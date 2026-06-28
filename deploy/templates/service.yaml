@@ -1,0 +1,18 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: iam
+  namespace: kacho
+spec:
+  selector:
+    app: iam
+  ports:
+    - name: grpc
+      port: {{ .Values.ports.grpc }}
+      targetPort: grpc
+    - name: grpc-internal
+      port: {{ .Values.ports.internalGrpc }}
+      targetPort: grpc-internal

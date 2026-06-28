@@ -1,0 +1,176 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kacho/cloud/validation.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// A Role resource. Named permission bundle.
+//
+// Roles бывают двух типов:
+//   - system roles (is_system=true, cluster_id='cluster_kacho_root') — seed'ятся
+//     миграциями kacho-iam, read-only через публичный API (Update/Delete на
+//     system role → FailedPrecondition).
+//   - custom roles (is_system=false) — multi-scope: точно один из
+//     `account_id` / `project_id` non-empty, другой пустой. Mutual exclusion
+//     enforced DB-level CHECK `roles_scope_xor`.
+//     (B2B Organization scope fully removed.)
+//
+// Backward-compat: existing pre-0011 rows with `account_id` set
+// remain valid — они классифицируются как account-scoped custom branch.
+//
+// Permission string format — `<domain>.<resource>.<verb>`.
+//
+// Policy model (authored `rules` vs compiled `permissions`):
+//   - `rules` (tag 11) — authored-политика И публичная API-поверхность роли:
+//     UI/клиенты рендерят роль из `rules[]` (источник истины).
+//   - `permissions` (tag 5, live) — INTERNAL compiled-форма для FGA-эмиссии
+//     (anchor/resource_names-армы, 4-сегмент `module.resource.resourceName.verb`);
+//     matchLabels-правила в `permissions` НЕ компилируются. Помечено
+//     `[deprecated=true]`: нельзя удалить (buf-breaking), но это внутренняя
+//     проекция — в `Get`/`List`-ответах для rules-ролей НЕ заполняется (пустое),
+//     на входе `Create`/`Update` ИГНОРИРУЕТСЯ (client-sent → INVALID_ARGUMENT).
+//
+// aggregationRule (composite roles) — пока не реализовано; будет добавлено
+// append-only позже отдельным tag'ом (tag НЕ зарезервирован заранее).
+//
+// Resource id prefix: `rol-`.
+message Role {
+  // ID of the role.
+  string id = 1;
+
+  // ID of the Account that owns this custom Role (legacy account-scoped
+  // branch). Empty for system roles and for org/project/cluster-scoped roles.
+  string account_id = 2;
+
+  // Name of the role. Unique within the active scope (one of cluster_id /
+  // account_id / project_id; partial UNIQUE indexes per scope).
+  string name = 3;
+
+  // Description of the role.
+  string description = 4;
+
+  // INTERNAL compiled-форма (anchor/resource_names-армы) для FGA-эмиссии. НЕ
+  // часть публичного API-ответа для rules-ролей (пустое в Get/List); на входе
+  // Create/Update игнорируется. Публичная поверхность роли — `rules` (tag 11).
+  repeated string permissions = 5 [deprecated = true];
+
+  // True for system roles (seed'ятся миграциями, read-only публично). When
+  // true, `cluster_id` MUST equal `cluster_kacho_root` and the other scope
+  // fields MUST be empty (DB CHECK `roles_scope_xor`).
+  bool is_system = 6;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 7;
+
+  // ID of the Cluster that owns this Role. Non-empty only for system roles
+  // (literal `cluster_kacho_root`).
+  string cluster_id = 8;
+
+  // TOMBSTONE (DB column dropped in migration 0008; proto field also
+  // dropped). Org-scoped roles были упразднены вместе с
+  // B2B Organization. Tag 9 & name `organization_id` зарезервированы и никогда
+  // не переиспользуются (append-only / buf-breaking tombstone discipline,
+  // enforced by scripts/tombstone_enforce.sh).
+  reserved 9;
+  reserved "organization_id";
+
+  // ID of the Project that owns this Role. Non-empty only for project-scoped
+  // custom roles.
+  string project_id = 10;
+
+  // --- APPEND-ONLY; tag'и ≥11 ---
+
+  // Authored-политика роли: 1..64 правил. Источник истины И публичная
+  // API-поверхность (UI/клиенты рендерят роль из `rules`). Каждое Rule —
+  // однородный грант `{verbs}` над `{module} × resources` (ровно один модуль
+  // на правило), опц. суженный `resource_names` XOR `match_labels`.
+  // Роль, покрывающая несколько модулей = несколько правил (по одному на модуль).
+  repeated Rule rules = 11 [(kacho.cloud.size) = "1-64"];
+
+  // Optimistic-concurrency token (xmin-backed) для Role.Update под
+  // конкуренцией. Output на Get/List; обязателен на входе Update при
+  // изменении `rules` (OCC).
+  string resource_version = 12;
+
+  // ID of the User that authored this Role (governance/audit).
+  string created_by_user_id = 13;
+
+  // Last-update timestamp.
+  google.protobuf.Timestamp updated_at = 14;
+
+  // Tenant-facing метки самого ресурса Role (НЕ путать с `Rule.match_labels`,
+  // которое отбирает ОБЪЕКТЫ под грантом). Единая модель видимости
+  // IAM-ресурсов: Role — label-selectable, как account/project; ARM_LABELS-грант
+  // на iam.role материализует v_list по совпадению `labels @> matchLabels`
+  // (iam-direct same-DB), а List фильтрует через `viewer ∪ v_list`. Mutable
+  // через Update (`labels` в update_mask).
+  map<string, string> labels = 15;
+}
+
+// Rule — один однородный грант: `{verbs}` над `{module} × resources` (ровно
+// ОДИН модуль на правило), опционально суженный `resource_names`
+// (pin-by-id) XOR `match_labels` (наше расширение над K8s RBAC, AND-equality).
+// Отсутствие обоих селекторов = ВСЕ инстансы `{module} × resources` в пределах
+// scope биндинга (ARM_ANCHOR).
+//
+// `arm` (ARM_ANCHOR / ARM_LABELS / ARM_NAMES) выводится клиентом из формы
+// правила — отдельного диагностического поля нет. Feed-доступность типа —
+// жесткий feed-gate на Role.Create (`match_labels` на не-fed тип →
+// INVALID_ARGUMENT), не поле ответа.
+message Rule {
+  // `Rule.modules` (repeated) → `Rule.module`
+  // (scalar). Ровно ОДИН модуль на правило: декартово `modules × resources`
+  // схлопывается в `{module} × resources × verbs` (resources чисто отображаются
+  // на module). Роль, покрывающая несколько модулей, выражается несколькими
+  // правилами (по одному на модуль). Намеренный major bump — tag 1 + имя
+  // `modules` зарезервированы tombstone-дисциплиной (тот же прием, что
+  // `AccessBinding` reserved 16/18; reserved, НЕ [deprecated]),
+  // никогда не реюзаются (enforced — scripts/tombstone_enforce.sh).
+  reserved 1;
+  reserved "modules";
+
+  // Типы ресурсов гранта. 1..16; lowercase. Literal `"*"` — SYSTEM-ONLY;
+  // только как единственный элемент.
+  repeated string resources = 2 [(kacho.cloud.size) = "1-16", (length) = "1-64"];
+
+  // Глаголы гранта. 1..16; lowercase. Literal `"*"` — SYSTEM-ONLY; только как
+  // единственный элемент.
+  repeated string verbs = 3 [(kacho.cloud.size) = "1-16", (length) = "1-64"];
+
+  // Pin-by-id селекция инстансов (K8s-native). ≤256; opaque-id; literal `"*"`
+  // запрещен как элемент. Взаимоисключающе с `match_labels`.
+  repeated string resource_names = 4 [(kacho.cloud.size) = "<=256", (length) = "1-64"];
+
+  // Label-equality селекция инстансов (наше расширение; AND-equality). ≤16
+  // ключей; если задано — непусто. Взаимоисключающе с `resource_names`.
+  map<string, string> match_labels = 5 [(kacho.cloud.size) = "<=16"];
+
+  // Domain-модуль гранта (ровно один). lowercase; грамматика
+  // `^[a-z][a-z0-9-]*$`; член закрытого набора модулей платформы
+  // (`iam`/`vpc`/`compute`/`loadbalancer`). Literal `"*"` — SYSTEM-ONLY
+  // (в custom-роли → INVALID_ARGUMENT). `(size)` не переносится из
+  // прежнего repeated `modules` — это cardinality repeated-поля, у scalar ее
+  // нет. tag 6 — первый свободный (1–5 заняты).
+  string module = 6 [(length) = "1-64"];
+}
+
+message CreateRoleMetadata {
+  // ID of the Role that is being created.
+  string role_id = 1;
+}
+
+message UpdateRoleMetadata {
+  // ID of the Role that is being updated.
+  string role_id = 1;
+}
+
+message DeleteRoleMetadata {
+  // ID of the Role that is being deleted.
+  string role_id = 1;
+}

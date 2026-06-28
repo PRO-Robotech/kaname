@@ -1,0 +1,17 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+# dev-only overrides — подключается через `helm install --values values.yaml --values values.dev.yaml`.
+# Параметры подходят для kind-стенда kacho-deploy (overlay over values.yaml).
+
+logger:
+  level: DEBUG
+
+repository:
+  postgres:
+    maxConns: 20
+
+authn:
+  mode: dev
+
+# OpenFGA по умолчанию disabled в dev-overlay. Auth-tier — Ory Kratos + Hydra.

@@ -1,0 +1,65 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// An Account resource. Top-level tenant container in kacho-iam.
+//
+// Account groups Projects and owns custom Roles/Groups/ServiceAccounts. Each Account
+// has a single owner_user_id (User id), который не редактируется через публичный Update
+// после Create (см. UpdateAccountRequest — owner_user_id не входит в update_mask).
+//
+// Resource id prefix: `acc-`.
+message Account {
+  // ID of the account.
+  string id = 1;
+
+  // Name of the account.
+  // The name is unique within the IAM domain. 3-63 characters long.
+  // Value must match the regular expression `[a-z]([-a-z0-9]{0,61}[a-z0-9])?`.
+  string name = 2;
+
+  // Optional description of the account. 0-256 characters long.
+  string description = 3;
+
+  // Resource labels as `key:value` pairs.
+  // No more than 64 per resource.
+  map<string, string> labels = 4;
+
+  // ID of the User who owns this Account (account-administrator).
+  // Immutable after Account.Create — попытка изменить через UpdateAccount.update_mask
+  // вернет InvalidArgument.
+  string owner_user_id = 5;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 6;
+
+  // TOMBSTONE (B2B Organization fully removed). The
+  // `organization_id` field (tag 7) is dropped; tag & name are reserved and
+  // never reused (append-only / buf-breaking tombstone discipline, enforced by
+  // scripts/tombstone_enforce.sh). The DB column was already dropped in iam
+  // migration 0008_drop_organizations.sql.
+  reserved 7;
+  reserved "organization_id";
+}
+
+message CreateAccountMetadata {
+  // ID of the Account that is being created.
+  string account_id = 1;
+}
+
+message UpdateAccountMetadata {
+  // ID of the Account that is being updated.
+  string account_id = 1;
+}
+
+message DeleteAccountMetadata {
+  // ID of the Account that is being deleted.
+  string account_id = 1;
+}

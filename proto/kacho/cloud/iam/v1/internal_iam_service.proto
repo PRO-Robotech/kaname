@@ -1,0 +1,381 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "kacho/cloud/api/operation.proto";
+import "kacho/cloud/iam/v1/service_account.proto";
+import "kacho/cloud/iam/v1/user.proto";
+import "kacho/cloud/operation/operation.proto";
+import "kacho/cloud/validation.proto";
+import "kacho/iam/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// InternalIAMService — cluster-internal RPCs (port 9091).
+//
+// НЕ публикуется на external TLS listener. Регистрируется в api-gateway internal mux
+// (внутренний listener) — нужен auth-interceptor api-gateway (звать LookupSubject
+// из interceptor'а после валидации JWT (Ory Hydra)).
+//
+// Вызывается из admin-tooling (grpcurl) и authz-interceptor api-gateway.
+service InternalIAMService {
+  // Резолв subject'а по одному из ключей (external_id / id / email).
+  //
+  // REST exposed ONLY on the cluster-internal listener;
+  // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
+  // and authz-public-allowlist permits the <exempt> catalog entry.
+  rpc LookupSubject (LookupSubjectRequest) returns (LookupSubjectResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/iam:lookupSubject"
+      body: "*"
+    };
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // TOMBSTONE. The false-assurance stub
+  // `ListPermissions` RPC is REMOVED: it ignored its required subject/resource
+  // fields and unconditionally returned the whole catalog, had zero real
+  // consumers (internal listener only; the UI merely referenced it in a
+  // comment), and operated on compiled `module.resource.verb` permission
+  // strings — NOT rule-tokens. The honest grantable catalog is the public
+  // `PermissionCatalogService.ListPermissionCatalog`; per-subject "who can do X"
+  // is answered by `AccessBindingService.ExpandAccess`. The method name
+  // `ListPermissions` is a tombstone — never re-add an RPC under that name.
+  // Intentional breaking change (documented in buf.yaml).
+
+  // Check — single-tuple authorization check.
+  // Thin wrapper над `openfga.Check(store_id, model_id, subject, relation, object)`.
+  // Используется per-service authz-interceptor'ами kacho-vpc / kacho-compute /
+  // kacho-loadbalancer / self (kacho-iam) для проверки прав на write/read RPC.
+  // Latency budget: ≤20ms p95. 1 hop поверх openfga.Check.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Check (CheckRequest) returns (CheckResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/iam:check"
+      body: "*"
+    };
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // WriteCreatorTuple — synchronous FGA-write для own-creator tuple.
+  // Вызывается из Create-handler ресурсного сервиса (kacho-vpc / kacho-compute /
+  // kacho-loadbalancer) ДО tx.Commit() — обеспечивает, что creator может сразу
+  // выполнить Get/Update/Delete на только что созданный ресурс без race на
+  // async-propagation (≤2s outbox-pipeline). Sync-path добавляет ≤10ms к
+  // budget Create (200ms p95).
+  //
+  // На fail (FGA unavailable): возвращает `Unavailable`; Create handler должен
+  // rollback'нуть TX (никаких partial-state ресурсов без owner-tuple).
+  rpc WriteCreatorTuple (WriteCreatorTupleRequest) returns (WriteCreatorTupleResponse) {
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // admin observability — current state of the
+  // `oidc_jwks_keys` table (per-alg current key id, created_at, rotation
+  // due date, age in days). Used by admin-UI and external monitoring (e.g.
+  // alert when current key age > 80d, rotation overdue).
+  rpc GetJWKSStatus (google.protobuf.Empty) returns (JWKSStatusResponse) {
+    // Cluster-internal listener-protected; admin-UI authz
+    // gating happens at the api-gateway internal mux layer.
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // admin force-logout of a user. Writes
+  // `session_revocations` rows for every active access token (enumerated via
+  // Hydra introspection) + a `caep_outbox` row so federated downstream RPs
+  // get notified. Async: returns Operation; the LISTEN/NOTIFY fan-out then
+  // updates every api-gateway pod's revocation cache ≤ 1s.
+  rpc ForceLogout (ForceLogoutRequest) returns (operation.Operation) {
+    option (kacho.cloud.api.operation) = {
+      metadata: "ForceLogoutMetadata"
+      response: "ForceLogoutResult"
+    };
+    // Cluster-internal listener-protected; admin authz gate enforced at
+    // the api-gateway internal mux layer (system_admin role required).
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // PollSubjectChanges drains subject_change_outbox by ascending id cursor.
+  // Internal-only (cluster-internal listener) — drives api-gateway authz
+  // decision-cache invalidation.
+  rpc PollSubjectChanges (PollSubjectChangesRequest) returns (PollSubjectChangesResponse) {
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
+  // (subject holds `relation` on `object`) on behalf of the resource-owning
+  // module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
+  // those modules никогда не ходят в FGA напрямую — только через IAM.
+  //
+  // ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
+  // gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
+  // drainer может ретраить безопасно.
+  //
+  // Sync unary (как Check / WriteCreatorTuple), НЕ async через Operation: ретрай
+  // и at-least-once обеспечивает сам drainer.
+  //
+  // authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
+  // Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
+  // ServiceAccount → relation `fga_writer` на системном объекте
+  // `iam_fgaproxy:system`. Нет relation → PermissionDenied. cluster-internal
+  // listener :9091 only — нет google.api.http.
+  rpc RegisterResource (RegisterResourceRequest) returns (RegisterResourceResponse) {
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
+  // (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
+  //
+  // ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
+  // НЕ NotFound — drainer ретраит безопасно.
+  //
+  // Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
+  // `iam_fgaproxy:system` (см. RegisterResource). cluster-internal :9091 only,
+  // нет google.api.http.
+  rpc UnregisterResource (UnregisterResourceRequest) returns (UnregisterResourceResponse) {
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+}
+
+message LookupSubjectRequest {
+  // Один из ключей идентификации subject'а. Exactly one должен быть выставлен.
+  oneof key {
+    // OIDC `sub` claim (Ory).
+    string external_id = 1;
+    // kacho-iam internal id (`usr-...` или `sva-...`).
+    string id = 2;
+    // Case-insensitive email lookup.
+    string email = 3;
+  }
+}
+
+message LookupSubjectResponse {
+  // Возвращенный subject — User или ServiceAccount.
+  oneof subject {
+    User           user            = 1;
+    ServiceAccount service_account = 2;
+  }
+}
+
+// TOMBSTONE: `ListPermissionsRequest` and
+// `ListPermissionsResponse` were removed together with the false-assurance
+// `ListPermissions` stub RPC. Never re-add messages under these names.
+
+// CheckRequest — single-tuple authorization check.
+message CheckRequest {
+  // FGA-style subject string. Допустимые форматы:
+  //   "user:<usr_xxx>"
+  //   "service_account:<sva_xxx>"
+  //   "group:<grp_xxx>#member"
+  string subject_id = 1 [(required) = true, (length) = "<=128"];
+
+  // FGA-relation: "viewer" | "editor" | "admin" | "use" | "member" | etc.
+  // Допустимые значения зависят от authorization-model.
+  string relation = 2 [(required) = true, (length) = "<=32"];
+
+  // FGA-object string. Формат "<type>:<id>", например:
+  //   "project:<prj_xxx>"
+  //   "vpc_network:<enp_xxx>"
+  //   "account:<acc_xxx>"
+  string object = 3 [(required) = true, (length) = "<=128"];
+
+  // Trace-id для correlation в логах (optional).
+  string trace_id = 4 [(length) = "<=64"];
+}
+
+// CheckResponse — результат authorization check.
+message CheckResponse {
+  // true — subject имеет relation на object'е (либо direct, либо через computed cascade).
+  bool allowed = 1;
+  // Human-readable reason on deny (для логов; не для UI).
+  string reason = 2;
+}
+
+// WriteCreatorTupleRequest — sync write own-creator tuple.
+message WriteCreatorTupleRequest {
+  // Subject creator'а (например "user:<usr_xxx>"; результат Principal propagation).
+  string subject_id = 1 [(required) = true, (length) = "<=128"];
+
+  // Relation для creator-tuple (как правило "admin").
+  string relation = 2 [(required) = true, (length) = "<=32"];
+
+  // Объект только что созданного ресурса ("vpc_network:<enp>", "compute_instance:<...>" и т.п.).
+  string object = 3 [(required) = true, (length) = "<=128"];
+}
+
+// WriteCreatorTupleResponse — пусто; success implicit (gRPC OK).
+message WriteCreatorTupleResponse {}
+
+// RegisterResourceRequest — Internal FGA-proxy register-owner-tuple payload.
+// Форма симметрична CheckRequest / WriteCreatorTupleRequest.
+message RegisterResourceRequest {
+  // FGA-subject string. Формат "<type>:<id>", напр.:
+  //   "user:<usr_xxx>"
+  //   "service_account:<sva_xxx>"
+  //   "<owner-type>:<id>"
+  string subject_id = 1 [(required) = true, (length) = "<=128"];
+
+  // FGA-relation для owner-tuple (как правило "admin" / "parent").
+  string relation = 2 [(required) = true, (length) = "<=32"];
+
+  // FGA-object string. Формат "<type>:<id>" из authorization-model OpenFGA
+  // (НЕ permission-каталог), напр. "vpc_network:<enp_xxx>",
+  // "compute_instance:<...>".
+  string object = 3 [(required) = true, (length) = "<=128"];
+
+  // Trace-id для correlation в логах (модуль ↔ IAM ↔ FGA). Optional.
+  string trace_id = 4 [(length) = "<=64"];
+
+  // Tenant labels зеркала ресурса. Output-only mirror в
+  // `kacho_iam.resource_mirror`; source of truth = owner-сервис. Питает
+  // `bySelector` (matchLabels) и containment. Пусто для legacy-caller'ов
+  // (graceful). IAM делает минимальную sanity-валидацию, не дублируя owner-pattern.
+  map<string, string> labels = 5;
+
+  // Parent project id ресурса (`prj-…`), если ресурс project-scoped.
+  // Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
+  // iam→owner. Пусто для не-project-scoped объектов.
+  string parent_project_id = 6 [(length) = "<=64"];
+
+  // Parent account id ресурса (`acc-…`), если применимо. Mirror /
+  // containment на account-scope.
+  string parent_account_id = 7 [(length) = "<=64"];
+
+  // Монотонный per-object source-version. Маркер «версии
+  // состояния» ресурса у владельца (compute), проставляемый в момент эмита
+  // register-intent внутри writer-tx источника. IAM применяет register в mirror
+  // ТОЛЬКО если этот source_version строго новее уже хранимого (last-source-
+  // state-wins, НЕ last-applier-wins): под HA-drainer reorder двух register одного
+  // object (реплика применяет v2, затем stale v1) устаревший intent → no-op, а не
+  // перезапись свежих labels. Пусто/нулевой → legacy-caller (graceful): IAM
+  // трактует как «-infinity», т.е. любой register применяется (back-compat).
+  google.protobuf.Timestamp source_version = 8;
+}
+
+// RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
+// контракта (повтор → OK) опирается на пустой ответ без уникального id.
+message RegisterResourceResponse {}
+
+// UnregisterResourceRequest — Internal FGA-proxy unregister-owner-tuple payload.
+// Поля идентичны RegisterResourceRequest.
+message UnregisterResourceRequest {
+  // FGA-subject string (см. RegisterResourceRequest.subject_id).
+  string subject_id = 1 [(required) = true, (length) = "<=128"];
+
+  // FGA-relation owner-tuple (см. RegisterResourceRequest.relation).
+  string relation = 2 [(required) = true, (length) = "<=32"];
+
+  // FGA-object string (см. RegisterResourceRequest.object).
+  string object = 3 [(required) = true, (length) = "<=128"];
+
+  // Trace-id для correlation в логах. Optional.
+  string trace_id = 4 [(length) = "<=64"];
+
+  // Поля 5/6/7 зарезервированы под форму-симметрию с RegisterResourceRequest.
+  // Unregister удаляет mirror-строку по `object`; эти поля
+  // игнорируются на приеме (симметрия shape, не семантики).
+  map<string, string> labels = 5;
+  string parent_project_id = 6 [(length) = "<=64"];
+  string parent_account_id = 7 [(length) = "<=64"];
+
+  // Tombstone-version: момент Delete у владельца (now() на
+  // эмите unregister-intent). IAM удаляет mirror-строку ТОЛЬКО если этот
+  // source_version >= хранимого (tombstone не старше последнего примененного
+  // register) — Delete-после-Update reorder (unregister(v2) затем stale что-либо)
+  // не теряет свежее состояние. Пусто/нулевой → legacy (graceful): безусловный
+  // DELETE (back-compat). Остаточный edge (stale register ПОСЛЕ unregister →
+  // возможный dangling) чистит reconcile-sweep — см. docs/architecture.
+  google.protobuf.Timestamp source_version = 8;
+}
+
+// UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление
+// отсутствующего tuple → OK (контракт идемпотентности).
+message UnregisterResourceResponse {}
+
+// JWKSStatusResponse — per-alg status row for every signing algorithm
+// currently active in `oidc_jwks_keys`.
+message JWKSStatusResponse {
+  // One entry per algorithm (RS256 / ES256 / EdDSA).
+  repeated JWKSAlgStatus algorithms = 1;
+}
+
+// JWKSAlgStatus — single algorithm's current-key snapshot.
+message JWKSAlgStatus {
+  // JWS `alg` identifier ("RS256" / "ES256" / "EdDSA").
+  string alg = 1;
+
+  // `kid` of the row where `current = true` for this alg.
+  string current_kid = 2;
+
+  // When the current key was created (= when the previous current was
+  // rotated out).
+  google.protobuf.Timestamp current_created_at = 3;
+
+  // Age of the current key (whole days since `created_at`).
+  int32 current_age_days = 4;
+
+  // Configured rotation interval (whole days; from kacho-iam config).
+  int32 rotation_interval_days = 5;
+
+  // True if `current_age_days >= rotation_interval_days` (rotation should
+  // have happened by now — alert condition).
+  bool rotation_overdue = 6;
+}
+
+// ForceLogoutRequest — admin force-logout payload.
+message ForceLogoutRequest {
+  // User to log out from every active session. Required.
+  string user_id = 1 [(required) = true, (length) = "<=20"];
+
+  // Free-form reason recorded in audit_outbox + each session_revocations row
+  // (default "admin-force-logout").
+  string reason = 2 [(length) = "<=128"];
+
+  // ID of the admin user (or service account) triggering the force-logout.
+  // Captured for audit; the authz check itself is performed at the gateway
+  // (admin must hold `iam.users.forceLogout` permission on the user's account).
+  string actor_id = 3 [(length) = "<=128"];
+}
+
+// ForceLogoutMetadata — Operation.metadata payload.
+message ForceLogoutMetadata {
+  // User that was force-logged-out.
+  string user_id = 1;
+}
+
+// ForceLogoutResult — Operation.response payload.
+message ForceLogoutResult {
+  // Number of session_revocations rows newly inserted (i.e. number of
+  // active tokens that were just revoked).
+  int32 revoked_count = 1;
+}
+
+// PollSubjectChangesRequest — cursor-based drain of subject_change_outbox.
+message PollSubjectChangesRequest {
+  // since_id — return rows with id > since_id. 0 on first call.
+  int64 since_id = 1;
+  // limit — max rows; server clamps to [1, 1000], default 256.
+  int32 limit = 2;
+}
+
+// SubjectChange — one row from subject_change_outbox.
+message SubjectChange {
+  int64  id         = 1;
+  string subject_id = 2;
+  string op         = 3; // binding_upsert | binding_delete | group_member_change
+}
+
+// PollSubjectChangesResponse — result of PollSubjectChanges.
+message PollSubjectChangesResponse {
+  repeated SubjectChange changes = 1;
+  // head_id — current MAX(id) in the outbox (0 when empty). Lets a freshly
+  // started gateway initialise its cursor without replaying history.
+  int64 head_id = 2;
+}

@@ -1,0 +1,148 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+package domain
+
+// rule_wildcard_scope_test.go — RBAC explicit-model 2026 / issue #224.
+//
+// Owner role `*.*.*` bound at a BOUNDED scope (ACCOUNT/PROJECT) MUST forward-
+// materialize per-object CONTENT: the wildcard rule expands to the full closed set
+// of materializable object types, materialized per-object via the ARM_ANCHOR path
+// (every object of those types inside the scope, narrowed by IsContainedIn). A
+// wildcard rule bound at GLOBAL/CLUSTER scope MUST NOT per-object materialize — it
+// is the D-9 cluster super-admin short-circuit (one flat cluster relation).
+//
+// Acceptance: D-3 (bounded vs GLOBAL `*.*.*`), D-8a/C-01b (owner content forward),
+// D-9 (cluster short-circuit). This is the domain-layer locus of the #224 fix:
+// dottedTypes previously dropped wildcard for ALL scopes, yielding 0 content.
+
+import (
+	"sort"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// ownerWildcardRules is the seeded owner role shape (migration 0035):
+// [{module:"*", resources:["*"], verbs:["*"]}].
+func ownerWildcardRules() Rules {
+	return Rules{{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}}}
+}
+
+// TestAllMaterializableTypes_CoversMirrorAndIAMDirect — the closed type set a
+// wildcard rule expands to must cover every materializable type (mirror-fed +
+// iam-direct), since owner is admin on EVERY object kind in the account.
+func TestAllMaterializableTypes_CoversMirrorAndIAMDirect(t *testing.T) {
+	got := AllMaterializableTypes()
+	require.NotEmpty(t, got, "wildcard expansion set must be non-empty")
+
+	// Sorted + deduped (deterministic selector → stable fast-path index).
+	require.True(t, sort.StringsAreSorted(got), "AllMaterializableTypes must be sorted")
+	seen := map[string]struct{}{}
+	for _, ty := range got {
+		_, dup := seen[ty]
+		require.False(t, dup, "AllMaterializableTypes must be deduped: %s", ty)
+		seen[ty] = struct{}{}
+	}
+
+	// Must include representative mirror-fed + iam-direct types.
+	for _, want := range []string{"vpc.network", "compute.instance", "iam.project", "iam.account"} {
+		_, ok := seen[want]
+		assert.True(t, ok, "wildcard expansion must include %s", want)
+	}
+}
+
+// TestMaterializingSelectorsInScope_WildcardBounded_ExpandsToAllTypes — issue #224
+// core: a wildcard rule @ ACCOUNT scope expands to ALL materializable types as one
+// ARM_ANCHOR selector (per-object content materialization), NOT empty.
+func TestMaterializingSelectorsInScope_WildcardBounded_ExpandsToAllTypes(t *testing.T) {
+	rs := ownerWildcardRules()
+
+	for _, scope := range []Scope{ScopeAccount, ScopeProject} {
+		sels := rs.MaterializingSelectorsInScope(scope)
+		require.Len(t, sels, 1, "scope %s: one selector for the wildcard rule", scope)
+		sel := sels[0]
+		assert.Equal(t, ArmAnchor, sel.Arm, "wildcard `all` selector is ARM_ANCHOR")
+		assert.NotEmpty(t, sel.ObjectTypes,
+			"scope %s: wildcard MUST expand to per-object content types (issue #224)", scope)
+		assert.ElementsMatch(t, AllMaterializableTypes(), sel.ObjectTypes,
+			"scope %s: wildcard expands to the full materializable type set", scope)
+		assert.ElementsMatch(t, []string{wildcard}, sel.Verbs, "verbs carried through")
+	}
+}
+
+// TestMaterializingSelectorsInScope_WildcardGlobal_NoPerObject — D-9: a wildcard
+// rule @ CLUSTER/GLOBAL scope must NOT per-object materialize (empty ObjectTypes);
+// cluster super-admin is the flat short-circuit, not per-object content.
+func TestMaterializingSelectorsInScope_WildcardGlobal_NoPerObject(t *testing.T) {
+	rs := ownerWildcardRules()
+	for _, scope := range []Scope{ScopeCluster, ScopeUnspecified} {
+		sels := rs.MaterializingSelectorsInScope(scope)
+		require.Len(t, sels, 1, "scope %s: selector still projected (empty types)", scope)
+		assert.Empty(t, sels[0].ObjectTypes,
+			"scope %s: GLOBAL wildcard MUST NOT per-object materialize (D-9 short-circuit)", scope)
+	}
+}
+
+// TestMaterializingSelectors_RolePersistence_ExpandsWildcard — the scope-agnostic
+// role-level projection (used to persist role_rule_selectors for the forward fast-
+// path JOIN) expands wildcard to the full type set so a freshly-registered object
+// fast-path-matches the owner binding. The per-binding scope gate (LoadBinding via
+// MaterializingSelectorsInScope) still prevents a GLOBAL binding from materializing
+// per-object — the role-level index is safe to expand.
+func TestMaterializingSelectors_RolePersistence_ExpandsWildcard(t *testing.T) {
+	rs := ownerWildcardRules()
+	sels := rs.MaterializingSelectors()
+	require.Len(t, sels, 1)
+	assert.Equal(t, ArmAnchor, sels[0].Arm)
+	assert.ElementsMatch(t, AllMaterializableTypes(), sels[0].ObjectTypes,
+		"role-level persistence expands wildcard (fast-path forward index)")
+}
+
+// TestOwnerRoleSelector_MigrationLockstep — the owner role_rule_selectors row is seeded
+// with HARD-CODED constants (rule_fp + object_types) by migration 0038, RE-SEEDED with
+// the iam-content-EXTENDED object_types list by migration 0039 (rbac-contract-a-fix).
+// They MUST equal the Go projection of domain.OwnerRoleRules(); if a future change to
+// the owner rule or the materializable type set drifts from the SQL constant, this guard
+// fails — forcing the migration to be updated in lockstep (issue #224 / review КФ-1).
+//
+// rule_fp is UNCHANGED across 0038→0039 (it hashes the RULE, not object_types); only
+// object_types grew by the five iam content types (role/group/serviceAccount/user/
+// accessBinding). The constant below mirrors migration 0039's seed list.
+func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
+	const migrationRuleFP = "3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4"
+	migrationObjectTypes := []string{
+		"compute.disk", "compute.image", "compute.instance", "compute.snapshot",
+		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
+		"iam.role", "iam.serviceAccount", "iam.user",
+		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
+		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
+		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
+	}
+
+	sels := OwnerRoleRules().MaterializingSelectors()
+	require.Len(t, sels, 1, "owner role projects exactly one selector")
+	assert.Equal(t, ArmAnchor, sels[0].Arm, "owner selector is ARM_ANCHOR (migration 0039 arm='anchor')")
+	assert.Equal(t, migrationRuleFP, sels[0].RuleFP,
+		"owner rule_fp drifted from the migration constant — update the migration in lockstep")
+	assert.Equal(t, migrationObjectTypes, sels[0].ObjectTypes,
+		"owner object_types drifted from migration 0039 constant — update the migration in lockstep")
+}
+
+// TestMaterializingSelectorsInScope_NonWildcard_Unchanged — a concrete rule is
+// scope-independent (its dotted types are explicit), so the scope variant returns
+// the same as the role-level projection. Guards against regressing regular rules.
+func TestMaterializingSelectorsInScope_NonWildcard_Unchanged(t *testing.T) {
+	rs := Rules{
+		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"},
+			MatchLabels: map[string]string{"env": "prod"}},
+	}
+	bounded := rs.MaterializingSelectorsInScope(ScopeProject)
+	global := rs.MaterializingSelectorsInScope(ScopeCluster)
+	require.Len(t, bounded, 1)
+	require.Len(t, global, 1)
+	assert.Equal(t, []string{"compute.instance"}, bounded[0].ObjectTypes)
+	assert.Equal(t, []string{"compute.instance"}, global[0].ObjectTypes,
+		"a concrete rule is scope-independent")
+}

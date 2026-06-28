@@ -1,0 +1,52 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+name: iam
+replicas: 1
+image: kacho-iam:dev
+imagePullPolicy: IfNotPresent
+ports:
+  grpc: 9090
+  internalGrpc: 9091
+  # Prometheus /metrics HTTP listener — separate cluster-internal port (never
+  # the public tenant gRPC surface).
+  metrics: 9095
+db:
+  host: kacho-umbrella-pg-iam
+  port: "5432"
+  user: iam
+  name: kacho_iam
+  passwordSecretName: kacho-umbrella-pg-iam
+  passwordSecretKey: password
+
+# ─── Config sections (viper YAML, parity с kacho-vpc) ───────────────────
+# Все ключи ниже рендерятся в /etc/kacho-iam/config.yaml через
+# deploy/templates/configmap.yaml. Любой ключ можно override через
+# ENV KACHO_IAM_<SECTION>__<KEY>=... (см. internal/apps/kacho/config).
+logger:
+  level: INFO
+apiServer:
+  gracefulShutdown: 10s
+metrics:
+  enable: true
+healthcheck:
+  enable: true
+repository:
+  postgres:
+    maxConns: 50
+    sslMode: disable
+authn:
+  mode: dev
+
+# extapi — внешние peer-зависимости сервиса (OpenFGA для authz-Check).
+# Auth-tier построен на Ory Kratos + Hydra.
+extapi:
+  openfga:
+    enabled: false
+    endpoint: ""
+    storeId: ""
+    authModelId: ""
+    tls:
+      enable: false
+
+env: {}

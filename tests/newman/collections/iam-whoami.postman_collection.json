@@ -1,0 +1,241 @@
+{
+  "info": {
+    "_postman_id": "6b806099-a0b6-51a3-9d54-15b3b746474d",
+    "name": "kacho-iam / newman / iam-whoami",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runId') || pm.environment.get('runId') === '') {",
+          "  // runId формат: только [a-z0-9], без точки, начинается с буквы — чтобы проходить compute name regex",
+          "  const t = Date.now().toString(36);",
+          "  const r = Math.floor(Math.random() * 1e9).toString(36);",
+          "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
+          "}",
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "IAM-WAI-GT-CRUD-OK — GET /iam/v1/me as jwtAccountAdminA → 200, subject/userId/email/accounts populated",
+      "description": "class:CRUD | priority:P0",
+      "item": [
+        {
+          "name": "IAM-WAI-GT-CRUD-OK :: whoami-aaa",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('WhoAmI: subject = user:<userAAAId>', () => {",
+                  "  const j = pm.response.json();",
+                  "  const want = 'user:' + pm.environment.get('userAAAId');",
+                  "  pm.expect(j.subject, JSON.stringify(j)).to.eql(want);",
+                  "});",
+                  "pm.test('WhoAmI: userId matches userAAAId', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.userId, JSON.stringify(j)).to.eql(pm.environment.get('userAAAId'));",
+                  "});",
+                  "pm.test('WhoAmI: email non-empty', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.email, 'email field').to.be.a('string').with.length.greaterThan(0);",
+                  "});",
+                  "pm.test('WhoAmI: clusterViewer is a boolean', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.clusterViewer, 'clusterViewer field').to.be.a('boolean');",
+                  "});",
+                  "pm.test('WhoAmI: systemAdmin is a boolean', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.systemAdmin, 'systemAdmin field').to.be.a('boolean');",
+                  "});",
+                  "pm.test('WhoAmI: accounts is an array', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.accounts, 'accounts field').to.be.an('array');",
+                  "});",
+                  "pm.test('WhoAmI: accounts contains accountAId (owner)', () => {",
+                  "  const j = pm.response.json();",
+                  "  const aid = pm.environment.get('accountAId');",
+                  "  const found = (j.accounts || []).find(m => m.accountId === aid);",
+                  "  pm.expect(found, 'accountAId membership entry').to.be.an('object');",
+                  "});",
+                  "pm.test('createdAt truncated to seconds', () => {",
+                  "  const ts = (pm.response.json().checkedAt);",
+                  "  pm.expect(ts, 'createdAt present').to.be.a('string');",
+                  "  // RFC3339; если есть дробная часть — это .000... либо отсутствует",
+                  "  const m = ts.match(/\\.(\\d+)/);",
+                  "  if (m) pm.expect(parseInt(m[1].padEnd(9,'0'), 10), 'sub-second part is zero').to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-WAI-GT-AUTHZ-ANON-DENY — GET /iam/v1/me as anonymous (no Bearer) → 401 Unauthenticated",
+      "description": "class:AUTHZ | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "IAM-WAI-GT-AUTHZ-ANON-DENY :: whoami-anon",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-WAI-GT-CRUD-NOB — GET /iam/v1/me as jwtNoBindings → 200, accounts empty (exempt for any authenticated)",
+      "description": "class:CRUD | priority:P1",
+      "item": [
+        {
+          "name": "IAM-WAI-GT-CRUD-NOB :: whoami-nob",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtNoBindings'",
+                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('WhoAmI-NOB: subject = user:<userNOBId>', () => {",
+                  "  const j = pm.response.json();",
+                  "  const want = 'user:' + pm.environment.get('userNOBId');",
+                  "  pm.expect(j.subject, JSON.stringify(j)).to.eql(want);",
+                  "});",
+                  "pm.test('WhoAmI-NOB: accounts is array (possibly empty)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.accounts, 'accounts field').to.be.an('array');",
+                  "});",
+                  "pm.test('WhoAmI-NOB: systemAdmin = false (regular user)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.systemAdmin, 'NOB must not be system_admin').to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": []
+}

@@ -1,0 +1,255 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package authorize — AuthorizeService gRPC handler.
+// Thin transport-layer wrapper around the service.AuthorizeService use-case.
+//
+// Subject binding: handler accepts subject directly from the protobuf
+// request (api-gateway interceptor enforces that the caller can only query
+// authz decisions about itself or about subjects in folders where the
+// caller holds `iam.subjects.checkAuthorization` — that gating happens at
+// the gateway, NOT here).
+package authorize
+
+import (
+	"context"
+	"strings"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
+
+	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
+)
+
+// Handler — gRPC server.
+type Handler struct {
+	iamv1.UnimplementedAuthorizeServiceServer
+	svc    *service.AuthorizeService
+	whoAmI *WhoAmIUseCase
+}
+
+// NewHandler — builder. Both svc and whoAmI are required (composition root
+// wires both unconditionally; nil at construction time means a wiring bug).
+func NewHandler(svc *service.AuthorizeService, whoAmI *WhoAmIUseCase) *Handler {
+	return &Handler{svc: svc, whoAmI: whoAmI}
+}
+
+// Check — see iamv1.AuthorizeServiceServer.
+func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (*iamv1.AuthorizeCheckResponse, error) {
+	if req.GetSubject() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument subject: required")
+	}
+	if req.GetResource() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument resource: required")
+	}
+	if req.GetAction() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
+	}
+	res, err := h.svc.Check(ctx, service.CheckRequest{
+		Subject: req.GetSubject(),
+		Resource: service.ResourceRef{
+			Type: req.GetResource().GetType(),
+			ID:   req.GetResource().GetId(),
+		},
+		Action:           req.GetAction(),
+		RequiredRelation: req.GetRequiredRelation(),
+		Context:          structToMap(req.GetContext()),
+	})
+	if err != nil {
+		// Validation errors → InvalidArgument; backend errors → Unavailable.
+		if strings.HasPrefix(err.Error(), "Illegal argument") {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		if strings.HasPrefix(err.Error(), "authz unavailable") ||
+			strings.HasPrefix(err.Error(), "policy unavailable") {
+			return nil, status.Error(codes.Unavailable, err.Error())
+		}
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &iamv1.AuthorizeCheckResponse{
+		Allowed:              res.Allowed,
+		DenyReasons:          res.DenyReasons,
+		AuthorizationModelId: res.AuthorizationModelID,
+		CheckedAt:            shared.TimestampProto(res.CheckedAt),
+	}, nil
+}
+
+// BatchCheck — see iamv1.AuthorizeServiceServer.
+func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheckRequest) (*iamv1.BatchAuthorizeCheckResponse, error) {
+	if len(req.GetChecks()) > 100 {
+		return nil, status.Errorf(codes.InvalidArgument, "Illegal argument checks: batch size %d > 100", len(req.GetChecks()))
+	}
+	reqs := make([]service.CheckRequest, 0, len(req.GetChecks()))
+	for _, c := range req.GetChecks() {
+		reqs = append(reqs, service.CheckRequest{
+			Subject: c.GetSubject(),
+			Resource: service.ResourceRef{
+				Type: c.GetResource().GetType(),
+				ID:   c.GetResource().GetId(),
+			},
+			Action:           c.GetAction(),
+			RequiredRelation: c.GetRequiredRelation(),
+			Context:          structToMap(c.GetContext()),
+		})
+	}
+	results, err := h.svc.BatchCheck(ctx, reqs)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	out := &iamv1.BatchAuthorizeCheckResponse{
+		Responses: make([]*iamv1.AuthorizeCheckResponse, len(results)),
+	}
+	for i, r := range results {
+		out.Responses[i] = &iamv1.AuthorizeCheckResponse{
+			Allowed:              r.Allowed,
+			DenyReasons:          r.DenyReasons,
+			AuthorizationModelId: r.AuthorizationModelID,
+			CheckedAt:            shared.TimestampProto(r.CheckedAt),
+		}
+	}
+	return out, nil
+}
+
+// ListObjects — see iamv1.AuthorizeServiceServer.
+func (h *Handler) ListObjects(ctx context.Context, req *iamv1.ListObjectsRequest) (*iamv1.ListObjectsResponse, error) {
+	res, err := h.svc.ListObjects(ctx, service.ListObjectsRequest{
+		Subject:      req.GetSubject(),
+		ResourceType: req.GetResourceType(),
+		Action:       req.GetAction(),
+		MaxResults:   int(req.GetMaxResults()),
+		PageToken:    req.GetPageToken(),
+		Context:      structToMap(req.GetContext()),
+	})
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "Illegal argument") {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &iamv1.ListObjectsResponse{
+		ResourceIds: res.ResourceIDs,
+		Truncated:   res.Truncated,
+	}, nil
+}
+
+// ListSubjects — see iamv1.AuthorizeServiceServer.
+func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsRequest) (*iamv1.ListSubjectsResponse, error) {
+	if req.GetResource() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument resource: required")
+	}
+	if req.GetAction() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
+	}
+	res, err := h.svc.ListSubjects(ctx, service.ListSubjectsRequest{
+		ResourceType:      req.GetResource().GetType(),
+		ResourceID:        req.GetResource().GetId(),
+		Action:            req.GetAction(),
+		PageSize:          int(req.GetPageSize()),
+		PageToken:         req.GetPageToken(),
+		SubjectTypeFilter: req.GetSubjectTypeFilter(),
+	})
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "Illegal argument") {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &iamv1.ListSubjectsResponse{
+		Subjects:      res.Subjects,
+		NextPageToken: res.NextPageToken,
+	}, nil
+}
+
+// ExpandRelations — see iamv1.AuthorizeServiceServer.
+func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelationsRequest) (*iamv1.ExpandRelationsResponse, error) {
+	if req.GetResource() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument resource: required")
+	}
+	if req.GetRelation() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument relation: required")
+	}
+	res, err := h.svc.ExpandRelations(ctx, service.ExpandRequest{
+		ResourceType: req.GetResource().GetType(),
+		ResourceID:   req.GetResource().GetId(),
+		Relation:     req.GetRelation(),
+		MaxDepth:     int(req.GetMaxDepth()),
+	})
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &iamv1.ExpandRelationsResponse{
+		Resource:             &iamv1.ResourceRef{Type: res.Resource.Type, Id: res.Resource.ID},
+		Relation:             res.Relation,
+		Tree:                 treeToProto(res.Tree),
+		AuthorizationModelId: res.AuthorizationModelID,
+	}, nil
+}
+
+// treeToProto — service.ExpandTree → iamv1.UsersetTree (recursive).
+func treeToProto(t *clients.ExpandTree) *iamv1.UsersetTree {
+	if t == nil {
+		return nil
+	}
+	out := &iamv1.UsersetTree{
+		Leaves:    append([]string(nil), t.Leaves...),
+		Truncated: t.Truncated,
+	}
+	for _, e := range t.Computed {
+		out.Computed = append(out.Computed, &iamv1.ComputedUsersetEdge{
+			Relation: e.Relation,
+			Subtree:  treeToProto(e.Subtree),
+		})
+	}
+	for _, e := range t.TupleToUserset {
+		out.TupleToUserset = append(out.TupleToUserset, &iamv1.TupleToUsersetEdge{
+			Parent:   &iamv1.ResourceRef{Type: e.ParentType, Id: e.ParentID},
+			Relation: e.Relation,
+			Subtree:  treeToProto(e.Subtree),
+		})
+	}
+	return out
+}
+
+func structToMap(s *structpb.Struct) map[string]any {
+	if s == nil {
+		return nil
+	}
+	return s.AsMap()
+}
+
+// WhoAmI — see iamv1.AuthorizeServiceServer. Marshals the WhoAmI
+// use-case result into the proto response shape. The use-case is the
+// authoritative gate (anonymous → Unauthenticated); the handler is the
+// thin transport wrapper.
+func (h *Handler) WhoAmI(ctx context.Context, _ *iamv1.WhoAmIRequest) (*iamv1.WhoAmIResponse, error) {
+	res, err := h.whoAmI.Execute(ctx)
+	if err != nil {
+		// use-case already returns status.Error for terminal cases
+		// (Unauthenticated, Unavailable, NotFound). Anything else is
+		// shaped through shared.MapRepoErr inside the use-case.
+		return nil, err
+	}
+	accounts := make([]*iamv1.AccountMembership, 0, len(res.Accounts))
+	for _, a := range res.Accounts {
+		accounts = append(accounts, &iamv1.AccountMembership{
+			AccountId:   string(a.AccountID),
+			AccountName: a.AccountName,
+			Roles:       append([]string(nil), a.Roles...),
+		})
+	}
+	return &iamv1.WhoAmIResponse{
+		Subject:       res.Subject,
+		UserId:        string(res.UserID),
+		Email:         res.Email,
+		DisplayName:   res.DisplayName,
+		SystemAdmin:   res.SystemAdmin,
+		ClusterViewer: res.ClusterViewer,
+		Accounts:      accounts,
+		CheckedAt:     shared.TimestampProto(res.CheckedAt),
+	}, nil
+}

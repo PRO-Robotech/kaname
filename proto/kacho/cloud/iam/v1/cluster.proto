@@ -1,0 +1,37 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kacho/cloud/validation.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// A Cluster resource — singleton root of the Kachō identity hierarchy.
+//
+// Exactly one Cluster row exists, with literal id `cluster_kacho_root` (enforced
+// by DB-level CHECK + BEFORE INSERT trigger).
+// Used as the OpenFGA root object for cluster-admin grants
+// (`cluster:cluster_kacho_root#system_admin@user:...`).
+//
+// Identity hierarchy: cluster → account → project → resource. Each downstream
+// level is owned by `kacho-iam` (account / project) or by domain services
+// (vpc / compute / loadbalancer).
+//
+// Resource id: literal `cluster_kacho_root` (not a Crockford-postfix id).
+message Cluster {
+  // ID of the cluster. Must be the literal `cluster_kacho_root`.
+  string id = 1 [(required) = true, (pattern) = "cluster_kacho_root"];
+
+  // Display name. Free-form, 3-63 characters.
+  string name = 2 [(length) = "3-63"];
+
+  // Description. 0-256 characters.
+  string description = 3 [(length) = "<=256"];
+
+  // Creation timestamp (seed migration time).
+  google.protobuf.Timestamp created_at = 4;
+}

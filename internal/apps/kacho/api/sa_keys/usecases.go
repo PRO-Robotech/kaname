@@ -1,0 +1,738 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package sa_keys — SAKeyService use-cases (Class A static SA-keys via
+// Hydra OAuth2 client_credentials + private_key_jwt).
+//
+// On Issue (private_key_jwt mode):
+//
+//  1. Generate an ECDSA P-256 keypair locally; the private half NEVER
+//     leaves kacho-iam's response and is NEVER stored in DB.
+//  2. Register an OAuth2 client with Hydra Admin with
+//     `token_endpoint_auth_method=private_key_jwt`,
+//     `grant_types=[client_credentials]`, `jwks={keys:[<public JWK>]}`,
+//     `owner=<sva_id>`. Hydra returns NO `client_secret` — none exists.
+//  3. Persist `service_account_oauth_clients` row (hydra_client_id mapping
+//     + public PEM + algorithm).
+//  4. Return IssueSAKeyResponse with the plaintext PRIVATE PEM + kid
+//     in `Operation.response` (one-shot delivery; redacted post-completion
+//     by OpsResponseRedactor so re-polling Operation.Get yields no secret).
+//
+// On Revoke:
+//
+//  1. Fetch row by id, scoped by sva_id (Authorization Cross-Tenant check).
+//  2. Delete row + DELETE Hydra OAuth2 client (idempotent — Hydra 404 is OK).
+//
+// On List: paged read of own SA's clients (no Hydra round-trip).
+package sa_keys
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/PRO-Robotech/kacho-corelib/operations"
+	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
+)
+
+// ───────────────── Port interfaces ─────────────────
+
+// SAClientRepo abstracts the SA-OAuth-clients repo. Tx-scoped writes take the
+// opaque service.Tx handle (the concrete pgx.Tx is recovered inside the pg
+// adapter via txAsPgx) so this use-case package stays free of the pgx driver.
+type SAClientRepo interface {
+	Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error)
+	Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error)
+	DeleteByID(ctx context.Context, tx service.Tx, id domain.SAOAuthClientID) error
+	List(ctx context.Context, svaID domain.ServiceAccountID, pageToken string, pageSize int32) ([]domain.ServiceAccountOAuthClient, string, error)
+}
+
+// OAuthClientAdmin abstracts hydra-admin operations needed by Issue/Revoke.
+type OAuthClientAdmin interface {
+	CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error)
+	DeleteOAuthClient(ctx context.Context, clientID string) error
+}
+
+// OpsResponseRedactor clears a named field in the proto-marshalled success
+// response of an `operations` row. Idempotent: re-running on an
+// already-cleared field is a no-op. The concrete pg adapter reads the
+// Any-wrapped response from the BYTEA `response_data` column, clears the field
+// reflectively, and writes the re-marshalled bytes back (single-statement
+// UPDATE) — there is no JSONB `response` column to jsonb_set.
+type OpsResponseRedactor interface {
+	RedactResponseField(ctx context.Context, opID string, fieldPath []string, valueJSON string) error
+}
+
+// ───────────────── Issue use-case ─────────────────
+
+// IssueSAKeyUseCase mints a new Hydra OAuth2 client + persists the mapping.
+type IssueSAKeyUseCase struct {
+	repo    SAClientRepo
+	tx      service.TxBeginner
+	hydra   OAuthClientAdmin
+	opsRepo operations.Repo
+	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
+	// skipped (test / legacy wiring). Production main.go wires the pg
+	// adapter so the secret is replaced with `"<redacted>"` after the
+	// caller's first poll of Operation.Get.
+	redactor OpsResponseRedactor
+	// audit — durable audit_outbox emitter. nil → no audit row
+	// (purely-additive; mutation contract unchanged). See WithAuditEmitter.
+	audit auditEmitter
+	now   func() time.Time
+	// logger — surfaces failures of the detached secret-redaction goroutine
+	// (redaction error / give-up / recovered panic), so a key that stays
+	// un-redacted in the operation response is detectable. nil → no logging.
+	logger *slog.Logger
+
+	// HydraClientNamePrefix — used to compose the Hydra `client_name`
+	// (default "kacho-sak-<svaID>"). Configurable via env at wire-time.
+	HydraClientNamePrefix string
+	// DefaultScope — scope granted to issued keys (default empty).
+	DefaultScope string
+	// AudiencePrefix — appended with `/<svaID>` as Hydra audience.
+	AudiencePrefix string
+}
+
+// WithResponseRedactor wires the post-Issue secret redactor.
+func (u *IssueSAKeyUseCase) WithResponseRedactor(r OpsResponseRedactor) *IssueSAKeyUseCase {
+	u.redactor = r
+	return u
+}
+
+// WithAuditEmitter wires the durable audit_outbox emitter.
+// Composition-root only. nil emitter → audit emit is skipped.
+func (u *IssueSAKeyUseCase) WithAuditEmitter(a auditEmitter) *IssueSAKeyUseCase {
+	u.audit = a
+	return u
+}
+
+// WithLogger wires the logger used by the detached secret-redaction goroutine to
+// surface redaction failures (the only place a key can stay un-redacted).
+func (u *IssueSAKeyUseCase) WithLogger(l *slog.Logger) *IssueSAKeyUseCase {
+	u.logger = l
+	return u
+}
+
+// NewIssueSAKeyUseCase constructs.
+func NewIssueSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, h OAuthClientAdmin, ops operations.Repo) *IssueSAKeyUseCase {
+	return &IssueSAKeyUseCase{
+		repo:                  r,
+		tx:                    tx,
+		hydra:                 h,
+		opsRepo:               ops,
+		now:                   time.Now,
+		HydraClientNamePrefix: "kacho-sak-",
+	}
+}
+
+// IssueInput — sanitized.
+type IssueInput struct {
+	ServiceAccountID domain.ServiceAccountID
+	Description      string
+	TTLSeconds       int64
+	CreatedByUserID  string
+
+	// TrustedSubjects — Federation IN. When non-empty, the use-case
+	// switches to FEDERATED mode: no keypair is generated, the Hydra OAuth2
+	// client is registered with `grant_types=[urn:ietf:params:oauth:grant-
+	// type:jwt-bearer]` + `token_endpoint_auth_method=none` (no JWKS), and
+	// the response omits `private_key_pem` / `public_key_pem`. External
+	// workloads sign their own assertions through the IdP that emitted one
+	// of the listed `(issuer, subject_pattern)` tuples; Hydra accepts the
+	// assertion if and only if the issuer is in the global trusted-issuers
+	// list (helm umbrella `hydra.config.oauth2.grant.jwt` + admin
+	// trust-grants) and the (iss, sub) matches an entry below. Empty slice
+	// = private_key_jwt mode.
+	TrustedSubjects []domain.TrustedSubject
+
+	// Audience — Federation OUT. When non-empty, the Hydra OAuth2
+	// client is registered with this exact `audience` list (replacing the
+	// default kacho-internal `AudiencePrefix`-built audience), so every
+	// access_token minted for this client lands the values in its `aud`
+	// claim. Required for OIDC-trust-federation with external IdPs — the
+	// `audience` value must match exactly what the remote IdP expects (its
+	// token-exchange endpoint or resource URI).
+	// Order preserved; empty entries dropped; duplicates collapsed.
+	// Empty slice = legacy kacho-internal-only audience.
+	Audience []string
+}
+
+// Execute returns a started Operation.
+func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operations.Operation, error) {
+	if in.ServiceAccountID == "" {
+		return nil, status.Error(codes.InvalidArgument, "service_account_id required")
+	}
+	if !strings.HasPrefix(string(in.ServiceAccountID), domain.PrefixServiceAccount) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid service account id '%s'", in.ServiceAccountID)
+	}
+	if in.CreatedByUserID == "" {
+		return nil, status.Error(codes.InvalidArgument, "created_by_user_id required")
+	}
+	if in.TTLSeconds < 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl_seconds must be >= 0")
+	}
+	if len(in.Description) > 256 {
+		return nil, status.Error(codes.InvalidArgument, "description too long (max 256)")
+	}
+	for i, ts := range in.TrustedSubjects {
+		if err := ts.Validate(); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "trusted_subjects[%d]: %v", i, err)
+		}
+	}
+
+	keyID := domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient))
+	op, err := operations.NewFromContext(ctx,
+		domain.PrefixOperationIAM,
+		fmt.Sprintf("Issue SA key for %s", in.ServiceAccountID),
+		&iamv1.IssueSAKeyMetadata{
+			ServiceAccountId: string(in.ServiceAccountID),
+			KeyId:            string(keyID),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.opsRepo.Create(ctx, op); err != nil {
+		return nil, err
+	}
+	// Capture the verified caller principal SYNCHRONOUSLY (before the worker
+	// goroutine is spawned) — the audit actor must be the authenticated
+	// principal (anti-spoofing, acceptance 5.2-40), never a request-body field.
+	actor := authzguard.PrincipalUserID(ctx)
+	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		resp, derr := u.doIssue(ctx, keyID, in, actor)
+		// Schedule post-completion redact. The worker is about to invoke
+		// MarkDone(opID, resp) with plaintext `client_secret` baked in;
+		// after that completes, we replace the secret field in-place via a
+		// single-statement UPDATE on the operations row (idempotent).
+		//
+		// The redact runs in a separate goroutine because the MarkDone call
+		// happens INSIDE the same goroutine that runs `fn`, AFTER `fn`
+		// returns — so we cannot inline the redact here. A brief poll waits
+		// for done=true, then performs the single UPDATE. Concurrency safety:
+		// jsonb_set is single-statement atomic; idempotent — re-running with
+		// the same `<redacted>` value is a no-op.
+		if derr == nil && u.redactor != nil && len(in.TrustedSubjects) == 0 {
+			// G118 (gosec) is suppressed intentionally: the goroutine must outlive
+			// the request-scoped ctx because the gRPC client has already received
+			// the Operation envelope by the time MarkDone runs; binding it to ctx
+			// would race-cancel the redact UPDATE on request return. The goroutine
+			// builds its own bounded context (5s) inside scheduleSecretRedact,
+			// derived from the worker ctx via WithoutCancel so trace/request-id
+			// baggage survives the detach.
+			//
+			// Federated rows (TrustedSubjects non-empty) carry no key
+			// material in the response — nothing to redact, skip the goroutine.
+			go u.scheduleSecretRedact(ctx, op.ID) // #nosec G118 -- deliberate lifetime detach (baggage preserved via WithoutCancel; see comment above).
+		}
+		return resp, derr
+	})
+	return &op, nil
+}
+
+// scheduleSecretRedact polls until the operation is marked done
+// (typically <100ms — the worker calls MarkDone immediately after `fn`
+// returns), then issues a single jsonb_set UPDATE replacing
+// `response.private_key_pem` with `"<redacted>"`. The legacy
+// `response.client_secret` field is also redacted for private_key_jwt wire-compat,
+// even though new keys always leave it empty.
+//
+// Bounded: max 100 attempts at 20ms intervals (2s total). If the op never
+// completes (worker panic / DB-down) the redact silently gives up; the
+// operations row stays as the worker left it (typically without a response,
+// or with an error result that never contained the secret).
+func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID string) {
+	// recover-guard: эта goroutine детачена от запроса и переживает его, поэтому
+	// неперехваченная паника (в opsRepo.Get / RedactResponseField) убила бы весь
+	// IAM-процесс — а он на critical path каждого InternalIAMService.Check. Паника
+	// ловится и логируется: ключ мог остаться нередактированным, но процесс жив.
+	defer func() {
+		if r := recover(); r != nil && u.logger != nil {
+			u.logger.Error("sa-key secret redaction panicked — key material may remain in the operation response",
+				slog.String("operation_id", opID), slog.Any("panic", r))
+		}
+	}()
+	if u.redactor == nil {
+		return
+	}
+	// Detach from the caller's cancellation (the redact must outlive the
+	// request-scoped ctx — the gRPC client already holds the Operation envelope)
+	// but PRESERVE its trace/request-id/slog baggage via WithoutCancel.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), 5*time.Second)
+	defer cancel()
+	for attempt := 0; attempt < 100; attempt++ {
+		op, err := u.opsRepo.Get(ctx, opID)
+		if err == nil && op != nil && op.Done {
+			// MarkDone has completed. Redact the private key (and the legacy
+			// client_secret field for wire-compat). A failed redaction leaves
+			// plaintext key material in operations.response_data, re-fetchable via
+			// Operation.Get — log on Error so the stuck secret is detectable, never
+			// silently discard the failure.
+			if rerr := u.redactor.RedactResponseField(ctx, opID,
+				[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+				u.logger.ErrorContext(ctx, "sa-key private_key_pem redaction failed — plaintext key may remain in the operation response",
+					slog.String("operation_id", opID), slog.Any("err", rerr))
+			}
+			if rerr := u.redactor.RedactResponseField(ctx, opID,
+				[]string{"client_secret"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+				u.logger.ErrorContext(ctx, "sa-key client_secret redaction failed",
+					slog.String("operation_id", opID), slog.Any("err", rerr))
+			}
+			return
+		}
+		select {
+		case <-time.After(20 * time.Millisecond):
+		case <-ctx.Done():
+			if u.logger != nil {
+				u.logger.WarnContext(ctx, "sa-key secret redaction gave up before the operation completed — key material may remain",
+					slog.String("operation_id", opID))
+			}
+			return
+		}
+	}
+	if u.logger != nil {
+		u.logger.WarnContext(ctx, "sa-key secret redaction exhausted retries before the operation completed — key material may remain",
+			slog.String("operation_id", opID))
+	}
+}
+
+// doIssue dispatches to the private_key_jwt path or the federated path
+// depending on whether the caller supplied TrustedSubjects.
+func (u *IssueSAKeyUseCase) doIssue(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
+	if len(in.TrustedSubjects) > 0 {
+		return u.doIssueFederated(ctx, keyID, in, actor)
+	}
+	return u.doIssuePrivateKeyJWT(ctx, keyID, in, actor)
+}
+
+// doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, register
+// Hydra client with private_key_jwt + embedded JWK, persist mapping with
+// PublicKeyPEM + KeyAlgorithm, return PrivateKeyPEM exactly once.
+func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
+	// 1. Mint ECDSA P-256 keypair locally. The JWK `kid` is the kacho-iam
+	//    SA-OAuth-client id (`soc_*`) so caller→Hydra assertions are
+	//    self-describing.
+	key, err := generateES256Key(string(keyID))
+	if err != nil {
+		return nil, fmt.Errorf("generate sa keypair: %w", err)
+	}
+
+	// 2. Register OAuth2 client with Hydra using private_key_jwt + the
+	//    public JWK. Hydra returns NO client_secret.
+	clientName := u.HydraClientNamePrefix + string(in.ServiceAccountID)
+	// #nosec G101 -- "client_credentials" is the OAuth2 grant-type identifier (RFC 6749 section 4.4),
+	// not a credential. Same applies to "private_key_jwt" (RFC 7521 client_assertion_type).
+	hydraReq := clients.CreateOAuthClientRequest{
+		ClientName:              clientName,
+		Owner:                   string(in.ServiceAccountID),
+		Scope:                   u.DefaultScope,
+		GrantTypes:              []string{"client_credentials"},
+		TokenEndpointAuthMethod: "private_key_jwt",
+		JWKS:                    &clients.JWKS{Keys: []clients.JWK{key.JWK}},
+	}
+	hydraReq.Audience = u.resolveAudience(in)
+	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
+	if err != nil {
+		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
+	}
+
+	// 3. Persist mapping row in TX.
+	row := domain.ServiceAccountOAuthClient{
+		ID:              keyID,
+		SvaID:           in.ServiceAccountID,
+		OAuthClientID:   domain.OAuthClientID(hydraClient.ClientID),
+		Description:     domain.Description(in.Description),
+		CreatedByUserID: domain.UserID(in.CreatedByUserID),
+		PublicKeyPEM:    key.PublicPEM,
+		KeyAlgorithm:    key.Algorithm,
+	}
+	if in.TTLSeconds > 0 {
+		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+		row.ExpiresAt = &t
+	}
+	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, key.Algorithm)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Build response — return PRIVATE PEM + kid ONCE. `client_secret`
+	//    is kept empty (deprecated field, retained for wire-compat).
+	pbKey, err := saClientToProto(persisted)
+	if err != nil {
+		return nil, err
+	}
+	resp := &iamv1.IssueSAKeyResponse{
+		Key:           pbKey,
+		ClientId:      hydraClient.ClientID,
+		ClientSecret:  "", // private_key_jwt: no shared secret exists.
+		PrivateKeyPem: key.PrivatePEM,
+		PublicKeyPem:  key.PublicPEM,
+		Algorithm:     key.Algorithm,
+		KeyId:         string(keyID),
+		// Echo resolved audience list (informational; what Hydra
+		// will land in `aud` of minted tokens for this client).
+		Audiences: hydraReq.Audience,
+	}
+	return anypb.New(resp)
+}
+
+// resolveAudience derives the Hydra `audience` list for a new SA client.
+//
+// Audience semantics:
+//   - in.Audience non-empty → use it verbatim (after dedup + empty drop).
+//     External-federation rollout requires
+//     the audience to match what the external IdP expects EXACTLY — the
+//     internal `AudiencePrefix` default would invalidate the token.
+//   - in.Audience empty AND AudiencePrefix set → legacy kacho-internal
+//     audience `<prefix>/sa/<svaID>`. Backwards-compat for callers that
+//     do not yet specify audience.
+//   - both empty → nil (Hydra mints tokens with no `aud` claim; valid for
+//     kacho-internal API gateway which doesn't require aud, but rejected by
+//     any external RP that enforces audience).
+func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
+	if len(in.Audience) > 0 {
+		seen := make(map[string]struct{}, len(in.Audience))
+		out := make([]string, 0, len(in.Audience))
+		for _, a := range in.Audience {
+			if a == "" {
+				continue
+			}
+			if _, dup := seen[a]; dup {
+				continue
+			}
+			seen[a] = struct{}{}
+			out = append(out, a)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if u.AudiencePrefix != "" {
+		return []string{strings.TrimRight(u.AudiencePrefix, "/") + "/sa/" + string(in.ServiceAccountID)}
+	}
+	return nil
+}
+
+// doIssueFederated — register Hydra client for RFC 7523
+// jwt-bearer grant (no JWKS, no client auth), persist mapping with
+// TrustedSubjects, return response WITHOUT any key material. External
+// workloads will sign their own assertions through the listed external IdPs
+// and present them to Hydra `/oauth2/token`.
+func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
+	clientName := u.HydraClientNamePrefix + string(in.ServiceAccountID)
+	hydraReq := clients.CreateOAuthClientRequest{
+		ClientName: clientName,
+		Owner:      string(in.ServiceAccountID),
+		Scope:      u.DefaultScope,
+		// RFC 7521/7523 jwt-bearer grant. Hydra accepts incoming OIDC
+		// assertions whose `iss` matches a globally-configured trusted
+		// issuer (helm umbrella `hydra.config.oauth2.grant.jwt` + admin
+		// trust-grants), then mints kacho-issued access_tokens against
+		// this client_id.
+		GrantTypes: []string{"urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		// No client authentication — the assertion IS the credential
+		// (signed by the external IdP). Hydra v26 spelling.
+		TokenEndpointAuthMethod: "none",
+		// Federated mode: NO JWKS — Hydra validates the assertion against
+		// the external IdP's JWKS (resolved via the trusted-issuer config).
+		JWKS: nil,
+	}
+	hydraReq.Audience = u.resolveAudience(in)
+	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
+	if err != nil {
+		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
+	}
+
+	row := domain.ServiceAccountOAuthClient{
+		ID:              keyID,
+		SvaID:           in.ServiceAccountID,
+		OAuthClientID:   domain.OAuthClientID(hydraClient.ClientID),
+		Description:     domain.Description(in.Description),
+		CreatedByUserID: domain.UserID(in.CreatedByUserID),
+		// PublicKeyPEM + KeyAlgorithm intentionally empty — no key
+		// material in kacho-iam for federated rows.
+		TrustedSubjects: append([]domain.TrustedSubject(nil), in.TrustedSubjects...),
+	}
+	if in.TTLSeconds > 0 {
+		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+		row.ExpiresAt = &t
+	}
+	// Federated rows carry no kacho-held key material — key_algorithm is "".
+	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, "")
+	if err != nil {
+		return nil, err
+	}
+
+	pbKey, err := saClientToProto(persisted)
+	if err != nil {
+		return nil, err
+	}
+	resp := &iamv1.IssueSAKeyResponse{
+		Key:      pbKey,
+		ClientId: hydraClient.ClientID,
+		// Federated: no key material. Algorithm + KeyId are likewise empty
+		// because the asserting party owns its own kid scheme.
+		ClientSecret:  "",
+		PrivateKeyPem: "",
+		PublicKeyPem:  "",
+		Algorithm:     "",
+		KeyId:         string(keyID),
+		// Echo resolved audience list (informational; what Hydra
+		// will land in `aud` of tokens minted from federated assertions).
+		Audiences: hydraReq.Audience,
+	}
+	return anypb.New(resp)
+}
+
+// commitMapping persists the SA-OAuth-client mapping row in a fresh tx and
+// rolls back + deletes the Hydra client on failure. Shared by both the
+// private_key_jwt and federated paths.
+//
+// The durable iam.sa_key.issued audit_outbox row is emitted in the SAME tx as
+// the Insert (atomic, запрет #10): the audit row commits iff the mapping
+// commits, so a rolled-back Insert (e.g. sva_unique 23505) leaves no orphan
+// compliance row. The Hydra client is created BEFORE this tx (external side-
+// effect) and rolled back on failure via DeleteOAuthClient; the audit row
+// records only the DB-committed fact.
+func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, hydraClientID, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
+	// cleanupCtx — detached from the caller's cancellation (the Hydra-client
+	// rollback must run even if the request ctx is cancelled) but PRESERVES the
+	// caller's trace/request-id/slog baggage. Bounded so a slow Hydra
+	// admin can't hang the rollback.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cleanupCancel()
+
+	tx, err := u.tx.Begin(ctx)
+	if err != nil {
+		_ = u.hydra.DeleteOAuthClient(cleanupCtx, hydraClientID)
+		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+			_ = u.hydra.DeleteOAuthClient(cleanupCtx, hydraClientID)
+		}
+	}()
+	persisted, err := u.repo.Insert(ctx, tx, row)
+	if err != nil {
+		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
+	}
+	// Emit the durable audit row in the SAME tx (atomic with the Insert).
+	// Payload carries only non-secret identifiers (no key material — 5.2-36).
+	if u.audit != nil {
+		if aerr := u.audit.EmitTx(ctx, tx, service.AuditEvent{
+			EventType:       auditEventSAKeyIssued,
+			TenantAccountID: "",
+			Payload: saKeyAuditPayload(
+				actor, string(row.SvaID), string(persisted.ID), keyAlgorithm),
+		}); aerr != nil {
+			return domain.ServiceAccountOAuthClient{}, mapPGErr(aerr)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
+	}
+	committed = true
+	return persisted, nil
+}
+
+// ───────────────── Revoke use-case ─────────────────
+
+// RevokeSAKeyUseCase deletes both the kacho-iam mapping row and the Hydra
+// OAuth2 client.
+type RevokeSAKeyUseCase struct {
+	repo    SAClientRepo
+	tx      service.TxBeginner
+	hydra   OAuthClientAdmin
+	opsRepo operations.Repo
+	// audit — durable audit_outbox emitter. nil → no audit row.
+	audit auditEmitter
+}
+
+// NewRevokeSAKeyUseCase constructs.
+func NewRevokeSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, h OAuthClientAdmin, ops operations.Repo) *RevokeSAKeyUseCase {
+	return &RevokeSAKeyUseCase{repo: r, tx: tx, hydra: h, opsRepo: ops}
+}
+
+// WithAuditEmitter wires the durable audit_outbox emitter.
+// Composition-root only. nil emitter → audit emit is skipped.
+func (u *RevokeSAKeyUseCase) WithAuditEmitter(a auditEmitter) *RevokeSAKeyUseCase {
+	u.audit = a
+	return u
+}
+
+// RevokeInput — sanitized.
+type RevokeInput struct {
+	ServiceAccountID domain.ServiceAccountID
+	KeyID            domain.SAOAuthClientID
+}
+
+// Execute returns a started Operation.
+func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*operations.Operation, error) {
+	if in.ServiceAccountID == "" {
+		return nil, status.Error(codes.InvalidArgument, "service_account_id required")
+	}
+	if in.KeyID == "" {
+		return nil, status.Error(codes.InvalidArgument, "key_id required")
+	}
+	op, err := operations.NewFromContext(ctx,
+		domain.PrefixOperationIAM,
+		fmt.Sprintf("Revoke SA key %s", in.KeyID),
+		&iamv1.RevokeSAKeyMetadata{
+			ServiceAccountId: string(in.ServiceAccountID),
+			KeyId:            string(in.KeyID),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.opsRepo.Create(ctx, op); err != nil {
+		return nil, err
+	}
+	// Capture the verified caller principal SYNCHRONOUSLY (anti-spoofing,
+	// acceptance 5.2-40) — the audit actor is never a request-body field.
+	actor := authzguard.PrincipalUserID(ctx)
+	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		return u.doRevoke(ctx, in, actor)
+	})
+	return &op, nil
+}
+
+func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor string) (*anypb.Any, error) {
+	cur, err := u.repo.Get(ctx, in.KeyID)
+	if err != nil {
+		return nil, mapPGErr(err)
+	}
+	// Cross-SA isolation — verify ownership before delete.
+	if cur.SvaID != in.ServiceAccountID {
+		return nil, status.Errorf(codes.NotFound, "ServiceAccountKey %s not found for service account %s", in.KeyID, in.ServiceAccountID)
+	}
+	tx, err := u.tx.Begin(ctx)
+	if err != nil {
+		return nil, mapPGErr(err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+	if err := u.repo.DeleteByID(ctx, tx, in.KeyID); err != nil {
+		return nil, mapPGErr(err)
+	}
+	// Emit the durable iam.sa_key.revoked audit row in the SAME tx as the
+	// mapping delete (atomic, запрет #10): no key material in payload (5.2-36).
+	if u.audit != nil {
+		if aerr := u.audit.EmitTx(ctx, tx, service.AuditEvent{
+			EventType:       auditEventSAKeyRevoked,
+			TenantAccountID: "",
+			Payload: saKeyAuditPayload(
+				actor, string(cur.SvaID), string(in.KeyID), cur.KeyAlgorithm),
+		}); aerr != nil {
+			return nil, mapPGErr(aerr)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, mapPGErr(err)
+	}
+	committed = true
+	// Delete from Hydra (idempotent — 404 OK).
+	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
+		if !errors.Is(err, clients.ErrHydraClientNotFound) {
+			// We've already committed the DB delete; surface a warning event,
+			// but treat this as eventual-consistency — the Hydra
+			// orphan-cleanup worker sweeps later. We return success with the
+			// orphan logged.
+			_ = err
+		}
+	}
+	resp := &iamv1.RevokeSAKeyResponse{
+		KeyId:     string(in.KeyID),
+		RevokedAt: timestamppb.Now(),
+	}
+	return anypb.New(resp)
+}
+
+// ───────────────── List use-case ─────────────────
+
+// ListSAKeysUseCase — sync read.
+type ListSAKeysUseCase struct {
+	repo SAClientRepo
+}
+
+// NewListSAKeysUseCase constructs.
+func NewListSAKeysUseCase(r SAClientRepo) *ListSAKeysUseCase { return &ListSAKeysUseCase{repo: r} }
+
+// ListInput — sanitized.
+type ListInput struct {
+	ServiceAccountID domain.ServiceAccountID
+	PageSize         int32
+	PageToken        string
+}
+
+// Execute returns paged keys.
+func (u *ListSAKeysUseCase) Execute(ctx context.Context, in ListInput) ([]domain.ServiceAccountOAuthClient, string, error) {
+	if in.ServiceAccountID == "" {
+		return nil, "", status.Error(codes.InvalidArgument, "service_account_id required")
+	}
+	return u.repo.List(ctx, in.ServiceAccountID, in.PageToken, in.PageSize)
+}
+
+// ───────────────── helpers ─────────────────
+
+func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountOAuthClient, error) {
+	pb := &iamv1.ServiceAccountOAuthClient{
+		Id:              string(c.ID),
+		SvaId:           string(c.SvaID),
+		HydraClientId:   string(c.OAuthClientID),
+		Description:     string(c.Description),
+		CreatedByUserId: string(c.CreatedByUserID),
+		CreatedAt:       shared.TimestampProto(c.CreatedAt),
+	}
+	if c.ExpiresAt != nil {
+		pb.ExpiresAt = shared.TimestampProto(*c.ExpiresAt)
+	}
+	if c.LastUsedAt != nil {
+		pb.LastUsedAt = shared.TimestampProto(*c.LastUsedAt)
+	}
+	return pb, nil
+}
+
+func mapPGErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
+		return err
+	}
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrAlreadyExists):
+		return status.Error(codes.AlreadyExists, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrFailedPrecondition):
+		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrInvalidArg):
+		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrUnavailable):
+		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+	}
+	return status.Error(codes.Internal, "internal SA key error")
+}

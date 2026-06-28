@@ -1,0 +1,27 @@
+{
+  "system_admin": [
+    "*.*.*.*"
+  ],
+  "system_view": [
+    "*.*.*.read",
+    "*.*.*.list",
+    "*.*.*.get"
+  ],
+  "compute_image_reader": [
+    "compute.image.*.get",
+    "compute.image.*.list",
+    "compute.snapshot.*.get",
+    "compute.snapshot.*.list"
+  ],
+  "vpc_address_ops": [
+    "vpc.address.addr5k.get",
+    "vpc.address.addr5k.update",
+    "vpc.address.addr9m.get",
+    "vpc.address.addr9m.update"
+  ],
+  "network_ops": [
+    "compute.image.*.get",
+    "vpc.address.addr5k.get",
+    "vpc.address.addr5k.update"
+  ]
+}

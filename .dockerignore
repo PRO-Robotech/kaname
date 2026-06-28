@@ -1,0 +1,9 @@
+.git
+.github
+bin
+go.work
+go.work.sum
+docs-site/node_modules
+docs-site/build
+*.log
+tests/**/results

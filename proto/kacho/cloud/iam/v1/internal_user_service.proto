@@ -1,0 +1,112 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "kacho/cloud/api/operation.proto";
+import "kacho/cloud/iam/v1/user.proto";
+import "kacho/cloud/iam/v1/user_service.proto";
+import "kacho/cloud/operation/operation.proto";
+import "kacho/cloud/validation.proto";
+import "kacho/iam/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// InternalUserService — cluster-internal user-mutation API (port 9091).
+//
+// НЕ публикуется на external TLS listener.
+//
+// Transport:
+//   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
+//   - `UpsertFromIdentity` — доступен через gRPC direct
+//     (`grpcurl -plaintext kacho-iam:9091 ...`); REST вызывается
+//     OIDC-callback handler'ом.
+service InternalUserService {
+  // Upsert User mirror'а из OIDC identity (Ory Kratos).
+  // Вызывается admin через grpcurl либо из OIDC-callback в api-gateway.
+  //
+  // REST exposed ONLY on the cluster-internal listener;
+  // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
+  // and authz-public-allowlist permits the <exempt> catalog entry.
+  rpc UpsertFromIdentity (UpsertFromIdentityRequest) returns (operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/users:upsertFromIdentity"
+      body: "*"
+    };
+    option (kacho.cloud.api.operation) = {
+      metadata: "UpsertFromIdentityMetadata"
+      response: "User"
+    };
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
+  rpc Get (GetUserRequest) returns (User) {
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // hook called by Ory Kratos after a successful
+  // self-service recovery flow (magic-link e-mail recovery). kacho-iam
+  // re-enables the User (if `invite_status` was `DISABLED`), invalidates all
+  // active sessions for the user (writes `session_revocations` rows with
+  // reason=`password-change`), and emits `iam.user.recovery_completed` audit.
+  //
+  // Idempotent on `(external_id, recovery_jti)` — duplicate webhook delivery
+  // does NOT spawn duplicate revocations.
+  rpc OnRecoveryCompleted (OnRecoveryCompletedRequest) returns (operation.Operation) {
+    option (kacho.cloud.api.operation) = {
+      metadata: "OnRecoveryCompletedMetadata"
+      response: "User"
+    };
+    // Cluster-internal listener-protected; Kratos is the only
+    // authorized caller via secret-token (configured in Kratos webhooks
+    // config). No per-RPC authz check.
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+}
+
+message UpsertFromIdentityRequest {
+  // OIDC `sub` claim (Ory) — UNIQUE-key.
+  string external_id = 1 [(required) = true, (length) = "<=128"];
+
+  // Email (case-insensitive). Required.
+  string email = 2 [(required) = true, (length) = "<=320"];
+
+  // Human-readable display name (необязателен).
+  string display_name = 3 [(length) = "<=256"];
+}
+
+message UpsertFromIdentityMetadata {
+  // ID локального User row после upsert'а.
+  string user_id = 1;
+
+  // True если был создан новый User; false если обновился existing.
+  bool created = 2;
+}
+
+// payload from Kratos recovery webhook.
+message OnRecoveryCompletedRequest {
+  // Kratos identity id (= kacho-iam User.external_id) whose recovery just
+  // completed.
+  string external_id = 1 [(required) = true, (length) = "<=128"];
+
+  // Kratos recovery-flow id (used as idempotency key — `INSERT ... ON
+  // CONFLICT (recovery_jti) DO NOTHING`).
+  string recovery_jti = 2 [(required) = true, (length) = "<=128"];
+
+  // E-mail at which the recovery was completed (echo from Kratos identity
+  // traits — kacho-iam matches it against `users.email` to defend against
+  // mismatched payloads).
+  string email = 3 [(required) = true, (length) = "<=320"];
+}
+
+message OnRecoveryCompletedMetadata {
+  // ID локального User row.
+  string user_id = 1;
+
+  // Number of active sessions revoked as part of the recovery flow.
+  int32 revoked_session_count = 2;
+}

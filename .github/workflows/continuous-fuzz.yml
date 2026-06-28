@@ -1,0 +1,108 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+name: continuous-fuzz
+
+# Continuous fuzzing for IAM.
+#
+# - Runs daily at 02:00 UTC.
+# - Each target fuzzes for 1 hour (configurable via FUZZTIME env).
+# - Crashing inputs upload as failure artifacts and open a GitHub Issue.
+# - Corpus persisted across runs via the GitHub Actions cache.
+
+on:
+  schedule:
+    - cron: '0 2 * * *'    # daily 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 'Duration per target (e.g. 1h, 4h, 24h)'
+        required: false
+        default: '1h'
+      target:
+        description: 'Target name (empty = all)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+defaults:
+  run:
+    working-directory: kacho-iam
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - FuzzJWTVerify
+          - FuzzCELExpression
+          - FuzzPermissionCatalogLookup
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: kacho-iam }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: kacho-iam/go.mod
+          cache-dependency-path: kacho-iam/go.sum
+
+      - name: restore fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: kacho-iam/internal/fuzz/testdata/fuzz/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: run fuzz
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '1h' }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.target }}" && "${{ inputs.target }}" != "${{ matrix.target }}" ]]; then
+            echo "Skipping ${{ matrix.target }} (filter: ${{ inputs.target }})"
+            exit 0
+          fi
+          go test -run=^$ -fuzz=${{ matrix.target }} -fuzztime=${FUZZTIME} \
+            ./internal/fuzz/ \
+            2>&1 | tee fuzz-output-${{ matrix.target }}.log
+
+      - name: upload corpus on success
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: kacho-iam/internal/fuzz/testdata/fuzz/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-failure-${{ matrix.target }}
+          path: |
+            kacho-iam/internal/fuzz/testdata/fuzz/${{ matrix.target }}/
+            kacho-iam/fuzz-output-${{ matrix.target }}.log
+
+      - name: open GitHub Issue on crash
+        if: failure()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'kacho-iam/fuzz-output-${{ matrix.target }}.log';
+            const log = fs.existsSync(path) ? fs.readFileSync(path, 'utf8').slice(-4000) : '(log missing)';
+            const title = 'fuzz crash: ${{ matrix.target }}';
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: `**Fuzz target**: \`${{ matrix.target }}\`\n**Run**: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nReproducer in artifact \`fuzz-failure-${{ matrix.target }}\`.\n\n\`\`\`\n${log}\n\`\`\``,
+              labels: ['bug', 'fuzz-crash']
+            });

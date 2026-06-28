@@ -1,0 +1,285 @@
+{
+  "info": {
+    "_postman_id": "6e92ea80-b3fb-5e80-89a7-583413d33437",
+    "name": "kacho-iam / newman / geo-read",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runId') || pm.environment.get('runId') === '') {",
+          "  // runId формат: только [a-z0-9], без точки, начинается с буквы — чтобы проходить compute name regex",
+          "  const t = Date.now().toString(36);",
+          "  const r = Math.floor(Math.random() * 1e9).toString(36);",
+          "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
+          "}",
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "GEO-ZON-GT-CONF-OK — GET /geo/v1/zones as jwtBootstrap → 200, zones[] non-empty + well-formed, not 503/code14",
+      "description": "class:CONF | class:CRUD | priority:P0",
+      "item": [
+        {
+          "name": "GEO-ZON-GT-CONF-OK :: list-zones-auth",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/geo/v1/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "geo",
+                "v1",
+                "zones"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('REGRESSION: not 503 (gateway->geo no-children)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.not.equal(503);",
+                  "});",
+                  "pm.test('REGRESSION: body not grpc code 14 (UNAVAILABLE no-children)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  // A successful read has no top-level grpc `code`; only an error body does.",
+                  "  if (j && typeof j.code !== 'undefined') {",
+                  "    pm.expect(j.code, JSON.stringify(j)).to.not.equal(14);",
+                  "  }",
+                  "});",
+                  "pm.test('zones is a non-empty array', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.zones, JSON.stringify(j)).to.be.an('array');",
+                  "  pm.expect(j.zones.length, 'zones non-empty').to.be.greaterThan(0);",
+                  "});",
+                  "pm.test('zones are well-formed (id + status present)', () => {",
+                  "  const j = pm.response.json();",
+                  "  (j.zones || []).forEach(z => {",
+                  "    pm.expect(z.id, 'zone id present: ' + JSON.stringify(z)).to.be.a('string').and.not.empty;",
+                  "    pm.expect(z.status, 'zone status present: ' + JSON.stringify(z)).to.not.be.undefined;",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GEO-REG-GT-CONF-OK — GET /geo/v1/regions as jwtBootstrap → 200, regions[] non-empty + well-formed, not 503/code14",
+      "description": "class:CONF | class:CRUD | priority:P0",
+      "item": [
+        {
+          "name": "GEO-REG-GT-CONF-OK :: list-regions-auth",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/geo/v1/regions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "geo",
+                "v1",
+                "regions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('REGRESSION: not 503 (gateway->geo no-children)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.not.equal(503);",
+                  "});",
+                  "pm.test('REGRESSION: body not grpc code 14 (UNAVAILABLE no-children)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  // A successful read has no top-level grpc `code`; only an error body does.",
+                  "  if (j && typeof j.code !== 'undefined') {",
+                  "    pm.expect(j.code, JSON.stringify(j)).to.not.equal(14);",
+                  "  }",
+                  "});",
+                  "pm.test('regions is a non-empty array', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.regions, JSON.stringify(j)).to.be.an('array');",
+                  "  pm.expect(j.regions.length, 'regions non-empty').to.be.greaterThan(0);",
+                  "});",
+                  "pm.test('regions are well-formed (id present)', () => {",
+                  "  const j = pm.response.json();",
+                  "  (j.regions || []).forEach(r => {",
+                  "    pm.expect(r.id, 'region id present: ' + JSON.stringify(r)).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GEO-ZON-GT-AUTHZ-ANON-DENY — GET /geo/v1/zones as anonymous (no Bearer) → 401 Unauthenticated (masked the 503)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "GEO-ZON-GT-AUTHZ-ANON-DENY :: list-zones-anon",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/geo/v1/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "geo",
+                "v1",
+                "zones"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GEO-REG-GT-AUTHZ-ANON-DENY — GET /geo/v1/regions as anonymous (no Bearer) → 401 Unauthenticated (masked the 503)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "GEO-REG-GT-AUTHZ-ANON-DENY :: list-regions-anon",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/geo/v1/regions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "geo",
+                "v1",
+                "regions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": []
+}

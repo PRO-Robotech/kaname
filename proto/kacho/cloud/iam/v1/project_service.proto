@@ -1,0 +1,192 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "kacho/cloud/api/operation.proto";
+import "kacho/cloud/iam/v1/project.proto";
+import "kacho/cloud/operation/operation.proto";
+import "kacho/cloud/validation.proto";
+import "kacho/iam/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// A set of methods for managing Project resources.
+service ProjectService {
+  // Returns the specified Project resource.
+  rpc Get (GetProjectRequest) returns (Project) {
+    option (google.api.http) = { get: "/iam/v1/projects/{project_id}" };
+    option (kacho.iam.authz.v1.permission)        = "iam.projects.get";
+    option (kacho.iam.authz.v1.required_relation) = "v_get";
+    option (kacho.iam.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (kacho.iam.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Retrieves the list of Project resources within an Account.
+  //
+  // Default-deny реализован SCOPE-FILTER'ом, а не PermissionDenied: in-handler
+  // фильтр — авторитетный гейт видимости. Handler возвращает 200 и оставляет
+  // только проекты, видимые вызывающему через объединение FGA-отношений
+  // viewer и v_list (пустой список, если ничего не видно — никогда 403).
+  // Поэтому gateway-middleware exempt'ит этот RPC от per-RPC FGA-Check.
+  // `<exempt>` снимает authz, но не аутентификацию — валидный JWT обязателен,
+  // anonymous отвергается anti-anonymous интерсептором IAM. Без ACR
+  // step-up-floor — паритет с остальными account-scoped List
+  // (user / serviceAccount / role).
+  rpc List (ListProjectsRequest) returns (ListProjectsResponse) {
+    option (google.api.http) = { get: "/iam/v1/projects" };
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+
+  // Creates a project within the specified account.
+  rpc Create (CreateProjectRequest) returns (operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/projects" body: "*" };
+    option (kacho.cloud.api.operation) = {
+      metadata: "CreateProjectMetadata"
+      response: "Project"
+    };
+    option (kacho.iam.authz.v1.permission)        = "iam.projects.create";
+    option (kacho.iam.authz.v1.required_relation) = "editor";
+    option (kacho.iam.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (kacho.iam.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Updates the specified project.
+  rpc Update (UpdateProjectRequest) returns (operation.Operation) {
+    option (google.api.http) = { patch: "/iam/v1/projects/{project_id}" body: "*" };
+    option (kacho.cloud.api.operation) = {
+      metadata: "UpdateProjectMetadata"
+      response: "Project"
+    };
+    option (kacho.iam.authz.v1.permission)        = "iam.projects.update";
+    option (kacho.iam.authz.v1.required_relation) = "v_update";
+    option (kacho.iam.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (kacho.iam.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Deletes the specified project.
+  // Project still referenced by resources of other services (Network/Instance/...) — semantics
+  // ограничены: cross-service refcheck появится позже; Delete лишь удаляет row.
+  rpc Delete (DeleteProjectRequest) returns (operation.Operation) {
+    option (google.api.http) = { delete: "/iam/v1/projects/{project_id}" };
+    option (kacho.cloud.api.operation) = {
+      metadata: "DeleteProjectMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (kacho.iam.authz.v1.permission)        = "iam.projects.delete";
+    option (kacho.iam.authz.v1.required_relation) = "v_delete";
+    option (kacho.iam.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (kacho.iam.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Lists operations for the specified project.
+  rpc ListOperations (ListProjectOperationsRequest) returns (ListProjectOperationsResponse) {
+    option (google.api.http) = { get: "/iam/v1/projects/{project_id}/operations" };
+    option (kacho.iam.authz.v1.permission)        = "iam.project_operationses.listOperations";
+    option (kacho.iam.authz.v1.required_relation) = "v_list";
+    option (kacho.iam.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (kacho.iam.authz.v1.required_acr_min)  = "2";
+  }
+}
+
+message GetProjectRequest {
+  // ID of the Project resource to return.
+  string project_id = 1 [(required) = true, (length) = "<=20"];
+}
+
+message ListProjectsRequest {
+  // ID of the Account to list projects in.
+  string account_id = 1 [(required) = true, (length) = "<=20"];
+
+  // The maximum number of results per page to return. Default value: 100.
+  int64 page_size = 2 [(value) = "<=1000"];
+
+  // Page token.
+  string page_token = 3 [(length) = "<=100"];
+
+  // A filter expression. Currently supports filtering by [Project.name].
+  string filter = 4 [(length) = "<=1000"];
+}
+
+message ListProjectsResponse {
+  // List of Project resources.
+  repeated Project projects = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}
+
+message CreateProjectRequest {
+  // ID of the Account that the Project will belong to.
+  string account_id = 1 [(required) = true, (length) = "<=20"];
+
+  // Name of the project. Must be unique within an Account. 3-63 characters long.
+  string name = 2 [(required) = true, (length) = "3-63", (pattern) = "[a-z]([-a-z0-9]{0,61}[a-z0-9])?"];
+
+  // Description of the project.
+  string description = 3 [(length) = "<=256"];
+
+  // Resource labels as `key:value` pairs.
+  map<string, string> labels = 4 [(kacho.cloud.size) = "<=64", (length) = "<=63", (pattern) = "[-_0-9a-z]*", (map_key).length = "1-63", (map_key).pattern = "[a-z][-_0-9a-z]*"];
+}
+
+message UpdateProjectRequest {
+  // ID of the Project resource to update.
+  string project_id = 1 [(required) = true, (length) = "<=20"];
+
+  // Field mask. Allowed fields: name, description, labels.
+  // account_id is NOT mutable via Update — use ProjectService.Move.
+  google.protobuf.FieldMask update_mask = 2;
+
+  // Name of the project.
+  string name = 3 [(pattern) = "|[a-z]([-a-z0-9]{0,61}[a-z0-9])?"];
+
+  // Description of the project.
+  string description = 4 [(length) = "<=256"];
+
+  // Resource labels as `key:value` pairs.
+  map<string, string> labels = 5 [(kacho.cloud.size) = "<=64", (length) = "<=63", (pattern) = "[-_0-9a-z]*", (map_key).length = "1-63", (map_key).pattern = "[a-z][-_0-9a-z]*"];
+}
+
+message DeleteProjectRequest {
+  // ID of the Project resource to delete.
+  string project_id = 1 [(required) = true, (length) = "<=20"];
+}
+
+message ListProjectOperationsRequest {
+  // ID of the Project resource to list operations for.
+  string project_id = 1 [(required) = true, (length) = "<=20"];
+
+  // The maximum number of results per page that should be returned.
+  int64 page_size = 2 [(value) = "<=1000"];
+
+  // Page token.
+  string page_token = 3 [(length) = "<=100"];
+}
+
+message ListProjectOperationsResponse {
+  // List of operations for the specified project.
+  repeated operation.Operation operations = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}

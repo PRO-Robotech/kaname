@@ -1,0 +1,137 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "kacho/iam/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// PermissionCatalogService — the grantable-token catalog for backend-driven
+// role-rule editor dropdowns.
+//
+// This is the HONEST, public, sync-read taxonomy that the role-rule editor
+// (kacho-ui RulesEditor) loads at runtime instead of carrying a hand-maintained
+// copy of the backend taxonomy. It answers "which (module, resource) tokens are
+// grantable, which verbs are closed, and what is the wildcard policy" — the
+// metadata the editor needs to render `modules → resources`, the verb set, and
+// the wildcard affordances.
+//
+// Ground-truth (the catalog mirrors EXACTLY this — no more, no less):
+//   - kacho-iam `internal/authzmap` → `objectTypes` (the closed
+//     `(module,resource) → FGA object_type` table; extending it requires a
+//     lockstep edit of `fga_model.fga`) + `TypeHasVerbRelations(fgaType)`
+//     (verb-bearing leaf vs tier-only ancestor);
+//   - kacho-iam `internal/domain.ClosedVerbs` = {get,list,create,update,delete}
+//     (+ the verb-`*` bounded expansion).
+// The rule compiler fail-closed-SKIPs any `(module,resource)` NOT in
+// `objectTypes` (the grant is a no-op), so such tokens never appear here.
+//
+// This service is DISTINCT from `InternalIAMService.ListPermissions` (which is
+// removed): it is PUBLIC (tenant UI, authenticated-floor), carries rule-tokens
+// `(module,resource)` rather than compiled `module.resource.verb` permission
+// strings, and takes NO subject. Per-subject "who can do X" is answered by
+// `AccessBindingService.ExpandAccess`.
+//
+// The catalog carries NO compiled `permissions[]` and NO FGA-relation
+// names (`v_*`/`scope_grant`/`sg_*`) — only tenant-facing grantable tokens plus
+// the editor/policy flags.
+service PermissionCatalogService {
+  // ListPermissionCatalog returns the whole grantable taxonomy in one sync read
+  // (NOT an Operation — reads are sync). Takes no payload:
+  // the catalog is one platform-wide taxonomy, immutable at runtime (it grows
+  // only with a new backend release that extends `objectTypes` lockstep with
+  // `fga_model.fga`), and is NOT scope-filtered per tenant. The UI caches it
+  // (react-query).
+  rpc ListPermissionCatalog (ListPermissionCatalogRequest) returns (ListPermissionCatalogResponse) {
+    option (google.api.http) = { get: "/iam/v1/permissionCatalog" };
+    // Authenticated-floor (system_viewer-tier): the catalog is platform
+    // metadata common to every tenant — any authenticated principal may read
+    // it. Exempt at the api-gateway permission catalog (parity with the
+    // tenant-wide `RoleService.Get`/`List` reference reads); anonymous is still
+    // rejected fail-closed by the IAM anti-anonymous interceptor.
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+}
+
+// ListPermissionCatalogRequest is empty — the catalog is the whole grantable
+// taxonomy with no parameters (no id / filter / pagination in v1).
+message ListPermissionCatalogRequest {}
+
+// ListPermissionCatalogResponse is the flat, sync grantable taxonomy
+// (camelCase on the wire).
+message ListPermissionCatalogResponse {
+  // Ordered list of grantable modules (the 1st token segment), derived from the
+  // keys of backend `objectTypes` (e.g. iam, vpc, compute, loadbalancer).
+  // Deterministic order.
+  repeated CatalogModule modules = 1;
+
+  // The closed verb set: ["get","list","create","update","delete"] — a mirror
+  // of `domain.ClosedVerbs` (fixed order).
+  repeated string closed_verbs = 2;
+
+  // Platform-wide wildcard policy flags.
+  WildcardPolicy wildcard_policy = 3;
+}
+
+// CatalogModule is a grantable module and the resources grantable within it.
+message CatalogModule {
+  // Module name (1st token segment, e.g. "vpc"), as in backend `objectTypes`.
+  string module = 1;
+
+  // Resources grantable within this module.
+  repeated CatalogResource resources = 2;
+}
+
+// CatalogResource is one grantable `(module,resource)` token plus the editor
+// flags the role-rule editor needs.
+message CatalogResource {
+  // Resource name (2nd token segment), spelled EXACTLY as in backend
+  // `objectTypes` (e.g. "securityGroup"/"routeTable"/"networkInterface", or the
+  // loadbalancer plural tokens "networkLoadBalancers"/"targetGroups"/
+  // "listeners"). The token travels on the wire as-is, never renamed.
+  string resource = 1;
+
+  // True for verb-bearing leaf types; false for tier-only ancestors
+  // (iam.account / iam.project). Mirrors
+  // `authzmap.TypeHasVerbRelations(objectType)`. A false value means
+  // ARM_ANCHOR/ARM_LABELS rules on this type fail-closed-SKIP — access is
+  // expressed via ARM_NAMES / tier roles.
+  bool has_verb_relations = 2;
+
+  // True if this type has a PUBLIC per-object filtered `List` registered on the
+  // api-gateway EXTERNAL listener — the resourceNames picker then
+  // renders a Select of caller-visible instances. False when there is no public
+  // List, or the List exists only on the cluster-internal listener (:9091) —
+  // the picker then falls back to a free-text input. The value is
+  // taken from a closed backend table ("(module,resource) → public List?"), not
+  // guessed by the UI. Internal-only List does NOT count as public.
+  bool has_list_endpoint = 3;
+
+  // True if the type may carry a match_labels (ARM_LABELS) selector — it is in
+  // the label-selectable feed set (kacho-iam domain.IsLabelSelectableType:
+  // mirror-fed types + iam.project/iam.account). ARM_NAMES (resourceNames) is
+  // NOT feed-gated — any type may be pinned by id. The editor must NOT offer a
+  // match_labels arm on a type where this is false (the rule compiler
+  // fail-closed-rejects an ARM_LABELS rule on a non-label-selectable type with
+  // INVALID_ARGUMENT "type %s is not selectable (no resource feed)"). E.g.
+  // vpc.addressPool is grantable+verb-bearing but NOT label-selectable.
+  bool label_selectable = 4;
+}
+
+// WildcardPolicy carries the catalog's wildcard policy flags, in parity with
+// the rule-compiler enforcement — one source of policy truth.
+message WildcardPolicy {
+  // True: verb-`*` is grantable in a custom role (bounded "all verbs of the
+  // type"). The editor renders the verb-`*` option enabled for custom.
+  bool verb_wildcard_allowed_custom = 1;
+
+  // True: module-`*` AND resource-`*` are system-only — using them in a custom
+  // role yields INVALID_ARGUMENT. The editor renders module/resource-`*`
+  // disabled for custom. (One flag covers both module and resource wildcards;
+  // they share the system-only policy.)
+  bool module_resource_wildcard_system_only = 2;
+}

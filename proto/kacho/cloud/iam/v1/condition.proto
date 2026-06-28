@@ -1,0 +1,119 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "kacho/cloud/validation.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// A Condition resource — reusable, user-defined CEL-like expression evaluated
+// inside the authz pipeline.
+//
+// `Condition` (`cnd_…`) differs from `AccessBindingCondition` (`cond_…`):
+//
+//   - `AccessBindingCondition` is **bound 1:1 to one AccessBinding** and carries
+//     a **whitelisted predicate kind** (MFA_FRESH / NON_EXPIRED / …) with kind-
+//     specific JSON params.
+//   - `Condition` is a **standalone, folder-scoped resource** that stores a
+//     free-form CEL expression + JSON-Schema for its parameters. It is
+//     referenced by `AccessBinding.condition_ref.condition_id` (oneof) and
+//     evaluated by OpenFGA Conditions (FGA-engine pre-compiles the CEL on
+//     `WriteAuthorizationModel`; runtime context is passed per `Check`).
+//
+// Why both: the whitelisted set (`BuiltinCondition` enum below +
+// `AccessBindingCondition.Kind`) covers 7 well-known predicates with frozen
+// semantics — fast path with no schema-evolution risk. `Condition` is the
+// escape hatch for tenant-defined expressions over the same condition
+// context (acr / amr / source_ip / device_attestation / current_time / …).
+//
+// Conditions are stored and lifecycled through Operations; full CEL
+// evaluation happens at OpenFGA. The OPA layer additionally enforces
+// guardrails — those are NOT exposed as
+// `Condition` rows; they live in `kacho-iam/policies/`.
+//
+// Resource id prefix: `cnd`.
+message Condition {
+  // Lifecycle status of a Condition row.
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    // CREATING — row inserted, but FGA model is being re-written to include
+    // this condition expression. Bindings referencing it return
+    // FailedPrecondition until status = ACTIVE.
+    CREATING           = 1;
+    // ACTIVE — condition compiled into the current FGA model; available for
+    // AccessBinding references.
+    ACTIVE             = 2;
+    // DELETING — row marked for deletion; outbox-worker is removing any
+    // bindings that still reference it.
+    DELETING           = 3;
+    // ERROR — terminal failure (e.g. CEL compilation failed at FGA-engine).
+    // Operation.error carries the reason.
+    ERROR              = 4;
+  }
+
+  // ID of the condition.
+  string id = 1 [(required) = true, (length) = "<=20", (pattern) = "cnd_[0-9a-z]+"];
+
+  // Folder in which this condition is scoped (Account/Project hierarchy from
+  // kacho-iam). Conditions are folder-local; references from AccessBindings
+  // on resources outside the folder are rejected at request-path
+  // validation.
+  string folder_id = 2 [(required) = true, (length) = "<=20"];
+
+  // Creation timestamp (truncated to seconds — kacho timestamp convention).
+  google.protobuf.Timestamp created_at = 3;
+
+  // Human-readable name. UNIQUE within `folder_id`. 1-63 chars,
+  // Kachō label pattern.
+  string name = 4 [(required) = true, (length) = "1-63", (pattern) = "[a-z]([-a-z0-9]{0,61}[a-z0-9])?"];
+
+  // Free-form description; ≤ 256 chars.
+  string description = 5 [(length) = "<=256"];
+
+  // User-defined key/value labels. Used for filtering/grouping. ≤ 64 entries;
+  // keys 1-63 chars, values 0-63 chars.
+  map<string, string> labels = 6;
+
+  // CEL-like expression evaluated against the per-request condition context
+  // (`acr_value`, `amr_claims`, `current_time`, `mfa_at`, `client_ip`,
+  // `device_attestation`, plus any extra params from `parameters_schema`).
+  // 1-2048 chars. Example:
+  //
+  //   context.mfa_fresh == true && context.source_ip in ['10.0.0.0/8']
+  //
+  // OpenFGA pre-validates the expression on `WriteAuthorizationModel`; an
+  // unparsable expression keeps the row in `CREATING` and finalises the
+  // Operation with `error = google.rpc.Status{code: InvalidArgument}`.
+  string expression = 7 [(required) = true, (length) = "1-2048"];
+
+  // JSON Schema describing the shape of `params` that callers may pass in
+  // (`source_ip_in_range` for instance accepts `{"cidrs": [...]}`). Optional —
+  // empty means no params. Stored as `google.protobuf.Struct` (JSON-compat).
+  google.protobuf.Struct parameters_schema = 8;
+
+  // Lifecycle status.
+  Status status = 10;
+}
+
+// CreateConditionMetadata — Operation.metadata for ConditionsService.Create.
+message CreateConditionMetadata {
+  // ID of the Condition resource that is being created.
+  string condition_id = 1;
+}
+
+// UpdateConditionMetadata — Operation.metadata for ConditionsService.Update.
+message UpdateConditionMetadata {
+  // ID of the Condition resource that is being updated.
+  string condition_id = 1;
+}
+
+// DeleteConditionMetadata — Operation.metadata for ConditionsService.Delete.
+message DeleteConditionMetadata {
+  // ID of the Condition resource that is being deleted.
+  string condition_id = 1;
+}

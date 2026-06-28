@@ -1,0 +1,82 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# kacho-iam собирается standalone: go.mod пинит kacho-corelib и kacho-proto на
+# версии с GitHub (без replace => ../), а `go mod download` тянет их из реестра.
+# Репо чекаутится в подкаталог `kacho-iam/` (см. defaults.working-directory) —
+# sibling-каталоги для сборки не нужны.
+
+defaults:
+  run:
+    working-directory: kacho-iam
+
+jobs:
+  build-vet-test:
+    name: build + vet + test (unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: kacho-iam }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: kacho-iam/go.mod, cache-dependency-path: kacho-iam/go.sum }
+      # go mod download тянет kacho-corelib и kacho-proto с GitHub (standalone-сборка).
+      - run: go mod download
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race -short -count=1 -timeout 5m ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: kacho-iam }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: kacho-iam/go.mod, cache-dependency-path: kacho-iam/go.sum }
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          working-directory: kacho-iam
+          args: --timeout 5m
+
+  govuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: kacho-iam }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: kacho-iam/go.mod, cache-dependency-path: kacho-iam/go.sum }
+      - run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+        continue-on-error: true
+
+  authz-deny-suite:
+    name: authz-deny suite — generate + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: kacho-iam }
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - name: generate authz-deny collection
+        run: python3 tests/newman/scripts/gen.py authz-deny
+      - name: assert collection non-empty
+        run: |
+          test -s tests/newman/collections/authz-deny.postman_collection.json
+          n=$(python3 -c "import json; print(len(json.load(open('tests/newman/collections/authz-deny.postman_collection.json'))['item']))")
+          echo "authz-deny cases: $n"
+          test "$n" -ge 200
+      - uses: actions/upload-artifact@v7
+        with:
+          name: authz-deny-collection
+          path: kacho-iam/tests/newman/collections/authz-deny.postman_collection.json

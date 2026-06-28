@@ -1,0 +1,54 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+{{/*
+ConfigMap с YAML-конфигом kacho-iam.
+
+Сервис читает config из /etc/kacho-iam/config.yaml; конкретные поля можно
+override'ить через ENV (`KACHO_IAM_REPOSITORY__POSTGRES__URL` и т.п.).
+
+DB-пароль НЕ кладется сюда (secret); подтягивается через
+`repository.postgres.password-from-env: KACHO_IAM_DB_PASSWORD` и Secret-ENV
+в deployment.yaml.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}-config
+  namespace: kacho
+data:
+  config.yaml: |
+    logger:
+      level: {{ default "INFO" .Values.logger.level | quote }}
+
+    api-server:
+      endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.grpc | quote }}
+      internal-endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.internalGrpc | quote }}
+      graceful-shutdown: {{ default "10s" .Values.apiServer.gracefulShutdown | quote }}
+
+    metrics:
+      enable: {{ default true .Values.metrics.enable }}
+    healthcheck:
+      enable: {{ default true .Values.healthcheck.enable }}
+
+    repository:
+      type: POSTGRES
+      postgres:
+        url: {{ printf "postgres://%s@%s:%v/%s" .Values.db.user .Values.db.host .Values.db.port .Values.db.name | quote }}
+        max-conns: {{ default 0 .Values.repository.postgres.maxConns }}
+        ssl-mode: {{ default "disable" .Values.repository.postgres.sslMode | quote }}
+        password-from-env: KACHO_IAM_DB_PASSWORD
+
+    authn:
+      mode: {{ default "dev" .Values.authn.mode | quote }}
+
+    extapi:
+      def-dial-duration: 10s
+      # Auth-tier — Ory Kratos + Hydra; OpenFGA — внешний authz-Check.
+      openfga:
+        enabled: {{ default false .Values.extapi.openfga.enabled }}
+        endpoint: {{ default "" .Values.extapi.openfga.endpoint | quote }}
+        store-id: {{ default "" .Values.extapi.openfga.storeId | quote }}
+        auth-model-id: {{ default "" .Values.extapi.openfga.authModelId | quote }}
+        tls:
+          enable: {{ default false .Values.extapi.openfga.tls.enable }}

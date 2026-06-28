@@ -1,0 +1,8 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+apiVersion: v2
+name: iam
+version: 0.1.0
+appVersion: 0.1.0
+description: Kachō IAM (Account, Project, User, ServiceAccount, Group, Role, AccessBinding)

@@ -1,0 +1,125 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
+name: release
+
+# Release pipeline for kacho-iam.
+#
+# On tag push v*.*.* :
+#   1. Build container via `ko` (reproducible, Go-native, no Dockerfile).
+#   2. Generate SBOM (CycloneDX + SPDX) via syft.
+#   3. Generate SLSA L3 provenance via slsa-github-generator.
+#   4. Sign image + SBOM + provenance via cosign (keyless OIDC via Fulcio).
+#   5. Push image + all 3 attestations to GHCR.
+#
+# Image registry runtime-configurable via env vars:
+#   - REGISTRY (default: ghcr.io)
+#   - REGISTRY_NAMESPACE (default: pro-robotech)
+# Signer key configurable via:
+#   - COSIGN_KEYLESS (default: true) — keyless OIDC via GitHub Actions OIDC token
+#   - COSIGN_PRIVATE_KEY (alternative: PEM-encoded private key from secret)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write     # OIDC for cosign keyless
+  attestations: write
+
+env:
+  REGISTRY: ${{ vars.REGISTRY || 'ghcr.io' }}
+  REGISTRY_NAMESPACE: ${{ vars.REGISTRY_NAMESPACE || 'pro-robotech' }}
+  IMAGE_NAME: kacho-iam
+  GO_VERSION_FILE: kacho-iam/go.mod
+
+jobs:
+  build-and-sign:
+    name: Build + SBOM + SLSA + Cosign
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.ko.outputs.image }}
+      digest: ${{ steps.ko.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: kacho-iam, fetch-depth: 0 }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+
+      # Login to registry via OIDC token (GHCR-native).
+      - name: Log in to ${{ env.REGISTRY }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ko — reproducible Go-native container builder.
+      - uses: ko-build/setup-ko@v0.10
+        with: { version: latest }
+
+      - name: ko build + push
+        id: ko
+        working-directory: kacho-iam
+        env:
+          KO_DOCKER_REPO: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_NAME }}
+        run: |
+          IMAGE=$(ko publish --bare --sbom=spdx ./cmd/kacho-iam)
+          DIGEST=$(echo "$IMAGE" | cut -d'@' -f2)
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      # SBOM generation via syft — produces CycloneDX in addition to SPDX (ko default).
+      - uses: anchore/sbom-action@v0.21
+        with:
+          image: ${{ steps.ko.outputs.image }}
+          format: cyclonedx-json
+          output-file: sbom-cyclonedx.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom-cyclonedx.json
+
+      # Cosign keyless sign image.
+      - uses: sigstore/cosign-installer@v3.7.0
+        with: { cosign-release: 'v2.5.1' }
+
+      - name: cosign sign image
+        run: |
+          cosign sign --yes ${{ steps.ko.outputs.image }}
+
+      - name: cosign attach SBOM (CycloneDX)
+        run: |
+          cosign attest --yes \
+            --predicate sbom-cyclonedx.json \
+            --type cyclonedx \
+            ${{ steps.ko.outputs.image }}
+
+  provenance:
+    needs: build-and-sign
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    # SLSA L3 generator — see https://github.com/slsa-framework/slsa-github-generator
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
+    with:
+      image: ${{ needs.build-and-sign.outputs.image }}
+      digest: ${{ needs.build-and-sign.outputs.digest }}
+      registry-username: ${{ github.actor }}
+      compile-generator: true
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}

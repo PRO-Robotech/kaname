@@ -1,0 +1,71 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// BuiltinCondition — well-known condition catalog.
+//
+// Referenced by `AccessBinding.condition_ref.builtin_condition` (oneof) so the
+// binding gains a Conditions overlay WITHOUT creating a per-folder
+// `Condition` row. The 7 enum values parallel `AccessBindingCondition.Kind`
+// — they encode the same predicates but at the AccessBinding
+// surface use a single int32 instead of a separate row.
+//
+// The frozen semantics (verbatim):
+//
+//   mfa_fresh           : acr_value == "3" && "webauthn" in amr_claims &&
+//                         current_time - mfa_at < 15m
+//   non_expired         : current_time < valid_until
+//   source_ip_in_range  : client_ip in allowed_cidrs
+//   jit_window          : current_time - activated_at < ttl_seconds
+//   business_hours      : hour_of_day(current_time, tz) in [start_h, end_h)
+//   device_compliant    : device_attestation in allowed_attestations
+//
+// break_glass_window (enum value 4) removed from
+// runtime; the enum number is preserved as a deprecated placeholder so
+// proto3 wire compatibility holds.
+//
+// All seven are compiled into the OpenFGA Authorization Model v2
+// at helm-install time. Future additions are reserved for PIM
+// extensions — DO NOT reuse numbers; append only.
+enum BuiltinCondition {
+  // Reserved zero — never written; an AccessBinding without conditions
+  // uses neither `condition_id` nor `builtin_condition` (oneof unset).
+  BUILTIN_CONDITION_UNSPECIFIED       = 0;
+
+  // Step-up MFA freshness gate. Allows when authentication is acr=3 (passkey
+  // / FIDO2) and `webauthn` is among the AMR claims and the MFA ceremony
+  // happened within the last 15 minutes.
+  BUILTIN_CONDITION_MFA_FRESH         = 1;
+
+  // TTL gate. Allows when the binding has no `expires_at` set OR
+  // `current_time < expires_at`.
+  BUILTIN_CONDITION_NON_EXPIRED       = 2;
+
+  // Network gate. Allows when the request's source IP belongs to one of the
+  // configured CIDRs (`allowed_cidrs` parameter — both IPv4 and IPv6
+  // literals are accepted).
+  BUILTIN_CONDITION_SOURCE_IP_IN_RANGE = 3;
+
+  // DEPRECATED — was break-glass time-window.
+  // Number + name preserved so existing serialized rows still parse;
+  // service-layer now rejects bindings carrying this value.
+  BUILTIN_CONDITION_BREAK_GLASS_WINDOW = 4 [deprecated = true];
+
+  // JIT activation window. Allows for `ttl_seconds` after self-elevation
+  // (PIM activates it).
+  BUILTIN_CONDITION_JIT_WINDOW         = 5;
+
+  // Org-tz business-hours gate. Allows M–F `[start_h, end_h)` in the
+  // organisation's configured timezone.
+  BUILTIN_CONDITION_BUSINESS_HOURS     = 6;
+
+  // Device attestation gate. Allows when the request's WebAuthn
+  // `device_attestation` claim is among the operator's approved
+  // AAGUID list.
+  BUILTIN_CONDITION_DEVICE_COMPLIANT   = 7;
+}

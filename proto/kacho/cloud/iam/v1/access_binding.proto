@@ -1,0 +1,269 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kacho/cloud/iam/v1/builtin_condition.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1;iamv1";
+
+// An AccessBinding resource. Связывает (subject_type, subject_id) с (role_id) на
+// (resource_type, resource_id).
+//
+// NB: это канонический AccessBinding из kacho.cloud.iam.v1 — единственный
+// источник истины для grant-привязок домена IAM.
+//
+// Runtime-Check грантов выполняется через OpenFGA ReBAC
+// (InternalIAMService.Check); tuple-sync — через fga_outbox drainer.
+//
+// Ресурс несет lifecycle (`status`), Conditions overlay
+// (`condition_id`), TTL (`expires_at`) и audit-метаданные
+// (`granted_by_user_id` / `revoked_at` / `revoked_by_user_id`). State machine
+// (PENDING → ACTIVE → REVOKED, REVOKED terminal); transitions
+// only via conditional CAS UPDATE.
+//
+// Constraint (DB-level): UNIQUE (subject_type, subject_id, role_id, resource_type,
+// resource_id) — идемпотентный INSERT (дубль возвращает existing).
+//
+// Resource id prefix: `acb-`.
+message AccessBinding {
+  // Lifecycle status. PENDING is reserved for a JIT approval workflow;
+  // ACTIVE is the steady state; REVOKED is terminal.
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    PENDING            = 1;
+    ACTIVE             = 2;
+    REVOKED            = 3;
+  }
+
+  // ID of the access binding.
+  string id = 1;
+
+  // Тип subject'а: "user" | "service_account" | "group".
+  string subject_type = 2;
+
+  // ID subject'а (User id / ServiceAccount id / Group id).
+  string subject_id = 3;
+
+  // ID of the Role assigned to the subject.
+  string role_id = 4;
+
+  // Тип resource'а, на который binding применен ("account" | "project" | т.п.).
+  // Произвольная строка, кодирующая kind ресурса; OpenFGA tuple-store
+  // определяет допустимые значения.
+  //
+  // DEPRECATED-in-favour-of `scope_ref`. The canonical
+  // scope dimension is now the nested `ScopeRef scope_ref = 17` ({tier, id}); this
+  // flat field is the deprecated, derived-equivalent legacy projection. The server
+  // accepts either form on input and fills BOTH on read (two-way projection).
+  // Not annotated `[deprecated=true]` (field is still populated on every response
+  // for pre-existing clients); physical removal is a future major bump.
+  string resource_type = 5;
+
+  // ID resource'а.
+  //
+  // DEPRECATED-in-favour-of `scope_ref.id`. See `resource_type` above.
+  string resource_id = 6;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 7;
+
+  // Lifecycle status. Backfill DEFAULT 'ACTIVE' for legacy rows.
+  Status status = 8;
+
+  // Optional FK to AccessBindingCondition (1:1) for ABAC overlay. Empty when
+  // no conditions apply.
+  //
+  // Logical-oneof with `builtin_condition` (field 14): at most one
+  // of the two MAY be set; setting both is InvalidArgument at the service
+  // layer (the wire schema cannot express this as a proto3 oneof without
+  // breaking existing field 9 callers).
+  string condition_id = 9;
+
+  // Optional hard-expiry timestamp. Unset = no TTL. When set, OPA
+  // gates evaluation by `now() < expires_at`.
+  google.protobuf.Timestamp expires_at = 10;
+
+  // ID of the User who created this binding (audit). Required at INSERT time
+  // for new bindings; NULL for legacy rows.
+  string granted_by_user_id = 11;
+
+  // Timestamp when the binding transitioned to REVOKED. Unset while not yet
+  // revoked.
+  google.protobuf.Timestamp revoked_at = 12;
+
+  // ID of the User who revoked the binding (audit). Unset until revoked.
+  string revoked_by_user_id = 13;
+
+  // Optional reference to a `BuiltinCondition` catalog entry. Logical-oneof
+  // with `condition_id` (field 9) — at most one MAY
+  // be set; setting both is InvalidArgument at the service layer.
+  // `BUILTIN_CONDITION_UNSPECIFIED` means "no built-in condition is bound"
+  // (the binding may still carry a `condition_id` instead, or be
+  // unconditional).
+  BuiltinCondition builtin_condition = 14;
+
+  // Scope tier of the binding — the level of the cluster ▶ account ▶ project
+  // hierarchy at which the binding anchors. Wildcard-resourceName permissions
+  // in the role fan out under this anchor; concrete-resourceName permissions
+  // emit direct per-object FGA tuples and use the scope as a sanity guard.
+  //
+  // Validation (service-layer + DB CHECK):
+  //   CLUSTER  ⇒ resource_type='cluster',  resource_id='cluster_kacho_root'
+  //   ACCOUNT  ⇒ resource_type='account',  resource_id starts with 'acc'
+  //   PROJECT  ⇒ resource_type='project',  resource_id starts with 'prj'
+  //
+  // Backfill default for legacy rows comes from migration 0025 (rbac-v2
+  // grammar + scope). SCOPE_UNSPECIFIED is rejected on new writes once
+  // backfill is in place.
+  enum Scope {
+    SCOPE_UNSPECIFIED = 0;
+    CLUSTER           = 1;
+    ACCOUNT           = 2;
+    PROJECT           = 3;
+  }
+  // DEPRECATED-in-favour-of `scope_ref.tier`. This
+  // enum is the deprecated derived-equivalent of `ScopeRef.tier`; the server
+  // fills both on read. NOT `[deprecated=true]` — still populated for pre-existing
+  // clients; removal is a future major bump.
+  Scope scope = 15;
+
+  // TOMBSTONE. The legacy `target`/`selector` object-selection machinery
+  // (`AccessTarget` oneof `all_in_scope`/`resources`/`selector`, tag 16,
+  // and its canonical alias `AccessTargetRef target_ref`, tag 18) is REMOVED:
+  // object-selection now lives entirely in `role.rules` (the single source of
+  // truth — ARM_ANCHOR / ARM_NAMES / ARM_LABELS). Tags 16/18 and names
+  // `target`/`target_ref`/`selector` are RESERVED tombstones — NOT reused
+  // (append-only / buf-breaking discipline). Removal is an INTENTIONAL
+  // breaking change, valid on pre-prod with no live data / external clients.
+  reserved 16, 18;
+  reserved "target", "target_ref", "selector";
+
+  // Canonical scope dimension. The {tier, id} pair
+  // that groups "hierarchy level + anchor id" into one concept, replacing the
+  // triple-redundant `resource_type`/`resource_id`/enum `scope`. On read
+  // the server fills this AND the legacy fields, derived-consistently from the
+  // single DB row. On Create, either `scope_ref` or the legacy
+  // `resource_type`/`resource_id` may be set; if both are set they MUST be
+  // derived-equivalent, otherwise INVALID_ARGUMENT.
+  ScopeRef scope_ref = 17;
+
+  // Multi-subject set. A binding may
+  // grant the same role+scope to 1..32 subjects at once. Each subject yields an
+  // INDEPENDENT FGA tuple-set and an independent emitted-tuple ledger lineage,
+  // so per-subject revoke/audit never touches another subject's tuples (no
+  // double-grant anomaly when, e.g., a user and a group containing that user
+  // are both listed).
+  //
+  // Two-way read-projection with the legacy single `subject_type`/`subject_id`,
+  // active during the back-compat window:
+  //   - On Create the canonical input is `subjects[]` (preferred); when only the
+  //     legacy single pair is set the server projects it to a one-element
+  //     `subjects[]`. If BOTH `subjects[]` AND the legacy single pair are set
+  //     and the single is NOT subjects[0], that is INVALID_ARGUMENT.
+  //   - On read the server fills BOTH: `subjects[]` (full set) AND the legacy
+  //     `subject_type`/`subject_id` (= the FIRST subject) so pre-existing clients
+  //     do not break. The projection is output-only, not the source of truth.
+  // A future cleanup drops the legacy single fields and the projection.
+  repeated Subject subjects = 19;
+
+  // Specifies if the binding is protected from deletion (modeled after
+  // `vpc.address.deletion_protection`).
+  // Default false. The owner auto-binding created on `Account.Create` sets this
+  // to `true`, so the account creator cannot accidentally delete
+  // their own owner grant. `DeleteAccessBinding` on a binding with
+  // `deletion_protection=true` is rejected sync with FAILED_PRECONDITION
+  // ("access binding <id> has deletion_protection enabled; clear it via Update
+  // before Delete"), plus an atomic CAS-backstop `DELETE … WHERE
+  // deletion_protection=false` against TOCTOU. To delete, clear the
+  // flag first via `Update(update_mask=["deletion_protection"])`, then Delete.
+  // Settable on input and populated on every read.
+  bool deletion_protection = 20;
+
+  // Tenant-facing метки самого ресурса AccessBinding. Единая модель видимости
+  // IAM-ресурсов: AccessBinding — label-selectable, как account/project;
+  // ARM_LABELS-грант на iam.accessBinding материализует v_list по совпадению
+  // `labels @> matchLabels` (iam-direct same-DB), а List фильтрует через
+  // `viewer ∪ v_list`. Mutable через Update (`labels` в update_mask).
+  map<string, string> labels = 21;
+}
+
+// Subject is one grantee of an AccessBinding. `type` is the closed
+// `SubjectType` (USER / SERVICE_ACCOUNT /
+// GROUP); `id` is the subject id whose prefix matches the type (`usr…` /
+// `sva…` / `grp…`). A GROUP subject grants the role to every member (userset),
+// which `ExpandAccess` resolves to concrete principals and which, for
+// admin/editor-tier roles, requires `requireGrantAuthority` on the scope
+// (group-amplification guard).
+message Subject {
+  // Type of the subject (USER / SERVICE_ACCOUNT / GROUP).
+  SubjectType type = 1;
+
+  // Subject id (`usr…` | `sva…` | `grp…`), prefix-consistent with `type`.
+  string id = 2;
+}
+
+// SubjectType is the closed set of AccessBinding grantee kinds.
+// Value names are enum-prefixed (SUBJECT_TYPE_*) because proto3 enum values
+// share the enclosing C++ scope (package level here) — bare USER/
+// SERVICE_ACCOUNT collide with ClusterGrantSubjectType and GROUP with
+// Derivation.
+enum SubjectType {
+  SUBJECT_TYPE_UNSPECIFIED       = 0;
+  SUBJECT_TYPE_USER              = 1;
+  SUBJECT_TYPE_SERVICE_ACCOUNT   = 2;
+  SUBJECT_TYPE_GROUP             = 3;
+}
+
+// ScopeRef is the canonical, nested scope dimension of an AccessBinding.
+// It groups the hierarchy `tier` and its anchor
+// `id` into one concept, replacing the historically triple-redundant
+// `resource_type`/`resource_id`/enum `scope`. `tier` reuses the existing closed
+// `AccessBinding.Scope` enum (CLUSTER/ACCOUNT/PROJECT); `id` is the anchor id
+// (`cluster_kacho_root` | `acc…` | `prj…`). The legacy projection is
+// derived-equivalent: tier=PROJECT ⟺ resource_type='project' ∧ resource_id
+// starts 'prj', and so on — re-using the same predicate the server already
+// enforces.
+message ScopeRef {
+  // Hierarchy tier of the scope anchor (reuses the AccessBinding.Scope enum).
+  AccessBinding.Scope tier = 1;
+
+  // Anchor id (`cluster_kacho_root` | `acc…` | `prj…`). Derived-equivalent of
+  // the legacy `resource_id`.
+  string id = 2;
+}
+
+message CreateAccessBindingMetadata {
+  // ID of the AccessBinding that is being created.
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized for account-scoped operations
+  // listing — AccountService.ListAllOperations). Non-first field so the
+  // corelib resource_id extractor (first `_id`-suffix match) still picks
+  // `access_binding_id`. Read by exact field name `account_id` by corelib.
+  // Populated ONLY for account-scoped bindings (resource_type=="account");
+  // project/cluster/cross-service bindings leave it empty
+  // (SQL NULL — excluded from the account-scoped list).
+  string account_id = 2;
+}
+
+message DeleteAccessBindingMetadata {
+  // ID of the AccessBinding that is being deleted.
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, populated only for
+  // account-scoped bindings — see CreateAccessBindingMetadata).
+  string account_id = 2;
+}
+
+message UpdateAccessBindingMetadata {
+  // ID of the AccessBinding that is being updated.
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, populated only for
+  // account-scoped bindings — see CreateAccessBindingMetadata).
+  string account_id = 2;
+}
