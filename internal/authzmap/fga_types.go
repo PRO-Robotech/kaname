@@ -158,6 +158,7 @@ var verbBearingTypes = map[string]bool{
 	"vpc_gateway":              true,
 	"vpc_network_interface":    true,
 	"vpc_address_pool":         true,
+	"vpc_anycast_address_pool": true,
 	"lb_network_load_balancer": true,
 	"lb_target_group":          true,
 	"lb_listener":              true,
@@ -223,14 +224,15 @@ var objectTypes = map[string]string{
 	"compute.snapshot": "compute_snapshot",
 
 	// vpc
-	"vpc.network":          "vpc_network",
-	"vpc.subnet":           "vpc_subnet",
-	"vpc.address":          "vpc_address",
-	"vpc.securityGroup":    "vpc_security_group",
-	"vpc.routeTable":       "vpc_route_table",
-	"vpc.gateway":          "vpc_gateway",
-	"vpc.networkInterface": "vpc_network_interface",
-	"vpc.addressPool":      "vpc_address_pool",
+	"vpc.network":            "vpc_network",
+	"vpc.subnet":             "vpc_subnet",
+	"vpc.address":            "vpc_address",
+	"vpc.securityGroup":      "vpc_security_group",
+	"vpc.routeTable":         "vpc_route_table",
+	"vpc.gateway":            "vpc_gateway",
+	"vpc.networkInterface":   "vpc_network_interface",
+	"vpc.addressPool":        "vpc_address_pool",
+	"vpc.anycastAddressPool": "vpc_anycast_address_pool",
 
 	// load balancer (kacho-nlb)
 	"loadbalancer.networkLoadBalancers": "lb_network_load_balancer",
