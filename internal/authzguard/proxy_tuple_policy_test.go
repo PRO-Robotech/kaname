@@ -40,7 +40,14 @@ func TestValidateProxyTuple(t *testing.T) {
 		// Легитимные owner-hierarchy tuple — проходят.
 		{"vpc registers network under project", "vpc", "project:prj1", "project", "vpc_network:net1", codes.OK},
 		{"compute registers instance under project", "compute", "project:prj1", "project", "compute_instance:inst1", codes.OK},
-		{"nlb registers listener under project", "nlb", "project:prj1", "project", "nlb_listener:lsn1", codes.OK},
+		// kacho-nlb владеет доменом loadbalancer, чьи FGA-object-типы префиксуются
+		// `lb_` (lb_network_load_balancer / lb_listener / lb_target_group), НЕ `nlb_`.
+		// callerDomain из SAN = "nlb", но object-домен = "lb".
+		{"nlb registers listener under project", "nlb", "project:prj1", "project", "lb_listener:lsn1", codes.OK},
+		{"nlb registers load balancer under project", "nlb", "project:prj1", "project", "lb_network_load_balancer:nlb1", codes.OK},
+		{"nlb creator owner on load balancer", "nlb", "user:usr1", "owner", "lb_network_load_balancer:nlb1", codes.OK},
+		// nlb не вправе писать в чужой домен (vpc_*), даже с hierarchy-relation.
+		{"nlb writes vpc object", "nlb", "user:usr1", "owner", "vpc_network:net1", codes.PermissionDenied},
 		{"vpc creator owner tuple", "vpc", "user:usr1", "owner", "vpc_network:net1", codes.OK},
 		// Empty inputs — InvalidArgument (грамматика проверяется отдельно, но guard fail-closed).
 		{"empty relation", "vpc", "project:prj1", "", "vpc_network:net1", codes.PermissionDenied},
