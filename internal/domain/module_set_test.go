@@ -14,12 +14,13 @@ import (
 )
 
 // TestIsKnownModule_ClosedSet — the closed platform module-set is EXACTLY
-// {iam, vpc, compute, loadbalancer}. geo is NOT a module (Geography moved
-// to its own service, not in authzmap.objectTypes). `nlb` is NOT the token — the
-// module is named `loadbalancer`. The wildcard `*` is NOT a "known module" (it is
-// a system-only marker handled separately by Rule.Validate, not by IsKnownModule).
+// {iam, vpc, compute, loadbalancer, registry}. geo is NOT a module (Geography
+// moved to its own service, not in authzmap.objectTypes). `nlb` is NOT the token —
+// the load-balancer module is named `loadbalancer`. The wildcard `*` is NOT a
+// "known module" (it is a system-only marker handled separately by Rule.Validate,
+// not by IsKnownModule).
 func TestIsKnownModule_ClosedSet(t *testing.T) {
-	known := []string{"iam", "vpc", "compute", "loadbalancer"}
+	known := []string{"iam", "vpc", "compute", "loadbalancer", "registry"}
 	for _, m := range known {
 		if !domain.IsKnownModule(m) {
 			t.Errorf("IsKnownModule(%q) = false, want true (member of closed set)", m)

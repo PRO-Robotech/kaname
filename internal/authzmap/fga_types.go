@@ -162,6 +162,8 @@ var verbBearingTypes = map[string]bool{
 	"lb_network_load_balancer": true,
 	"lb_target_group":          true,
 	"lb_listener":              true,
+	"registry_registry":        true,
+	"registry_repository":      true,
 	"iam_user":                 true,
 	"iam_service_account":      true,
 	"iam_group":                true,
@@ -238,6 +240,12 @@ var objectTypes = map[string]string{
 	"loadbalancer.networkLoadBalancers": "lb_network_load_balancer",
 	"loadbalancer.targetGroups":         "lb_target_group",
 	"loadbalancer.listeners":            "lb_listener",
+
+	// registry (kacho-registry) — object-prefix `registry_` == service name, so
+	// no moduleObjectDomain mapping is required. `registries` is the namespace
+	// resource; `repositories` is the per-repo authz object (docker pull/push).
+	"registry.registries":   "registry_registry",
+	"registry.repositories": "registry_repository",
 
 	// iam — note the hierarchy types `account` and `project` are bare
 	// (no `iam_` prefix) because they're shared hierarchy ancestors in

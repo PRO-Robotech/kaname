@@ -46,6 +46,12 @@ var labelSelectableTypes = map[string]struct{}{
 	"loadbalancer.targetGroups":         {},
 	"loadbalancer.listeners":            {},
 
+	// registry (kacho-registry) — the namespace `registries` carries own-table
+	// labels driving authz label-scope (mirror-fed via registry→iam
+	// RegisterResource). Per-repo `repositories` is name-selectable only (repos
+	// appear via docker push, without labels) → intentionally ABSENT here.
+	"registry.registries": {},
+
 	// iam-direct — labels live on the native table + an iam-hierarchy
 	// containment. Unified model: ALL iam-native types are label-selectable,
 	// matched SAME-DB from their own table (no self-mirror, acyclic).
