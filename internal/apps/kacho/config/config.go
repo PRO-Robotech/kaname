@@ -53,6 +53,14 @@ type APIServerConfig struct {
 	// tenant gRPC surface — exposing the registry there would leak internal
 	// cardinality (security.md). Empty disables the metrics listener.
 	MetricsEndpoint string `mapstructure:"metrics-endpoint"`
+	// RegistryToken — the Docker Registry v2 `/iam/token` auth-server HTTP
+	// listener. A SEPARATE, EXTERNAL-reachable plaintext port (default
+	// `tcp://0.0.0.0:9096`; TLS terminated at the ingress, like the hooks /
+	// metrics listeners) — docker clients hit `/iam/token` through the edge to
+	// exchange an SA-key for a short-lived identity-JWT. Distinct from the
+	// cluster-internal hooks (:9092) and metrics (:9095) listeners. Empty
+	// endpoint disables it.
+	RegistryToken RegistryTokenConfig `mapstructure:"registry-token"`
 }
 
 // RepositoryConfig — repository section. Postgres-only (the repository type
