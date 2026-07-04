@@ -41,7 +41,7 @@ service UserTokenService {
       response: "IssueUserTokenResponse"
     };
     option (kacho.iam.authz.v1.permission)        = "iam.issue_user_tokens.issue";
-    option (kacho.iam.authz.v1.required_relation) = "v_update";
+    option (kacho.iam.authz.v1.required_relation) = "token_admin";
     option (kacho.iam.authz.v1.scope_extractor)   = {
       object_type:        "iam_user"
       from_request_field: "user_id"
@@ -54,7 +54,7 @@ service UserTokenService {
       get: "/iam/v1/users/{user_id}/tokens"
     };
     option (kacho.iam.authz.v1.permission)        = "iam.user_tokens.list";
-    option (kacho.iam.authz.v1.required_relation) = "v_list";
+    option (kacho.iam.authz.v1.required_relation) = "token_admin";
     option (kacho.iam.authz.v1.scope_extractor)   = {
       object_type:        "iam_user"
       from_request_field: "user_id"
@@ -71,7 +71,7 @@ service UserTokenService {
       response: "RevokeUserTokenResponse"
     };
     option (kacho.iam.authz.v1.permission)        = "iam.revoke_user_tokens.revoke";
-    option (kacho.iam.authz.v1.required_relation) = "v_update";
+    option (kacho.iam.authz.v1.required_relation) = "token_admin";
     option (kacho.iam.authz.v1.scope_extractor)   = {
       object_type:        "iam_user"
       from_request_field: "user_id"
