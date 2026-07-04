@@ -417,7 +417,10 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		Scope:                   u.DefaultScope,
 		GrantTypes:              []string{"client_credentials"},
 		TokenEndpointAuthMethod: "private_key_jwt",
-		JWKS:                    &clients.JWKS{Keys: []clients.JWK{key.JWK}},
+		// Hydra обязан проверять client_assertion тем же alg, что несёт ключ (ES256);
+		// без этого Hydra дефолтит на RS256 → invalid_client на ES256-assertion.
+		TokenEndpointAuthSigningAlg: key.JWK.Alg,
+		JWKS:                        &clients.JWKS{Keys: []clients.JWK{key.JWK}},
 	}
 	hydraReq.Audience = u.resolveAudience(in)
 	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
