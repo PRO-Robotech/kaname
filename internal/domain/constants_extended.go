@@ -17,6 +17,7 @@ const (
 	PrefixClusterAdminGrant = "cag"
 	PrefixCondition         = "cond"
 	PrefixSAOAuthClient     = "soc"
+	PrefixUserOAuthClient   = "uoc"
 	PrefixAuditEvent        = "evt"
 
 	// ClusterSingletonID — единственный валидный id для кластера.

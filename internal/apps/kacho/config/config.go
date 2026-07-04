@@ -108,6 +108,9 @@ type PostgresConfig struct {
 //	                        одноразового private_key_pem в её response. Даёт
 //	                        поллящему клиенту окно, чтобы забрать ключ до вычистки.
 //	                        Default 120s; override KACHO_IAM_SAKEY_REDACT_GRACE.
+//	UserTokenRedactGrace  — то же для UserTokenService.Issue (персональные токены
+//	                        пользователя). Default 120s; override
+//	                        KACHO_IAM_USERTOKEN_REDACT_GRACE.
 type AuthNConfig struct {
 	Mode                     Mode          `mapstructure:"mode"`
 	Domain                   string        `mapstructure:"domain"`
@@ -122,6 +125,7 @@ type AuthNConfig struct {
 	SessionRevocationsTTLSec int           `mapstructure:"session-revocations-cache-ttl-seconds"`
 	HooksHTTPEndpoint        string        `mapstructure:"hooks-http-endpoint"`
 	SAKeyRedactGrace         time.Duration `mapstructure:"sakey-redact-grace"`
+	UserTokenRedactGrace     time.Duration `mapstructure:"usertoken-redact-grace"`
 }
 
 // schemaOptionsParam — URL-encoded libpq parameter `options=-c search_path=…`.

@@ -32,6 +32,7 @@ import (
 	serviceaccountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
 	sessionrevapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/session_revocations"
 	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
+	usertokensapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user_tokens"
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
@@ -71,6 +72,9 @@ type services struct {
 
 	// SAKey handler — public.
 	saKeysHandler *sakeysapp.Handler
+
+	// UserToken handler — public (персональные access-токены пользователя).
+	userTokensHandler *usertokensapp.Handler
 
 	// internalClusterHandler — InternalClusterService: cluster admin
 	// RBAC management. Internal-only (запрет #6), registered on port 9091.
@@ -369,6 +373,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
+	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
+	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
+
 	// ── InternalClusterService ────────────────────────────────────────────
 	clusterReader := kachopg.NewClusterReader(pool)
 	clusterGrantWriter := kachopg.NewClusterAdminGrantWriter(pool)
@@ -441,6 +448,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		// SAKey (Class A static keys via Hydra).
 		saKeysHandler: saKeysH,
 
+		// UserToken (персональные access-токены пользователя via Hydra).
+		userTokensHandler: userTokensH,
+
 		// Expose relationStore so runServe can reuse the same instance for the
 		// fga_outbox drainer wiring.
 		relationStore: relationStore,
@@ -484,6 +494,39 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	logger.Info("sa_keys wired", "hydra_admin", hydraAdminURL)
 
 	return sakeysapp.NewHandler(issueUC, revokeUC, listKeysUC)
+}
+
+// buildUserTokensHandler wires the UserTokenService handler — персональные
+// access-токены пользователя via Hydra OAuth2 client_credentials + private_key_jwt.
+// Зеркалит buildSAKeysHandler, подставляя User вместо ServiceAccount.
+func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config, logger *slog.Logger) *usertokensapp.Handler {
+	userClientRepo := kachopg.NewUserOAuthClientRepo(pool)
+
+	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
+	hydraAdmin := clients.NewHydraAdminClient(hydraAdminURL, os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"))
+
+	// Durable audit_outbox emitter — эмитит iam.user_token.{issued,revoked} строки
+	// внутри worker-tx, атомарно с token-mapping-мутацией (запрет #10). Payload без
+	// key material.
+	auditEmitter := kachopg.NewAuditOutboxEmitter(pool)
+
+	issueUC := usertokensapp.NewIssueUserTokenUseCase(userClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	// Post-Issue секрет-редактор: после MarkDone с plaintext private_key_pem этот
+	// pg-adapter затирает поле в proto-marshalled response_data (BYTEA) одним UPDATE.
+	issueUC.WithResponseRedactor(kachopg.NewOpsResponseRedactor(pool, "kacho_iam"))
+	issueUC.WithAuditEmitter(auditEmitter)
+	// Grace-окно перед затиранием одноразового private_key_pem: поллящий клиент
+	// (CLI/UI) должен успеть прочитать ключ из op.response до вычистки.
+	issueUC.WithRedactGrace(cfg.AuthN.UserTokenRedactGrace)
+	// Surface redaction-сбоев detached redaction-goroutine.
+	issueUC.WithLogger(logger)
+	revokeUC := usertokensapp.NewRevokeUserTokenUseCase(userClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	revokeUC.WithAuditEmitter(auditEmitter)
+	listUC := usertokensapp.NewListUserTokensUseCase(userClientRepo)
+
+	logger.Info("user_tokens wired", "hydra_admin", hydraAdminURL)
+
+	return usertokensapp.NewHandler(issueUC, revokeUC, listUC)
 }
 
 // authzServiceBundle — handlers produced by buildAuthZServices.

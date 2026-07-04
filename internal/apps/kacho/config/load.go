@@ -105,6 +105,9 @@ func applyLegacyEnv(v *viper.Viper) {
 		// the short KACHO_IAM_SAKEY_REDACT_GRACE rather than the namespaced
 		// KACHO_IAM_AUTHN__SAKEY_REDACT_GRACE. Value is a Go duration ("120s").
 		{"KACHO_IAM_SAKEY_REDACT_GRACE", "authn.sakey-redact-grace"},
+		// Flat alias for the User-token redact grace window — mirror of the SA-key
+		// alias above. Value is a Go duration ("120s").
+		{"KACHO_IAM_USERTOKEN_REDACT_GRACE", "authn.usertoken-redact-grace"},
 		// OpenFGA legacy aliases — extend as the rollout adds them.
 	}
 	for _, m := range simple {

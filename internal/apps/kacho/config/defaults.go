@@ -65,6 +65,10 @@ func RegisterDefaults(v *viper.Viper) {
 	// иначе клиент проигрывает гонку и получает "<redacted>". Override —
 	// KACHO_IAM_SAKEY_REDACT_GRACE (или KACHO_IAM_AUTHN__SAKEY_REDACT_GRACE).
 	v.SetDefault("authn.sakey-redact-grace", 120*time.Second)
+	// User-токен: одноразовый private_key_pem отдаётся только в op.response; клиент
+	// поллит Operation.Get, чтобы его забрать. Grace-окно выдерживает это окно.
+	// Override — KACHO_IAM_USERTOKEN_REDACT_GRACE.
+	v.SetDefault("authn.usertoken-redact-grace", 120*time.Second)
 
 	// OpenFGA, the gateway-internal drainer, Enterprise SSO, Governance,
 	// Federation/CAEP/ComplianceReport/Notify and the dead healthcheck

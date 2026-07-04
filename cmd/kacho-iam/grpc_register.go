@@ -62,6 +62,11 @@ func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations
 	if svcs != nil && svcs.saKeysHandler != nil {
 		iamv1.RegisterSAKeyServiceServer(srv, svcs.saKeysHandler)
 	}
+	// UserToken (персональные access-токены пользователя via Hydra). Public под
+	// /iam/v1/users/{id}/tokens — зеркало SAKeyService на iam_user.
+	if svcs != nil && svcs.userTokensHandler != nil {
+		iamv1.RegisterUserTokenServiceServer(srv, svcs.userTokensHandler)
+	}
 }
 
 // registerInternalServices — kacho-only/admin RPC на internal listener.
