@@ -75,11 +75,17 @@ func (c AuthNConfig) ResolveDomain() string {
 	return d
 }
 
-// ResolveHydraIssuer returns the Hydra issuer. Default `https://hydra.<Domain>`.
-// If HydraIssuer is set explicitly we use it (supports custom deployments).
+// ResolveHydraIssuer returns the Hydra issuer. Precedence: explicit HydraIssuer
+// field → KACHO_IAM_HYDRA_ISSUER env → derived `https://hydra.<Domain>`. The env
+// fallback lets a deployment whose Hydra advertises a non-derivable issuer (e.g. a
+// dev-stand behind a path-prefixed public URL) align the shim's client_assertion
+// audience with Hydra's real issuer — otherwise the exchange fails invalid_client.
 func (c AuthNConfig) ResolveHydraIssuer() string {
 	if iss := strings.TrimSpace(c.HydraIssuer); iss != "" {
 		return iss
+	}
+	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_ISSUER")); v != "" {
+		return v
 	}
 	return "https://hydra." + c.ResolveDomain()
 }
