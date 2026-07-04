@@ -112,6 +112,10 @@ type IssueSAKeyUseCase struct {
 	// (redaction error / give-up / recovered panic), so a key that stays
 	// un-redacted in the operation response is detectable. nil → no logging.
 	logger *slog.Logger
+	// redactGrace — задержка между тем как Operation стал Done, и затиранием
+	// одноразового private_key_pem. Даёт поллящему клиенту (docker/CI/UI) окно,
+	// чтобы прочитать и сохранить ключ до его вычистки. 0 → без окна (тест/legacy).
+	redactGrace time.Duration
 
 	// HydraClientNamePrefix — used to compose the Hydra `client_name`
 	// (default "kacho-sak-<svaID>"). Configurable via env at wire-time.
@@ -147,6 +151,15 @@ func (u *IssueSAKeyUseCase) WithTrustGrantAdmin(t TrustGrantAdmin) *IssueSAKeyUs
 // surface redaction failures (the only place a key can stay un-redacted).
 func (u *IssueSAKeyUseCase) WithLogger(l *slog.Logger) *IssueSAKeyUseCase {
 	u.logger = l
+	return u
+}
+
+// WithRedactGrace задаёт grace-окно между Done-ом Operation и затиранием
+// одноразового private_key_pem. Composition-root передаёт значение из конфига
+// (KACHO_IAM_SAKEY_REDACT_GRACE, дефолт 120s); нулевое или отрицательное значение
+// трактуется как «без окна» (немедленное затирание — тест/legacy).
+func (u *IssueSAKeyUseCase) WithRedactGrace(d time.Duration) *IssueSAKeyUseCase {
+	u.redactGrace = d
 	return u
 }
 
@@ -245,18 +258,19 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 		//
 		// The redact runs in a separate goroutine because the MarkDone call
 		// happens INSIDE the same goroutine that runs `fn`, AFTER `fn`
-		// returns — so we cannot inline the redact here. A brief poll waits
-		// for done=true, then performs the single UPDATE. Concurrency safety:
-		// jsonb_set is single-statement atomic; idempotent — re-running with
-		// the same `<redacted>` value is a no-op.
+		// returns — so we cannot inline the redact here. The goroutine waits
+		// for done=true, holds the grace window (so the polling client can
+		// retrieve the one-shot key), then performs the single UPDATE.
+		// Concurrency safety: the UPDATE is single-statement atomic; idempotent
+		// — re-running with the same `<redacted>` value is a no-op.
 		if derr == nil && u.redactor != nil && len(in.TrustedSubjects) == 0 {
 			// G118 (gosec) is suppressed intentionally: the goroutine must outlive
 			// the request-scoped ctx because the gRPC client has already received
 			// the Operation envelope by the time MarkDone runs; binding it to ctx
 			// would race-cancel the redact UPDATE on request return. The goroutine
-			// builds its own bounded context (5s) inside scheduleSecretRedact,
-			// derived from the worker ctx via WithoutCancel so trace/request-id
-			// baggage survives the detach.
+			// builds its own bounded context (grace + margin) inside
+			// scheduleSecretRedact, derived from the worker ctx via WithoutCancel
+			// so trace/request-id baggage survives the detach.
 			//
 			// Federated rows (TrustedSubjects non-empty) carry no key
 			// material in the response — nothing to redact, skip the goroutine.
@@ -267,17 +281,19 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	return &op, nil
 }
 
-// scheduleSecretRedact polls until the operation is marked done
-// (typically <100ms — the worker calls MarkDone immediately after `fn`
-// returns), then issues a single jsonb_set UPDATE replacing
-// `response.private_key_pem` with `"<redacted>"`. The legacy
-// `response.client_secret` field is also redacted for private_key_jwt wire-compat,
-// even though new keys always leave it empty.
+// redactCtxMargin — запас поверх grace-окна для ctx-таймаута redact-goroutine:
+// сначала ~2s поллинга done, затем grace, затем сам UPDATE. Таймаут обязан
+// пережить grace-окно, иначе ctx отменится до затирания.
+const redactCtxMargin = 10 * time.Second
+
+// scheduleSecretRedact дожидается, пока операция станет Done (worker вызывает
+// MarkDone сразу после `fn`), выдерживает grace-окно, затем одним UPDATE заменяет
+// `response.private_key_pem` на `"<redacted>"`. Legacy-поле `response.client_secret`
+// затирается тем же образом для wire-compat, хотя новые ключи оставляют его пустым.
 //
-// Bounded: max 100 attempts at 20ms intervals (2s total). If the op never
-// completes (worker panic / DB-down) the redact silently gives up; the
-// operations row stays as the worker left it (typically without a response,
-// or with an error result that never contained the secret).
+// Grace-окно (redactGrace) даёт поллящему клиенту время прочитать и сохранить
+// одноразовый ключ ДО затирания — без него клиент гарантированно проигрывает гонку
+// и получает "<redacted>". По истечении окна секрет всё равно вычищается из LRO.
 func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID string) {
 	// recover-guard: эта goroutine детачена от запроса и переживает его, поэтому
 	// неперехваченная паника (в opsRepo.Get / RedactResponseField) убила бы весь
@@ -292,30 +308,47 @@ func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID
 	if u.redactor == nil {
 		return
 	}
+	grace := u.redactGrace
+	if grace < 0 {
+		grace = 0
+	}
 	// Detach from the caller's cancellation (the redact must outlive the
 	// request-scoped ctx — the gRPC client already holds the Operation envelope)
-	// but PRESERVE its trace/request-id/slog baggage via WithoutCancel.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), 5*time.Second)
+	// but PRESERVE its trace/request-id/slog baggage via WithoutCancel. Таймаут =
+	// grace + margin, чтобы ctx не отменился до затирания (grace может быть 120s).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), grace+redactCtxMargin)
 	defer cancel()
+
+	if !u.awaitOpDone(ctx, opID) {
+		return // причина уже залогирована внутри awaitOpDone
+	}
+
+	// Grace-окно перед затиранием. op.response access-controlled на владельца
+	// операции, поэтому такая экспозиция приемлема — это осознанный компромисс
+	// между окном poll-retrieval у клиента и временем жизни секрета в LRO.
+	if grace > 0 {
+		select {
+		case <-time.After(grace):
+		case <-ctx.Done():
+			if u.logger != nil {
+				u.logger.WarnContext(ctx, "sa-key secret redaction ctx expired during the grace window — key material may remain",
+					slog.String("operation_id", opID))
+			}
+			return
+		}
+	}
+
+	u.redactSecretFields(ctx, opID)
+}
+
+// awaitOpDone поллит операцию, пока она не станет Done. Bounded: 100 попыток по
+// 20ms (~2s). Возвращает false, если операция не завершилась в бюджете (worker-
+// panic / DB-down) или ctx истёк — тогда затирать нечего (ответа с секретом нет).
+func (u *IssueSAKeyUseCase) awaitOpDone(ctx context.Context, opID string) bool {
 	for attempt := 0; attempt < 100; attempt++ {
 		op, err := u.opsRepo.Get(ctx, opID)
 		if err == nil && op != nil && op.Done {
-			// MarkDone has completed. Redact the private key (and the legacy
-			// client_secret field for wire-compat). A failed redaction leaves
-			// plaintext key material in operations.response_data, re-fetchable via
-			// Operation.Get — log on Error so the stuck secret is detectable, never
-			// silently discard the failure.
-			if rerr := u.redactor.RedactResponseField(ctx, opID,
-				[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
-				u.logger.ErrorContext(ctx, "sa-key private_key_pem redaction failed — plaintext key may remain in the operation response",
-					slog.String("operation_id", opID), slog.Any("err", rerr))
-			}
-			if rerr := u.redactor.RedactResponseField(ctx, opID,
-				[]string{"client_secret"}, `"<redacted>"`); rerr != nil && u.logger != nil {
-				u.logger.ErrorContext(ctx, "sa-key client_secret redaction failed",
-					slog.String("operation_id", opID), slog.Any("err", rerr))
-			}
-			return
+			return true
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):
@@ -324,12 +357,31 @@ func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID
 				u.logger.WarnContext(ctx, "sa-key secret redaction gave up before the operation completed — key material may remain",
 					slog.String("operation_id", opID))
 			}
-			return
+			return false
 		}
 	}
 	if u.logger != nil {
 		u.logger.WarnContext(ctx, "sa-key secret redaction exhausted retries before the operation completed — key material may remain",
 			slog.String("operation_id", opID))
+	}
+	return false
+}
+
+// redactSecretFields затирает одноразовый private_key_pem (и legacy client_secret
+// для wire-compat) в proto-marshalled response операции одним UPDATE на строку;
+// idempotent — повтор с тем же `<redacted>` no-op. Провал затирания оставляет
+// plaintext ключ в operations.response_data, re-fetchable через Operation.Get —
+// логируем на Error, чтобы застрявший секрет был обнаружим, никогда не глушим.
+func (u *IssueSAKeyUseCase) redactSecretFields(ctx context.Context, opID string) {
+	if rerr := u.redactor.RedactResponseField(ctx, opID,
+		[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		u.logger.ErrorContext(ctx, "sa-key private_key_pem redaction failed — plaintext key may remain in the operation response",
+			slog.String("operation_id", opID), slog.Any("err", rerr))
+	}
+	if rerr := u.redactor.RedactResponseField(ctx, opID,
+		[]string{"client_secret"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		u.logger.ErrorContext(ctx, "sa-key client_secret redaction failed",
+			slog.String("operation_id", opID), slog.Any("err", rerr))
 	}
 }
 

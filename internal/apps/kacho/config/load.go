@@ -101,6 +101,10 @@ func applyLegacyEnv(v *viper.Viper) {
 		{"KACHO_IAM_GRPC_PORT", "_legacy.grpc-port"},
 		{"KACHO_IAM_INTERNAL_PORT", "_legacy.internal-port"},
 		{"KACHO_IAM_AUTH_MODE", "authn.mode"},
+		// Flat alias for the SA-key redact grace window — the deploy chart sets
+		// the short KACHO_IAM_SAKEY_REDACT_GRACE rather than the namespaced
+		// KACHO_IAM_AUTHN__SAKEY_REDACT_GRACE. Value is a Go duration ("120s").
+		{"KACHO_IAM_SAKEY_REDACT_GRACE", "authn.sakey-redact-grace"},
 		// OpenFGA legacy aliases — extend as the rollout adds them.
 	}
 	for _, m := range simple {

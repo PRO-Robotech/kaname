@@ -470,6 +470,10 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// single-statement UPDATE on the operations row. Idempotent.
 	issueUC.WithResponseRedactor(kachopg.NewOpsResponseRedactor(pool, "kacho_iam"))
 	issueUC.WithAuditEmitter(auditEmitter)
+	// Grace-окно перед затиранием одноразового private_key_pem: поллящий клиент
+	// (docker-login / CI / UI) должен успеть прочитать ключ из op.response до его
+	// вычистки. Без окна затирание выигрывало гонку и клиент получал "<redacted>".
+	issueUC.WithRedactGrace(cfg.AuthN.SAKeyRedactGrace)
 	// Surface redaction failures (error / give-up / recovered panic) of the
 	// detached redaction goroutine — the only place a key can stay un-redacted.
 	issueUC.WithLogger(logger)
