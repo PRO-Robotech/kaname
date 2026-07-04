@@ -4,14 +4,15 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Owner `*.*` per-object forward path EXTENDED to the registry namespace resource.
+-- Owner `*.*` per-object forward path EXTENDED to the registry namespace resources.
 --
--- WHY: registry.registries becomes label-selectable (own-table labels drive authz
--- label-scope), and under the unified visibility model label-selectable ⟺
--- materializable — domain.AllMaterializableTypes() now includes registry.registries.
--- The owner role's UNIFIED materializing selector (role_rule_selectors row) must
--- carry it too, otherwise a freshly-created Registry object would not fast-path-match
--- the account/project-owner binding (owner would not see their own registries).
+-- WHY: registry.registries carries own-table labels (label-selectable authz scope),
+-- and registry.repositories is the per-repo authz object materialized on docker push
+-- (materializable, NOT label-selectable). Both are in domain.AllMaterializableTypes().
+-- The owner role's UNIFIED materializing selector (role_rule_selectors row) must carry
+-- BOTH, otherwise a freshly-created Registry / freshly-pushed repository would not
+-- fast-path-match the account/project-owner binding (owner would not see their own
+-- registries, and the pushed images would be unreachable even for the owner).
 --
 -- WHAT: re-seed the owner role's role_rule_selectors row with the EXPANDED
 -- object_types list. Keyed by (role_id, rule_fp) — the rule_fp is UNCHANGED (it is
@@ -21,8 +22,8 @@
 -- of domain.OwnerRoleRules() through MaterializingSelectors():
 --   rule_fp      = unchanged sha256 (lockstep-guarded in rule_wildcard_scope_test.go)
 --   arm          = 'anchor'  (the `*.*` "selector all" shape)
---   object_types = domain.AllMaterializableTypes() (sorted closed set — now 22 types,
---                  the 21 prior + registry.registries)
+--   object_types = domain.AllMaterializableTypes() (sorted closed set — now 23 types,
+--                  the 21 prior + registry.registries + registry.repositories)
 --
 -- Idempotent: ON CONFLICT (role_id, rule_fp) DO UPDATE re-applies the same row, so a
 -- re-run (or the Go self-heal) is a no-op. Additive — no column drop, no edit to an
@@ -39,7 +40,7 @@ VALUES (
     'iam.accessBinding', 'iam.account', 'iam.group', 'iam.project',
     'iam.role', 'iam.serviceAccount', 'iam.user',
     'loadbalancer.listeners', 'loadbalancer.networkLoadBalancers', 'loadbalancer.targetGroups',
-    'registry.registries',
+    'registry.registries', 'registry.repositories',
     'vpc.address', 'vpc.gateway', 'vpc.network', 'vpc.networkInterface',
     'vpc.routeTable', 'vpc.securityGroup', 'vpc.subnet'
   ]::text[],

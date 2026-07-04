@@ -11,10 +11,12 @@ package domain
 //
 // Единая модель (owner direction — единая модель для всех iam-типов): КАЖДЫЙ
 // iam-native тип label-selectable наравне с account/project. Следствие:
-//   - labelSelectableTypes теперь содержит все 7 iam-native типов;
-//   - AllMaterializableTypes() == labelSelectableTypes (материализуемое
-//     множество = label-selectable множество — больше нет «строгого надмножества»).
-// iam content-типы по-прежнему materializable через ARM_ANCHOR/ARM_NAMES И теперь
+//   - labelSelectableTypes содержит все 7 iam-native типов;
+//   - AllMaterializableTypes() ⊇ labelSelectableTypes — материализуемое множество
+//     есть strict superset label-selectable, отличается ровно на
+//     registry.repositories (materializable, но НЕ label-selectable; проверяется в
+//     feed_registry_repositories_test.go). Для iam-типов множества совпадают.
+// iam content-типы по-прежнему materializable через ARM_ANCHOR/ARM_NAMES И
 // дополнительно через ARM_LABELS (own-table labels @> matchLabels, same-DB).
 
 import (
@@ -68,21 +70,5 @@ func TestAllMaterializableTypes_IncludesIamContent(t *testing.T) {
 	for _, want := range []string{"vpc.network", "compute.instance"} {
 		_, ok := seen[want]
 		assert.True(t, ok, "AllMaterializableTypes must keep consumer type %s", want)
-	}
-}
-
-// TestMaterializable_EqualsLabelSelectable — под единой моделью материализуемое
-// множество СОВПАДАЕТ с label-selectable множеством (каждый materializable тип
-// теперь и label-selectable; больше нет «строгого надмножества»).
-func TestMaterializable_EqualsLabelSelectable(t *testing.T) {
-	mat := map[string]struct{}{}
-	for _, ty := range AllMaterializableTypes() {
-		mat[ty] = struct{}{}
-	}
-	assert.Equal(t, len(labelSelectableTypes), len(mat),
-		"materializable set must equal label-selectable set under the unified model")
-	for ty := range labelSelectableTypes {
-		_, ok := mat[ty]
-		assert.True(t, ok, "label-selectable %s must be materializable", ty)
 	}
 }

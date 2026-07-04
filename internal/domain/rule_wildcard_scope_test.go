@@ -117,7 +117,7 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
-		"registry.registries",
+		"registry.registries", "registry.repositories",
 		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
 		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
 	}
