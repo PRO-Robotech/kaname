@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 )
 
 // fakeIssuer — scripted TokenIssuer.
@@ -66,7 +65,7 @@ func TestToken_ValidBasic_200DockerBody(t *testing.T) {
 	iss := &fakeIssuer{out: registrytokenuc.IssueOutput{Token: "the.jwt.token", ExpiresIn: 300, IssuedAt: 1700000000}}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/iam/token?service=registry.kacho.local&scope=repository:reg-A/app:pull", nil)
-	req.Header.Set("Authorization", basic("sva0000000000000aa", "sa-key-secret"))
+	req.Header.Set("Authorization", basic("cid-ci", "sa-key-private-pem"))
 	newTokenHandler(iss).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -82,7 +81,7 @@ func TestToken_ValidBasic_200DockerBody(t *testing.T) {
 	if body["expires_in"].(float64) != 300 {
 		t.Fatalf("expires_in = %v; want 300", body["expires_in"])
 	}
-	if iss.gotUser != "sva0000000000000aa" || iss.gotPass != "sa-key-secret" || iss.gotSvc != "registry.kacho.local" {
+	if iss.gotUser != "cid-ci" || iss.gotPass != "sa-key-private-pem" || iss.gotSvc != "registry.kacho.local" {
 		t.Fatalf("use-case input = %q/%q/%q", iss.gotUser, iss.gotPass, iss.gotSvc)
 	}
 }
@@ -92,7 +91,7 @@ func TestToken_ValidBasic_200DockerBody(t *testing.T) {
 func TestToken_InvalidCredentials_401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/iam/token?service=registry.kacho.local", nil)
-	req.Header.Set("Authorization", basic("sva0000000000000aa", "wrong"))
+	req.Header.Set("Authorization", basic("cid-ci", "wrong"))
 	newTokenHandler(&fakeIssuer{err: registrytokenuc.ErrUnauthenticated}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
@@ -106,6 +105,22 @@ func TestToken_InvalidCredentials_401(t *testing.T) {
 	}
 }
 
+// TestToken_IssuerUnavailable_503 — Hydra being unreachable (a hard mint-path
+// dependency) is fail-closed 503 with no token and no raw error leaked.
+func TestToken_IssuerUnavailable_503(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/iam/token?service=registry.kacho.local", nil)
+	req.Header.Set("Authorization", basic("cid-ci", "sa-key-private-pem"))
+	newTokenHandler(&fakeIssuer{err: registrytokenuc.ErrIssuerUnavailable}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d; want 503", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "token") {
+		t.Fatalf("503 body must not carry a token: %s", rec.Body.String())
+	}
+}
+
 // TestToken_NonBasicScheme_401 — a Bearer/garbage Authorization is not accepted as
 // Basic; fail-closed 401.
 func TestToken_NonBasicScheme_401(t *testing.T) {
@@ -115,33 +130,5 @@ func TestToken_NonBasicScheme_401(t *testing.T) {
 	newTokenHandler(&fakeIssuer{}).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d; want 401", rec.Code)
-	}
-}
-
-// fakeJWKS — scripted JWKSProvider.
-type fakeJWKS struct {
-	set registrytoken.JWKS
-	err error
-}
-
-func (f fakeJWKS) PublicJWKS(context.Context) (registrytoken.JWKS, error) { return f.set, f.err }
-
-// TestJWKS_ServesKeySet — GET returns the JWK Set as JSON so a verifier can build
-// keys.
-func TestJWKS_ServesKeySet(t *testing.T) {
-	set := registrytoken.JWKS{Keys: []registrytoken.JWK{{Kty: "RSA", N: "bg", E: "AQAB", Kid: "kacho-rs256-1", Alg: "RS256", Use: "sig"}}}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/iam/token/jwks", nil)
-	NewJWKSHandler(fakeJWKS{set: set}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200", rec.Code)
-	}
-	var got registrytoken.JWKS
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("body not JWKS json: %v", err)
-	}
-	if len(got.Keys) != 1 || got.Keys[0].Kid != "kacho-rs256-1" || got.Keys[0].Kty != "RSA" {
-		t.Fatalf("jwks = %+v", got)
 	}
 }

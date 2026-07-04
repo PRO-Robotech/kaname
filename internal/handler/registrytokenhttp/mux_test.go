@@ -9,29 +9,28 @@ import (
 	"testing"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 )
 
-// TestNewMux_RoutesTokenAndJWKS — the mux dispatches the canonical token + JWKS
-// paths to their handlers.
-func TestNewMux_RoutesTokenAndJWKS(t *testing.T) {
+// TestNewMux_RoutesToken — the mux dispatches the canonical token path to its
+// handler. There is no JWKS endpoint: the data-plane verifies against Hydra's
+// JWKS, not an IAM-served key set.
+func TestNewMux_RoutesToken(t *testing.T) {
 	iss := &fakeIssuer{out: registrytokenuc.IssueOutput{Token: "t", ExpiresIn: 60}}
-	jwks := fakeJWKS{set: registrytoken.JWKS{Keys: []registrytoken.JWK{{Kty: "RSA", Kid: "k"}}}}
-	mux := NewMux(newTokenHandler(iss), NewJWKSHandler(jwks))
+	mux := NewMux(newTokenHandler(iss))
 
 	// token path — Basic-authed → 200.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, TokenPath+"?service=registry.kacho.local", nil)
-	req.Header.Set("Authorization", basic("sva1", "key"))
+	req.Header.Set("Authorization", basic("cid-ci", "key"))
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("token path status = %d; want 200", rec.Code)
 	}
 
-	// jwks path → 200.
+	// The former /iam/token/jwks path is gone → the mux does not route it (404).
 	rec2 := httptest.NewRecorder()
-	mux.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, JWKSPath, nil))
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("jwks path status = %d; want 200", rec2.Code)
+	mux.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/iam/token/jwks", nil))
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("jwks path status = %d; want 404 (endpoint removed)", rec2.Code)
 	}
 }

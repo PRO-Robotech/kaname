@@ -34,7 +34,6 @@ import (
 	"github.com/PRO-Robotech/kacho-corelib/safeconv"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
@@ -437,48 +436,40 @@ func runServe(cfg config.Config) error {
 
 	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
 	// EXTERNAL-reachable port (default :9096; TLS terminated at the ingress, like
-	// hooks/metrics). Docker clients hit `/iam/token` through the edge to exchange
-	// an SA-key for a short-lived identity-JWT, verified against `/iam/token/jwks`.
-	// Distinct from the cluster-internal hooks (:9092) and metrics (:9095)
-	// listeners. Disabled (WARN-skip, never a boot block) when the endpoint is
-	// empty OR the JWKS encryption key is unavailable — the RS256 signer needs it
-	// to decrypt the at-rest key; in production the key is boot-validated so the
-	// listener always comes up, in dev without a key it stays down like the
-	// metrics opt-out.
+	// hooks/metrics). Docker clients hit `/iam/token` through the edge; the shim
+	// verifies the SA-key and BROKERS a token from Ory Hydra (the issuer). The
+	// data-plane verifies the returned token against Hydra's JWKS. Distinct from
+	// the cluster-internal hooks (:9092) and metrics (:9095) listeners. Disabled
+	// (WARN-skip, never a boot block) only when the endpoint is empty — the shim
+	// needs no JWKS encryption key (it mints nothing).
 	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
 	var registryTokenListener net.Listener
 	var registryTokenHTTPServer *http.Server
 	if registryTokenAddr != "" {
-		jwksEncKey, keyErr := cfg.AuthN.ResolveJWKSEncryptionKey()
-		if keyErr != nil {
-			logger.Warn("registry token listener disabled — JWKS encryption key unavailable", "err", keyErr)
-			registryTokenAddr = ""
-		} else {
-			registryTokenListener, err = net.Listen("tcp", registryTokenAddr)
-			if err != nil {
-				_ = listener.Close()
-				_ = internalListener.Close()
-				if hooksListener != nil {
-					_ = hooksListener.Close()
-				}
-				if metricsListener != nil {
-					_ = metricsListener.Close()
-				}
-				return fmt.Errorf("registry token http listener: %w", err)
+		registryTokenListener, err = net.Listen("tcp", registryTokenAddr)
+		if err != nil {
+			_ = listener.Close()
+			_ = internalListener.Close()
+			if hooksListener != nil {
+				_ = hooksListener.Close()
 			}
-			registryTokenMux := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
-				Issuer:            cfg.APIServer.RegistryToken.TokenIssuer(),
-				Service:           cfg.APIServer.RegistryToken.TokenService(),
-				JWKSEncryptionKey: jwksEncKey,
-				TTL:               registrytokenuc.Config{TTL: cfg.APIServer.RegistryToken.TokenTTL()},
-			})
-			registryTokenHTTPServer = &http.Server{
-				Handler:           registryTokenMux,
-				ReadHeaderTimeout: 10 * time.Second,
-				ReadTimeout:       30 * time.Second,
-				WriteTimeout:      30 * time.Second,
-				IdleTimeout:       90 * time.Second,
+			if metricsListener != nil {
+				_ = metricsListener.Close()
 			}
+			return fmt.Errorf("registry token http listener: %w", err)
+		}
+		registryTokenMux := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
+			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
+			Service:           cfg.APIServer.RegistryToken.TokenService(),
+			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
+			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
+		})
+		registryTokenHTTPServer = &http.Server{
+			Handler:           registryTokenMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       90 * time.Second,
 		}
 	}
 

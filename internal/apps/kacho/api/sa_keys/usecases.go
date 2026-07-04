@@ -68,6 +68,14 @@ type OAuthClientAdmin interface {
 	DeleteOAuthClient(ctx context.Context, clientID string) error
 }
 
+// TrustGrantAdmin abstracts the Hydra jwt-bearer trust-grant registration used by
+// the federated Issue path. Each trusted subject is registered as an EXACT-subject
+// grant (allow_any_subject=false) so Hydra accepts an external assertion only when
+// its `sub` matches the granted subject verbatim.
+type TrustGrantAdmin interface {
+	CreateJWTBearerTrustGrant(ctx context.Context, g clients.JWTBearerTrustGrant) error
+}
+
 // OpsResponseRedactor clears a named field in the proto-marshalled success
 // response of an `operations` row. Idempotent: re-running on an
 // already-cleared field is a no-op. The concrete pg adapter reads the
@@ -86,6 +94,11 @@ type IssueSAKeyUseCase struct {
 	tx      service.TxBeginner
 	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
+	// trustGrants registers exact-subject jwt-bearer trust-grants for the
+	// federated path. Nil → skipped (test / private_key_jwt-only wiring); the
+	// composition root wires it so a federated key's `(issuer, subject)` binding
+	// actually lands in Hydra.
+	trustGrants TrustGrantAdmin
 	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
 	// skipped (test / legacy wiring). Production main.go wires the pg
 	// adapter so the secret is replaced with `"<redacted>"` after the
@@ -119,6 +132,14 @@ func (u *IssueSAKeyUseCase) WithResponseRedactor(r OpsResponseRedactor) *IssueSA
 // Composition-root only. nil emitter → audit emit is skipped.
 func (u *IssueSAKeyUseCase) WithAuditEmitter(a auditEmitter) *IssueSAKeyUseCase {
 	u.audit = a
+	return u
+}
+
+// WithTrustGrantAdmin wires the Hydra jwt-bearer trust-grant registrar used by the
+// federated Issue path. Composition-root only. nil → federated Issue skips
+// trust-grant registration.
+func (u *IssueSAKeyUseCase) WithTrustGrantAdmin(t TrustGrantAdmin) *IssueSAKeyUseCase {
+	u.trustGrants = t
 	return u
 }
 
@@ -459,6 +480,18 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
 	}
 
+	// Register an EXACT-subject jwt-bearer trust-grant per trusted subject: Hydra
+	// accepts an external assertion only when its `sub` equals the granted subject
+	// verbatim (allow_any_subject=false). The subject_pattern is already validated
+	// literal-anchored, so LiteralSubject always resolves here. On failure roll
+	// back the just-created Hydra client (external side-effect) and fail closed.
+	if u.trustGrants != nil {
+		if err := u.registerTrustGrants(ctx, in); err != nil {
+			_ = u.hydra.DeleteOAuthClient(ctx, hydraClient.ClientID)
+			return nil, err
+		}
+	}
+
 	row := domain.ServiceAccountOAuthClient{
 		ID:              keyID,
 		SvaID:           in.ServiceAccountID,
@@ -498,6 +531,43 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		Audiences: hydraReq.Audience,
 	}
 	return anypb.New(resp)
+}
+
+// registerTrustGrants registers one EXACT-subject jwt-bearer trust-grant per
+// trusted subject. allow_any_subject is always false — trusting an issuer must not
+// mean trusting an arbitrary subject from it. On the first failure the caller
+// rolls back the Hydra client and fails closed.
+func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInput) error {
+	expiresAt := u.trustGrantExpiry(in)
+	scope := strings.Fields(u.DefaultScope)
+	for i, ts := range in.TrustedSubjects {
+		subject, ok := ts.LiteralSubject()
+		if !ok {
+			// Defensive: Validate() already rejects non-literal patterns.
+			return status.Errorf(codes.InvalidArgument,
+				"trusted_subjects[%d].subject_pattern must be a literal anchored subject", i)
+		}
+		grant := clients.JWTBearerTrustGrant{
+			Issuer:          ts.Issuer,
+			Subject:         subject,
+			AllowAnySubject: false,
+			Scope:           scope,
+			ExpiresAt:       expiresAt,
+		}
+		if err := u.trustGrants.CreateJWTBearerTrustGrant(ctx, grant); err != nil {
+			return fmt.Errorf("%w: hydra create-trust-grant: %w", iamerr.ErrUnavailable, err)
+		}
+	}
+	return nil
+}
+
+// trustGrantExpiry — the trust-grant lifetime: the SA-key's expiry when set,
+// otherwise a long-lived default (the federation binding lives as long as the key).
+func (u *IssueSAKeyUseCase) trustGrantExpiry(in IssueInput) time.Time {
+	if in.TTLSeconds > 0 {
+		return u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+	}
+	return u.now().Add(10 * 365 * 24 * time.Hour)
 }
 
 // commitMapping persists the SA-OAuth-client mapping row in a fresh tx and

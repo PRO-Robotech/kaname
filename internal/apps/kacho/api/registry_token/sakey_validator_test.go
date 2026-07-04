@@ -16,8 +16,8 @@ import (
 )
 
 // ecKeyPEMs mints an ECDSA P-256 keypair and returns (privatePKCS8PEM,
-// publicSPKIPEM) — the exact shapes the SA-key issuer persists (public) and hands
-// the holder once (private).
+// publicSPKIPEM) — the shapes the SA-key issuer persists (public) and hands the
+// holder once (private).
 func ecKeyPEMs(t *testing.T) (privPEM, pubPEM string) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -37,34 +37,41 @@ func ecKeyPEMs(t *testing.T) (privPEM, pubPEM string) {
 	return privPEM, pubPEM
 }
 
-// fakeLookup — a scripted SAKeyLookup.
-type fakeLookup struct {
-	bySubject map[string][]SAKeyRef
-	err       error
+// fakeClientLookup — a scripted SAClientLookup keyed by Hydra client_id.
+type fakeClientLookup struct {
+	byClient map[string]RegisteredKey
+	err      error
 }
 
-func (f fakeLookup) PublicKeysForSubject(_ context.Context, subjectID string) ([]SAKeyRef, error) {
+func (f fakeClientLookup) KeyByClientID(_ context.Context, clientID string) (RegisteredKey, error) {
 	if f.err != nil {
-		return nil, f.err
+		return RegisteredKey{}, f.err
 	}
-	return f.bySubject[subjectID], nil
+	k, ok := f.byClient[clientID]
+	if !ok {
+		return RegisteredKey{}, errors.New("not found")
+	}
+	return k, nil
 }
 
-// TestSAKeyValidator_ValidPrivateKey_Authenticates — presenting the issued
-// private-key PEM whose public half is a registered, non-expired key resolves the
-// subject.
-func TestSAKeyValidator_ValidPrivateKey_Authenticates(t *testing.T) {
+// TestSAKeyValidator_ValidPrivateKey_ResolvesCredential — presenting the issued
+// private-key PEM whose public half is the registered key for the client_id
+// yields the credential (client_id + kid) the assertion is built from.
+func TestSAKeyValidator_ValidPrivateKey_ResolvesCredential(t *testing.T) {
 	priv, pub := ecKeyPEMs(t)
-	v := NewSAKeyValidator(fakeLookup{bySubject: map[string][]SAKeyRef{
-		"sva0000000000000aa": {{PublicKeyPEM: pub}},
+	v := NewSAKeyValidator(fakeClientLookup{byClient: map[string]RegisteredKey{
+		"cid-ci": {ClientID: "cid-ci", KeyID: "soc_key1", Subject: "sva0000000000000aa", PublicKeyPEM: pub, KeyAlgorithm: "ES256"},
 	}})
 
-	subj, err := v.Validate(context.Background(), "sva0000000000000aa", priv)
+	cred, err := v.Validate(context.Background(), "cid-ci", priv)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if subj.ID != "sva0000000000000aa" {
-		t.Fatalf("subject = %q; want the SA id", subj.ID)
+	if cred.ClientID != "cid-ci" || cred.KeyID != "soc_key1" {
+		t.Fatalf("cred = %+v; want client_id + kid", cred)
+	}
+	if cred.Subject != "sva0000000000000aa" {
+		t.Errorf("subject = %q; want owning SA", cred.Subject)
 	}
 }
 
@@ -75,29 +82,40 @@ func TestSAKeyValidator_Rejections(t *testing.T) {
 	otherPriv, _ := ecKeyPEMs(t)
 	past := time.Now().Add(-time.Hour)
 
-	base := map[string][]SAKeyRef{
-		"sva0000000000000aa": {{PublicKeyPEM: pub}},
-		"sva0000000000000bb": {{PublicKeyPEM: pub, ExpiresAt: &past}}, // expired
+	base := map[string]RegisteredKey{
+		"cid-ok":        {ClientID: "cid-ok", KeyID: "soc_1", PublicKeyPEM: pub, KeyAlgorithm: "ES256"},
+		"cid-expired":   {ClientID: "cid-expired", KeyID: "soc_2", PublicKeyPEM: pub, KeyAlgorithm: "ES256", ExpiresAt: &past},
+		"cid-federated": {ClientID: "cid-federated", KeyID: "soc_3", PublicKeyPEM: "" /* federated: no key */},
 	}
+	v := NewSAKeyValidator(fakeClientLookup{byClient: base})
 
 	cases := []struct {
-		name, user, pass string
+		name, client, pass string
 	}{
-		{"non-sva username", "usr0000000000000aa", priv},
-		{"empty username", "", priv},
-		{"unparseable password", "sva0000000000000aa", "-----not a key-----"},
-		{"empty password", "sva0000000000000aa", ""},
-		{"no registered key for subject", "sva0000000000000zz", priv},
-		{"key does not match registered", "sva0000000000000aa", otherPriv},
-		{"registered key expired", "sva0000000000000bb", priv},
+		{"empty client", "", priv},
+		{"empty password", "cid-ok", ""},
+		{"unparseable password", "cid-ok", "-----not a key-----"},
+		{"unknown client", "cid-nope", priv},
+		{"key does not match registered", "cid-ok", otherPriv},
+		{"registered key expired", "cid-expired", priv},
+		{"federated client has no docker key", "cid-federated", priv},
 	}
-	v := NewSAKeyValidator(fakeLookup{bySubject: base})
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := v.Validate(context.Background(), c.user, c.pass)
+			_, err := v.Validate(context.Background(), c.client, c.pass)
 			if !errors.Is(err, ErrInvalidCredentials) {
 				t.Fatalf("err = %v; want ErrInvalidCredentials", err)
 			}
 		})
+	}
+}
+
+// TestSAKeyValidator_LookupError_FailsClosed — a store failure collapses to
+// ErrInvalidCredentials (no token, and no leak of subject existence).
+func TestSAKeyValidator_LookupError_FailsClosed(t *testing.T) {
+	priv, _ := ecKeyPEMs(t)
+	v := NewSAKeyValidator(fakeClientLookup{err: errors.New("db down")})
+	if _, err := v.Validate(context.Background(), "cid-ok", priv); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("err = %v; want ErrInvalidCredentials", err)
 	}
 }

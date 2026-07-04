@@ -5,150 +5,167 @@ package registry_token
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 )
 
-// fakeValidator — a scripted APITokenValidator.
+// fakeValidator — a scripted CredentialValidator.
 type fakeValidator struct {
-	subject Subject
+	cred    Credential
 	err     error
 	gotUser string
 	gotPass string
 }
 
-func (f *fakeValidator) Validate(_ context.Context, u, p string) (Subject, error) {
-	f.gotUser, f.gotPass = u, p
-	return f.subject, f.err
+func (f *fakeValidator) Validate(_ context.Context, clientID, privateKeyPEM string) (Credential, error) {
+	f.gotUser, f.gotPass = clientID, privateKeyPEM
+	return f.cred, f.err
 }
 
-// staticRSAProvider — a fixed RS256 key for signer wiring in tests.
-type staticRSAProvider struct {
-	kid  string
-	priv *rsa.PrivateKey
+// fakeSigner — records the assertion input and returns a canned assertion.
+type fakeSigner struct {
+	got AssertionInput
+	err error
 }
 
-func (s staticRSAProvider) CurrentRSA(context.Context) (string, *rsa.PrivateKey, error) {
-	return s.kid, s.priv, nil
-}
-
-func genRSA(t *testing.T) *rsa.PrivateKey {
-	t.Helper()
-	k, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("gen rsa: %v", err)
+func (f *fakeSigner) Sign(in AssertionInput) (string, error) {
+	f.got = in
+	if f.err != nil {
+		return "", f.err
 	}
-	return k
+	return "assertion.for." + in.ClientID, nil
 }
 
-// TestExecute_HappyPath_MintsVerifiableIdentityJWT — valid creds → an RS256 JWT
-// carrying the resolved subject, verifiable against the signing public key, with
-// iss/aud/exp/iat/jti and exp = iat + TTL (identity-only, no scope claim).
-func TestExecute_HappyPath_MintsVerifiableIdentityJWT(t *testing.T) {
-	priv := genRSA(t)
+// fakeExchanger — a scripted TokenExchanger.
+type fakeExchanger struct {
+	out ExchangeOutput
+	err error
+	got ExchangeInput
+}
+
+func (f *fakeExchanger) Exchange(_ context.Context, in ExchangeInput) (ExchangeOutput, error) {
+	f.got = in
+	return f.out, f.err
+}
+
+// TestExecute_HappyPath_BrokersHydraToken — a valid SA-key is verified, an ES256
+// client_assertion is built (kid, iss=sub=client_id, aud=assertion-audience,
+// exp≤60s), and the shim relays Hydra's access_token in the docker form.
+func TestExecute_HappyPath_BrokersHydraToken(t *testing.T) {
 	fixedNow := time.Unix(1_700_000_000, 0)
+	val := &fakeValidator{cred: Credential{ClientID: "cid-ci", KeyID: "soc_key1", Subject: "sva0123456789abcde"}}
+	sig := &fakeSigner{}
+	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "hydra-jwt", ExpiresIn: 3600}}
 
 	uc := NewIssueRegistryTokenUseCase(
-		Config{Issuer: "https://api.kacho.local/iam/token", DefaultService: "registry.kacho.local", TTL: 3 * time.Minute},
-		&fakeValidator{subject: Subject{ID: "sva0123456789abcde"}},
-		NewRS256Signer(staticRSAProvider{kid: "kacho-rs256-1", priv: priv}),
+		Config{AssertionAudience: "https://hydra.api.kacho.cloud/oauth2/token", DefaultService: "registry.kacho.local"},
+		val, sig, ex,
 	).WithClock(func() time.Time { return fixedNow }).
 		WithJTIFunc(func() (string, error) { return "jti-fixed", nil })
 
 	out, err := uc.Execute(context.Background(), IssueInput{
-		Username: "sva0123456789abcde", Password: "the-sa-key", Service: "registry.kacho.local",
+		Username: "cid-ci", Password: "-----private-pem-----", Service: "registry.kacho.local",
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if out.Token == "" {
-		t.Fatal("expected a non-empty token")
+	if out.Token != "hydra-jwt" || out.ExpiresIn != 3600 {
+		t.Fatalf("out = %+v; want Hydra token + expires_in", out)
 	}
-	if out.ExpiresIn != 180 {
-		t.Fatalf("expires_in = %d; want 180", out.ExpiresIn)
+	// The credential was verified with the presented client_id + private PEM.
+	if val.gotUser != "cid-ci" || val.gotPass != "-----private-pem-----" {
+		t.Errorf("validator got (%q,%q)", val.gotUser, val.gotPass)
 	}
-
-	got, err := registrytoken.VerifyRS256(out.Token, &priv.PublicKey)
-	if err != nil {
-		t.Fatalf("token must verify against signing key: %v", err)
+	// The assertion is built from the verified credential (identity is not taken
+	// from the presented username after verification).
+	if sig.got.ClientID != "cid-ci" || sig.got.KeyID != "soc_key1" {
+		t.Errorf("assertion identity = (%q,%q)", sig.got.ClientID, sig.got.KeyID)
 	}
-	if got.Issuer != "https://api.kacho.local/iam/token" {
-		t.Errorf("iss = %q", got.Issuer)
+	if sig.got.PrivateKeyPEM != "-----private-pem-----" {
+		t.Errorf("assertion must be signed with the presented private key")
 	}
-	if got.Subject != "sva0123456789abcde" {
-		t.Errorf("sub = %q; want the resolved subject id", got.Subject)
+	if sig.got.Audience != "https://hydra.api.kacho.cloud/oauth2/token" {
+		t.Errorf("assertion aud = %q; want the Hydra token endpoint", sig.got.Audience)
 	}
-	if got.Audience != "registry.kacho.local" {
-		t.Errorf("aud = %q; want the service", got.Audience)
+	if sig.got.JTI != "jti-fixed" || sig.got.IssuedAt != fixedNow.Unix() {
+		t.Errorf("assertion jti/iat = %q/%d", sig.got.JTI, sig.got.IssuedAt)
 	}
-	if got.IssuedAt != fixedNow.Unix() {
-		t.Errorf("iat = %d; want %d", got.IssuedAt, fixedNow.Unix())
+	if ttl := sig.got.ExpiresAt - sig.got.IssuedAt; ttl <= 0 || ttl > int64(MaxAssertionTTL.Seconds()) {
+		t.Errorf("assertion exp-iat = %d; want (0, %d]", ttl, int64(MaxAssertionTTL.Seconds()))
 	}
-	if got.ExpiresAt != fixedNow.Add(3*time.Minute).Unix() {
-		t.Errorf("exp = %d; want iat+TTL", got.ExpiresAt)
-	}
-	if got.JTI != "jti-fixed" {
-		t.Errorf("jti = %q", got.JTI)
+	// The requested token audience is the registry service.
+	if ex.got.ClientAssertion != "assertion.for.cid-ci" || ex.got.Audience != "registry.kacho.local" {
+		t.Errorf("exchange = %+v", ex.got)
 	}
 }
 
-// TestExecute_ServiceFallsBackToDefault — empty ?service= → DefaultService aud.
+// TestExecute_ServiceFallsBackToDefault — empty ?service= → DefaultService as the
+// requested token audience.
 func TestExecute_ServiceFallsBackToDefault(t *testing.T) {
-	priv := genRSA(t)
+	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "t", ExpiresIn: 60}}
 	uc := NewIssueRegistryTokenUseCase(
-		Config{Issuer: "iss", DefaultService: "registry.kacho.local", TTL: time.Minute},
-		&fakeValidator{subject: Subject{ID: "sva1"}},
-		NewRS256Signer(staticRSAProvider{kid: "k", priv: priv}),
+		Config{AssertionAudience: "aud", DefaultService: "registry.kacho.local"},
+		&fakeValidator{cred: Credential{ClientID: "cid", KeyID: "soc_1"}}, &fakeSigner{}, ex,
 	)
-	out, err := uc.Execute(context.Background(), IssueInput{Username: "sva1", Password: "x"})
-	if err != nil {
+	if _, err := uc.Execute(context.Background(), IssueInput{Username: "cid", Password: "x"}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	got, _ := registrytoken.VerifyRS256(out.Token, &priv.PublicKey)
-	if got.Audience != "registry.kacho.local" {
-		t.Errorf("aud = %q; want DefaultService fallback", got.Audience)
+	if ex.got.Audience != "registry.kacho.local" {
+		t.Errorf("requested aud = %q; want DefaultService", ex.got.Audience)
 	}
 }
 
-// TestExecute_InvalidCredentials_Unauthenticated — a validator rejection surfaces
-// as ErrUnauthenticated (fail-closed) and NO token is minted.
-func TestExecute_InvalidCredentials_Unauthenticated(t *testing.T) {
-	priv := genRSA(t)
-	uc := NewIssueRegistryTokenUseCase(
-		Config{Issuer: "iss", DefaultService: "svc", TTL: time.Minute},
-		&fakeValidator{err: ErrInvalidCredentials},
-		NewRS256Signer(staticRSAProvider{kid: "k", priv: priv}),
-	)
-	out, err := uc.Execute(context.Background(), IssueInput{Username: "sva1", Password: "wrong"})
-	if !errors.Is(err, ErrUnauthenticated) {
-		t.Fatalf("err = %v; want ErrUnauthenticated", err)
+// TestExecute_AnonymousOrInvalid_Unauthenticated — a missing credential and a
+// validator rejection both fail closed as ErrUnauthenticated with NO exchange.
+func TestExecute_AnonymousOrInvalid_Unauthenticated(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   IssueInput
+		vErr error
+	}{
+		{"empty username", IssueInput{Username: "", Password: "x"}, nil},
+		{"empty password", IssueInput{Username: "cid", Password: ""}, nil},
+		{"validator reject", IssueInput{Username: "cid", Password: "x"}, ErrInvalidCredentials},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "should-not-happen"}}
+			uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", DefaultService: "svc"},
+				&fakeValidator{err: tc.vErr}, &fakeSigner{}, ex)
+			out, err := uc.Execute(context.Background(), tc.in)
+			if !errors.Is(err, ErrUnauthenticated) {
+				t.Fatalf("err = %v; want ErrUnauthenticated", err)
+			}
+			if out.Token != "" || ex.got.ClientAssertion != "" {
+				t.Fatalf("no token / no exchange must occur on auth failure")
+			}
+		})
+	}
+}
+
+// TestExecute_HydraUnavailable_FailClosed — the issuer being unreachable surfaces
+// as ErrIssuerUnavailable (→ 503 at the handler), never a token.
+func TestExecute_HydraUnavailable_FailClosed(t *testing.T) {
+	uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", DefaultService: "svc"},
+		&fakeValidator{cred: Credential{ClientID: "cid", KeyID: "soc_1"}}, &fakeSigner{},
+		&fakeExchanger{err: ErrIssuerUnavailable})
+	out, err := uc.Execute(context.Background(), IssueInput{Username: "cid", Password: "x"})
+	if !errors.Is(err, ErrIssuerUnavailable) {
+		t.Fatalf("err = %v; want ErrIssuerUnavailable", err)
 	}
 	if out.Token != "" {
-		t.Fatal("no token must be minted on invalid credentials")
+		t.Fatal("no token on issuer-unavailable")
 	}
 }
 
-// TestExecute_TTLClampedToMax — a TTL above the ceiling is clamped to MaxTTL.
-func TestExecute_TTLClampedToMax(t *testing.T) {
-	priv := genRSA(t)
-	uc := NewIssueRegistryTokenUseCase(
-		Config{Issuer: "iss", DefaultService: "svc", TTL: time.Hour}, // > MaxTTL
-		&fakeValidator{subject: Subject{ID: "sva1"}},
-		NewRS256Signer(staticRSAProvider{kid: "k", priv: priv}),
-	)
-	if uc.TTL() != MaxTTL {
-		t.Fatalf("TTL() = %v; want clamp to %v", uc.TTL(), MaxTTL)
-	}
-	out, err := uc.Execute(context.Background(), IssueInput{Username: "sva1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if out.ExpiresIn != int(MaxTTL.Seconds()) {
-		t.Fatalf("expires_in = %d; want %d", out.ExpiresIn, int(MaxTTL.Seconds()))
+// TestExecute_HydraRejected_Unauthenticated — a Hydra rejection (bad/revoked key)
+// collapses to ErrUnauthenticated (→ 401 challenge), not a 503.
+func TestExecute_HydraRejected_Unauthenticated(t *testing.T) {
+	uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", DefaultService: "svc"},
+		&fakeValidator{cred: Credential{ClientID: "cid", KeyID: "soc_1"}}, &fakeSigner{},
+		&fakeExchanger{err: errors.New("rejected")})
+	_, err := uc.Execute(context.Background(), IssueInput{Username: "cid", Password: "x"})
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("err = %v; want ErrUnauthenticated", err)
 	}
 }

@@ -5,155 +5,110 @@ package registrytokenwire
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
+	"errors"
 	"testing"
 	"time"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 )
 
-// encryptAESGCM mirrors the JWKS rotation encryptor (nonce||ciphertext) so the
-// test can produce an at-rest private key exactly as the store holds it.
-func encryptAESGCM(t *testing.T, key, plaintext []byte) []byte {
-	t.Helper()
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		t.Fatalf("aes: %v", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		t.Fatalf("gcm: %v", err)
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		t.Fatalf("nonce: %v", err)
-	}
-	return append(nonce, gcm.Seal(nil, nonce, plaintext, nil)...)
+// fakeSAByID — a scripted reverse lookup by Hydra client_id.
+type fakeSAByID struct {
+	row domain.ServiceAccountOAuthClient
+	err error
 }
 
-func rsaPEMs(t *testing.T) (privPEM, pubPEM string, priv *rsa.PrivateKey) {
-	t.Helper()
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("gen rsa: %v", err)
-	}
-	privDER, _ := x509.MarshalPKCS8PrivateKey(priv)
-	pubDER, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	privPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER}))
-	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
-	return privPEM, pubPEM, priv
+func (f fakeSAByID) GetByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	return f.row, f.err
 }
 
-type fakeJWKSRepo struct {
-	current domain.OIDCJwksKey
-	all     []domain.OIDCJwksKey
-}
-
-func (f fakeJWKSRepo) GetCurrent(_ context.Context, alg domain.JWKSAlg) (domain.OIDCJwksKey, error) {
-	return f.current, nil
-}
-func (f fakeJWKSRepo) ListCurrent(context.Context) ([]domain.OIDCJwksKey, error) { return f.all, nil }
-
-// TestRSAKeyProvider_DecryptsAndSigns — the adapter decrypts the at-rest key and
-// returns a usable signer whose token verifies against the stored public key.
-func TestRSAKeyProvider_DecryptsAndSigns(t *testing.T) {
-	encKey := make([]byte, 32)
-	if _, err := rand.Read(encKey); err != nil {
-		t.Fatalf("enc key: %v", err)
-	}
-	privPEM, _, priv := rsaPEMs(t)
-	key := domain.OIDCJwksKey{
-		KID:                    "kacho-rs256-1",
-		Alg:                    domain.JWKSAlgRS256Domain,
-		Current:                true,
-		PrivateKeyPEMEncrypted: encryptAESGCM(t, encKey, []byte(privPEM)),
-	}
-	prov := NewRSAKeyProvider(fakeJWKSRepo{current: key}, encKey)
-
-	kid, got, err := prov.CurrentRSA(context.Background())
-	if err != nil {
-		t.Fatalf("CurrentRSA: %v", err)
-	}
-	if kid != "kacho-rs256-1" {
-		t.Fatalf("kid = %q", kid)
-	}
-	// Sign with the recovered key → verify against the ORIGINAL public key.
-	tok, err := registrytoken.SignRS256(kid, got, registrytoken.Claims{Subject: "sva1", ExpiresAt: 10})
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	if _, err := registrytoken.VerifyRS256(tok, &priv.PublicKey); err != nil {
-		t.Fatalf("recovered key must match the stored public key: %v", err)
-	}
-}
-
-// TestJWKSProvider_ProjectsCurrentRS256 — only the RS256 current key is projected
-// as a signing JWK.
-func TestJWKSProvider_ProjectsCurrentRS256(t *testing.T) {
-	_, pubPEM, priv := rsaPEMs(t)
-	all := []domain.OIDCJwksKey{
-		{KID: "es", Alg: domain.JWKSAlgES256Domain, Current: true, PublicKeyPEM: "ignored"},
-		{KID: "kacho-rs256-1", Alg: domain.JWKSAlgRS256Domain, Current: true, PublicKeyPEM: pubPEM},
-	}
-	prov := NewJWKSProvider(fakeJWKSRepo{all: all})
-
-	set, err := prov.PublicJWKS(context.Background())
-	if err != nil {
-		t.Fatalf("PublicJWKS: %v", err)
-	}
-	if len(set.Keys) != 1 {
-		t.Fatalf("keys = %d; want 1 (RS256 only)", len(set.Keys))
-	}
-	jwk := set.Keys[0]
-	if jwk.Kid != "kacho-rs256-1" || jwk.Kty != "RSA" || jwk.Alg != "RS256" {
-		t.Fatalf("jwk = %+v", jwk)
-	}
-	// The projected n/e must reconstruct the modulus of the stored key.
-	if jwk.N == "" || jwk.E == "" {
-		t.Fatal("jwk n/e must be populated")
-	}
-	_ = priv
-}
-
-type fakeSARepo struct {
-	rows []domain.ServiceAccountOAuthClient
-}
-
-func (f fakeSARepo) List(_ context.Context, _ domain.ServiceAccountID, _ string, _ int32) ([]domain.ServiceAccountOAuthClient, string, error) {
-	return f.rows, "", nil
-}
-
-// TestSAKeyLookup_ReturnsPublicHalvesSkippingFederated — maps SA rows to key refs,
-// dropping federated rows that carry no key material.
-func TestSAKeyLookup_ReturnsPublicHalvesSkippingFederated(t *testing.T) {
+// TestSAClientLookup_MapsRegisteredKey — the adapter maps the SA row to the shim's
+// RegisteredKey (kid=soc id, client_id=hydra id, subject=owning SA, public half).
+func TestSAClientLookup_MapsRegisteredKey(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
-	rows := []domain.ServiceAccountOAuthClient{
-		{ID: "soc1", PublicKeyPEM: "PEM-A", ExpiresAt: &exp},
-		{ID: "soc2", PublicKeyPEM: ""}, // federated — no key material.
-		{ID: "soc3", PublicKeyPEM: "PEM-B"},
+	row := domain.ServiceAccountOAuthClient{
+		ID:            "soc_01abcdefghjkmnpqr",
+		SvaID:         "sva_ci",
+		OAuthClientID: "cid-ci",
+		PublicKeyPEM:  "PEM-A",
+		KeyAlgorithm:  "ES256",
+		ExpiresAt:     &exp,
 	}
-	look := NewSAKeyLookup(fakeSARepo{rows: rows})
-	refs, err := look.PublicKeysForSubject(context.Background(), "sva1")
+	look := NewSAClientLookup(fakeSAByID{row: row})
+	got, err := look.KeyByClientID(context.Background(), "cid-ci")
 	if err != nil {
-		t.Fatalf("lookup: %v", err)
+		t.Fatalf("KeyByClientID: %v", err)
 	}
-	if len(refs) != 2 {
-		t.Fatalf("refs = %d; want 2 (federated row skipped)", len(refs))
+	want := registrytokenuc.RegisteredKey{
+		ClientID:     "cid-ci",
+		KeyID:        "soc_01abcdefghjkmnpqr",
+		Subject:      "sva_ci",
+		PublicKeyPEM: "PEM-A",
+		KeyAlgorithm: "ES256",
+		ExpiresAt:    &exp,
 	}
-	want := map[string]registrytokenuc.SAKeyRef{
-		"PEM-A": {PublicKeyPEM: "PEM-A", ExpiresAt: &exp},
-		"PEM-B": {PublicKeyPEM: "PEM-B"},
+	if got != want {
+		t.Fatalf("RegisteredKey = %+v; want %+v", got, want)
 	}
-	for _, r := range refs {
-		if _, ok := want[r.PublicKeyPEM]; !ok {
-			t.Fatalf("unexpected ref %q", r.PublicKeyPEM)
-		}
+}
+
+// TestSAClientLookup_PropagatesError — an unknown/failed lookup surfaces an error
+// (the validator collapses it to ErrInvalidCredentials).
+func TestSAClientLookup_PropagatesError(t *testing.T) {
+	look := NewSAClientLookup(fakeSAByID{err: errors.New("not found")})
+	if _, err := look.KeyByClientID(context.Background(), "cid-nope"); err == nil {
+		t.Fatal("expected error for a failed lookup")
+	}
+}
+
+// fakeHydraTokenClient — a scripted Hydra public token endpoint.
+type fakeHydraTokenClient struct {
+	out clients.TokenResponse
+	err error
+	got clients.ClientCredentialsRequest
+}
+
+func (f *fakeHydraTokenClient) ClientCredentials(_ context.Context, req clients.ClientCredentialsRequest) (clients.TokenResponse, error) {
+	f.got = req
+	return f.out, f.err
+}
+
+// TestHydraExchange_Happy — the adapter forwards the exchange and returns Hydra's
+// access_token.
+func TestHydraExchange_Happy(t *testing.T) {
+	fc := &fakeHydraTokenClient{out: clients.TokenResponse{AccessToken: "hydra-jwt", ExpiresIn: 3600}}
+	out, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{
+		ClientAssertion: "assertion", Audience: "registry.kacho.local", Scope: "reg",
+	})
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if out.AccessToken != "hydra-jwt" || out.ExpiresIn != 3600 {
+		t.Fatalf("out = %+v", out)
+	}
+	if fc.got.ClientAssertion != "assertion" || fc.got.Audience != "registry.kacho.local" || fc.got.Scope != "reg" {
+		t.Fatalf("forwarded request = %+v", fc.got)
+	}
+}
+
+// TestHydraExchange_UnavailableMapsToIssuerUnavailable — a Hydra-unavailable
+// client error maps to the use-case's fail-closed 503 sentinel.
+func TestHydraExchange_UnavailableMapsToIssuerUnavailable(t *testing.T) {
+	fc := &fakeHydraTokenClient{err: clients.ErrHydraUnavailable}
+	_, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{ClientAssertion: "a"})
+	if !errors.Is(err, registrytokenuc.ErrIssuerUnavailable) {
+		t.Fatalf("err = %v; want ErrIssuerUnavailable", err)
+	}
+}
+
+// TestHydraExchange_RejectedMapsToInvalidCredentials — a Hydra rejection maps to
+// the credential-invalid sentinel (→ 401 challenge upstream), not a 503.
+func TestHydraExchange_RejectedMapsToInvalidCredentials(t *testing.T) {
+	fc := &fakeHydraTokenClient{err: clients.ErrHydraRejected}
+	_, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{ClientAssertion: "a"})
+	if !errors.Is(err, registrytokenuc.ErrInvalidCredentials) {
+		t.Fatalf("err = %v; want ErrInvalidCredentials", err)
 	}
 }

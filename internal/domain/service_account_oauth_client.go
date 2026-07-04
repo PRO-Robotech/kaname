@@ -5,8 +5,10 @@ package domain
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"go.uber.org/multierr"
@@ -55,34 +57,86 @@ type ServiceAccountOAuthClient struct {
 	TrustedSubjects []TrustedSubject
 }
 
-// TrustedSubject — one (issuer, subject_pattern) tuple permitted to assert a
-// federated ServiceAccountOAuthClient. `Issuer` MUST match the external OIDC
-// `iss` claim verbatim; `SubjectPattern` is an RE2 regex the external `sub`
-// claim must match. Anchor the regex with `^…$` to avoid substring footguns.
+// TrustedSubject — one (issuer, subject) tuple permitted to assert a federated
+// ServiceAccountOAuthClient. `Issuer` MUST match the external OIDC `iss` claim
+// verbatim; `SubjectPattern` is a LITERAL-anchored exact subject (`^<literal>$`,
+// no regex metacharacters).
+//
+// The literal-anchored form is required because the enforcement point is Hydra's
+// native jwt-bearer trust-grant, which matches an EXACT subject (`allow_any_
+// subject=false`) — not a per-client regex engine. kacho-iam is off the request
+// path (the pod exchanges its projected token with Hydra directly), so a wildcard
+// pattern could not be enforced and is rejected up front (any pod of the cluster
+// would otherwise obtain a token). Per-subject wildcard federation would require a
+// kacho-side enforcer on the request path.
 type TrustedSubject struct {
 	Issuer         string
 	SubjectPattern string
 }
 
-// Validate — non-empty Issuer that parses as URL, non-empty regex that
-// compiles. Length caps mirror the proto (≤512 each).
+// literalSubjectRe — a subject_pattern anchored with `^…$` around a run of
+// characters that are NOT regex metacharacters (so the enclosed text is a literal
+// subject, matched exactly by the Hydra trust-grant).
+var literalSubjectRe = regexp.MustCompile(`^\^[^.\\*+?()\[\]{}|^$]+\$$`)
+
+// LiteralSubject returns the exact subject enclosed by a valid literal-anchored
+// pattern (`^<literal>$` → `<literal>`), and false when the pattern is not a
+// literal-anchored subject (wildcard / unanchored / regex metacharacters).
+func (ts TrustedSubject) LiteralSubject() (string, bool) {
+	if !literalSubjectRe.MatchString(ts.SubjectPattern) {
+		return "", false
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(ts.SubjectPattern, "^"), "$"), true
+}
+
+// Validate — Issuer must be an https URL to a public host (anti-SSRF on the
+// trust-config: no non-https / loopback / private / link-local host);
+// SubjectPattern must be a literal-anchored exact subject. Length caps mirror the
+// proto (≤512 each).
 func (ts TrustedSubject) Validate() error {
 	var errs error
-	if ts.Issuer == "" {
+	switch {
+	case ts.Issuer == "":
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument issuer: required"))
-	} else if len(ts.Issuer) > 512 {
+	case len(ts.Issuer) > 512:
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument issuer: length must be <=512"))
-	} else if u, err := url.Parse(ts.Issuer); err != nil || u.Scheme == "" || u.Host == "" {
-		errs = multierr.Append(errs, fmt.Errorf("Illegal argument issuer: must be an absolute URL"))
+	case !isPublicHTTPSIssuer(ts.Issuer):
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument issuer: must be an https URL to a public host"))
 	}
-	if ts.SubjectPattern == "" {
+	switch {
+	case ts.SubjectPattern == "":
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument subject_pattern: required"))
-	} else if len(ts.SubjectPattern) > 512 {
+	case len(ts.SubjectPattern) > 512:
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument subject_pattern: length must be <=512"))
-	} else if _, err := regexp.Compile(ts.SubjectPattern); err != nil {
-		errs = multierr.Append(errs, fmt.Errorf("Illegal argument subject_pattern: invalid RE2 regex: %v", err))
+	default:
+		if _, ok := ts.LiteralSubject(); !ok {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"Illegal argument subject_pattern: must be a literal anchored subject (^...$, no wildcards)"))
+		}
 	}
 	return errs
+}
+
+// isPublicHTTPSIssuer — true when raw parses as an https URL whose host is not a
+// loopback / private / link-local / unspecified IP and not `localhost`. A DNS
+// hostname (including cluster-internal FQDNs like `kube.cluster.local`) passes;
+// an IP literal is admitted only when it is a routable public address.
+func isPublicHTTPSIssuer(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return false
+		}
+	}
+	return true
 }
 
 func (c ServiceAccountOAuthClient) Validate() error {

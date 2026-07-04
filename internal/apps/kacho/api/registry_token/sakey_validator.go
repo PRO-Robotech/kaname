@@ -10,45 +10,49 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"strings"
 	"time"
-
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // errInvalidPEM — an internal parse sentinel; callers collapse it to
 // ErrInvalidCredentials (no detail leaks to the client).
 var errInvalidPEM = errors.New("registry token: invalid key PEM")
 
-// SAKeyRef — one registered ServiceAccount key: its PUBLIC half (SPKI PEM) plus
-// an optional expiry. kacho-iam never stores the private half.
-type SAKeyRef struct {
+// RegisteredKey — the SA-key registered for a Hydra client_id: its PUBLIC half
+// (SPKI PEM), the JWK kid (the SA-OAuth-client id) and owning ServiceAccount,
+// plus an optional expiry. kacho-iam never stores the private half. A federated
+// client carries no key material (PublicKeyPEM empty) — the docker path rejects it.
+type RegisteredKey struct {
+	ClientID     string
+	KeyID        string // the registered JWK kid → assertion header kid.
+	Subject      string // owning ServiceAccount id.
 	PublicKeyPEM string
+	KeyAlgorithm string
 	ExpiresAt    *time.Time // nil → no expiry.
 }
 
-// SAKeyLookup — reads the PUBLIC keys currently registered for a subject
-// (ServiceAccount id). The composition root wires it to the SA-key store; the
-// use-case package stays free of pgx.
-type SAKeyLookup interface {
-	PublicKeysForSubject(ctx context.Context, subjectID string) ([]SAKeyRef, error)
+// SAClientLookup — reverse lookup of the SA-key registered for a Hydra client_id.
+// The composition root wires it to the SA-key store; the use-case package stays
+// free of pgx.
+type SAClientLookup interface {
+	KeyByClientID(ctx context.Context, clientID string) (RegisteredKey, error)
 }
 
-// SAKeyValidator — the MVP APITokenValidator: the presented password IS the
-// issued SA-key private-key PEM (the one-shot secret the holder possesses). It
-// authenticates by deriving the public half and matching a REGISTERED,
-// non-expired key for the named subject — so a rotated/revoked key stops working,
-// and possession of the private key is proof of identity.
+// SAKeyValidator — the CredentialValidator for the docker path: the Basic user is
+// the Hydra client_id and the Basic password IS the issued SA-key private-key PEM
+// (the one-shot secret the holder possesses). It authenticates by resolving the
+// registered key for the client_id and matching the derived public half against
+// it — so a rotated/revoked key stops working, and possession of the private key
+// is proof of identity. The verified (client_id, kid) then builds the assertion.
 //
-// Any failure (bad subject prefix, unparseable key, no matching/expired key)
-// returns ErrInvalidCredentials — no distinction leaks which check failed.
+// Any failure (empty input, unparseable key, unknown/federated client, no match,
+// expired) returns ErrInvalidCredentials — no distinction leaks which check failed.
 type SAKeyValidator struct {
-	lookup SAKeyLookup
+	lookup SAClientLookup
 	now    func() time.Time
 }
 
 // NewSAKeyValidator — builder.
-func NewSAKeyValidator(l SAKeyLookup) *SAKeyValidator {
+func NewSAKeyValidator(l SAClientLookup) *SAKeyValidator {
 	return &SAKeyValidator{lookup: l, now: time.Now}
 }
 
@@ -58,38 +62,39 @@ func (v *SAKeyValidator) WithClock(now func() time.Time) *SAKeyValidator {
 	return v
 }
 
-// Validate resolves the subject from (username=SA-id, password=SA-key private PEM).
-func (v *SAKeyValidator) Validate(ctx context.Context, username, password string) (Subject, error) {
-	if username == "" || !strings.HasPrefix(username, domain.PrefixServiceAccount) {
-		return Subject{}, ErrInvalidCredentials
+// Validate resolves the credential from (clientID, private-key PEM).
+func (v *SAKeyValidator) Validate(ctx context.Context, clientID, privateKeyPEM string) (Credential, error) {
+	if clientID == "" || privateKeyPEM == "" {
+		return Credential{}, ErrInvalidCredentials
 	}
-	presented, err := publicDERFromPrivatePEM(password)
+	presented, err := publicDERFromPrivatePEM(privateKeyPEM)
 	if err != nil {
-		return Subject{}, ErrInvalidCredentials
+		return Credential{}, ErrInvalidCredentials
 	}
 
-	refs, err := v.lookup.PublicKeysForSubject(ctx, username)
+	key, err := v.lookup.KeyByClientID(ctx, clientID)
 	if err != nil {
-		// Store unavailable → fail-closed (no token). Distinguishing this from a
-		// genuine mismatch would leak subject existence, so collapse to the same
+		// Store failure / unknown client → fail-closed. Distinguishing this from
+		// a genuine mismatch would leak client existence, so collapse to the same
 		// sentinel.
-		return Subject{}, ErrInvalidCredentials
+		return Credential{}, ErrInvalidCredentials
 	}
-
-	now := v.now()
-	for _, ref := range refs {
-		if ref.ExpiresAt != nil && !ref.ExpiresAt.After(now) {
-			continue // expired registered key — never authenticates.
-		}
-		registered, derr := publicDERFromPublicPEM(ref.PublicKeyPEM)
-		if derr != nil {
-			continue // skip a malformed stored key rather than fail the whole match.
-		}
-		if bytes.Equal(presented, registered) {
-			return Subject{ID: username}, nil
-		}
+	if key.PublicKeyPEM == "" || key.KeyID == "" {
+		// Federated client (no key material) or a row missing its kid — the docker
+		// private_key_jwt path cannot authenticate it.
+		return Credential{}, ErrInvalidCredentials
 	}
-	return Subject{}, ErrInvalidCredentials
+	if key.ExpiresAt != nil && !key.ExpiresAt.After(v.now()) {
+		return Credential{}, ErrInvalidCredentials
+	}
+	registered, err := publicDERFromPublicPEM(key.PublicKeyPEM)
+	if err != nil {
+		return Credential{}, ErrInvalidCredentials
+	}
+	if !bytes.Equal(presented, registered) {
+		return Credential{}, ErrInvalidCredentials
+	}
+	return Credential{ClientID: clientID, KeyID: key.KeyID, Subject: key.Subject}, nil
 }
 
 // publicDERFromPrivatePEM parses a PKCS#8 private-key PEM and returns the PKIX

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho-iam/internal/registrytokenwire"
 )
@@ -65,7 +64,8 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 		"cfg.APIServer.RegistryToken.ListenAddress()",
 		"cfg.APIServer.RegistryToken.TokenIssuer()",
 		"cfg.APIServer.RegistryToken.TokenService()",
-		"cfg.APIServer.RegistryToken.TokenTTL()",
+		"cfg.AuthN.ResolveHydraTokenURL()",
+		"cfg.AuthN.ResolveHydraTokenEndpoint()",
 		"registryTokenHTTPServer.Serve(registryTokenListener)",
 		"registryTokenHTTPServer.Shutdown(",
 		"registry_token_http_endpoint",
@@ -89,10 +89,10 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	tok := cfg.APIServer.RegistryToken
 
 	mux := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
-		Issuer:            tok.TokenIssuer(),
+		Realm:             tok.TokenIssuer(),
 		Service:           tok.TokenService(),
-		JWKSEncryptionKey: make([]byte, 32),
-		TTL:               registrytokenuc.Config{TTL: tok.TokenTTL()},
+		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
+		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 	})
 
 	rec := httptest.NewRecorder()

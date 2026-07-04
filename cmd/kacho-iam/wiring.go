@@ -461,6 +461,9 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	auditEmitter := kachopg.NewAuditOutboxEmitter(pool)
 
 	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	// Register exact-subject jwt-bearer trust-grants for federated (k8s/CI) keys —
+	// the same Hydra admin client carries the trust-grant endpoint.
+	issueUC.WithTrustGrantAdmin(hydraAdmin)
 	// Wire the post-Issue secret redactor. After the Operation is
 	// MarkDone'd with plaintext client_secret, this pg adapter clears the
 	// client_secret field in the proto-marshalled response_data (BYTEA) via a

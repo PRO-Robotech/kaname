@@ -108,6 +108,8 @@ type AuthNConfig struct {
 	Mode                     Mode   `mapstructure:"mode"`
 	Domain                   string `mapstructure:"domain"`
 	HydraIssuer              string `mapstructure:"hydra-issuer"`
+	HydraAdminURL            string `mapstructure:"hydra-admin-url"`
+	HydraTokenURL            string `mapstructure:"hydra-token-url"`
 	HookSharedSecret         string `mapstructure:"hook-shared-secret"`
 	HookSharedSecretEnv      string `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex     string `mapstructure:"jwks-encryption-key-hex"`

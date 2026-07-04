@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // Package registrytokenhttp — thin HTTP transport for the IAM Docker Registry v2
-// auth-server: the `/token` endpoint (Basic-auth → identity-JWT) and its JWKS.
+// auth-server: the `/iam/token` endpoint (Basic-auth → Hydra-brokered token).
 //
 // Transport only: parse the Docker token-auth request, delegate to the
-// registry_token use-case, format the Docker-compatible JSON. No business logic.
+// registry_token use-case (which verifies the SA-key and brokers a token from
+// Ory Hydra), format the Docker-compatible JSON. No business logic.
 //
-// Endpoints:
+// The data-plane verifies the returned token against HYDRA's JWKS (not an IAM
+// JWKS) — kacho-iam no longer mints or serves registry verification keys, so
+// there is no `/iam/token/jwks` endpoint here.
 //
-//	GET|POST /iam/token       — Docker Registry v2 token endpoint (Basic → JWT).
-//	GET      /iam/token/jwks  — JWK Set for verifying minted identity-JWTs.
+// Endpoint:
+//
+//	GET|POST /iam/token — Docker Registry v2 token endpoint (Basic → Hydra token).
 package registrytokenhttp
 
 import (
@@ -21,27 +25,20 @@ import (
 	"net/http"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 )
 
-// Route paths for the registry token endpoints. TokenPath MUST equal the
-// data-plane's Bearer realm path (the WWW-Authenticate realm), so verifiers and
-// docker clients resolve the same URL.
-const (
-	TokenPath = "/iam/token"
-	JWKSPath  = "/iam/token/jwks"
-)
+// TokenPath — the token endpoint path. MUST equal the data-plane's Bearer realm
+// path (the WWW-Authenticate realm), so verifiers and docker clients resolve the
+// same URL.
+const TokenPath = "/iam/token"
 
-// NewMux mounts the token + JWKS handlers on their canonical paths. The caller
-// exposes the returned mux on an EXTERNAL-reachable HTTP listener (docker clients
-// hit /iam/token through the edge) — unlike the cluster-internal hooks mux.
-func NewMux(token, jwks http.Handler) *http.ServeMux {
+// NewMux mounts the token handler on its canonical path. The caller exposes the
+// returned mux on an EXTERNAL-reachable HTTP listener (docker clients hit
+// /iam/token through the edge) — unlike the cluster-internal hooks mux.
+func NewMux(token http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if token != nil {
 		mux.Handle(TokenPath, token)
-	}
-	if jwks != nil {
-		mux.Handle(JWKSPath, jwks)
 	}
 	return mux
 }
@@ -49,11 +46,6 @@ func NewMux(token, jwks http.Handler) *http.ServeMux {
 // TokenIssuer — the registry_token use-case port the handler delegates to.
 type TokenIssuer interface {
 	Execute(ctx context.Context, in registrytokenuc.IssueInput) (registrytokenuc.IssueOutput, error)
-}
-
-// JWKSProvider — supplies the public JWK Set for verifying minted tokens.
-type JWKSProvider interface {
-	PublicJWKS(ctx context.Context) (registrytoken.JWKS, error)
 }
 
 // Config — handler config (the WWW-Authenticate realm + default service name).
@@ -66,7 +58,7 @@ type Config struct {
 	DefaultService string
 }
 
-// TokenHandler — the `/token` endpoint.
+// TokenHandler — the `/iam/token` endpoint.
 type TokenHandler struct {
 	cfg    Config
 	issuer TokenIssuer
@@ -110,12 +102,17 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Service:  service,
 	})
 	if err != nil {
-		if errors.Is(err, registrytokenuc.ErrUnauthenticated) {
+		switch {
+		case errors.Is(err, registrytokenuc.ErrUnauthenticated):
 			h.challenge(w, service)
-			return
+		case errors.Is(err, registrytokenuc.ErrIssuerUnavailable):
+			// The issuer (Hydra) is a hard dependency of the mint path — its
+			// unavailability is fail-closed 503, never a token; the raw
+			// Hydra/network error never leaks (fixed text).
+			http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
+		default:
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		}
-		// Signing / infra failure — fixed text, no internal detail leaked.
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -134,30 +131,4 @@ func (h *TokenHandler) challenge(w http.ResponseWriter, service string) {
 	w.Header().Set("WWW-Authenticate",
 		fmt.Sprintf(`Bearer realm=%q,service=%q`, h.cfg.Realm, service))
 	http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-}
-
-// JWKSHandler — the `/token/jwks` endpoint.
-type JWKSHandler struct {
-	provider JWKSProvider
-}
-
-// NewJWKSHandler — builder.
-func NewJWKSHandler(p JWKSProvider) *JWKSHandler { return &JWKSHandler{provider: p} }
-
-func (h *JWKSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-	set, err := h.provider.PublicJWKS(r.Context())
-	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	// Public verification keys rotate slowly; allow brief caching by verifiers.
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(set)
 }
