@@ -5,7 +5,7 @@ package pg_test
 
 // tier_parity_integration_test.go — the load-bearing tier-parity assertion for
 // the RBAC rules model. Testcontainers Postgres 16; reads the
-// ACTUAL 64 re-seeded system roles (permissions + rules columns) and asserts that
+// ACTUAL 65 re-seeded system roles (permissions + rules columns) and asserts that
 // the rules-derived per-(module,resource) tier EQUALS the legacy
 // permissions-derived per-(module,resource) tier for EVERY role. If any role
 // diverges, the re-seed rules for that role are wrong (fix the migration, never
@@ -139,7 +139,7 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 		roles = append(roles, roleRow{name: name, perms: perms, rules: dr})
 	}
 	require.NoError(t, rows.Err())
-	require.Len(t, roles, 64, "F-53: expected exactly 64 system roles (58 catalog + 5 SEC-C module-SA from mig 0009 + owner from mig 0035)")
+	require.Len(t, roles, 65, "F-53: expected exactly 65 system roles (58 catalog + 5 SEC-C module-SA from mig 0009 + owner from mig 0035 + registry module-SA from mig 0044)")
 
 	var mismatches []string
 	for _, r := range roles {
@@ -167,7 +167,7 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 		}
 	}
 	assert.Empty(t, mismatches,
-		"F-53 tier-parity: rules-derived tier must equal legacy permissions-derived tier for ALL 64 roles; mismatches:\n%s",
+		"F-53 tier-parity: rules-derived tier must equal legacy permissions-derived tier for ALL 65 roles; mismatches:\n%s",
 		strings.Join(mismatches, "\n"))
 
 	// emit-FACT gap — the tier-parity assertion above proves the tier VALUE
