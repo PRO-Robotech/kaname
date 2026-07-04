@@ -116,13 +116,13 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 		grants = []string{"client_credentials"}
 	}
 	payload := HydraOAuthClient{
-		ClientID:                req.ClientID,
-		ClientName:              req.ClientName,
-		GrantTypes:              grants,
-		ResponseTypes:           []string{"token"},
-		Scope:                   req.Scope,
-		Audience:                req.Audience,
-		Owner:                   req.Owner,
+		ClientID:                    req.ClientID,
+		ClientName:                  req.ClientName,
+		GrantTypes:                  grants,
+		ResponseTypes:               []string{"token"},
+		Scope:                       req.Scope,
+		Audience:                    req.Audience,
+		Owner:                       req.Owner,
 		TokenEndpointAuthMethod:     authMethod,
 		TokenEndpointAuthSigningAlg: req.TokenEndpointAuthSigningAlg,
 		JWKS:                        req.JWKS,
