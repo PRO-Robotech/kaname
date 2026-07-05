@@ -140,7 +140,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 	// 4. Redact.
 	redactor := kachopg.NewOpsResponseRedactor(pool, "kacho_iam")
 	require.NoError(t, redactor.RedactResponseField(ctx, op.ID,
-		[]string{"client_secret"}, `"<redacted>"`))
+		[]string{"client_secret"}))
 
 	// 5. Read back AFTER redact — ClientSecret must be empty; other fields kept.
 	got, err = opsRepo.Get(ctx, op.ID)
@@ -161,7 +161,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 	// 6. Idempotent re-redact — second call must not error and must not flip
 	//    anything else.
 	require.NoError(t, redactor.RedactResponseField(ctx, op.ID,
-		[]string{"client_secret"}, `"<redacted>"`))
+		[]string{"client_secret"}))
 	got, err = opsRepo.Get(ctx, op.ID)
 	require.NoError(t, err)
 	{
@@ -187,7 +187,7 @@ func TestKAC164_RedactSAKey_NonExistentOp_NoError(t *testing.T) {
 
 	redactor := kachopg.NewOpsResponseRedactor(pool, "kacho_iam")
 	err = redactor.RedactResponseField(ctx, "iop_does_not_exist",
-		[]string{"client_secret"}, `"<redacted>"`)
+		[]string{"client_secret"})
 	require.NoError(t, err, "missing op must not error")
 }
 
@@ -216,6 +216,6 @@ func TestKAC164_RedactSAKey_OpWithoutResponse_NoError(t *testing.T) {
 
 	redactor := kachopg.NewOpsResponseRedactor(pool, "kacho_iam")
 	err = redactor.RedactResponseField(ctx, op.ID,
-		[]string{"client_secret"}, `"<redacted>"`)
+		[]string{"client_secret"})
 	require.NoError(t, err, "op without response must no-op")
 }

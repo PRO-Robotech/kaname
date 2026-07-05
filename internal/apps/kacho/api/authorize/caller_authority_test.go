@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
@@ -40,6 +41,20 @@ func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
 		ModelID:   "test-model",
 	})
 	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth)
+}
+
+// newHandlerWithAuthorityProd builds the handler in PRODUCTION mode, where the
+// inner caller-authority gate fails closed for an anonymous/system principal
+// that carries no verified module cert (the public-listener bypass).
+func newHandlerWithAuthorityProd(svcCheck bool, auth *authorityStub) *Handler {
+	return newHandlerWithAuthority(svcCheck, auth).WithProductionMode(true)
+}
+
+// moduleCertCtx injects a verified mTLS module-cert SAN into ctx, simulating a
+// cluster-internal module PDP peer call over the :9091 internal listener.
+func moduleCertCtx() context.Context {
+	return grpcsrv.WithCertIdentity(context.Background(),
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc", true)
 }
 
 func userCtx(id string) context.Context {
@@ -145,6 +160,60 @@ func TestCallerAuthority_Anonymous_PassesThrough(t *testing.T) {
 	}
 	if auth.calls != 0 {
 		t.Errorf("anonymous path must not hit the authority checker; calls=%d", auth.calls)
+	}
+}
+
+// TestCallerAuthority_Anonymous_ProdMode_NoCert_Denied — the public-listener
+// bypass (CWE-863). In production an anonymous/system caller that presents NO
+// verified module cert (i.e. reached the PUBLIC :9090 listener, which has no
+// module-cert floor) must be DENIED, not blanket-allowed. Before the fail-closed
+// fix this Check returned the underlying decision (fail-open oracle).
+func TestCallerAuthority_Anonymous_ProdMode_NoCert_Denied(t *testing.T) {
+	auth := &authorityStub{allow: map[string]bool{}}
+	h := newHandlerWithAuthorityProd(true, auth)
+	_, err := h.Check(context.Background(), &iamv1.AuthorizeCheckRequest{
+		Subject:  "user:usr_victim",
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:   "iam.accounts.get",
+	})
+	requireDenied(t, err)
+	if auth.calls != 0 {
+		t.Errorf("denied public anonymous call must not reach the FGA oracle; calls=%d", auth.calls)
+	}
+}
+
+// TestCallerAuthority_Anonymous_ProdMode_NoCert_ListSubjects_Denied — the same
+// fail-closed posture for the enumeration RPC on the public listener.
+func TestCallerAuthority_Anonymous_ProdMode_NoCert_ListSubjects_Denied(t *testing.T) {
+	auth := &authorityStub{allow: map[string]bool{}}
+	h := newHandlerWithAuthorityProd(true, auth)
+	_, err := h.ListSubjects(context.Background(), &iamv1.ListSubjectsRequest{
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_victim"},
+		Action:   "iam.accounts.listAccessBindings",
+	})
+	requireDenied(t, err)
+}
+
+// TestCallerAuthority_Anonymous_ProdMode_VerifiedModuleCert_Allowed — a GENUINE
+// cluster-internal module PDP peer (verified mTLS module SAN on :9091) still
+// passes the inner gate in production; the internal listener's verified-cert
+// floor governs it. This is the path the fail-closed fix must NOT break.
+func TestCallerAuthority_Anonymous_ProdMode_VerifiedModuleCert_Allowed(t *testing.T) {
+	auth := &authorityStub{allow: map[string]bool{}}
+	h := newHandlerWithAuthorityProd(true, auth)
+	resp, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
+		Subject:  "user:usr_bob",
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:   "iam.accounts.get",
+	})
+	if err != nil {
+		t.Fatalf("verified module PDP peer must pass through in prod: %v", err)
+	}
+	if !resp.GetAllowed() {
+		t.Errorf("expected the underlying decision to proceed for the module peer")
+	}
+	if auth.calls != 0 {
+		t.Errorf("module-peer path must not hit the authority checker; calls=%d", auth.calls)
 	}
 }
 

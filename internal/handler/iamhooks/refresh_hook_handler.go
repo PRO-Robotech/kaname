@@ -214,9 +214,12 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"ext_claims": claims,
 	}
 
-	// 6. Audit emit success.
+	// 6. Audit emit success. Log-and-continue on failure (mirrors
+	// token_hook.authn.token.issued): a failing/backpressured audit sink must
+	// not be invisible — swallowing the error silently drops the authn audit
+	// record with zero operator signal (OWASP A09 / CWE-778).
 	if h.audit != nil {
-		_ = h.audit.Emit(ctx, AuditEvent{
+		if emitErr := h.audit.Emit(ctx, AuditEvent{
 			EventType:       "authn.refresh.issued",
 			TenantAccountID: string(primary.AccountID),
 			Payload: map[string]any{
@@ -227,7 +230,10 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"jkt":       payload.Session.Cnf.Jkt,
 				"x5t_s256":  payload.Session.Cnf.X5tS256,
 			},
-		})
+		}); emitErr != nil {
+			h.logger.Warn("refresh_hook: audit emit failed",
+				"event_type", "authn.refresh.issued", "err", emitErr)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -301,7 +307,9 @@ func (h *RefreshHookHandler) denyAndAudit(ctx context.Context, p hydraRefreshHoo
 	if h.audit == nil {
 		return
 	}
-	_ = h.audit.Emit(ctx, AuditEvent{
+	// Log-and-continue on emit failure: a dropped "authn.refresh.denied" record
+	// must be observable (OWASP A09 / CWE-778), not silently swallowed.
+	if emitErr := h.audit.Emit(ctx, AuditEvent{
 		EventType: "authn.refresh.denied",
 		Payload: map[string]any{
 			"subject":   p.Subject,
@@ -309,5 +317,8 @@ func (h *RefreshHookHandler) denyAndAudit(ctx context.Context, p hydraRefreshHoo
 			"client_id": p.Request.ClientID,
 			"jti":       p.AccessTokenClaims.Jti,
 		},
-	})
+	}); emitErr != nil {
+		h.logger.Warn("refresh_hook: audit emit failed",
+			"event_type", "authn.refresh.denied", "err", emitErr)
+	}
 }

@@ -65,25 +65,15 @@ func NewOpsResponseRedactor(pool *pgxpool.Pool, schema string) *OpsResponseRedac
 //	fieldPath  — proto field name(s) to clear. Top-level only (no dotted paths;
 //	             multi-field redaction iterates them). Names match the proto
 //	             field name in lowerCamel form ("client_secret", "password").
-//	valueJSON  — historical positional arg kept for API stability; ignored —
-//	             field is set to its zero value (clearing strings → "", bytes
-//	             → empty, etc.). Pass `"<redacted>"` for documentation; the
-//	             literal is never written.
+//	             Each named field is set to its zero value (strings → "", bytes
+//	             → empty, etc.); the cleared value is never surfaced.
 //
 // Returns nil even when no row matches OR when the row has no response_data
 // (defensive — the redact races with worker.MarkError; a failed op never
 // stored the secret).
-func (r *OpsResponseRedactor) RedactResponseField(ctx context.Context, opID string, fieldPath []string, valueJSON string) error {
+func (r *OpsResponseRedactor) RedactResponseField(ctx context.Context, opID string, fieldPath []string) error {
 	if len(fieldPath) == 0 {
 		return errors.New("ops redact: empty field path")
-	}
-	// Pre-validate valueJSON for callers that pass it; we still discard it.
-	// Empty string is allowed (means "rely on default-zero clear").
-	if valueJSON != "" {
-		// We do not parse JSON because we are not going to use it — but we
-		// keep the API stable for callers that pass a literal like
-		// `"<redacted>"`. Any non-empty value is fine.
-		_ = valueJSON
 	}
 
 	table := pgx.Identifier{r.schema, "operations"}.Sanitize()

@@ -43,3 +43,53 @@ is intentionally **not** done as part of a single-service change. Tracked as a
 convergence item for the next corelib config pass; no runtime impact until then.
 
 _Reviewed 2026-07-05 (security-hardening audit)._
+
+---
+
+## 2. `access_bindings.subject_id` has no within-service subject-existence enforcement
+
+**Convention** (project hard-rule #10): every within-service reference must be
+DB-enforced (FK / trigger / CAS), never left to software validation. `group_members`
+follows this with the `group_members_member_exists` existence trigger, and
+`access_bindings.role_id` is FK-backed (`access_bindings_role_fk`).
+
+**Divergence**: `access_bindings.subject_id` (polymorphic `user|group|service_account`,
+same `kacho_iam` DB) is validated by **nothing** — only a `CHECK` on the
+`subject_type` enum and the partial `UNIQUE access_bindings_active_grant_uniq`
+(duplicate-active-grant guard). `AccessBinding.Create` accepts a binding whose
+subject does not (yet) exist. The `access_binding_subjects` set-table (migration
+0028) likewise carries the polymorphic `subject_id` with no existence check.
+
+**Why (by design, not a defect)**: this is the **grant-before-subject-exists /
+invite** flow. A tenant admin grants a project/account role to a principal that
+has not yet been provisioned in this account — e.g. an invited user who has never
+logged in (a `PENDING` user row, or no row at all until first login materializes
+it), or a subject managed in another account. Requiring the subject to pre-exist
+would break the standard IAM pattern of pre-authorizing access ahead of first
+sign-in. The `role_id` reference *is* FK-enforced because a role is always a
+same-account catalog object that must exist at grant time; a *subject* is
+deliberately allowed to be forward-referenced.
+
+**Safety**: a binding to a not-yet-existent subject is inert — it grants nothing
+until a matching subject id materializes, at which point the already-emitted FGA
+tuples resolve. The reverse direction (deleting a subject that still has active
+bindings) *is* guarded: `User.Delete` / `ServiceAccount.Delete` / `Group.Delete`
+carry a `NOT EXISTS (access_bindings WHERE subject_id = …)` guard, so a live
+subject cannot be removed out from under an active grant through the normal delete
+path. (A concurrent create-binding-vs-delete-subject race under READ COMMITTED can
+still leave a binding referencing a just-deleted subject — the same class of
+polymorphic-no-FK write-skew as `group_members`; it is tolerated here for the same
+reason the forward reference is: the binding is inert without a subject, and the
+authoritative fix is the shared one below.)
+
+**Convergence path (deferred)**: the only way to make a polymorphic reference
+race-free is to stop it being polymorphic — split `subject_id` into typed nullable
+FK columns (`subject_user_id` / `subject_group_id` / `subject_sa_id`, each a real
+FK, exactly-one `CHECK`) — OR run the create/delete pair at `SERIALIZABLE`. Both
+are a shared redesign that must also cover `group_members` (identical shape) and
+is out of scope for a single hardening pass; tracked as a dedicated schema-redesign
+item. If the typed-FK route is taken, `ON DELETE RESTRICT` would additionally make
+subject-existence a hard DB invariant — but only if the invite/pre-provision flow
+is first reworked to tolerate it.
+
+_Reviewed 2026-07-05 (security-hardening audit)._

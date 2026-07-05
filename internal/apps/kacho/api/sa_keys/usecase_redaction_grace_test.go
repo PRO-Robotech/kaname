@@ -26,7 +26,7 @@ type recordedRedact struct {
 	field string
 }
 
-func (r *recordingRedactor) RedactResponseField(_ context.Context, _ string, fieldPath []string, _ string) error {
+func (r *recordingRedactor) RedactResponseField(_ context.Context, _ string, fieldPath []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, recordedRedact{at: time.Now(), field: strings.Join(fieldPath, ".")})

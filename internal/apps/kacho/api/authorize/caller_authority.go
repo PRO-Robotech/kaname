@@ -30,6 +30,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
@@ -61,10 +63,16 @@ var callerAuthorityRelations = []string{"admin", "checkAuthorization"}
 func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv1.ResourceRef) error {
 	callerSubject, ok := authzguard.PrincipalSubject(ctx)
 	if !ok {
-		// Anonymous / system / unknown-type principal → cluster-internal module
-		// PDP path (or an unauthenticated read on a suffix-whitelisted RPC). The
-		// verified-cert floor on the internal listener is the governing gate.
-		return nil
+		// Anonymous / system / unknown-type principal. This is EITHER a genuine
+		// cluster-internal module PDP peer call (verified mTLS module cert on the
+		// :9091 internal listener — its CallerPolicy verified-cert floor governs)
+		// OR an unauthenticated caller that reached the PUBLIC :9090 listener,
+		// which has NO module-cert floor. Do NOT blanket-allow: that fails open
+		// and turns Check/ListObjects/ListSubjects into an anonymous
+		// authorization oracle over every tenant (CWE-863 / CWE-200). Distinguish
+		// the two by the verified mTLS client-cert identity, not by principal
+		// absence.
+		return h.authorizeAnonymousPeer(ctx)
 	}
 	// Self-query: a tenant may always ask authz questions about itself.
 	if subject != "" && callerSubject == subject {
@@ -85,6 +93,37 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 				}
 			}
 		}
+	}
+	return status.Error(codes.PermissionDenied, "permission denied")
+}
+
+// authorizeAnonymousPeer decides the fate of an anonymous / system principal
+// (PrincipalSubject !ok) reaching the inner gate. The only legitimate
+// no-tenant-principal caller of AuthorizeService is a cluster-internal module
+// PDP peer, which is identified by a VERIFIED mTLS module SAN
+// (spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) on the :9091 internal listener —
+// NOT by the mere absence of a principal. It returns nil (allow) only when:
+//
+//   - a verified module SAN is present (genuine internal PDP peer — the internal
+//     listener's CallerPolicy verified-cert floor is the governing outer gate); OR
+//   - the process is in dev / insecure-listener mode (prodMode == false), where
+//     there is no mTLS at all so the public/internal listeners are
+//     indistinguishable — permissive back-compat, mirroring
+//     authzguard.CallerPolicy / RelationWriteGate.
+//
+// Otherwise (production, no verified module cert) the caller reached the PUBLIC
+// :9090 listener with no credentials and is DENIED — fail-closed, closing the
+// public-listener authorization-oracle bypass.
+func (h *Handler) authorizeAnonymousPeer(ctx context.Context) error {
+	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
+		if _, ok := authzguard.SANToServiceDomain(san); ok {
+			return nil
+		}
+	}
+	if !h.prodMode {
+		// Dev / insecure listener: no mTLS to distinguish listeners → allow
+		// (insecure back-compat). Production is strictly fail-closed above.
+		return nil
 	}
 	return status.Error(codes.PermissionDenied, "permission denied")
 }

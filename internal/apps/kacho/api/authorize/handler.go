@@ -51,6 +51,13 @@ type Handler struct {
 	// or resource-authority (fail-closed). Wired to the OpenFGA client in the
 	// composition root via WithCallerAuthority.
 	authority authzguard.RelationChecker
+	// prodMode — production AuthN mode (cfg.AuthN.Mode.IsProduction()). It governs
+	// the inner caller-authority gate's treatment of an anonymous/system principal
+	// that carries NO verified module cert: in production such a caller is on the
+	// PUBLIC listener (no module-cert floor) and is DENIED (fail-closed); in dev
+	// (insecure listener, no mTLS at all) it is allowed (back-compat, mirroring
+	// authzguard.CallerPolicy / RelationWriteGate). Set via WithProductionMode.
+	prodMode bool
 }
 
 // NewHandler — builder. Both svc and whoAmI are required (composition root
@@ -63,6 +70,16 @@ func NewHandler(svc *service.AuthorizeService, whoAmI *WhoAmIUseCase) *Handler {
 // caller-authority defense-in-depth gate. Returns the receiver for chaining.
 func (h *Handler) WithCallerAuthority(checker authzguard.RelationChecker) *Handler {
 	h.authority = checker
+	return h
+}
+
+// WithProductionMode toggles fail-closed enforcement of the inner
+// caller-authority gate for anonymous/system principals without a verified
+// module cert (the public-listener bypass). Defaults to dev-mode (permissive
+// back-compat); the composition root enables it from cfg.AuthN.Mode.IsProduction().
+// Returns the receiver for chaining.
+func (h *Handler) WithProductionMode(prod bool) *Handler {
+	h.prodMode = prod
 	return h
 }
 

@@ -152,6 +152,26 @@ func awaitCondAudit(ctx context.Context, t *testing.T, pool *pgxpool.Pool, event
 	t.Fatalf("audit row %s for condition %s never appeared", eventType, condID)
 }
 
+// awaitOpError polls the operations table until the given operation is Done and
+// asserts it terminated in error (the expected duplicate-name rollback). This is
+// the deterministic gate the rollback-no-orphan test needs — it replaces a fixed
+// time.Sleep that could let the absence assertions run before the worker had even
+// processed the operation (false GREEN).
+func awaitOpError(ctx context.Context, t *testing.T, opsRepo operations.Repo, opID string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		op, err := opsRepo.Get(ctx, opID)
+		if err != nil || op == nil {
+			return false
+		}
+		return op.Done
+	}, 5*time.Second, 20*time.Millisecond, "operation %s never reached Done", opID)
+	op, err := opsRepo.Get(ctx, opID)
+	require.NoError(t, err)
+	require.NotNil(t, op.Error,
+		"duplicate-name Create must terminate the operation in error (23505 rollback), got success")
+}
+
 // awaitConditionStatus polls until the conditions row reaches the target status.
 func awaitConditionStatus(ctx context.Context, t *testing.T, pool *pgxpool.Pool, condID, want string) {
 	t.Helper()
@@ -358,15 +378,20 @@ func TestConditionsAudit_CreateRollbackNoOrphan(t *testing.T) {
 	// Second Create with the SAME (folder, name) — the Insert hits
 	// conditions_folder_name_uniq (23505) → the worker-tx rolls back. No second
 	// condition row and no orphan audit row may exist.
-	_, err = svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
+	dupOp, err := svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
 		FolderID:   folderID,
 		Name:       "dup-name",
 		Expression: "non_expired",
 	})
 	require.NoError(t, err) // async — error surfaces on the Operation, not here
+	require.NotNil(t, dupOp)
 
-	// Give the worker time to attempt + roll back.
-	time.Sleep(500 * time.Millisecond)
+	// Deterministically gate on the SUBJECT operation reaching a terminal state
+	// (Done) — the orphan-audit regression is produced DURING worker processing,
+	// so asserting absence before the worker has processed the op would pass
+	// vacuously. Poll the operation until Done and assert it terminated in error
+	// (the 23505 duplicate), then run the absence assertions. No fixed sleep.
+	awaitOpError(ctx, t, operations.NewRepo(pool, "kacho_iam"), dupOp.ID)
 
 	var condCount int
 	require.NoError(t, pool.QueryRow(ctx,

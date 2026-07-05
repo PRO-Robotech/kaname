@@ -176,10 +176,15 @@ func TestIntegration_SingleEmit_EndToEnd(t *testing.T) {
 	d, err := drainer.New[clients.SubjectChangeEvent](
 		pool,
 		drainer.Config{
-			Table:        "kacho_iam.subject_change_outbox",
-			Channel:      "kacho_iam_subject_outbox_added",
-			BatchSize:    16,
-			PollFallback: 30 * time.Second,
+			Table:   "kacho_iam.subject_change_outbox",
+			Channel: "kacho_iam_subject_outbox_added",
+			BatchSize: 16,
+			// PollFallback well under the 1s delivery deadline so a NOTIFY that is
+			// missed because the row was INSERTed before the drainer finished
+			// installing its LISTEN is still drained by the periodic catch-up tick
+			// within the assertion window — making delivery deterministic instead
+			// of depending on a fixed "give drainer time to LISTEN" sleep.
+			PollFallback: 250 * time.Millisecond,
 			MaxAttempts:  5,
 			BackoffMin:   100 * time.Millisecond,
 			BackoffMax:   500 * time.Millisecond,
@@ -195,8 +200,10 @@ func TestIntegration_SingleEmit_EndToEnd(t *testing.T) {
 	defer drainerCancel()
 	drainerDone := make(chan error, 1)
 	go func() { drainerDone <- d.Run(drainerCtx) }()
-	// Give drainer time to install LISTEN.
-	time.Sleep(200 * time.Millisecond)
+	// No fixed "wait for LISTEN" sleep: the row is drained either by the NOTIFY
+	// (if LISTEN is already installed), the drainer's startup catch-up scan, or
+	// the sub-second PollFallback tick — the bounded delivery poll below is the
+	// deterministic gate.
 
 	// INSERT a post-rollout-shape row (payload populated).
 	_, err = pool.Exec(ctx, `
@@ -376,7 +383,10 @@ func TestIntegration_AtomicRollback_NoLeak(t *testing.T) {
 	drainerCtx, drainerCancel := context.WithCancel(ctx)
 	defer drainerCancel()
 	go func() { _ = d.Run(drainerCtx) }()
-	time.Sleep(200 * time.Millisecond)
+	// No fixed "wait for LISTEN" sleep: the post-rollback sentinel row below is a
+	// committed barrier drained via NOTIFY / startup catch-up / the 1s
+	// PollFallback tick, which deterministically proves a full drain cycle
+	// elapsed past the rolled-back INSERT.
 
 	// Open real pgx.Tx, INSERT, ROLLBACK.
 	tx, err := pool.Begin(ctx)

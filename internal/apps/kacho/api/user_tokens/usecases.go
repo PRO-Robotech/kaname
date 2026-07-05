@@ -72,7 +72,7 @@ type OAuthClientAdmin interface {
 // OpsResponseRedactor затирает именованное поле в proto-marshalled success-response
 // строки `operations`. Идемпотентно: повторный прогон на уже-затёртом поле — no-op.
 type OpsResponseRedactor interface {
-	RedactResponseField(ctx context.Context, opID string, fieldPath []string, valueJSON string) error
+	RedactResponseField(ctx context.Context, opID string, fieldPath []string) error
 }
 
 // ───────────────── Issue use-case ─────────────────
@@ -275,7 +275,7 @@ func (u *IssueUserTokenUseCase) awaitOpDone(ctx context.Context, opID string) bo
 // redactSecretFields затирает одноразовый private_key_pem одним UPDATE; idempotent.
 func (u *IssueUserTokenUseCase) redactSecretFields(ctx context.Context, opID string) {
 	if rerr := u.redactor.RedactResponseField(ctx, opID,
-		[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		[]string{"private_key_pem"}); rerr != nil && u.logger != nil {
 		u.logger.ErrorContext(ctx, "user-token private_key_pem redaction failed — plaintext key may remain in the operation response",
 			slog.String("operation_id", opID), slog.Any("err", rerr))
 	}

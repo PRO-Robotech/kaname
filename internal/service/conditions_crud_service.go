@@ -524,7 +524,7 @@ func normaliseMask(paths []string) map[string]bool {
 }
 
 func marshalCondition(c domain.Condition) (*anypb.Any, error) {
-	pb := conditionToProto(c)
+	pb := ConditionToProto(c)
 	return anypb.New(pb)
 }
 
@@ -532,8 +532,13 @@ func marshalEmpty() (*anypb.Any, error) {
 	return anypb.New(&iamv1.DeleteConditionMetadata{})
 }
 
-// conditionToProto — domain → iamv1.Condition mapping (handler-shared).
-func conditionToProto(c domain.Condition) *iamv1.Condition {
+// ConditionToProto — the single source of truth for the domain.Condition →
+// iamv1.Condition projection. It lives here (the use-case layer) because the
+// service must embed it in the completed Operation.response Any, and the layer
+// cannot import the handler; the conditions gRPC handler reuses THIS mapper for
+// its synchronous Get/List path so the async and sync projections can never
+// drift (previously each layer carried its own copy — CWE-1041).
+func ConditionToProto(c domain.Condition) *iamv1.Condition {
 	pb := &iamv1.Condition{
 		Id:          string(c.ID),
 		FolderId:    c.FolderID,

@@ -43,7 +43,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetConditionRequest) (*iam
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return ConditionToProto(c), nil
+	return service.ConditionToProto(c), nil
 }
 
 // List — see iamv1.ConditionsServiceServer.
@@ -59,7 +59,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListConditionsRequest) (*
 	}
 	pbs := make([]*iamv1.Condition, 0, len(rows))
 	for _, r := range rows {
-		pbs = append(pbs, ConditionToProto(r))
+		pbs = append(pbs, service.ConditionToProto(r))
 	}
 	return &iamv1.ListConditionsResponse{Conditions: pbs, NextPageToken: next}, nil
 }
@@ -153,45 +153,6 @@ func (h *Handler) Evaluate(ctx context.Context, req *iamv1.EvaluateConditionRequ
 }
 
 // ── helpers ──
-
-// ConditionToProto — domain.Condition → iamv1.Condition.
-func ConditionToProto(c domain.Condition) *iamv1.Condition {
-	pb := &iamv1.Condition{
-		Id:          string(c.ID),
-		FolderId:    c.FolderID,
-		Name:        c.Name,
-		Description: c.Description,
-		Labels:      c.Labels,
-		Expression:  c.Expression,
-		Status:      conditionStatusToProto(c.Status),
-	}
-	if !c.CreatedAt.IsZero() {
-		pb.CreatedAt = shared.TimestampProto(c.CreatedAt)
-	}
-	if len(c.ParametersSchema) > 0 {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(c.ParametersSchema), &m); err == nil {
-			if s, err := structpb.NewStruct(m); err == nil {
-				pb.ParametersSchema = s
-			}
-		}
-	}
-	return pb
-}
-
-func conditionStatusToProto(s domain.ConditionStatus) iamv1.Condition_Status {
-	switch s {
-	case domain.ConditionStatusCreating:
-		return iamv1.Condition_CREATING
-	case domain.ConditionStatusActive:
-		return iamv1.Condition_ACTIVE
-	case domain.ConditionStatusDeleting:
-		return iamv1.Condition_DELETING
-	case domain.ConditionStatusError:
-		return iamv1.Condition_ERROR
-	}
-	return iamv1.Condition_STATUS_UNSPECIFIED
-}
 
 func structToMap(s *structpb.Struct) map[string]any {
 	if s == nil {

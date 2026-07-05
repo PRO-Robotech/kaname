@@ -83,7 +83,7 @@ type TrustGrantAdmin interface {
 // reflectively, and writes the re-marshalled bytes back (single-statement
 // UPDATE) — there is no JSONB `response` column to jsonb_set.
 type OpsResponseRedactor interface {
-	RedactResponseField(ctx context.Context, opID string, fieldPath []string, valueJSON string) error
+	RedactResponseField(ctx context.Context, opID string, fieldPath []string) error
 }
 
 // ───────────────── Issue use-case ─────────────────
@@ -387,12 +387,12 @@ func (u *IssueSAKeyUseCase) awaitOpDone(ctx context.Context, opID string) bool {
 // логируем на Error, чтобы застрявший секрет был обнаружим, никогда не глушим.
 func (u *IssueSAKeyUseCase) redactSecretFields(ctx context.Context, opID string) {
 	if rerr := u.redactor.RedactResponseField(ctx, opID,
-		[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		[]string{"private_key_pem"}); rerr != nil && u.logger != nil {
 		u.logger.ErrorContext(ctx, "sa-key private_key_pem redaction failed — plaintext key may remain in the operation response",
 			slog.String("operation_id", opID), slog.Any("err", rerr))
 	}
 	if rerr := u.redactor.RedactResponseField(ctx, opID,
-		[]string{"client_secret"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		[]string{"client_secret"}); rerr != nil && u.logger != nil {
 		u.logger.ErrorContext(ctx, "sa-key client_secret redaction failed",
 			slog.String("operation_id", opID), slog.Any("err", rerr))
 	}

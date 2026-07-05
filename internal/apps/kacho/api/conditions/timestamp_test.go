@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 func TestConditionToProto_TruncatesCreatedAtToSeconds(t *testing.T) {
 	created := time.Date(2026, 6, 16, 10, 20, 30, 123456789, time.UTC)
 
-	pb := ConditionToProto(domain.Condition{
+	pb := service.ConditionToProto(domain.Condition{
 		ID:        "cnd_test_1234567890abcd",
 		FolderID:  "fld_test",
 		Name:      "cond-a",

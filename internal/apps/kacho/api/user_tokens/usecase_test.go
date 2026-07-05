@@ -140,13 +140,13 @@ func waitForOp(t *testing.T, ops *stubOpsRepo) {
 // panicRedactor / errRedactor — зеркало sa_keys redaction-тестов.
 type panicRedactor struct{}
 
-func (panicRedactor) RedactResponseField(context.Context, string, []string, string) error {
+func (panicRedactor) RedactResponseField(context.Context, string, []string) error {
 	panic("redactor boom")
 }
 
 type errRedactor struct{ err error }
 
-func (e errRedactor) RedactResponseField(context.Context, string, []string, string) error {
+func (e errRedactor) RedactResponseField(context.Context, string, []string) error {
 	return e.err
 }
 

@@ -105,7 +105,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	relationStore *clients.OpenFGAHTTPClient,
 	metricsReg *metrics.Registry,
 	cfg config.Config, logger *slog.Logger) *services {
-	_ = cfg
 	_ = slavePool // kachoRepo is built and passed in by main()
 
 	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
@@ -292,7 +291,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		WithExpandAccess(abExpandAccess)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore, logger)
+	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore, cfg.AuthN.Mode.IsProduction(), logger)
 
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
@@ -550,7 +549,7 @@ type authzServiceBundle struct {
 // additional guardrail overlay after the FGA Check.
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	kachoRepo kachorepo.Repository, relationStore *clients.OpenFGAHTTPClient,
-	logger *slog.Logger) authzServiceBundle {
+	prodMode bool, logger *slog.Logger) authzServiceBundle {
 	modelID := relationStore.AuthorizationModel
 	logger.Info("openfga extended client wired for AuthZ",
 		"endpoint", relationStore.Endpoint, "store_id", relationStore.StoreID, "model_id", modelID)
@@ -570,7 +569,12 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// (a tenant principal may only query authz decisions about itself, a resource
 	// it administers, or as a cluster-admin). The SAME OpenFGA client answers the
 	// authority Check; anonymous/system module PDP peer calls pass through.
-	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC).WithCallerAuthority(relationStore)
+	// WithProductionMode makes the inner caller-authority gate fail-closed for an
+	// anonymous/system principal without a verified module cert (the public-listener
+	// authorization-oracle bypass); dev-mode stays permissive (no mTLS to gate on).
+	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC).
+		WithCallerAuthority(relationStore).
+		WithProductionMode(prodMode)
 
 	// RelationProjector — used by InternalAuthorizeService.
 	tupleWriter := service.NewRelationProjector(relationStore)

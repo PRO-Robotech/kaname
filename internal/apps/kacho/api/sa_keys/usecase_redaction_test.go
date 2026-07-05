@@ -16,14 +16,14 @@ import (
 // panicRedactor — RedactResponseField паникует (эмулирует баг в adapter'е).
 type panicRedactor struct{}
 
-func (panicRedactor) RedactResponseField(context.Context, string, []string, string) error {
+func (panicRedactor) RedactResponseField(context.Context, string, []string) error {
 	panic("redactor boom")
 }
 
 // errRedactor — RedactResponseField возвращает ошибку (jsonb_set провалился).
 type errRedactor struct{ err error }
 
-func (e errRedactor) RedactResponseField(context.Context, string, []string, string) error {
+func (e errRedactor) RedactResponseField(context.Context, string, []string) error {
 	return e.err
 }
 
