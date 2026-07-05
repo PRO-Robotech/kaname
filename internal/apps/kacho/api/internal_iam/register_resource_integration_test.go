@@ -48,8 +48,8 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	uc := internaliam.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	)
 	return uc, &outboxProbe{pool: pool}

@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// postgres.go — production-реализация [Dialect] для PostgreSQL через
+// postgres.go — production-реализация миграций для PostgreSQL через
 // goose + pgx driver.
 package migrator
 
@@ -16,14 +16,13 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// postgresDialect — реализация [Dialect] для PostgreSQL.
-type postgresDialect struct{}
+// Dialect — PostgreSQL-миграции (единственный поддерживаемый диалект;
+// конструируется через NewDialect).
+type Dialect struct{}
 
-func newPostgresDialect() *postgresDialect { return &postgresDialect{} }
+func (p *Dialect) Spec() DialectSpec { return SpecPostgres }
 
-func (p *postgresDialect) Spec() DialectSpec { return SpecPostgres }
-
-func (p *postgresDialect) Up(ctx context.Context, dsn string, fsys fs.FS, dir string, target string) error {
+func (p *Dialect) Up(ctx context.Context, dsn string, fsys fs.FS, dir string, target string) error {
 	db, err := openPgxDB(dsn, p.Spec())
 	if err != nil {
 		return err
@@ -43,7 +42,7 @@ func (p *postgresDialect) Up(ctx context.Context, dsn string, fsys fs.FS, dir st
 	return goose.UpToContext(ctx, db, dir, version)
 }
 
-func (p *postgresDialect) Down(ctx context.Context, dsn string, fsys fs.FS, dir string, target string) error {
+func (p *Dialect) Down(ctx context.Context, dsn string, fsys fs.FS, dir string, target string) error {
 	db, err := openPgxDB(dsn, p.Spec())
 	if err != nil {
 		return err
@@ -63,7 +62,7 @@ func (p *postgresDialect) Down(ctx context.Context, dsn string, fsys fs.FS, dir 
 	return goose.DownToContext(ctx, db, dir, version)
 }
 
-func (p *postgresDialect) Status(ctx context.Context, dsn string, fsys fs.FS, dir string, out io.Writer) error {
+func (p *Dialect) Status(ctx context.Context, dsn string, fsys fs.FS, dir string, out io.Writer) error {
 	db, err := openPgxDB(dsn, p.Spec())
 	if err != nil {
 		return err
@@ -77,7 +76,7 @@ func (p *postgresDialect) Status(ctx context.Context, dsn string, fsys fs.FS, di
 	return goose.StatusContext(ctx, db, dir)
 }
 
-func (p *postgresDialect) Create(physDir, name string) error {
+func (p *Dialect) Create(physDir, name string) error {
 	if name == "" {
 		return errors.New("migration name is empty")
 	}
@@ -90,7 +89,7 @@ func (p *postgresDialect) Create(physDir, name string) error {
 	return goose.Create(nil, physDir, name, "sql")
 }
 
-// openPgxDB / setupGoose — общие helpers для postgres + cockroach.
+// openPgxDB / setupGoose — helpers, параметризованные DialectSpec.
 
 func openPgxDB(dsn string, spec DialectSpec) (*sql.DB, error) {
 	db, err := sql.Open(spec.SQLDriver, dsn)

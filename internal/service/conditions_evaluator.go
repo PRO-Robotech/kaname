@@ -27,22 +27,28 @@
 //
 // LRU cache: compiled-builtin-form is trivially cheap, but mapping
 // "expression text → builtin kind" is cached per-expression for the lifetime
-// of the process. Env-overridable size via
-// `KACHO_IAM_CONDITIONS_CACHE_SIZE` (default 1000) and
-// `KACHO_IAM_CONDITIONS_CACHE_TTL_SECONDS` (default 60).
+// of the process. Cache size/TTL are injected from the viper Config
+// (`conditions.cache-size` / `conditions.cache-ttl-seconds`, defaults 1000 / 60s)
+// at the composition root — never read from the environment in this layer.
 package service
 
 import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+)
+
+// Default recognition-cache tuning — used by NewBuiltinEvaluator and as the
+// floor for a non-positive injected value in NewBuiltinEvaluatorWithCache.
+const (
+	defaultConditionsCacheSize = 1000
+	defaultConditionsCacheTTL  = 60 * time.Second
 )
 
 // ErrUnsupportedExpression — caller should fall back to FGA Check.
@@ -78,19 +84,25 @@ type exprCacheEntry struct {
 	exp  time.Time
 }
 
-// NewBuiltinEvaluator — reads cache config from env.
+// NewBuiltinEvaluator builds an evaluator with the default recognition-cache
+// tuning. Cache size/TTL come from the composition-root config via
+// NewBuiltinEvaluatorWithCache in production; this default variant is for tests
+// and callers that don't tune the cache. No environment access (config is
+// injected at the composition root, never read in the service layer).
 func NewBuiltinEvaluator() *BuiltinEvaluator {
-	size := 1000
-	if v := os.Getenv("KACHO_IAM_CONDITIONS_CACHE_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			size = n
-		}
+	return NewBuiltinEvaluatorWithCache(defaultConditionsCacheSize, defaultConditionsCacheTTL)
+}
+
+// NewBuiltinEvaluatorWithCache builds an evaluator with an explicit
+// recognition-cache size/TTL, injected from the viper Config in the composition
+// root. A non-positive size or ttl falls back to the package default (defensive;
+// Config.Validate already rejects non-positive values at boot).
+func NewBuiltinEvaluatorWithCache(size int, ttl time.Duration) *BuiltinEvaluator {
+	if size <= 0 {
+		size = defaultConditionsCacheSize
 	}
-	ttl := 60 * time.Second
-	if v := os.Getenv("KACHO_IAM_CONDITIONS_CACHE_TTL_SECONDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			ttl = time.Duration(n) * time.Second
-		}
+	if ttl <= 0 {
+		ttl = defaultConditionsCacheTTL
 	}
 	return &BuiltinEvaluator{
 		cacheTTL:  ttl,

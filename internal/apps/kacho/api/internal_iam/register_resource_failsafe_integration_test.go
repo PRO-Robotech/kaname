@@ -172,8 +172,8 @@ func TestRegisterResource_A07_FGADownIntentPersistsAcrossRestart(t *testing.T) {
 	defer pool.Close()
 
 	uc := internaliam.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	)
 
@@ -238,8 +238,8 @@ func TestRegisterResource_A08_PoisonRowDoesNotWedgeDrainer(t *testing.T) {
 	defer pool.Close()
 
 	uc := internaliam.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	)
 

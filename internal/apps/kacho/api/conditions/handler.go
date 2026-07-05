@@ -166,6 +166,12 @@ func mapErr(err error) error {
 	if err == nil {
 		return nil
 	}
+	// Already a gRPC status (the in-service authz guards return
+	// codes.PermissionDenied directly) — pass through unchanged rather than
+	// re-wrapping as Internal.
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
 	if stderrors.Is(err, iamerr.ErrNotFound) {
 		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
 	}

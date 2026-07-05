@@ -19,7 +19,7 @@ import (
 
 // Config — параметры одного запуска runner'а.
 type Config struct {
-	Dialect       Dialect
+	Dialect       *Dialect
 	DSN           string
 	FS            fs.FS
 	MigrationsDir string

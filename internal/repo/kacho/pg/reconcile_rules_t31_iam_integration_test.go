@@ -54,12 +54,12 @@ import (
 // the resource_reconcile_outbox event the worker drains.
 func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCase {
 	return internal_iam.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	).
-		WithReconcile(kachopg.NewReconcileEventEmitter(pool)).
-		WithAccountResolver(kachopg.NewProjectAccountResolver(pool))
+		WithReconcile(kachopg.NewReconcileEventEmitter()).
+		WithAccountResolver(kachopg.NewProjectAccountResolver())
 }
 
 // drainOnce drives the REAL reconciler-worker drain path to convergence (the

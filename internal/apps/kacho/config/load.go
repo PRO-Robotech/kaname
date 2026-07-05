@@ -108,6 +108,10 @@ func applyLegacyEnv(v *viper.Viper) {
 		// Flat alias for the User-token redact grace window — mirror of the SA-key
 		// alias above. Value is a Go duration ("120s").
 		{"KACHO_IAM_USERTOKEN_REDACT_GRACE", "authn.usertoken-redact-grace"},
+		// ConditionsService evaluator cache — flat aliases for the documented env
+		// knobs (moved out of the service layer's os.Getenv into viper config).
+		{"KACHO_IAM_CONDITIONS_CACHE_SIZE", "conditions.cache-size"},
+		{"KACHO_IAM_CONDITIONS_CACHE_TTL_SECONDS", "conditions.cache-ttl-seconds"},
 		// OpenFGA legacy aliases — extend as the rollout adds them.
 	}
 	for _, m := range simple {

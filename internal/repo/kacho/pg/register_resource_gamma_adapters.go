@@ -15,18 +15,17 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/reconcile_outbox"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
-// ReconcileEventEmitter — adapter for the γ reconcile-event emit-in-tx. Stateless
-// (pool arg for parity with the other emitters).
+// ReconcileEventEmitter — adapter for the γ reconcile-event emit-in-tx.
+// Stateless — it recovers the concrete pgx.Tx from the caller tx at call time.
 type ReconcileEventEmitter struct{}
 
 // NewReconcileEventEmitter — composition-root constructor.
-func NewReconcileEventEmitter(_ *pgxpool.Pool) *ReconcileEventEmitter {
+func NewReconcileEventEmitter() *ReconcileEventEmitter {
 	return &ReconcileEventEmitter{}
 }
 
@@ -40,7 +39,7 @@ func (e *ReconcileEventEmitter) EmitTx(ctx context.Context, tx service.Tx, event
 type ProjectAccountResolver struct{}
 
 // NewProjectAccountResolver — composition-root constructor.
-func NewProjectAccountResolver(_ *pgxpool.Pool) *ProjectAccountResolver {
+func NewProjectAccountResolver() *ProjectAccountResolver {
 	return &ProjectAccountResolver{}
 }
 

@@ -6,16 +6,13 @@
 // Sub-phase β. Recovers the concrete pgx.Tx from the opaque service.Tx and
 // forwards UPSERT/DELETE to the resource_mirror helper package, which runs the
 // statement on the caller-supplied tx (atomic co-commit with the owner-tuple
-// fga_outbox emit, ban #10 — D-β3). Stateless adapter; the pool arg is accepted
-// for parity with the other emitters (the statement never runs on a
-// pool-managed connection — that would break atomicity).
+// fga_outbox emit, ban #10 — D-β3). Stateless adapter; the statement never runs
+// on a pool-managed connection — that would break atomicity.
 package pg
 
 import (
 	"context"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/resource_mirror"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
@@ -25,8 +22,8 @@ import (
 // top of the resource_mirror package. Stateless.
 type ResourceMirrorEmitter struct{}
 
-// NewResourceMirrorEmitter — composition root constructor (pool arg for parity).
-func NewResourceMirrorEmitter(_ *pgxpool.Pool) *ResourceMirrorEmitter {
+// NewResourceMirrorEmitter — composition root constructor.
+func NewResourceMirrorEmitter() *ResourceMirrorEmitter {
 	return &ResourceMirrorEmitter{}
 }
 

@@ -291,7 +291,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		WithExpandAccess(abExpandAccess)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore, cfg.AuthN.Mode.IsProduction(), logger)
+	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore, cfg.Conditions, cfg.AuthN.Mode.IsProduction(), logger)
 
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
@@ -311,12 +311,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	// affected selector/byName memberships — all atomic with the mirror UPSERT/
 	// DELETE (ban #10).
 	registerResourceUC := internaliamapp.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	).
-		WithReconcile(kachopg.NewReconcileEventEmitter(pool)).
-		WithAccountResolver(kachopg.NewProjectAccountResolver(pool)).
+		WithReconcile(kachopg.NewReconcileEventEmitter()).
+		WithAccountResolver(kachopg.NewProjectAccountResolver()).
 		// Design-B instant-visibility (VBC-15): after the owner-tuple + mirror co-commit,
 		// drive a SYNCHRONOUS ReconcileObject (shared rsabReconciler's sync-FGA writer) so
 		// the creator's per-object v_get materializes before the consumer's create-Operation
@@ -379,7 +379,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	clusterReader := kachopg.NewClusterReader(pool)
 	clusterGrantWriter := kachopg.NewClusterAdminGrantWriter(pool)
 	clusterGrantReader := kachopg.NewClusterAdminGrantReader(pool)
-	clusterRelEmitter := kachopg.NewFGAOutboxEmitter(pool)
+	clusterRelEmitter := kachopg.NewFGAOutboxEmitter()
 	clusterTxb := kachopg.NewPoolTxBeginner(pool)
 	clusterUserChecker := kachopg.NewUserExistenceChecker(pool)
 
@@ -549,7 +549,7 @@ type authzServiceBundle struct {
 // additional guardrail overlay after the FGA Check.
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	kachoRepo kachorepo.Repository, relationStore *clients.OpenFGAHTTPClient,
-	prodMode bool, logger *slog.Logger) authzServiceBundle {
+	condCfg config.ConditionsConfig, prodMode bool, logger *slog.Logger) authzServiceBundle {
 	modelID := relationStore.AuthorizationModel
 	logger.Info("openfga extended client wired for AuthZ",
 		"endpoint", relationStore.Endpoint, "store_id", relationStore.StoreID, "model_id", modelID)
@@ -582,8 +582,13 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 
 	// ConditionsService — Postgres-backed.
 	condRepo := kachopg.NewConditionsRepo(pool)
-	condEvaluator := service.NewBuiltinEvaluator()
+	condEvaluator := service.NewBuiltinEvaluatorWithCache(condCfg.CacheSize, condCfg.CacheTTL())
 	condSvc := service.NewConditionsCRUDService(condRepo, opsRepo, condEvaluator)
+	// In-service authz: reads require `viewer` and mutations require `editor` on
+	// the condition's owning project(folder) scope (cluster-admin short-circuits),
+	// mirroring the sibling IAM resources. Without this, ConditionsService had no
+	// server-side authorization (cross-tenant BOLA read + tamper).
+	condSvc.WithRelationStore(relationStore)
 	// Durable audit_outbox emitter — emits
 	// iam.condition.created / .updated / .deleted rows inside the ConditionsService
 	// worker-tx, atomic with the conditions-row mutation (запрет #10). Payload

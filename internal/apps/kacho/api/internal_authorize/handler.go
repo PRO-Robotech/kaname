@@ -19,7 +19,6 @@ package internal_authorize
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -44,13 +43,21 @@ type Handler struct {
 	iamv1.UnimplementedInternalAuthorizeServiceServer
 	writer *service.RelationProjector
 	ops    operations.Repo
-	// currentModelID — captured at process start; mutated by ReloadModel.
+	// currentModelID — the live authorization_model_id; captured at process start
+	// from the injected config value and mutated by ReloadModel.
 	currentModelID string
+	// defaultModelID — the composition-root-configured model id (immutable). Used
+	// as the fallback for an empty ReloadModel request instead of a request-time
+	// os.Getenv read (which would drift from the model the process was started
+	// with, and scatters config access into the transport layer).
+	defaultModelID string
 }
 
-// NewHandler — builder.
+// NewHandler — builder. modelID is the composition-root-configured
+// authorization_model_id (the single source of truth), used both as the initial
+// live id and as the empty-request ReloadModel fallback.
 func NewHandler(writer *service.RelationProjector, ops operations.Repo, modelID string) *Handler {
-	return &Handler{writer: writer, ops: ops, currentModelID: modelID}
+	return &Handler{writer: writer, ops: ops, currentModelID: modelID, defaultModelID: modelID}
 }
 
 // WriteTuples — see iamv1.InternalAuthorizeServiceServer.
@@ -120,7 +127,9 @@ func (h *Handler) ReadTuples(ctx context.Context, req *iamv1.ReadTuplesRequest) 
 func (h *Handler) ReloadModel(ctx context.Context, req *iamv1.ReloadModelRequest) (*iamv1.ReloadModelResponse, error) {
 	newID := req.GetAuthorizationModelId()
 	if newID == "" {
-		newID = os.Getenv("KACHO_IAM_OPENFGA_MODEL_ID")
+		// Fall back to the composition-root-configured default (injected at
+		// construction) — NOT a request-time env read (config drift / layering).
+		newID = h.defaultModelID
 	}
 	if newID != "" {
 		h.currentModelID = newID

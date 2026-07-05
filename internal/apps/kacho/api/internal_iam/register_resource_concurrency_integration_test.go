@@ -38,8 +38,8 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 	defer pool.Close()
 
 	uc := internaliam.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	)
 

@@ -25,6 +25,9 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			},
 		},
 		AuthN: config.AuthNConfig{Mode: mode},
+		// Positive cache knobs so the (unrelated) conditions validation passes;
+		// RegisterDefaults sets these in the real load path.
+		Conditions: config.ConditionsConfig{CacheSize: 1000, CacheTTLSeconds: 60},
 	}
 }
 

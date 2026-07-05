@@ -85,33 +85,34 @@ func TestReloadModel_SetsReloadedAt(t *testing.T) {
 }
 
 func TestReloadModel_EmptyID_KeepsCurrentWhenNoEnvFallback(t *testing.T) {
-	// Given no KACHO_IAM_OPENFGA_MODEL_ID in env (t.Setenv guarantees empty).
-	t.Setenv("KACHO_IAM_OPENFGA_MODEL_ID", "")
 	w := service.NewRelationProjector(&storeInfoFake{})
 	h := NewHandler(w, nil, "model-current")
 
-	// When ReloadModel is called with an empty id and no env fallback exists.
+	// When ReloadModel is called with an empty id, the injected default
+	// (== the initial live id here) is (re-)applied.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{})
 
-	// Then the previously-loaded id is retained (no overwrite to empty).
+	// Then the configured id is retained (no overwrite to empty).
 	require.NoError(t, err)
 	assert.Equal(t, "model-current", resp.GetAuthorizationModelId())
 	assert.Equal(t, "model-current", h.currentModelID)
 }
 
-func TestReloadModel_EmptyID_FallsBackToEnv(t *testing.T) {
-	// Given an env fallback model id.
+func TestReloadModel_EmptyID_FallsBackToInjectedDefault(t *testing.T) {
+	// A stale/divergent env value must NOT leak into the handler at request time:
+	// the empty-request fallback is the composition-root-injected default, not
+	// os.Getenv. Setting the env here proves it is ignored (no config drift).
 	t.Setenv("KACHO_IAM_OPENFGA_MODEL_ID", "model-from-env")
 	w := service.NewRelationProjector(&storeInfoFake{})
-	h := NewHandler(w, nil, "model-current")
+	h := NewHandler(w, nil, "model-configured")
 
 	// When ReloadModel is called with an empty request id.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{})
 
-	// Then the env-supplied id is adopted.
+	// Then the INJECTED default is adopted — the divergent env value is ignored.
 	require.NoError(t, err)
-	assert.Equal(t, "model-from-env", resp.GetAuthorizationModelId())
-	assert.Equal(t, "model-from-env", h.currentModelID)
+	assert.Equal(t, "model-configured", resp.GetAuthorizationModelId())
+	assert.Equal(t, "model-configured", h.currentModelID)
 }
 
 // ── GetFGAStoreInfo ──────────────────────────────────────────────────────

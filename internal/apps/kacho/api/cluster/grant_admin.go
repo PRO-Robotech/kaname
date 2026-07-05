@@ -8,9 +8,10 @@ package cluster
 // Flow (synchronous within Execute):
 //  1. Sync validations: subject_type USER only, subject_id format,
 //     user exists in kacho_iam.users.
-//  2. Begin TX → Grant → if !created && !active → Reactivate →
-//     EmitWriteTx (FGA outbox) → commit.
-//  3. Create Operation record (done=true) and return to caller.
+//  2. Persist Operation (done=false) so the returned id is always queryable.
+//  3. Begin TX → Grant → if !created && !active → Reactivate →
+//     EmitWriteTx (FGA outbox) → commit. On failure → MarkError the op.
+//  4. MarkDone the Operation (done=true, full grant metadata) and return.
 //
 // Idempotency:
 //   - Grant returns (row, false, nil) if ON CONFLICT fires.
@@ -18,14 +19,16 @@ package cluster
 //   - If the existing row !IsActive (revoked history) → Reactivate within
 //     the same TX (re-activates in-place, same id).
 //
-// Operation: returned immediately with done=true (no async worker needed —
-// the mutation is simple single-row and fast).
+// Operation: persisted done=false BEFORE the mutation (mirroring the async
+// mutations) then flipped to done=true — the caller receives a terminal (done)
+// envelope, and the op row is durable even if the terminal write is retried.
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
 
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
@@ -131,13 +134,36 @@ func (uc *GrantAdminUseCase) Execute(
 	// 'bootstrap'), not through this use-case.
 	principal := authzguard.PrincipalUserID(ctx)
 
+	// Persist the Operation (done=false) BEFORE the mutation — mirroring every
+	// async mutation in this service, so the operation id the caller receives is
+	// ALWAYS durably queryable. The previous order (mutate → persist op, persist
+	// failure non-fatal) left the committed grant with NO pollable Operation row →
+	// OperationService.Get(id) returned NotFound forever (CWE-662). The grant.ID
+	// is not yet known here, so the initial metadata carries only subject_id; the
+	// full metadata (with grant.ID) is written on MarkDone.
+	op, oerr := operations.NewFromContext(ctx,
+		domain.PrefixOperationIAM,
+		fmt.Sprintf("Grant cluster admin to user %s", subjectID),
+		&iamv1.GrantClusterAdminMetadata{SubjectId: subjectID},
+	)
+	if oerr != nil {
+		return nil, oerr
+	}
+	if err := uc.opsRepo.Create(ctx, op); err != nil {
+		return nil, fmt.Errorf("persist operation: %w", err)
+	}
+
 	// Perform domain mutation synchronously.
 	grant, err := uc.doGrant(ctx, sid, principal)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		// Record the terminal failure on the already-persisted op so a poll sees a
+		// real error, not NotFound; still surface the gRPC error to the caller.
+		gerr := shared.MapRepoErr(err)
+		_ = uc.opsRepo.MarkError(ctx, op.ID, status.Convert(gerr).Proto())
+		return nil, gerr
 	}
 
-	// Build and persist Operation (done=true immediately — sync mutation).
+	// Complete the Operation (done=true) with the full grant metadata as response.
 	meta, merr := anypb.New(&iamv1.GrantClusterAdminMetadata{
 		ClusterAdminGrantId: string(grant.ID),
 		SubjectId:           subjectID,
@@ -145,28 +171,15 @@ func (uc *GrantAdminUseCase) Execute(
 	if merr != nil {
 		return nil, fmt.Errorf("marshal grant metadata: %w", merr)
 	}
-
-	op, oerr := operations.NewFromContext(ctx,
-		domain.PrefixOperationIAM,
-		fmt.Sprintf("Grant cluster admin to user %s", subjectID),
-		&iamv1.GrantClusterAdminMetadata{
-			ClusterAdminGrantId: string(grant.ID),
-			SubjectId:           subjectID,
-		},
-	)
-	if oerr != nil {
-		return nil, oerr
+	if err := uc.opsRepo.MarkDone(ctx, op.ID, meta); err != nil {
+		// Non-fatal: the grant committed and the op row exists (done=false) — a
+		// poller keeps polling and the terminal-write is retriable, so this never
+		// degrades to NotFound. Log for traceability (CWE-390: no silent swallow).
+		slog.ErrorContext(ctx, "cluster GrantAdmin: operation complete failed",
+			"operation_id", op.ID, "err", err.Error())
 	}
 	op.Done = true
 	op.Response = meta
-
-	if err := uc.opsRepo.Create(ctx, op); err != nil {
-		// Non-fatal: mutation already committed; return op without persisting.
-		// Log so a later OperationService.Get(op.id) returning NotFound is
-		// traceable to this persistence failure (CWE-390: no silent swallow).
-		slog.ErrorContext(ctx, "cluster GrantAdmin: operation persist failed",
-			"operation_id", op.ID, "err", err.Error())
-	}
 
 	return shared.OperationToProto(&op), nil
 }

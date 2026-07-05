@@ -7,16 +7,13 @@
 // auto-grant, JitPending Approve, JIT/BG expirers, BG.ApproveB) to the
 // internal helper package `fga_outbox` which performs the INSERT.
 //
-// Stateless adapter: the pool argument is accepted for symmetry with other
-// adapters; the actual INSERT runs on the supplied tx, never on a
+// Stateless adapter: the actual INSERT runs on the supplied tx, never on a
 // pool-managed connection (otherwise the emit would no longer be atomic with
 // the domain mutation).
 package pg
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/fga_outbox"
@@ -27,8 +24,8 @@ import (
 // the fga_outbox package. Stateless.
 type FGAOutboxEmitter struct{}
 
-// NewFGAOutboxEmitter — composition root constructor (pool arg for parity).
-func NewFGAOutboxEmitter(_ *pgxpool.Pool) *FGAOutboxEmitter {
+// NewFGAOutboxEmitter — composition root constructor.
+func NewFGAOutboxEmitter() *FGAOutboxEmitter {
 	return &FGAOutboxEmitter{}
 }
 

@@ -14,7 +14,7 @@
 //
 // Флаги верхнего уровня:
 //
-//	--dialect oneof<postgres|cockroach>   (default postgres; multi-dialect-ready)
+//	--dialect postgres                    (default; единственный поддерживаемый)
 //	--dsn     <connection-string>         (или ENV KACHO_MIGRATOR_DSN)
 //
 // Если --dsn пуст и KACHO_MIGRATOR_DSN пуст — читаем `config.Load()` (viper)
@@ -72,7 +72,7 @@ func newRootCmd(migrationsFS fs.FS) *cobra.Command {
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().StringVar(&opts.dialect, "dialect", defaultDialect,
-		"SQL dialect (postgres|cockroach)")
+		"SQL dialect (postgres)")
 	root.PersistentFlags().StringVar(&opts.dsn, "dsn", "",
 		"database DSN; if empty — read ENV "+envDSN+", then fall back to kacho-iam config (viper)")
 
@@ -158,7 +158,7 @@ func newCreateCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 // (config.Load → cfg.MigrateDSN). Так одно helm-values покрывает оба binary, и
 // можно явно перекрыть `--dsn` для cross-DB-инструментов и ad-hoc запусков.
 func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migrator.Runner, error) {
-	dialect, err := migrator.ResolveDialect(opts.dialect)
+	dialect, err := migrator.NewDialect(opts.dialect)
 	if err != nil {
 		return nil, err
 	}

@@ -88,11 +88,27 @@ type ConditionsCRUDService struct {
 	txb conditionsTxBeginner
 	// audit — durable audit_outbox emitter. nil → no audit row.
 	audit conditionsAuditEmitter
+	// relations — FGA relation-Check port authorizing every read/write against
+	// the condition's owning project (folder) scope. nil → fail-closed (every
+	// non-cluster-admin read/write is denied), so an unwired composition root is
+	// safe by default. Wired via WithRelationStore.
+	relations authzguard.RelationChecker
 }
 
 // NewConditionsCRUDService — builder.
 func NewConditionsCRUDService(repo ConditionsRepoPort, ops operations.Repo, eval ConditionsEvaluator) *ConditionsCRUDService {
 	return &ConditionsCRUDService{repo: repo, ops: ops, evaluator: eval}
+}
+
+// WithRelationStore wires the FGA relation-Check port used to authorize
+// ConditionsService reads and mutations against the owning project(folder)
+// scope. Conditions are project-scoped: read requires `viewer` and mutation
+// requires `editor` on `project:<folder_id>` (cluster-admin short-circuits both,
+// via authzguard). Composition-root only. Without it the service fails closed
+// (deny) — it never fails open. Returns the receiver for chaining.
+func (s *ConditionsCRUDService) WithRelationStore(relations authzguard.RelationChecker) *ConditionsCRUDService {
+	s.relations = relations
+	return s
 }
 
 // WithAuditEmitter wires the durable audit_outbox emitter + worker-tx beginner
@@ -114,16 +130,65 @@ func (s *ConditionsCRUDService) auditEnabled() bool {
 }
 
 // Get — fetch single Condition.
+//
+// Authz (BOLA / defense-in-depth): the caller must hold `viewer` on the
+// condition's owning project(folder) scope OR be a cluster-admin. Otherwise —
+// including anonymous / unwired relation-store — NotFound (hide existence, no
+// enumeration leak; same posture as the sibling Project/Account Get).
 func (s *ConditionsCRUDService) Get(ctx context.Context, id domain.ConditionID) (domain.Condition, error) {
 	if err := id.Validate(); err != nil {
 		return domain.Condition{}, err
 	}
-	return s.repo.Get(ctx, id)
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return domain.Condition{}, err
+	}
+	if !s.canReadFolder(ctx, c.FolderID) {
+		return domain.Condition{}, iamerr.Wrapf(iamerr.ErrNotFound, "Condition %s not found", id)
+	}
+	return c, nil
 }
 
-// List — page over conditions in folder.
+// List — page over conditions in a folder.
+//
+// Authz (BOLA): anonymous → empty. An empty folder_id enumerates EVERY folder's
+// conditions and is a cluster-admin-only operation; a non-cluster-admin gets an
+// empty page (no cross-tenant enumeration). A scoped list requires `viewer` on
+// `project:<folder_id>`; an unauthorized caller gets an empty page (no existence
+// leak, never PermissionDenied — mirrors Project/Account List).
 func (s *ConditionsCRUDService) List(ctx context.Context, filter condition.ListFilter) ([]domain.Condition, string, error) {
+	if authzguard.IsAnonymous(ctx) {
+		return nil, "", nil
+	}
+	if filter.FolderID == "" {
+		if !authzguard.IsClusterAdmin(ctx, s.relations) {
+			return nil, "", nil
+		}
+	} else if !s.canReadFolder(ctx, filter.FolderID) {
+		return nil, "", nil
+	}
 	return s.repo.List(ctx, filter)
+}
+
+// canReadFolder reports whether the ctx principal may read conditions in the
+// project(folder) scope — cluster-admin OR `viewer` on `project:<folderID>`.
+// Fail-closed: nil relation-store / anonymous / empty folder / Check error →
+// false.
+func (s *ConditionsCRUDService) canReadFolder(ctx context.Context, folderID string) bool {
+	if folderID == "" {
+		return false
+	}
+	return authzguard.AllowsVerb(ctx, s.relations, "viewer", "project", folderID)
+}
+
+// requireFolderWrite gates a mutation on `editor` (⊇ admin) authority over the
+// project(folder) scope — cluster-admin short-circuits via authzguard. Returns
+// PermissionDenied when unauthorized; fail-closed on a nil relation-store.
+func (s *ConditionsCRUDService) requireFolderWrite(ctx context.Context, folderID string) error {
+	if folderID != "" && authzguard.AllowsVerb(ctx, s.relations, "editor", "project", folderID) {
+		return nil
+	}
+	return authzguard.PermissionDenied()
 }
 
 // CreateRequest — input.
@@ -151,6 +216,11 @@ func (s *ConditionsCRUDService) Create(ctx context.Context, req CreateConditionR
 		Status:           domain.ConditionStatusCreating,
 	}
 	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	// Authz: only a principal with `editor` on the target folder scope may add a
+	// condition to it (the folder gate is checked BEFORE any Operation is minted).
+	if err := s.requireFolderWrite(ctx, req.FolderID); err != nil {
 		return nil, err
 	}
 	op, err := operations.NewFromContext(ctx,
@@ -290,13 +360,21 @@ func (s *ConditionsCRUDService) Update(ctx context.Context, req UpdateConditionR
 		}
 	}
 
-	// Determine expected version: if caller didn't supply, do a read-then-CAS.
+	// Load current for authz (folder scope) and, when the caller didn't supply an
+	// expected version, the read-then-CAS baseline. A missing condition surfaces
+	// as NotFound here — BEFORE the authz gate — so the gate never leaks folder
+	// existence for a non-existent id.
+	cur, err := s.repo.Get(ctx, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	// Authz: mutating a condition (which can flip an AccessBinding's predicate)
+	// requires `editor` on the owning folder scope.
+	if err := s.requireFolderWrite(ctx, cur.FolderID); err != nil {
+		return nil, err
+	}
 	expected := req.ExpectedVersion
 	if expected == 0 {
-		cur, err := s.repo.Get(ctx, req.ID)
-		if err != nil {
-			return nil, err
-		}
 		expected = cur.ResourceVersion
 	}
 
@@ -360,6 +438,17 @@ func (s *ConditionsCRUDService) doUpdate(ctx context.Context, id domain.Conditio
 // Delete — flip to DELETING tombstone + refcheck + hard-delete.
 func (s *ConditionsCRUDService) Delete(ctx context.Context, id domain.ConditionID) (*operations.Operation, error) {
 	if err := id.Validate(); err != nil {
+		return nil, err
+	}
+	// Load current for the authz folder scope. A missing condition is NotFound
+	// (before the authz gate) so the gate never leaks folder existence.
+	cur, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Authz: deleting a condition (removing an AccessBinding's predicate)
+	// requires `editor` on the owning folder scope.
+	if err := s.requireFolderWrite(ctx, cur.FolderID); err != nil {
 		return nil, err
 	}
 	op, err := operations.NewFromContext(ctx,

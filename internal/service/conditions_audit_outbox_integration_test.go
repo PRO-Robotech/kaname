@@ -93,6 +93,16 @@ func setupCondAuditDB(t testing.TB) string {
 	return dsn + sep + optionsParam
 }
 
+// allowAllRelations — permissive authzguard.RelationChecker for the audit tests,
+// which exercise the CRUD audit-emit path, not the authz gate (covered by the
+// dedicated conditions/authz_test.go). Every Check allows, so the folder-scope
+// authz gate passes and the mutation proceeds.
+type allowAllRelations struct{}
+
+func (allowAllRelations) Check(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
 // buildCondSvc wires a real ConditionsCRUDService against the live pool with the
 // durable audit emitter attached (mirrors SAKey buildIssueUC).
 func buildCondSvc(pool *pgxpool.Pool) *service.ConditionsCRUDService {
@@ -100,6 +110,7 @@ func buildCondSvc(pool *pgxpool.Pool) *service.ConditionsCRUDService {
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
 	eval := service.NewBuiltinEvaluator()
 	svc := service.NewConditionsCRUDService(repo, opsRepo, eval)
+	svc.WithRelationStore(allowAllRelations{})
 	svc.WithAuditEmitter(kachopg.NewAuditOutboxEmitter(pool), kachopg.NewPoolTxBeginner(pool))
 	return svc
 }

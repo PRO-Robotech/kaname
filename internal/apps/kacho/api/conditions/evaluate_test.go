@@ -38,6 +38,10 @@ import (
 // regression).
 type fakeConditionsRepo struct {
 	byID map[domain.ConditionID]domain.Condition
+	// listRows — rows returned by List. Filtered by FolderID when the filter
+	// carries one (mirrors the repo's folder-scope predicate) so the authz
+	// tests can distinguish an empty-folder_id global scan from a scoped list.
+	listRows []domain.Condition
 }
 
 func (f *fakeConditionsRepo) Get(_ context.Context, id domain.ConditionID) (domain.Condition, error) {
@@ -48,8 +52,17 @@ func (f *fakeConditionsRepo) Get(_ context.Context, id domain.ConditionID) (doma
 	return c, nil
 }
 
-func (f *fakeConditionsRepo) List(context.Context, condition.ListFilter) ([]domain.Condition, string, error) {
-	panic("List not used by Evaluate")
+func (f *fakeConditionsRepo) List(_ context.Context, filter condition.ListFilter) ([]domain.Condition, string, error) {
+	if filter.FolderID == "" {
+		return f.listRows, "", nil
+	}
+	out := make([]domain.Condition, 0, len(f.listRows))
+	for _, c := range f.listRows {
+		if c.FolderID == filter.FolderID {
+			out = append(out, c)
+		}
+	}
+	return out, "", nil
 }
 
 func (f *fakeConditionsRepo) CountReferences(context.Context, domain.ConditionID) (int64, error) {

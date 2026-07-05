@@ -43,8 +43,8 @@ func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	uc := internaliam.NewRegisterResourceUseCase(
-		kachopg.NewFGAOutboxEmitter(pool),
-		kachopg.NewResourceMirrorEmitter(pool),
+		kachopg.NewFGAOutboxEmitter(),
+		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
 	)
 	return uc, &mirrorProbe{pool: pool}

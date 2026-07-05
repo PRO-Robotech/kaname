@@ -653,7 +653,7 @@ func TestGrant_OpenFGAOutage(t *testing.T) {
 	target := mustSeedUser(t, ctx, pool, "target")
 
 	w := kachopg.NewClusterAdminGrantWriter(pool)
-	emit := kachopg.NewFGAOutboxEmitter(pool) // existing adapter (pg/fga_outbox_emitter.go)
+	emit := kachopg.NewFGAOutboxEmitter() // existing adapter (pg/fga_outbox_emitter.go)
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
@@ -702,7 +702,7 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 	seedClusterAdmin(t, ctx, pool, other)
 
 	w := kachopg.NewClusterAdminGrantWriter(pool)
-	emit := kachopg.NewFGAOutboxEmitter(pool)
+	emit := kachopg.NewFGAOutboxEmitter()
 
 	// — Step 1: Grant ————————————————————————————————
 	tx1, err := pool.Begin(ctx)

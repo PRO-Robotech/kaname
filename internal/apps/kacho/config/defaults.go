@@ -70,6 +70,11 @@ func RegisterDefaults(v *viper.Viper) {
 	// Override — KACHO_IAM_USERTOKEN_REDACT_GRACE.
 	v.SetDefault("authn.usertoken-redact-grace", 120*time.Second)
 
+	// conditions — ConditionsService evaluator recognition-cache tuning. Legacy
+	// env aliases KACHO_IAM_CONDITIONS_CACHE_SIZE / _CACHE_TTL_SECONDS (load.go).
+	v.SetDefault("conditions.cache-size", 1000)
+	v.SetDefault("conditions.cache-ttl-seconds", 60)
+
 	// OpenFGA, the gateway-internal drainer, Enterprise SSO, Governance,
 	// Federation/CAEP/ComplianceReport/Notify and the dead healthcheck
 	// placeholder were all removed (dead config) — OpenFGA + the drainer are

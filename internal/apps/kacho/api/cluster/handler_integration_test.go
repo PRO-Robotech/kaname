@@ -62,7 +62,7 @@ func buildHandler(t *testing.T, dsn string) *clusterapp.Handler {
 	clusterReader := kachopg.NewClusterReader(pool)
 	grantWriter := kachopg.NewClusterAdminGrantWriter(pool)
 	grantReader := kachopg.NewClusterAdminGrantReader(pool)
-	fgaEmitter := kachopg.NewFGAOutboxEmitter(pool)
+	fgaEmitter := kachopg.NewFGAOutboxEmitter()
 	txb := kachopg.NewPoolTxBeginner(pool)
 
 	userChecker := kachopg.NewUserExistenceChecker(pool)

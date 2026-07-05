@@ -458,12 +458,14 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 	// project-admin grant). The user's ACCESS on the project (and its content) is
 	// ALSO covered by the owner ARM_ANCHOR forward-mat over iam.project — this row
 	// is the explicit binding parity (so the project shows in the user's grants).
-	const projectAdminRoleID = "rol21232f297a57a5a74" // roles/admin
+	// The pinned deterministic id of the system `admin` role is the single source
+	// of truth in domain; project vs cluster privilege is keyed on binding Scope,
+	// not the id (so reusing the constant is not a privilege bug).
 	projectAB := domain.AccessBinding{
 		ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(userID),
-		RoleID:       domain.RoleID(projectAdminRoleID),
+		RoleID:       domain.RoleID(domain.ClusterAdminRoleID),
 		ResourceType: domain.ResourceType("project"),
 		ResourceID:   string(prjID),
 	}
@@ -502,16 +504,17 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 					InviteStatus: domain.InviteStatusActive,
 				})
 				if err != nil {
-					// KAC follow-up (migration 0002): DB UNIQUE(email) +
+					// Concurrency contract (migration 0002): DB UNIQUE(email) +
 					// UNIQUE(external_id WHERE !='') enforce one user-row per
 					// identity. Concurrent bootstraps for the same Kratos
-					// identity will lose the race here with 23505 (mapped to
-					// ErrAlreadyExists). Operator-facing recovery: client
-					// retries UpsertFromIdentity, second attempt hits the
-					// fast path SELECT by external_id and returns the
-					// already-bootstrapped row. Refactoring this TX to a
-					// single ON CONFLICT statement is a follow-up — the DB
-					// constraint already prevents dupes from accumulating.
+					// identity lose the race here with 23505 (mapped to
+					// ErrAlreadyExists). Operator-facing recovery: the client
+					// retries UpsertFromIdentity, and the second attempt hits the
+					// fast-path SELECT by external_id and returns the
+					// already-bootstrapped row. This is complete as-is — the DB
+					// constraint is the authoritative dup guard; a single
+					// ON CONFLICT statement would be an equivalent alternative,
+					// not a missing piece.
 					return domain.User{}, err
 				}
 			} else {
