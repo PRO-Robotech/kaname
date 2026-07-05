@@ -260,6 +260,7 @@ func (w *delFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTok
 func (w *delFakeWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *delFakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *delFakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *delFakeWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type delAcctWriter struct{ repo *delFakeRepo }
 

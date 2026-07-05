@@ -179,6 +179,18 @@ func (w *writeTx) ReleaseSavepoint(ctx context.Context, name string) error {
 	return nil
 }
 
+// AdvisoryXactLock takes pg_advisory_xact_lock(hashtext($1)) on THIS writer-tx.
+// The key is passed as a bind parameter (hashtext maps it to the int4 lock key),
+// so no identifier-splicing / injection surface. The lock is transaction-scoped
+// and auto-releases at COMMIT/ROLLBACK — mirroring the reconcile-adapter's
+// per-binding lock and the JWKS-rotate per-alg lock.
+func (w *writeTx) AdvisoryXactLock(ctx context.Context, key string) error {
+	if _, err := w.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, key); err != nil {
+		return mapErr(err, "", "")
+	}
+	return nil
+}
+
 // safeSavepointName validates a SAVEPOINT identifier (must match
 // [A-Za-z_][A-Za-z0-9_]*). SAVEPOINT names can't be passed as bind parameters,
 // so the name is concatenated into the SQL text; an unsafe name is a programmer

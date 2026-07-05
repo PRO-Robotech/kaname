@@ -515,6 +515,7 @@ func (w *abFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserToke
 func (w *abFakeWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *abFakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *abFakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *abFakeWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 // fakeAcctRdr — account Reader; returns Account with the configured owner.
 type fakeAcctRdr struct{ repo *abFakeRepo }

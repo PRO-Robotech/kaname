@@ -163,4 +163,16 @@ type Writer interface {
 	Savepoint(ctx context.Context, name string) error
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error
+
+	// AdvisoryXactLock takes a transaction-scoped
+	// pg_advisory_xact_lock(hashtext(key)) on THIS writer-tx. It serializes
+	// concurrent writer-txs that pass the SAME key, and auto-releases at
+	// COMMIT/ROLLBACK (no manual unlock). Used to make a check-then-insert
+	// atomic where no single-statement CAS / UNIQUE can express the invariant —
+	// e.g. the RC-5 personal-account bootstrap gate, whose "owns-zero-accounts"
+	// predicate cannot be a partial UNIQUE (a user may legitimately own many
+	// accounts) and whose random account name defeats accounts_name_unique. The
+	// caller takes the lock FIRST, then RE-CHECKs the predicate inside the same
+	// tx (ban #10 — DB-level serialization, not a cross-tx software check).
+	AdvisoryXactLock(ctx context.Context, key string) error
 }

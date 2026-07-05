@@ -135,6 +135,7 @@ func (w *fakeUsrWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTok
 func (w *fakeUsrWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *fakeUsrWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *fakeUsrWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *fakeUsrWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type fakeUsrRdr struct{ accID string }
 

@@ -34,6 +34,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
@@ -638,9 +639,9 @@ func ConditionToProto(c domain.Condition) *iamv1.Condition {
 		Expression:  c.Expression,
 		Status:      conditionStatusToProto(c.Status),
 	}
-	if !c.CreatedAt.IsZero() {
-		pb.CreatedAt = timestampSecsProto(c.CreatedAt)
-	}
+	// shared.TimestampProto truncates to seconds and maps zero-time → nil,
+	// preserving this call site's prior omit-on-zero behaviour.
+	pb.CreatedAt = shared.TimestampProto(c.CreatedAt)
 	if len(c.ParametersSchema) > 0 {
 		// `Condition.parameters_schema` is google.protobuf.Struct — unmarshal
 		// JSON object → Struct.

@@ -91,6 +91,31 @@ PDP, может **перечислять** authz-отношения о чужи�
 аутентификации + строгом режиме + отсутствии data-leak, а не на сокрытии endpoint'а или
 на (ломающем flow) self-scoping.
 
+#### Оценено (r5-аудит): dev-mode inner-gate и read-surface backstop
+
+Два defense-in-depth-замечания 5-го аудита, оба **не** меняющие prod-постуру:
+
+- **`AuthorizeService.authorizeAnonymousPeer` fail-open в `mode=dev`.** Внутренний
+  gate PDP отдаёт allow анонимному/system-принципалу только когда `prodMode==false`
+  (`internal/apps/kacho/api/authorize/caller_authority.go`). Это **тот же** dev-mode
+  компромисс, что и общий anonymous-allow: в dev нет mTLS, поэтому public- и
+  internal-слушатели неразличимы, и легитимный внутримодульный PDP-вызов в dev тоже
+  анонимен — потребовать deny означало бы сломать dev-режим (и inter-module
+  preflight), а не закрыть реальную дыру. **По умолчанию** `authn.mode=production`
+  (defaults.go) — gate строго fail-closed; сценарий требует развернуть стенд в
+  `mode=dev`, что уже запрещено (`security.md`: dev — только локальные фикстуры).
+  Сознательно **не** меняем на deny-in-dev (сломало бы flow, prod уже закрыт).
+- **Anti-anonymous interceptor не даёт read-path backstop.** `AntiAnonymousUnary`
+  пропускает read-суффиксы (Get/List/…/Check) для анонимного вызывающего, делегируя
+  authz каждому read use-case (сегодня все они fail-closed: `AllowsVGet`, listauthz
+  с anonymous→empty, FGA-error→fail-closed). Замечание — про архитектурную хрупкость
+  (новый read-RPC, забывший in-use-case gate, не будет пойман на уровне интерсептора),
+  а не про текущую дыру. Предложенный fix (явный per-RPC allowlist вместо суффиксного
+  bypass) — широкая переделка security-интерсептора с риском регрессии на всей
+  read-поверхности; требует отдельного acceptance + full read-suite прогона и **не**
+  сворачивается в hardening-pass. CI-gate `make audit-list-filter` уже держит
+  List-фильтрацию под контролем. Отслеживается отдельной задачей.
+
 ## Целостность данных authz
 
 Гранты `AccessBinding` транслируются в OpenFGA-tuples через transactional-outbox

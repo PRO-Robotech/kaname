@@ -155,6 +155,7 @@ func (w *lcsWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRe
 func (w *lcsWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *lcsWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *lcsWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *lcsWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 func (w *lcsWriter) Commit(context.Context) error                      { return nil }
 func (w *lcsWriter) Rollback(context.Context) error                    { return nil }
 

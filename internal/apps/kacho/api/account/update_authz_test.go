@@ -120,6 +120,7 @@ func (w *authzAcctWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserT
 func (w *authzAcctWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *authzAcctWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *authzAcctWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *authzAcctWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type authzAcctRdr struct{ ownerUserID domain.UserID }
 

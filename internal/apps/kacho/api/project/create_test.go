@@ -275,6 +275,7 @@ func (w *fakeProjWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTo
 func (w *fakeProjWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *fakeProjWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *fakeProjWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *fakeProjWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type fakeProjPRdr struct {
 	parent *fakeProjRepo

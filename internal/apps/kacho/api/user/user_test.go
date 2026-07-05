@@ -325,6 +325,7 @@ func (w *fakeUWtr) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRev
 func (w *fakeUWtr) Savepoint(context.Context, string) error           { return nil }
 func (w *fakeUWtr) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *fakeUWtr) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *fakeUWtr) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 // Stubs нужные для bootstrap-path (InsertActive + Account.Insert +
 // Project.Insert + AB.Insert). Возвращают входной argument как success.

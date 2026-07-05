@@ -133,9 +133,26 @@ func TestIntegration_BootstrapAdminGrant_EndToEnd(t *testing.T) {
 	drainerDone := make(chan error, 1)
 	go func() { drainerDone <- d.Run(ctx) }()
 
-	// Give the drainer ~100ms to LISTEN before we INSERT (otherwise the
-	// initial catch-up still catches it — but this is the realistic path).
-	time.Sleep(100 * time.Millisecond)
+	// Deterministically wait until the drainer's dedicated connection has issued
+	// LISTEN — observable in pg_stat_activity — BEFORE we INSERT, so this test
+	// actually exercises the NOTIFY delivery path rather than the startup catch-up
+	// SELECT. A fixed sleep could, on a loaded runner, let the INSERT race ahead of
+	// LISTEN, so the catch-up would silently mask a broken NOTIFY path (e.g. a wrong
+	// channel name) while the test stays green. Polling the catalog removes that
+	// timing dependence: once the LISTEN backend is idle on `LISTEN <channel>`, the
+	// row we insert next can only reach the drainer via NOTIFY.
+	require.Eventually(t, func() bool {
+		var n int
+		if qerr := pool.QueryRow(ctx,
+			`SELECT count(*) FROM pg_stat_activity
+			  WHERE datname = current_database()
+			    AND state = 'idle'
+			    AND query = 'LISTEN kacho_iam_fga_outbox'`).Scan(&n); qerr != nil {
+			return false
+		}
+		return n > 0
+	}, 5*time.Second, 20*time.Millisecond,
+		"drainer never established LISTEN on kacho_iam_fga_outbox")
 
 	// Payload shape matches bootstrap_admin.go:124-128 exactly.
 	payload, err := json.Marshal(map[string]any{

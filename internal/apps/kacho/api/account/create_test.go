@@ -440,6 +440,7 @@ func (w *fakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenR
 func (w *fakeWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *fakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *fakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *fakeWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type fakeAcctReader struct{}
 

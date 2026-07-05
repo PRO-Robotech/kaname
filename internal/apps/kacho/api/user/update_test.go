@@ -198,6 +198,7 @@ func (w *updUserWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTok
 func (w *updUserWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *updUserWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *updUserWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *updUserWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 func (w *updUserWriter) Commit(context.Context) error                      { return nil }
 func (w *updUserWriter) Rollback(context.Context) error                    { return nil }
 

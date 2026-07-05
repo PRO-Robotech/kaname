@@ -181,3 +181,64 @@ cleanup with no behavioural or security impact. Extracting the emitters into sha
 helpers touches the write-path and the async drain-path together and is better done
 as a focused, independently-reviewed refactor than folded into a hardening pass.
 Tracked as a dedicated refactor-only change.
+
+---
+
+## 7. Conditions domain→proto projection + required-field validation live in the service/handler, not the dto registry / a domain constructor (deferred reorg)
+
+**Convention** (godzila/evgeniy regime): domain→proto mapping goes through the
+generic `internal/dto` + `internal/dto/toproto/*` registry (`dto.Transfer` /
+`RegTransfer`), and required-field/business validation lives in self-validating
+domain newtypes + a `domain.X.Validate()` constructor — the pattern every core
+resource (Account/Project/User/ServiceAccount/Group/Role/AccessBinding) follows.
+
+**Divergence**: the conditions feature hand-rolls its projection
+(`service.ConditionToProto` / `conditionStatusToProto` in
+`conditions_crud_service.go`) instead of a registered `toproto/condition.go`, and
+validates required fields (`folder_id` / `name` / `expression`, and `context` on
+Evaluate) **inline in the transport handler**
+(`internal/apps/kacho/api/conditions/handler.go`) rather than in a
+`domain.Condition` constructor.
+
+**Why deferred (not fixed here)**: this is the same cohesive-service area already
+recorded in §5 (conditions/authorize kept as fat services). Moving the projection
+into the registry would **not** by itself close the stated risk — the
+`conditionStatusToProto` `switch` keeps a catch-all `STATUS_UNSPECIFIED` default,
+so an unhandled future `domain.ConditionStatus` would still map silently regardless
+of where the switch lives; and the `parameters_schema` JSON→structpb path
+currently swallows a decode error (omit-on-bad-JSON) that a registry impl returning
+`(T, error)` would surface differently. Both are behaviour-affecting nuances that
+belong in a focused, independently-reviewed conditions refactor (with a domain
+constructor and a loud-on-unknown status mapping), not folded into a security
+hardening pass. Introducing a second entry point to condition creation before that
+refactor is the only way the inline-handler validation could be bypassed; today the
+gRPC handler is the sole caller, so the invariant holds for every real path.
+
+**Convergence path (deferred)**: add `internal/dto/toproto/condition.go`
+(registered via `RegTransfer`, added to the `Transferrable` type-set), introduce a
+self-validating `domain.Condition` (ConditionName/Expression newtypes +
+`Validate()`), make the status mapping fail loud on an unknown value, and reduce the
+handler to transport parsing + delegation. Tracked as a dedicated refactor-only
+change.
+
+---
+
+## 8. `cmd/kacho-iam/serve.go` `runServe` is a single ~780-line composition root (accepted)
+
+**Convention** (Clean-Architecture composition-root rule): `cmd/<svc>/main.go` is
+the single legitimate wiring place; but a function this long cannot be unit-covered
+and forces a reviewer to hold the whole boot sequence in working memory.
+
+**Why accepted (not split here)**: `runServe` is genuinely the composition root —
+sequential wiring of pools, ops-repo, listeners, interceptor chains, hook servers
+and graceful shutdown, with no branching business logic. Extracting sub-builders
+(`buildListeners` / `buildInterceptorChain` / `buildHookServers` / `wireShutdown`)
+is a pure readability reorganisation with no runtime, wire, or security impact, and
+— like §5/§6 — carries reorder/early-return-cleanup risk in the boot path that is
+better absorbed by a focused, independently-reviewed change than by a hardening
+pass. No behavioural benefit; deferred as a dedicated refactor.
+
+**Convergence path (deferred)**: extract cohesive sub-builders returning wired
+components + cleanup funcs and have `runServe` call them in sequence.
+
+_Reviewed 2026-07-05 (r5 security-hardening audit)._

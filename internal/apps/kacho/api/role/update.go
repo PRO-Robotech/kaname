@@ -9,6 +9,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -175,7 +176,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// changing, it must match the version read on the sync path; a stale token →
 	// FAILED_PRECONDITION (the role was edited concurrently). When omitted, the
 	// xmin worker-tx CAS below is the sole guard (last-writer, back-compat).
-	if in.ResourceVersion != "" && containsField(changed, "rules") && in.ResourceVersion != version {
+	if in.ResourceVersion != "" && slices.Contains(changed, "rules") && in.ResourceVersion != version {
 		return nil, shared.MapRepoErr(
 			iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Role was modified concurrently, retry"))
 	}
@@ -189,7 +190,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// the limit between this check and the fan-out. That is acceptable: the bound only
 	// protects against grossly-oversized fan-out, and the per-binding reconcile is
 	// idempotent + bounded per binding, so a small overshoot is harmless.
-	if u.membership != nil && containsField(changed, "rules") {
+	if u.membership != nil && slices.Contains(changed, "rules") {
 		n, cerr := u.membership.CountActiveBindings(ctx, in.ID)
 		if cerr != nil {
 			return nil, shared.MapRepoErr(cerr)
@@ -242,7 +243,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			// privilege). Bounded fan-out (active bindings of this single role),
 			// idempotent (unchanged tier → empty delta). nil-safe: in unit tests of
 			// the non-rules paths the reconciler may be unwired.
-			if u.reconciler != nil && containsField(changed, "rules") {
+			if u.reconciler != nil && slices.Contains(changed, "rules") {
 				if rerr := u.reconciler.ReconcileRoleTuples(ctx, w, upd.ID, upd); rerr != nil {
 					return domain.Role{}, rerr
 				}
@@ -253,7 +254,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			// fast-path / sweep) see the new selectors. A removed rule drops its
 			// selector here; the per-binding membership re-materialize (eager-revoke by
 			// rule_fp) runs post-commit.
-			if containsField(changed, "rules") {
+			if slices.Contains(changed, "rules") {
 				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID, upd.Rules.MaterializingSelectors()); serr != nil {
 					return domain.Role{}, serr
 				}
@@ -278,7 +279,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			// в ЭТОЙ writer-tx (ban #10, паритет с user/SA Update) — reconciler ре-оценит
 			// затронутые iam.role selector-биндинги (≤2s): label add → грант появляется,
 			// label remove/change → eager fall-out. Только при изменении labels.
-			if containsField(changed, "labels") {
+			if slices.Contains(changed, "labels") {
 				if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(upd.ID)); rerr != nil {
 					return domain.Role{}, rerr
 				}
@@ -297,21 +298,10 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 	// reports done only once membership has converged. Bounded by the sync count-check
 	// above. nil-safe + fatal-to-Operation (a fan-out error fails the Operation so the
 	// caller learns the membership did not converge; the sweep also re-converges).
-	if u.membership != nil && containsField(changed, "rules") {
+	if u.membership != nil && slices.Contains(changed, "rules") {
 		if ferr := u.membership.ReconcileActiveBindings(ctx, updated.ID); ferr != nil {
 			return nil, shared.MapRepoErr(ferr)
 		}
 	}
 	return marshalRole(updated)
-}
-
-// containsField reports whether the changed-fields list includes field — used
-// to gate the FGA reconcile fan-out on an actual permissions change.
-func containsField(changed []string, field string) bool {
-	for _, c := range changed {
-		if c == field {
-			return true
-		}
-	}
-	return false
 }

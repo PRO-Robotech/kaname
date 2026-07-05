@@ -154,6 +154,7 @@ func (w *strictDupFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.U
 func (w *strictDupFakeWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *strictDupFakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *strictDupFakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *strictDupFakeWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type strictDupAcctReader struct {
 	ownerUserID string

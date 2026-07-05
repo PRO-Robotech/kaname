@@ -9,16 +9,9 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-// timestampSecsProto — RFC3339 truncate-seconds + proto.
-func timestampSecsProto(t time.Time) *timestamppb.Timestamp {
-	return timestamppb.New(t.Truncate(time.Second))
-}
 
 // jsonToStructpb — unmarshal `[]byte` JSON object into structpb.Struct.
 // Returns nil on empty input. Caller decides how to handle errors (we return

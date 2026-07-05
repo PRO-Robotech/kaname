@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -211,7 +212,7 @@ func (e *BuiltinEvaluator) evalMFAFresh(ctx map[string]any) (bool, string, error
 		return false, fmt.Sprintf("mfa_fresh: acr=%q (need 3)", acr), nil
 	}
 	amr := asStringList(ctx["amr_claims"])
-	if !contains(amr, "webauthn") {
+	if !slices.Contains(amr, "webauthn") {
 		return false, fmt.Sprintf("mfa_fresh: amr_claims=%v (missing webauthn)", amr), nil
 	}
 	now := unixTime(ctx["current_time"])
@@ -315,22 +316,13 @@ func (e *BuiltinEvaluator) evalDeviceCompliant(ctx, params map[string]any) (bool
 	if len(allowed) == 0 {
 		allowed = asStringList(ctx["allowed_attestations"])
 	}
-	if !contains(allowed, att) {
+	if !slices.Contains(allowed, att) {
 		return false, fmt.Sprintf("device_compliant: %q not in %v", att, allowed), nil
 	}
 	return true, "device_compliant: ok", nil
 }
 
 // ── helpers ──────────────────────────────────────────────────────
-
-func contains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
 
 func asStringList(v any) []string {
 	switch x := v.(type) {

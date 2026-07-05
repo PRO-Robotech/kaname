@@ -482,6 +482,31 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 
 	user, err := shared.DoWithWriteTx(ctx, uc.repo,
 		func(ctx context.Context, w Writer) (domain.User, error) {
+			// 0. ban #10 — close the owns-zero-accounts TOCTOU. The outer
+			// countOwnedAccounts pre-check (uc.countOwnedAccounts above) runs in
+			// its OWN reader-tx, so two concurrent bootstraps for the SAME resolved
+			// user-id both read count==0 and both INSERT a distinct personal
+			// account (random 'personal-cloud-<rand>' name → accounts_name_unique
+			// never fires; owner_user_id has no cardinality bound). "One personal
+			// account per user" cannot be a partial UNIQUE (a user may legitimately
+			// own many accounts), so we serialize same-user bootstraps with a
+			// tx-scoped advisory lock and RE-CHECK the owned-account count INSIDE
+			// this writer-tx: the loser blocks until the winner commits, then sees
+			// count>0 and returns the already-bootstrapped user without inserting a
+			// duplicate. (newIdentity=true callers each carry a distinct fresh id →
+			// different lock key; they are serialized instead by UNIQUE(external_id)
+			// on InsertActive below — unchanged.)
+			if lerr := w.AdvisoryXactLock(ctx, "iam:bootstrap:"+candidateUserID); lerr != nil {
+				return domain.User{}, lerr
+			}
+			if owned, cerr := w.Accounts().CountAccountsByOwner(ctx, userID); cerr != nil {
+				return domain.User{}, cerr
+			} else if owned > 0 {
+				// A concurrent bootstrap won the lock and already created this
+				// user's personal account — return the existing user-row.
+				return w.Users().Get(ctx, userID)
+			}
+
 			// 1. Resolve the user-row.
 			//   - newIdentity=true → INSERT user первым (FK на account отложен).
 			//   - newIdentity=false → invited+activated row уже существует; Get его,

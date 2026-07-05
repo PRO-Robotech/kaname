@@ -122,6 +122,7 @@ func (w *authzProjWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserT
 func (w *authzProjWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *authzProjWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *authzProjWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
+func (w *authzProjWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
 
 type authzAcctRdr struct{ ownerUserID domain.UserID }
 
