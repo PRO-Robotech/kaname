@@ -15,30 +15,20 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 )
 
-// ConditionalTuple — FGA tuple optionally tagged with a Condition reference
-// + per-tuple context. Conditional tuples evaluate the named condition's
-// CEL expression at Check time using `Context` ∪ `request.Context`.
-type ConditionalTuple struct {
-	User      string
-	Relation  string
-	Object    string
-	Condition *TupleConditionRef
-}
-
-// TupleConditionRef — points to a Condition either by name (e.g. `mfa_fresh`,
-// `non_expired`) or by Condition resource id. Either Name or ConditionID
-// must be set; per-tuple context is shipped inline as `Context`.
-type TupleConditionRef struct {
-	// Name — built-in condition name (`mfa_fresh`, `source_ip_in_range`, …)
-	// OR Condition resource id (`cnd_…`).
-	Name string
-	// Context — per-tuple CEL-context (e.g. `{"allowed_cidrs":[...]}` for
-	// source_ip_in_range). Empty for builtin conditions taking only
-	// request-time context.
-	Context map[string]any
-}
+// ConditionalTuple / TupleConditionRef are neutral value types owned by
+// internal/authztypes (so the service-layer ports can speak them without pinning
+// to this adapter — dependency-rule fix). These aliases keep the adapter code
+// ergonomic; the canonical definitions live in the leaf package.
+type (
+	// ConditionalTuple — alias of authztypes.ConditionalTuple.
+	ConditionalTuple = authztypes.ConditionalTuple
+	// TupleConditionRef — alias of authztypes.TupleConditionRef.
+	TupleConditionRef = authztypes.TupleConditionRef
+)
 
 // RelationQueries — extension methods on the OpenFGA client port. Kept as
 // a separate interface so production swap-in does not break the legacy

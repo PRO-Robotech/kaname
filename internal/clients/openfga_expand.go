@@ -11,29 +11,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 )
 
-// ExpandTree — Zanzibar userset tree node.
-type ExpandTree struct {
-	Leaves         []string
-	Computed       []ComputedEdge
-	TupleToUserset []TupleToUsersetEdge
-	Truncated      bool
-}
-
-// ComputedEdge — same-object userset (`admin → viewer`).
-type ComputedEdge struct {
-	Relation string
-	Subtree  *ExpandTree
-}
-
-// TupleToUsersetEdge — parent-resource cascade.
-type TupleToUsersetEdge struct {
-	ParentType string
-	ParentID   string
-	Relation   string
-	Subtree    *ExpandTree
-}
+// The Zanzibar userset-tree types are neutral value types owned by
+// internal/authztypes so the service-layer ports can speak them without pinning
+// to this adapter (dependency-rule fix). These aliases keep the adapter's own
+// code + method signatures ergonomic while the canonical definitions live in the
+// leaf package.
+type (
+	// ExpandTree — Zanzibar userset tree node. Alias of authztypes.ExpandTree.
+	ExpandTree = authztypes.ExpandTree
+	// ComputedEdge — same-object userset. Alias of authztypes.ComputedEdge.
+	ComputedEdge = authztypes.ComputedEdge
+	// TupleToUsersetEdge — parent-resource cascade. Alias of authztypes.TupleToUsersetEdge.
+	TupleToUsersetEdge = authztypes.TupleToUsersetEdge
+)
 
 type fgaWireExpandRequest struct {
 	AuthorizationModelID string          `json:"authorization_model_id,omitempty"`

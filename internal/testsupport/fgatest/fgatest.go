@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,22 +142,53 @@ func (h *Harness) post(t *testing.T, path string, body any) map[string]any {
 	return out
 }
 
-// fgaModelPath resolves the canonical fga_model.fga in the sibling kacho-proto
-// checkout (single source of truth). Walks up from the test working dir.
+// fgaModelRelPath — location of the canonical model inside the kacho-proto tree
+// (shared by the sibling checkout and the Go-module directory).
+const fgaModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
+
+// fgaModelPath resolves the canonical fga_model.fga (single source of truth). It
+// tries a sibling kacho-proto checkout (workspace-dev layout) then the pinned
+// kacho-proto Go-module directory (standalone-CI layout). When neither resolves,
+// setting KACHO_IAM_REQUIRE_FGA_MODEL=1 turns the absence into a hard failure so
+// the real-FGA authorization proof cannot SILENTLY skip in a pipeline; without
+// the flag it degrades to a documented skip for offline local runs.
 func fgaModelPath(t *testing.T) string {
 	t.Helper()
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	for i := 0; i < 12; i++ {
-		cand := filepath.Join(dir, "kacho-proto", "proto", "kacho", "cloud", "iam", "v1", "fga_model.fga")
-		if _, statErr := os.Stat(cand); statErr == nil {
-			return cand
-		}
-		dir = filepath.Dir(dir)
+	if p, ok := resolveFGAModel(); ok {
+		return p
 	}
-	t.Skip("canonical fga_model.fga not found (kacho-proto sibling absent) — skipping real-FGA proof")
+	const msg = "canonical fga_model.fga not found (no kacho-proto sibling and not in the pinned module) — real-FGA proof cannot run"
+	if os.Getenv("KACHO_IAM_REQUIRE_FGA_MODEL") != "" {
+		t.Fatal(msg + " [KACHO_IAM_REQUIRE_FGA_MODEL set: refusing to skip a security proof]")
+	}
+	t.Skip(msg)
 	return ""
+}
+
+// resolveFGAModel returns the canonical model path and whether it was found,
+// trying the sibling checkout then the pinned kacho-proto module directory.
+func resolveFGAModel() (string, bool) {
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for i := 0; i < 12; i++ {
+			cand := filepath.Join(dir, "kacho-proto", fgaModelRelPath)
+			if _, statErr := os.Stat(cand); statErr == nil {
+				return cand, true
+			}
+			dir = filepath.Dir(dir)
+		}
+	}
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
+		"github.com/PRO-Robotech/kacho-proto").Output()
+	if err == nil {
+		if modDir := strings.TrimSpace(string(out)); modDir != "" {
+			cand := filepath.Join(modDir, fgaModelRelPath)
+			if _, statErr := os.Stat(cand); statErr == nil {
+				return cand, true
+			}
+		}
+	}
+	return "", false
 }
 
 // transformModelToJSON shells out to the openfga/cli image to transform the

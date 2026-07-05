@@ -17,6 +17,7 @@ package internal_iam
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
@@ -274,9 +276,10 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 		switch {
 		case strings.HasPrefix(err.Error(), "Illegal argument"):
 			return nil, status.Error(codes.InvalidArgument, err.Error())
-		case strings.HasPrefix(err.Error(), "authz unavailable"),
-			strings.HasPrefix(err.Error(), "policy unavailable"):
-			return nil, status.Error(codes.Unavailable, err.Error())
+		case stderrors.Is(err, iamerr.ErrUnavailable):
+			// Backend-unavailable classified by the typed sentinel (robust to
+			// error-text rewording), not an error-string prefix.
+			return nil, status.Error(codes.Unavailable, iamerr.StripSentinel(err))
 		default:
 			return nil, status.Error(codes.Internal, err.Error())
 		}

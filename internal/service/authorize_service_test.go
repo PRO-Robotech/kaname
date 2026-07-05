@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // mockRelations — minimal Authorizer for unit tests.
@@ -467,8 +468,14 @@ func TestAuthorize_CheckRelation_FGAUnavailableWhenNoClient(t *testing.T) {
 	_, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 		Subject: "user:u", Relation: "viewer", Object: "vpc_network:e",
 	})
-	if err == nil || !strings.HasPrefix(err.Error(), "authz unavailable") {
-		t.Errorf("expected authz unavailable err; got %v", err)
+	// Backend-unavailable is now carried by the typed iamerr.ErrUnavailable
+	// sentinel (handlers classify via errors.Is, not an error-text prefix); the
+	// client-facing text still reads "authz unavailable".
+	if err == nil || !errors.Is(err, iamerr.ErrUnavailable) {
+		t.Errorf("expected ErrUnavailable-wrapped err; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "authz unavailable") {
+		t.Errorf("expected message to mention authz unavailable; got %v", err)
 	}
 }
 
@@ -479,7 +486,10 @@ func TestAuthorize_CheckRelation_FGAErrorIsUnavailable(t *testing.T) {
 	_, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 		Subject: "user:u", Relation: "viewer", Object: "vpc_network:e",
 	})
-	if err == nil || !strings.HasPrefix(err.Error(), "authz unavailable") {
-		t.Errorf("expected authz unavailable err; got %v", err)
+	if err == nil || !errors.Is(err, iamerr.ErrUnavailable) {
+		t.Errorf("expected ErrUnavailable-wrapped err; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "authz unavailable") {
+		t.Errorf("expected message to mention authz unavailable; got %v", err)
 	}
 }

@@ -39,8 +39,9 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // Authorizer — port-iface narrowed to AuthorizeService needs.
@@ -48,12 +49,12 @@ type Authorizer interface {
 	CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error)
 	ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error)
 	ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error)
-	Expand(ctx context.Context, objectType, objectID, relation string) (*clients.ExpandTree, error)
+	Expand(ctx context.Context, objectType, objectID, relation string) (*authztypes.ExpandTree, error)
 	// ReadTuples — filtered read; used by Check to enrich deny_reasons with
 	// the subject's existing relations on the object (so the user can see
 	// "you have `viewer` but need `editor`" instead of opaque "no path").
 	// Nil-zero filters are wildcard.
-	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error)
+	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error)
 }
 
 // AuthorizeService — use-case.
@@ -228,11 +229,11 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 
 	// FGA Check.
 	if s.relations == nil {
-		return result, fmt.Errorf("authz unavailable")
+		return result, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
 	allowed, err := s.relations.CheckWithContext(ctx, req.Subject, relation, object, condCtx)
 	if err != nil {
-		return result, fmt.Errorf("authz unavailable: %w", err)
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
 	}
 	if allowed {
 		result.Allowed = true
@@ -354,11 +355,11 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	condCtx := map[string]any{"current_time": now.Unix()}
 
 	if s.relations == nil {
-		return result, fmt.Errorf("authz unavailable")
+		return result, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
 	allowed, err := s.relations.CheckWithContext(ctx, req.Subject, req.Relation, req.Object, condCtx)
 	if err != nil {
-		return result, fmt.Errorf("authz unavailable: %w", err)
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
 	}
 	if allowed {
 		result.Allowed = true
@@ -445,7 +446,7 @@ type ListObjectsResult struct {
 // dangling relation.
 func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsRequest) (*ListObjectsResult, error) {
 	if s.relations == nil {
-		return nil, fmt.Errorf("authz unavailable")
+		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
 	relation := resolveActionToRelation(req.Action)
 	if relation == "" {
@@ -516,7 +517,7 @@ type ListSubjectsResult struct {
 // ListSubjects — inverse of ListObjects.
 func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsRequest) (*ListSubjectsResult, error) {
 	if s.relations == nil {
-		return nil, fmt.Errorf("authz unavailable")
+		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
 	if req.PageSize > 1000 {
 		return nil, fmt.Errorf("Illegal argument page_size %d > 1000", req.PageSize)
@@ -554,14 +555,14 @@ type ExpandRequest struct {
 type ExpandResult struct {
 	Resource             ResourceRef
 	Relation             string
-	Tree                 *clients.ExpandTree
+	Tree                 *authztypes.ExpandTree
 	AuthorizationModelID string
 }
 
 // ExpandRelations — Zanzibar userset tree.
 func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandRequest) (*ExpandResult, error) {
 	if s.relations == nil {
-		return nil, fmt.Errorf("authz unavailable")
+		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
 	tree, err := s.relations.Expand(ctx, req.ResourceType, req.ResourceID, req.Relation)
 	if err != nil {
@@ -584,7 +585,7 @@ func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandReques
 }
 
 // truncateTree — depth-limit the expand tree.
-func truncateTree(t *clients.ExpandTree, depth int) {
+func truncateTree(t *authztypes.ExpandTree, depth int) {
 	if t == nil || depth <= 0 {
 		return
 	}

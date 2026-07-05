@@ -199,7 +199,7 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Re-inject ext_claims.
-	claims, err := h.refreshClaims(ctx, primary, &payload)
+	claims, err := h.refreshClaims(primary, &payload)
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
 			http.Error(w, `{"error":"user_disabled"}`, http.StatusForbidden)
@@ -278,8 +278,11 @@ func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domai
 	return false, "", nil
 }
 
-func (h *RefreshHookHandler) refreshClaims(ctx context.Context, u domain.User, p *hydraRefreshHookRequest) (map[string]any, error) {
-	_ = ctx
+// refreshClaims builds the enriched ID/access-token claim set from the resolved
+// user + the Hydra refresh payload. It performs no context-propagated work
+// (groups enrichment is not yet wired), so it takes no ctx — a caller that later
+// adds a DB/FGA lookup here must re-introduce ctx and thread it to that call.
+func (h *RefreshHookHandler) refreshClaims(u domain.User, p *hydraRefreshHookRequest) (map[string]any, error) {
 	claims := map[string]any{
 		"kacho_external_id":       string(u.ExternalID),
 		"kacho_user_id":           string(u.ID),

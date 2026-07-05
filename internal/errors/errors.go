@@ -108,7 +108,7 @@ func WrapPgErr(err error, kindHint, idHint string) error {
 	case "23503": // foreign_key_violation
 		return Wrapf(ErrFailedPrecondition, "%s", fkText(pgErr, kindHint, idHint))
 	case "23514": // check_violation
-		return Wrapf(ErrInvalidArg, "%s", checkText(pgErr, kindHint))
+		return Wrapf(ErrInvalidArg, "%s", checkText(pgErr))
 	case "23502": // not_null_violation
 		return Wrapf(ErrInvalidArg, "%s", notNullText(pgErr))
 	case "23P01": // exclusion_violation
@@ -230,7 +230,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	return "referenced resource not found or still in use"
 }
 
-func checkText(pgErr *pgconn.PgError, kindHint string) string {
+func checkText(pgErr *pgconn.PgError) string {
 	switch pgErr.ConstraintName {
 	case "accounts_name_check":
 		return "Illegal argument name: must match ^[a-z][-a-z0-9]{2,62}$"
@@ -252,7 +252,6 @@ func checkText(pgErr *pgconn.PgError, kindHint string) string {
 	case "users_external_id_check":
 		return "Illegal argument external_id: length must be 1..256"
 	}
-	_ = kindHint
 	// Unmapped CHECK — generic InvalidArgument text; never leak pgErr.Message
 	// (it embeds the constraint expression/name → schema reconnaissance).
 	return "Illegal argument: value violates a constraint"

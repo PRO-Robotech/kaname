@@ -36,6 +36,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/condition"
 )
 
@@ -388,7 +389,7 @@ func (s *ConditionsCRUDService) doDelete(ctx context.Context, id domain.Conditio
 			return nil, err
 		}
 		if count > 0 {
-			return nil, fmt.Errorf("Condition %s is in use by %d AccessBindings — cleanup the bindings first", id, count)
+			return nil, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Condition %s is in use by %d AccessBindings — cleanup the bindings first", id, count)
 		}
 		if err := s.repo.SetStatus(ctx, id, domain.ConditionStatusDeleting); err != nil {
 			return nil, err
@@ -424,7 +425,7 @@ func (s *ConditionsCRUDService) doDelete(ctx context.Context, id domain.Conditio
 		return nil, err
 	}
 	if count > 0 {
-		return nil, fmt.Errorf("Condition %s is in use by %d AccessBindings — cleanup the bindings first", id, count)
+		return nil, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Condition %s is in use by %d AccessBindings — cleanup the bindings first", id, count)
 	}
 	if err := s.repo.SetStatusTx(ctx, tx, id, domain.ConditionStatusDeleting); err != nil {
 		return nil, err

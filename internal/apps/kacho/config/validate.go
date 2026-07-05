@@ -54,18 +54,27 @@ func (c Config) Validate() error {
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
-	}
 
-	if c.AuthN.Mode == ModeProductionStrict {
+		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
+		// IAM data (user/SA records, session-revocation + token rows, the
+		// transient SA-key client_secret briefly staged in operations.response_data
+		// before redaction) traverses this link; a plaintext connection
+		// (sslmode=disable, or the empty default baseDSN substitutes with
+		// "disable") is a boot-time misconfiguration in production, exactly like a
+		// missing mTLS listener. A network-adjacent attacker on a plaintext DB link
+		// can passively read credentials and IAM rows (CWE-319). Dev mode is
+		// unaffected — see InsecureDevWarnings.
 		switch strings.ToLower(c.Repository.Postgres.SSLMode) {
 		case "require", "verify-ca", "verify-full":
 			// OK
 		default:
 			errs = multierr.Append(errs,
-				fmt.Errorf("production-strict mode: repository.postgres.ssl-mode must be one of require|verify-ca|verify-full (got %q)",
+				fmt.Errorf("production mode: repository.postgres.ssl-mode must be one of require|verify-ca|verify-full (got %q)",
 					c.Repository.Postgres.SSLMode))
 		}
-		// extend later with extapi.openfga.tls.enable etc.
+		// (production-strict adds no DB-TLS requirement beyond this gate; any
+		// future extapi.openfga.tls.* strict-only checks go under a
+		// c.AuthN.Mode == ModeProductionStrict branch here.)
 	}
 
 	return errs

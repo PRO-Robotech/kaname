@@ -13,6 +13,7 @@ package authorize
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"strings"
 
@@ -24,7 +25,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
@@ -112,11 +114,12 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	if err != nil {
 		// Validation errors → InvalidArgument (verbatim, safe); backend errors →
 		// Unavailable/Internal with a fixed, redacted message (no raw pgx/FGA leak).
+		// Backend-unavailable is classified by the typed iamerr.ErrUnavailable
+		// sentinel (robust to error-text rewording), NOT an error-string prefix.
 		if strings.HasPrefix(err.Error(), "Illegal argument") {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		if strings.HasPrefix(err.Error(), "authz unavailable") ||
-			strings.HasPrefix(err.Error(), "policy unavailable") {
+		if stderrors.Is(err, iamerr.ErrUnavailable) {
 			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "Check", "err", err.Error())
 			return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 		}
@@ -278,7 +281,7 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 }
 
 // treeToProto — service.ExpandTree → iamv1.UsersetTree (recursive).
-func treeToProto(t *clients.ExpandTree) *iamv1.UsersetTree {
+func treeToProto(t *authztypes.ExpandTree) *iamv1.UsersetTree {
 	if t == nil {
 		return nil
 	}

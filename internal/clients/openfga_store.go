@@ -12,17 +12,13 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 )
 
-// StoreInfo — FGA store metadata.
-type StoreInfo struct {
-	StoreID              string
-	AuthorizationModelID string
-	TupleCount           int64
-	ModelCreatedAt       time.Time
-	ModelBuildSHA        string
-	EngineVersion        string
-}
+// StoreInfo — FGA store metadata. Neutral value type owned by
+// internal/authztypes (dependency-rule fix); alias kept for adapter ergonomics.
+type StoreInfo = authztypes.StoreInfo
 
 // GetStoreInfo — see RelationQueries.
 func (c *OpenFGAHTTPClient) GetStoreInfo(ctx context.Context) (StoreInfo, error) {

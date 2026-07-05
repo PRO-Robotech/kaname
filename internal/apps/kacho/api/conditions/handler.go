@@ -181,8 +181,9 @@ func mapErr(err error) error {
 	if strings.HasPrefix(err.Error(), "Illegal argument") {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
-	if strings.Contains(err.Error(), "is in use by") {
-		return status.Error(codes.FailedPrecondition, err.Error())
-	}
+	// NOTE: the "Condition … is in use by … AccessBindings" precondition is now
+	// returned wrapped in iamerr.ErrFailedPrecondition by the use-case and is
+	// caught by the ErrFailedPrecondition sentinel branch above — no error-string
+	// substring match here (robust to rewording).
 	return status.Error(codes.Internal, err.Error())
 }

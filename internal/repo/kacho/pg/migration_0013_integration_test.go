@@ -23,27 +23,61 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
 	pg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
+// jitTestSubjectID / jitTestAccountID — the fixed subject seeded for the parent
+// bindings below (migration 0049 enforces subject existence via the
+// subject_ref_exists trigger, so the referenced user must be a live row).
+const (
+	jitTestSubjectID = "usr_jit_test"
+	jitTestAccountID = "acc_jit_test"
+)
+
+// ensureJITSubject idempotently seeds the user (+ its account, deferred-FK
+// chicken/egg) that the parent bindings reference. Safe to call repeatedly
+// within one test (ON CONFLICT DO NOTHING).
+func ensureJITSubject(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	// users.account_id → accounts(id) is DEFERRABLE INITIALLY DEFERRED, so the
+	// user may be inserted before its account within one tx (same pattern as
+	// mustSeedUser). invite_status='ACTIVE' requires a non-empty external_id.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO kacho_iam.users (id, account_id, external_id, email, display_name, invite_status)
+		VALUES ($1, $2, 'ext-jit-test', 'jit@example.com', 'JIT', 'ACTIVE')
+		ON CONFLICT (id) DO NOTHING`, jitTestSubjectID, jitTestAccountID)
+	require.NoError(t, err, "seed jit subject user")
+	_, err = tx.Exec(ctx, `
+		INSERT INTO kacho_iam.accounts (id, name, owner_user_id, labels)
+		VALUES ($1, 'jit-test-acc', $2, '{}'::jsonb)
+		ON CONFLICT (id) DO NOTHING`, jitTestAccountID, jitTestSubjectID)
+	require.NoError(t, err, "seed jit subject account")
+	require.NoError(t, tx.Commit(ctx), "commit jit subject seed")
+}
+
 // insertParentBinding inserts a minimal valid access_bindings row and returns
 // its id (so the FK on access_binding_conditions.binding_id is satisfiable).
-func insertParentBinding(ctx context.Context, t *testing.T, pool interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-}, id string) {
+func insertParentBinding(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id string) {
 	t.Helper()
+	// migration 0049: subject_id is now DB-enforced (subject_ref_exists trigger),
+	// so the referenced subject must be a live user row — seed it first.
+	ensureJITSubject(ctx, t, pool)
 	// role_id has an FK → roles(id); use a seeded deterministic system role.
-	// subject_id / resource_id are soft refs (no FK). resource_id is derived
-	// from the binding id so each parent's active-grant 5-tuple is unique
+	// resource_id is a soft (cross-domain) ref (no FK), derived from the binding
+	// id so each parent's active-grant 5-tuple is unique
 	// (access_bindings_active_grant_uniq partial UNIQUE).
 	_, err := pool.Exec(ctx, `
 		INSERT INTO kacho_iam.access_bindings
 			(id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', 'usr_jit_test', 'rol000000000sysadmin', 'project', $2, 'ACTIVE')`,
-		id, "prj_"+id)
+		VALUES ($1, 'user', $2, 'rol000000000sysadmin', 'project', $3, 'ACTIVE')`,
+		id, jitTestSubjectID, "prj_"+id)
 	require.NoError(t, err, "insert parent access_binding")
 }
 

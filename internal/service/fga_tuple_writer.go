@@ -24,14 +24,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 )
 
 // RelationWriter — port-iface narrowed to writer-needs.
 type RelationWriter interface {
-	WriteConditionalTuples(ctx context.Context, writes, deletes []clients.ConditionalTuple) error
-	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error)
-	GetStoreInfo(ctx context.Context) (clients.StoreInfo, error)
+	WriteConditionalTuples(ctx context.Context, writes, deletes []authztypes.ConditionalTuple) error
+	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error)
+	GetStoreInfo(ctx context.Context) (authztypes.StoreInfo, error)
 }
 
 // RelationProjector — service.
@@ -50,7 +50,7 @@ type AccessBindingTuple struct {
 	Relation     string // resolved from role permissions
 	ResourceType string
 	ResourceID   string
-	Condition    *clients.TupleConditionRef // optional
+	Condition    *authztypes.TupleConditionRef // optional
 }
 
 // OnAccessBindingCreated — write tuple for a freshly-created binding.
@@ -58,13 +58,13 @@ func (w *RelationProjector) OnAccessBindingCreated(ctx context.Context, b Access
 	if w.relations == nil {
 		return fmt.Errorf("fga: writer not configured")
 	}
-	tup := clients.ConditionalTuple{
+	tup := authztypes.ConditionalTuple{
 		User:      b.Subject,
 		Relation:  b.Relation,
 		Object:    fmt.Sprintf("%s:%s", b.ResourceType, b.ResourceID),
 		Condition: b.Condition,
 	}
-	if err := w.relations.WriteConditionalTuples(ctx, []clients.ConditionalTuple{tup}, nil); err != nil {
+	if err := w.relations.WriteConditionalTuples(ctx, []authztypes.ConditionalTuple{tup}, nil); err != nil {
 		return fmt.Errorf("fga write tuple: %w", err)
 	}
 	return nil
@@ -77,12 +77,12 @@ func (w *RelationProjector) OnAccessBindingDeleted(ctx context.Context, b Access
 		return fmt.Errorf("fga: writer not configured")
 	}
 	// Deletes do not carry a Condition (FGA semantics: delete by triple).
-	tup := clients.ConditionalTuple{
+	tup := authztypes.ConditionalTuple{
 		User:     b.Subject,
 		Relation: b.Relation,
 		Object:   fmt.Sprintf("%s:%s", b.ResourceType, b.ResourceID),
 	}
-	if err := w.relations.WriteConditionalTuples(ctx, nil, []clients.ConditionalTuple{tup}); err != nil {
+	if err := w.relations.WriteConditionalTuples(ctx, nil, []authztypes.ConditionalTuple{tup}); err != nil {
 		return fmt.Errorf("fga delete tuple: %w", err)
 	}
 	return nil
@@ -98,18 +98,18 @@ func (w *RelationProjector) OnAccessBindingUpdated(ctx context.Context, oldB, ne
 	if equalTupleCore(oldB, newB) && equalCondition(oldB.Condition, newB.Condition) {
 		return nil // no-op
 	}
-	delTup := clients.ConditionalTuple{
+	delTup := authztypes.ConditionalTuple{
 		User:     oldB.Subject,
 		Relation: oldB.Relation,
 		Object:   fmt.Sprintf("%s:%s", oldB.ResourceType, oldB.ResourceID),
 	}
-	addTup := clients.ConditionalTuple{
+	addTup := authztypes.ConditionalTuple{
 		User:      newB.Subject,
 		Relation:  newB.Relation,
 		Object:    fmt.Sprintf("%s:%s", newB.ResourceType, newB.ResourceID),
 		Condition: newB.Condition,
 	}
-	if err := w.relations.WriteConditionalTuples(ctx, []clients.ConditionalTuple{addTup}, []clients.ConditionalTuple{delTup}); err != nil {
+	if err := w.relations.WriteConditionalTuples(ctx, []authztypes.ConditionalTuple{addTup}, []authztypes.ConditionalTuple{delTup}); err != nil {
 		return fmt.Errorf("fga update tuple: %w", err)
 	}
 	return nil
@@ -117,7 +117,7 @@ func (w *RelationProjector) OnAccessBindingUpdated(ctx context.Context, oldB, ne
 
 // WriteRaw — pass-through used by InternalAuthorizeService.WriteTuples
 // admin RPC.
-func (w *RelationProjector) WriteRaw(ctx context.Context, writes, deletes []clients.ConditionalTuple) (inserted, deleted int, err error) {
+func (w *RelationProjector) WriteRaw(ctx context.Context, writes, deletes []authztypes.ConditionalTuple) (inserted, deleted int, err error) {
 	if w.relations == nil {
 		return 0, 0, fmt.Errorf("fga: writer not configured")
 	}
@@ -128,7 +128,7 @@ func (w *RelationProjector) WriteRaw(ctx context.Context, writes, deletes []clie
 }
 
 // ReadRaw — used by InternalAuthorizeService.ReadTuples.
-func (w *RelationProjector) ReadRaw(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error) {
+func (w *RelationProjector) ReadRaw(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error) {
 	if w.relations == nil {
 		return nil, "", fmt.Errorf("fga: writer not configured")
 	}
@@ -139,9 +139,9 @@ func (w *RelationProjector) ReadRaw(ctx context.Context, subjectFilter, relation
 }
 
 // StoreInfo — pass-through for InternalAuthorizeService.GetFGAStoreInfo.
-func (w *RelationProjector) StoreInfo(ctx context.Context) (clients.StoreInfo, error) {
+func (w *RelationProjector) StoreInfo(ctx context.Context) (authztypes.StoreInfo, error) {
 	if w.relations == nil {
-		return clients.StoreInfo{}, fmt.Errorf("fga: writer not configured")
+		return authztypes.StoreInfo{}, fmt.Errorf("fga: writer not configured")
 	}
 	return w.relations.GetStoreInfo(ctx)
 }
@@ -151,7 +151,7 @@ func equalTupleCore(a, b AccessBindingTuple) bool {
 		a.ResourceType == b.ResourceType && a.ResourceID == b.ResourceID
 }
 
-func equalCondition(a, b *clients.TupleConditionRef) bool {
+func equalCondition(a, b *authztypes.TupleConditionRef) bool {
 	if a == nil && b == nil {
 		return true
 	}

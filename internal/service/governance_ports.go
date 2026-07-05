@@ -15,6 +15,8 @@ package service
 import (
 	"context"
 	"time"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/outboxtypes"
 )
 
 // TxBeginner opens a transaction. The returned handle is the opaque service.Tx
@@ -24,11 +26,10 @@ type TxBeginner interface {
 }
 
 // RelationTuple — {User, Relation, Object} triple for fga_outbox writes.
-type RelationTuple struct {
-	User     string
-	Relation string
-	Object   string
-}
+// Neutral value type owned by internal/outboxtypes so the repo-ports package
+// (internal/repo/kacho) can reference it without importing this use-case package
+// (dependency-rule fix); the alias keeps the ergonomic service.RelationTuple name.
+type RelationTuple = outboxtypes.RelationTuple
 
 // RelationOutboxEmitter — port for emitting kacho_iam.fga_outbox grant/revoke
 // rows from writer-tx-owning code paths. Atomic with the surrounding
@@ -74,15 +75,11 @@ type ResourceMirrorEmitter interface {
 // Payload carries the compliance dimensions (actor / subject / resource / key
 // domain fields). It MUST NOT contain secret material (no tokens, no key PEM,
 // no client_secret) — see security.md / acceptance 5.2-36.
-type AuditEvent struct {
-	// EventType — canonical `iam.<resource>.<action>` taxonomy value.
-	EventType string
-	// TenantAccountID — Account scope for per-account audit queries; "" → NULL.
-	TenantAccountID string
-	// Payload — the event_payload jsonb body (camelCase-irrelevant at this layer;
-	// the use-case decides key names — actor / subject_id / reason / token_jti / …).
-	Payload map[string]any
-}
+//
+// Neutral value type owned by internal/outboxtypes so the repo-ports package can
+// reference it without importing this use-case package (dependency-rule fix);
+// the alias keeps the ergonomic service.AuditEvent name.
+type AuditEvent = outboxtypes.AuditEvent
 
 // AuditOutboxEmitter — port for emitting one durable kacho_iam.audit_outbox row
 // inside a caller-owned writer-tx. Atomic with the surrounding security-relevant

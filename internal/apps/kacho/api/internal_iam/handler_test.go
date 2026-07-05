@@ -29,6 +29,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
@@ -150,10 +151,15 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 		err  error
 		want codes.Code
 	}{
-		{"authz unavailable", errors.New("authz unavailable: openfga check: status 503"), codes.Unavailable},
-		{"policy unavailable", errors.New("policy unavailable: opa down"), codes.Unavailable},
+		// Backend-unavailable is classified by the typed iamerr.ErrUnavailable
+		// sentinel (robust to error-text rewording), not an error-string prefix.
+		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: openfga check: status 503"), codes.Unavailable},
+		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "policy unavailable: opa down"), codes.Unavailable},
 		{"illegal argument", errors.New("Illegal argument relation: required"), codes.InvalidArgument},
 		{"generic", errors.New("unexpected boom"), codes.Internal},
+		// Regression-lock: a raw "authz unavailable" TEXT with no sentinel must NOT
+		// be classified as Unavailable anymore (the brittle string branch is gone).
+		{"raw unavailable text without sentinel", errors.New("authz unavailable: raw"), codes.Internal},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

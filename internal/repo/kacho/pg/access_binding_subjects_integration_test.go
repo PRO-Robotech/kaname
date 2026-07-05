@@ -71,6 +71,10 @@ func TestABSubjects_E34_RoundTripOrdered(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "absubrt")
 	acc := seedAccount(t, ctx, repo, "acc-absubrt", uid)
+	// subject_id is a within-service ref enforced by migration 0049 — seed real
+	// group/SA rows so the multi-subject set references live principals.
+	gid := seedGroupID(t, ctx, pool, string(acc.ID), "absubrt")
+	said := seedSAID(t, ctx, pool, string(acc.ID), "absubrt")
 	ab := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
@@ -78,8 +82,8 @@ func TestABSubjects_E34_RoundTripOrdered(t *testing.T) {
 
 	subs := []domain.Subject{
 		{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)},
-		{Type: domain.SubjectTypeGroup, ID: "grp_absubrt"},
-		{Type: domain.SubjectTypeServiceAccount, ID: "sva_absubrt"},
+		{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)},
+		{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(said)},
 	}
 	insertSubjects(t, ctx, repo, ab.ID, subs)
 
@@ -109,13 +113,14 @@ func TestABSubjects_E30_CascadeOnBindingDelete(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "absubcas")
 	acc := seedAccount(t, ctx, repo, "acc-absubcas", uid)
+	gid := seedGroupID(t, ctx, pool, string(acc.ID), "absubcas")
 	ab := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	insertSubjects(t, ctx, repo, ab.ID, []domain.Subject{
 		{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)},
-		{Type: domain.SubjectTypeGroup, ID: "grp_absubcas"},
+		{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)},
 	})
 	require.Equal(t, 2, countABSubjects(t, ctx, repo, ab.ID))
 
@@ -141,19 +146,20 @@ func TestABSubjects_PerSubjectDelete_Independent(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "absubdel")
 	acc := seedAccount(t, ctx, repo, "acc-absubdel", uid)
+	gid := seedGroupID(t, ctx, pool, string(acc.ID), "absubdel")
 	ab := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	insertSubjects(t, ctx, repo, ab.ID, []domain.Subject{
 		{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)},
-		{Type: domain.SubjectTypeGroup, ID: "grp_absubdel"},
+		{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)},
 	})
 
 	// Remove ONLY the group subject; the user subject survives.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	deleted, err := w.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: "grp_absubdel"})
+	deleted, err := w.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)})
 	require.NoError(t, err)
 	require.True(t, deleted)
 	require.NoError(t, w.Commit(ctx))
@@ -172,7 +178,7 @@ func TestABSubjects_PerSubjectDelete_Independent(t *testing.T) {
 	// Idempotent: deleting an absent subject returns false.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	d2, err := w2.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: "grp_absubdel"})
+	d2, err := w2.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)})
 	require.NoError(t, err)
 	assert.False(t, d2)
 	require.NoError(t, w2.Commit(ctx))
@@ -191,6 +197,8 @@ func TestABSubjects_Batch_ListForBindings(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "absubbat")
 	acc := seedAccount(t, ctx, repo, "acc-absubbat", uid)
+	gid := seedGroupID(t, ctx, pool, string(acc.ID), "absubbat")
+	said := seedSAID(t, ctx, pool, string(acc.ID), "absubbat")
 	ab1 := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
@@ -199,8 +207,8 @@ func TestABSubjects_Batch_ListForBindings(t *testing.T) {
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysadmin", ResourceType: "account", ResourceID: string(acc.ID),
 	})
-	insertSubjects(t, ctx, repo, ab1.ID, []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}, {Type: domain.SubjectTypeGroup, ID: "grp_a"}})
-	insertSubjects(t, ctx, repo, ab2.ID, []domain.Subject{{Type: domain.SubjectTypeServiceAccount, ID: "sva_b"}})
+	insertSubjects(t, ctx, repo, ab1.ID, []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}, {Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)}})
+	insertSubjects(t, ctx, repo, ab2.ID, []domain.Subject{{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(said)}})
 
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
@@ -209,7 +217,7 @@ func TestABSubjects_Batch_ListForBindings(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, m[ab1.ID], 2)
 	require.Len(t, m[ab2.ID], 1)
-	assert.Equal(t, domain.SubjectID("sva_b"), m[ab2.ID][0].ID)
+	assert.Equal(t, domain.SubjectID(said), m[ab2.ID][0].ID)
 }
 
 func TestABSubjects_E33_ListByRole(t *testing.T) {
@@ -225,13 +233,14 @@ func TestABSubjects_E33_ListByRole(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "ablbr")
 	acc := seedAccount(t, ctx, repo, "acc-ablbr", uid)
+	gid := seedGroupID(t, ctx, pool, string(acc.ID), "ablbr")
 	// Two ACTIVE bindings carrying the same role; one of a different role.
 	insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	insertAB(t, ctx, repo, domain.AccessBinding{
-		SubjectType: domain.SubjectTypeGroup, SubjectID: "grp_ablbr",
+		SubjectType: domain.SubjectTypeGroup, SubjectID: domain.SubjectID(gid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	insertAB(t, ctx, repo, domain.AccessBinding{
@@ -263,11 +272,12 @@ func TestABSubjects_RACE_ConcurrentInsertSameSubject_OneRow(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "absubrace")
 	acc := seedAccount(t, ctx, repo, "acc-absubrace", uid)
+	gid := seedGroupID(t, ctx, pool, string(acc.ID), "absubrace")
 	ab := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 	})
-	sub := domain.Subject{Type: domain.SubjectTypeGroup, ID: "grp_race"}
+	sub := domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)}
 
 	const n = 8
 	var wg sync.WaitGroup

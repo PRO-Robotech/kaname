@@ -34,7 +34,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
@@ -152,10 +152,10 @@ func (h *Handler) GetFGAStoreInfo(ctx context.Context, _ *iamv1.GetFGAStoreInfoR
 
 // ── helpers ──
 
-func protoTuplesToInternal(tuples []*iamv1.Tuple) []clients.ConditionalTuple {
-	out := make([]clients.ConditionalTuple, 0, len(tuples))
+func protoTuplesToInternal(tuples []*iamv1.Tuple) []authztypes.ConditionalTuple {
+	out := make([]authztypes.ConditionalTuple, 0, len(tuples))
 	for _, t := range tuples {
-		tup := clients.ConditionalTuple{
+		tup := authztypes.ConditionalTuple{
 			User:     t.GetSubject(),
 			Relation: t.GetRelation(),
 			Object:   t.GetObject(),
@@ -165,7 +165,7 @@ func protoTuplesToInternal(tuples []*iamv1.Tuple) []clients.ConditionalTuple {
 			if name == "" {
 				name = cnd.GetBuiltin().String()
 			}
-			tup.Condition = &clients.TupleConditionRef{
+			tup.Condition = &authztypes.TupleConditionRef{
 				Name:    name,
 				Context: structToMap(cnd.GetContext()),
 			}

@@ -24,6 +24,7 @@ import (
 	"context"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/outboxtypes"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
@@ -31,7 +32,6 @@ import (
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // Repository — корневой entry-point. Конкретная реализация — `pg` подпакет.
@@ -78,11 +78,11 @@ type Writer interface {
 	// inside THIS writer-tx — atomic with the surrounding domain mutation
 	// (запрет #10): the audit row commits iff the mutation commits, so a
 	// rolled-back mutation leaves no orphan compliance row and a committed one
-	// always leaves its trail. Reuses the shared service.AuditOutboxEmitter
+	// always leaves its trail. Reuses the shared audit_outbox emitter
 	// emit path (22-char `evt_…` id, status='pending'). Used by the async CRUD
 	// use-cases (Account/Project/User/ServiceAccount/Group/Role) to record
 	// "who created/updated/deleted which resource, and when".
-	EmitAuditEvent(ctx context.Context, ev service.AuditEvent) error
+	EmitAuditEvent(ctx context.Context, ev outboxtypes.AuditEvent) error
 
 	// EmitFGARelationWrite / EmitFGARelationDelete append N FGA owner/hierarchy
 	// tuple-write (resp. tuple-delete) intent rows into kacho_iam.fga_outbox
@@ -101,8 +101,8 @@ type Writer interface {
 	// CHECK literals 'fga.tuple.write'/'fga.tuple.delete' (migration 0001) —
 	// no new literal, no new migration. len(tuples)==0 is a no-op. Mirrors the
 	// already-atomic AccessBindingsW().EmitRelationWrite emit path.
-	EmitFGARelationWrite(ctx context.Context, tuples []service.RelationTuple) error
-	EmitFGARelationDelete(ctx context.Context, tuples []service.RelationTuple) error
+	EmitFGARelationWrite(ctx context.Context, tuples []outboxtypes.RelationTuple) error
+	EmitFGARelationDelete(ctx context.Context, tuples []outboxtypes.RelationTuple) error
 
 	// EmitReconcileEvent enqueues a resource_reconcile_outbox event on THIS
 	// writer-tx (T3/Q2): an IAM-OWN-resource label change (Project/Account.Update

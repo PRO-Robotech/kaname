@@ -27,6 +27,7 @@ package authzmap_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -54,22 +55,62 @@ var closedVerbRelations = []string{"v_get", "v_list", "v_create", "v_update", "v
 // full closed v_* set (D-2 path), matching authzmap.TypeHasVerbRelations=true.
 var tierOnlyObjectTypes = map[string]bool{}
 
-// fgaModelPath resolves the canonical fga_model.fga in the sibling kacho-proto
-// checkout. Walks up from the package dir to the dir containing kacho-proto.
+// fgaModelRelPath — location of the canonical model inside the kacho-proto tree
+// (both the sibling checkout and the Go-module directory share this layout).
+const fgaModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
+
+// fgaModelPath resolves the canonical fga_model.fga. It tries, in order:
+//  1. a sibling kacho-proto checkout (walk-up from the package dir — the
+//     workspace-dev layout), then
+//  2. the PINNED kacho-proto Go module directory (`go list -m -f {{.Dir}}`) —
+//     the standalone-CI layout, where kacho-proto is a module, not a sibling.
+//
+// When neither resolves, the security drift-gate cannot run. To stop it from
+// SILENTLY skipping in a pipeline (a skipped test is neither red nor green and
+// gives zero protection), setting KACHO_IAM_REQUIRE_FGA_MODEL=1 turns the
+// absence into a hard failure (t.Fatal) so CI can enforce the gate the moment
+// the model ships in the pinned module; without the flag it degrades to a
+// documented skip for Docker-less / offline local runs.
 func fgaModelPath(t *testing.T) string {
 	t.Helper()
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	for i := 0; i < 12; i++ {
-		cand := filepath.Join(dir, "kacho-proto", "proto", "kacho", "cloud", "iam", "v1", "fga_model.fga")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
-		}
-		dir = filepath.Dir(dir)
+	if p, ok := resolveFGAModel(); ok {
+		return p
 	}
-	t.Skip("canonical fga_model.fga not found (kacho-proto sibling absent) — skipping drift-gate")
+	const msg = "canonical fga_model.fga not found (no kacho-proto sibling and not in the pinned module) — drift-gate cannot run"
+	if os.Getenv("KACHO_IAM_REQUIRE_FGA_MODEL") != "" {
+		t.Fatal(msg + " [KACHO_IAM_REQUIRE_FGA_MODEL set: refusing to skip a security gate]")
+	}
+	t.Skip(msg)
 	return ""
+}
+
+// resolveFGAModel returns the canonical model path and whether it was found,
+// trying the sibling checkout then the pinned kacho-proto module directory.
+func resolveFGAModel() (string, bool) {
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for i := 0; i < 12; i++ {
+			cand := filepath.Join(dir, "kacho-proto", fgaModelRelPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand, true
+			}
+			dir = filepath.Dir(dir)
+		}
+	}
+	// Standalone CI: kacho-proto is a pinned Go module. Its module dir carries
+	// the whole repo tree (including proto/…/fga_model.fga once shipped there).
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
+		"github.com/PRO-Robotech/kacho-proto").Output()
+	if err == nil {
+		modDir := strings.TrimSpace(string(out))
+		if modDir != "" {
+			cand := filepath.Join(modDir, fgaModelRelPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand, true
+			}
+		}
+	}
+	return "", false
 }
 
 var (
