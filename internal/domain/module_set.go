@@ -19,7 +19,7 @@ package domain
 
 // knownModules — the closed set of platform modules a rule may grant over. Order
 // is the canonical platform order (iam first, then resource domains).
-var knownModules = []string{"iam", "vpc", "compute", "loadbalancer"}
+var knownModules = []string{"iam", "vpc", "compute", "loadbalancer", "registry"}
 
 // knownModuleSet — membership index built once from knownModules.
 var knownModuleSet = func() map[string]struct{} {
@@ -31,7 +31,7 @@ var knownModuleSet = func() map[string]struct{} {
 }()
 
 // IsKnownModule reports whether m is a member of the closed platform module-set
-// {iam, vpc, compute, loadbalancer}. The wildcard `*` is NOT a known module (it
+// {iam, vpc, compute, loadbalancer, registry}. The wildcard `*` is NOT a known module (it
 // is a system-only marker handled separately by Rule.Validate).
 func IsKnownModule(m string) bool {
 	_, ok := knownModuleSet[m]

@@ -158,9 +158,12 @@ var verbBearingTypes = map[string]bool{
 	"vpc_gateway":              true,
 	"vpc_network_interface":    true,
 	"vpc_address_pool":         true,
+	"vpc_anycast_address_pool": true,
 	"lb_network_load_balancer": true,
 	"lb_target_group":          true,
 	"lb_listener":              true,
+	"registry_registry":        true,
+	"registry_repository":      true,
 	"iam_user":                 true,
 	"iam_service_account":      true,
 	"iam_group":                true,
@@ -223,19 +226,26 @@ var objectTypes = map[string]string{
 	"compute.snapshot": "compute_snapshot",
 
 	// vpc
-	"vpc.network":          "vpc_network",
-	"vpc.subnet":           "vpc_subnet",
-	"vpc.address":          "vpc_address",
-	"vpc.securityGroup":    "vpc_security_group",
-	"vpc.routeTable":       "vpc_route_table",
-	"vpc.gateway":          "vpc_gateway",
-	"vpc.networkInterface": "vpc_network_interface",
-	"vpc.addressPool":      "vpc_address_pool",
+	"vpc.network":            "vpc_network",
+	"vpc.subnet":             "vpc_subnet",
+	"vpc.address":            "vpc_address",
+	"vpc.securityGroup":      "vpc_security_group",
+	"vpc.routeTable":         "vpc_route_table",
+	"vpc.gateway":            "vpc_gateway",
+	"vpc.networkInterface":   "vpc_network_interface",
+	"vpc.addressPool":        "vpc_address_pool",
+	"vpc.anycastAddressPool": "vpc_anycast_address_pool",
 
 	// load balancer (kacho-nlb)
 	"loadbalancer.networkLoadBalancers": "lb_network_load_balancer",
 	"loadbalancer.targetGroups":         "lb_target_group",
 	"loadbalancer.listeners":            "lb_listener",
+
+	// registry (kacho-registry) — object-prefix `registry_` == service name, so
+	// no moduleObjectDomain mapping is required. `registries` is the namespace
+	// resource; `repositories` is the per-repo authz object (docker pull/push).
+	"registry.registries":   "registry_registry",
+	"registry.repositories": "registry_repository",
 
 	// iam — note the hierarchy types `account` and `project` are bare
 	// (no `iam_` prefix) because they're shared hierarchy ancestors in

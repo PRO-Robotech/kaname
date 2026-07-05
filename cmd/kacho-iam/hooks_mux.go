@@ -58,10 +58,15 @@ func buildHooksMux(
 	saClientRepo := kachopg.NewSAOAuthClientRepo(pool)
 	saPort := &tokenEnrichSAAdapter{pool: pool, saClients: saClientRepo}
 
+	// User-token principal mapping: минтованный из UserOAuthClient токен резолвится
+	// в принципал `user:<id>` (net-new относительно SA-key → serviceAccount:<id>).
+	userClientRepo := kachopg.NewUserOAuthClientRepo(pool)
+	userTokenPort := &tokenEnrichUserTokenAdapter{userClients: userClientRepo, users: users}
+
 	tokenEnricher := service.NewTokenEnrichmentService(
 		service.TokenEnrichmentConfig{Domain: domain, HydraIssuer: hydraIssuer},
 		users,
-	).WithSAPort(saPort)
+	).WithSAPort(saPort).WithUserTokenPort(userTokenPort)
 	tokenHook := handlerinternal.NewTokenHookHandler(
 		handlerinternal.TokenHookConfig{
 			HookSharedSecret: hookSecret,
@@ -181,4 +186,21 @@ func (a *tokenEnrichSAAdapter) GetServiceAccount(ctx context.Context, id domain.
 	sa.Name = domain.SvcAccountName(name)
 	sa.Description = domain.Description(description)
 	return sa, nil
+}
+
+// tokenEnrichUserTokenAdapter — pool-scoped read adapter for
+// service.TokenEnrichmentUserTokenPort. Резолвит принципал `user:<id>` для токена,
+// минтованного из UserOAuthClient (личный access-токен) — обратный lookup по
+// hydra_client_id + чтение владеющего User.
+type tokenEnrichUserTokenAdapter struct {
+	userClients *kachopg.UserOAuthClientRepo
+	users       *kachopg.UserPoolRepo
+}
+
+func (a *tokenEnrichUserTokenAdapter) LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error) {
+	return a.userClients.GetByOAuthClientID(ctx, hydraClientID)
+}
+
+func (a *tokenEnrichUserTokenAdapter) GetUser(ctx context.Context, id domain.UserID) (domain.User, error) {
+	return a.users.GetByID(ctx, id)
 }

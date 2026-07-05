@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	"github.com/PRO-Robotech/kacho-iam/internal/registrytokenwire"
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
@@ -433,11 +434,51 @@ func runServe(cfg config.Config) error {
 		}
 	}
 
+	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
+	// EXTERNAL-reachable port (default :9096; TLS terminated at the ingress, like
+	// hooks/metrics). Docker clients hit `/iam/token` through the edge; the shim
+	// verifies the SA-key and BROKERS a token from Ory Hydra (the issuer). The
+	// data-plane verifies the returned token against Hydra's JWKS. Distinct from
+	// the cluster-internal hooks (:9092) and metrics (:9095) listeners. Disabled
+	// (WARN-skip, never a boot block) only when the endpoint is empty — the shim
+	// needs no JWKS encryption key (it mints nothing).
+	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
+	var registryTokenListener net.Listener
+	var registryTokenHTTPServer *http.Server
+	if registryTokenAddr != "" {
+		registryTokenListener, err = net.Listen("tcp", registryTokenAddr)
+		if err != nil {
+			_ = listener.Close()
+			_ = internalListener.Close()
+			if hooksListener != nil {
+				_ = hooksListener.Close()
+			}
+			if metricsListener != nil {
+				_ = metricsListener.Close()
+			}
+			return fmt.Errorf("registry token http listener: %w", err)
+		}
+		registryTokenMux := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
+			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
+			Service:           cfg.APIServer.RegistryToken.TokenService(),
+			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
+			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
+		})
+		registryTokenHTTPServer = &http.Server{
+			Handler:           registryTokenMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       90 * time.Second,
+		}
+	}
+
 	logger.Info("kacho-iam listening",
 		"public_endpoint", publicAddr,
 		"internal_endpoint", internalAddr,
 		"hooks_http_endpoint", hooksAddr,
-		"metrics_http_endpoint", metricsAddr)
+		"metrics_http_endpoint", metricsAddr,
+		"registry_token_http_endpoint", registryTokenAddr)
 
 	gracefulTimeout := cfg.APIServer.GracefulShutdown
 	if gracefulTimeout <= 0 {
@@ -495,6 +536,11 @@ func runServe(cfg config.Config) error {
 				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancelShutdown()
 				_ = metricsHTTPServer.Shutdown(shutdownCtx)
+			}
+			if registryTokenHTTPServer != nil {
+				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelShutdown()
+				_ = registryTokenHTTPServer.Shutdown(shutdownCtx)
 			}
 		})
 	}
@@ -558,6 +604,19 @@ func runServe(cfg config.Config) error {
 			return nil
 		})
 	}
+
+	// Registry v2 `/iam/token` auth-server HTTP listener (separate external port).
+	if registryTokenHTTPServer != nil && registryTokenListener != nil {
+		tasks = append(tasks, func() error {
+			logger.Info("kacho-iam registry token listener serving", "addr", registryTokenListener.Addr().String())
+			err := registryTokenHTTPServer.Serve(registryTokenListener)
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				triggerShutdown()
+				return fmt.Errorf("registry token http server: %w", err)
+			}
+			return nil
+		})
+	}
 	// Enterprise SSO (SCIM + SAML) is not served by this listener set.
 
 	// fga_outbox drainer. Watches kacho_iam.fga_outbox via LISTEN/NOTIFY
@@ -588,6 +647,9 @@ func runServe(cfg config.Config) error {
 		_ = internalListener.Close()
 		if hooksListener != nil {
 			_ = hooksListener.Close()
+		}
+		if registryTokenListener != nil {
+			_ = registryTokenListener.Close()
 		}
 		return fmt.Errorf("fga_outbox drainer init: %w", derr)
 	}
@@ -626,6 +688,9 @@ func runServe(cfg config.Config) error {
 		_ = internalListener.Close()
 		if hooksListener != nil {
 			_ = hooksListener.Close()
+		}
+		if registryTokenListener != nil {
+			_ = registryTokenListener.Close()
 		}
 		return fmt.Errorf("subject_change drainer wiring: %w", err)
 	}

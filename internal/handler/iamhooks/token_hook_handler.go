@@ -121,6 +121,17 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if subject == "" {
 		subject = payload.Session.Subject
 	}
+	// client_credentials (RFC 6749 §4.4) не несёт end-user subject — Hydra
+	// отдаёт его пустым. kacho-принципал такого токена — ServiceAccount за
+	// OAuth2-клиентом, поэтому fallback на client_id (session, затем request);
+	// enricher резолвит его в SA через LookupByOAuthClientID и штампует
+	// kacho_principal_id = SA-id.
+	if subject == "" {
+		subject = payload.Session.ClientID
+		if subject == "" {
+			subject = payload.Request.ClientID
+		}
+	}
 	if subject == "" {
 		http.Error(w, `{"error":"missing_subject"}`, http.StatusBadRequest)
 		return

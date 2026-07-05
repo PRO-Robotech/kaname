@@ -189,6 +189,33 @@ func TestTokenHook_MissingSubject_BadRequest(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "missing_subject")
 }
 
+func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing.T) {
+	audit := &fakeAudit{}
+	h := newTokenHookHandler(t, &fakeUserLookup{}, audit)
+
+	// client_credentials (RFC 6749 §4.4) несёт пустой subject — end-user'а нет.
+	// kacho-принципал — это ServiceAccount за OAuth2-клиентом, поэтому handler
+	// обязан взять client_id как subject (а не отвергать 400 missing_subject),
+	// чтобы enricher резолвил SA через LookupByOAuthClientID.
+	payload := map[string]any{
+		"subject": "",
+		"session": map[string]any{"client_id": "cc-client-uuid", "subject": ""},
+		"request": map[string]any{
+			"client_id": "cc-client-uuid",
+			"payload":   map[string][]string{"grant_type": {"client_credentials"}},
+		},
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/iam/v1/hooks/token", strings.NewReader(string(body)))
+	req.Header.Set("X-Kacho-Hook-Token", "secret-hook-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"empty-subject client_credentials must fall back to client_id; body: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "missing_subject")
+}
+
 func TestTokenHook_UserNotFound_EmitsMinimalClaims(t *testing.T) {
 	users := &fakeUserLookup{} // no users — FindActiveByExternalID returns empty
 	audit := &fakeAudit{}

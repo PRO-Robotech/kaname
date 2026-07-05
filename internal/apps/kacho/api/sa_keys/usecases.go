@@ -40,7 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
@@ -68,6 +68,14 @@ type OAuthClientAdmin interface {
 	DeleteOAuthClient(ctx context.Context, clientID string) error
 }
 
+// TrustGrantAdmin abstracts the Hydra jwt-bearer trust-grant registration used by
+// the federated Issue path. Each trusted subject is registered as an EXACT-subject
+// grant (allow_any_subject=false) so Hydra accepts an external assertion only when
+// its `sub` matches the granted subject verbatim.
+type TrustGrantAdmin interface {
+	CreateJWTBearerTrustGrant(ctx context.Context, g clients.JWTBearerTrustGrant) error
+}
+
 // OpsResponseRedactor clears a named field in the proto-marshalled success
 // response of an `operations` row. Idempotent: re-running on an
 // already-cleared field is a no-op. The concrete pg adapter reads the
@@ -86,6 +94,11 @@ type IssueSAKeyUseCase struct {
 	tx      service.TxBeginner
 	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
+	// trustGrants registers exact-subject jwt-bearer trust-grants for the
+	// federated path. Nil → skipped (test / private_key_jwt-only wiring); the
+	// composition root wires it so a federated key's `(issuer, subject)` binding
+	// actually lands in Hydra.
+	trustGrants TrustGrantAdmin
 	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
 	// skipped (test / legacy wiring). Production main.go wires the pg
 	// adapter so the secret is replaced with `"<redacted>"` after the
@@ -99,6 +112,10 @@ type IssueSAKeyUseCase struct {
 	// (redaction error / give-up / recovered panic), so a key that stays
 	// un-redacted in the operation response is detectable. nil → no logging.
 	logger *slog.Logger
+	// redactGrace — задержка между тем как Operation стал Done, и затиранием
+	// одноразового private_key_pem. Даёт поллящему клиенту (docker/CI/UI) окно,
+	// чтобы прочитать и сохранить ключ до его вычистки. 0 → без окна (тест/legacy).
+	redactGrace time.Duration
 
 	// HydraClientNamePrefix — used to compose the Hydra `client_name`
 	// (default "kacho-sak-<svaID>"). Configurable via env at wire-time.
@@ -122,10 +139,27 @@ func (u *IssueSAKeyUseCase) WithAuditEmitter(a auditEmitter) *IssueSAKeyUseCase 
 	return u
 }
 
+// WithTrustGrantAdmin wires the Hydra jwt-bearer trust-grant registrar used by the
+// federated Issue path. Composition-root only. nil → federated Issue skips
+// trust-grant registration.
+func (u *IssueSAKeyUseCase) WithTrustGrantAdmin(t TrustGrantAdmin) *IssueSAKeyUseCase {
+	u.trustGrants = t
+	return u
+}
+
 // WithLogger wires the logger used by the detached secret-redaction goroutine to
 // surface redaction failures (the only place a key can stay un-redacted).
 func (u *IssueSAKeyUseCase) WithLogger(l *slog.Logger) *IssueSAKeyUseCase {
 	u.logger = l
+	return u
+}
+
+// WithRedactGrace задаёт grace-окно между Done-ом Operation и затиранием
+// одноразового private_key_pem. Composition-root передаёт значение из конфига
+// (KACHO_IAM_SAKEY_REDACT_GRACE, дефолт 120s); нулевое или отрицательное значение
+// трактуется как «без окна» (немедленное затирание — тест/legacy).
+func (u *IssueSAKeyUseCase) WithRedactGrace(d time.Duration) *IssueSAKeyUseCase {
+	u.redactGrace = d
 	return u
 }
 
@@ -224,18 +258,19 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 		//
 		// The redact runs in a separate goroutine because the MarkDone call
 		// happens INSIDE the same goroutine that runs `fn`, AFTER `fn`
-		// returns — so we cannot inline the redact here. A brief poll waits
-		// for done=true, then performs the single UPDATE. Concurrency safety:
-		// jsonb_set is single-statement atomic; idempotent — re-running with
-		// the same `<redacted>` value is a no-op.
+		// returns — so we cannot inline the redact here. The goroutine waits
+		// for done=true, holds the grace window (so the polling client can
+		// retrieve the one-shot key), then performs the single UPDATE.
+		// Concurrency safety: the UPDATE is single-statement atomic; idempotent
+		// — re-running with the same `<redacted>` value is a no-op.
 		if derr == nil && u.redactor != nil && len(in.TrustedSubjects) == 0 {
 			// G118 (gosec) is suppressed intentionally: the goroutine must outlive
 			// the request-scoped ctx because the gRPC client has already received
 			// the Operation envelope by the time MarkDone runs; binding it to ctx
 			// would race-cancel the redact UPDATE on request return. The goroutine
-			// builds its own bounded context (5s) inside scheduleSecretRedact,
-			// derived from the worker ctx via WithoutCancel so trace/request-id
-			// baggage survives the detach.
+			// builds its own bounded context (grace + margin) inside
+			// scheduleSecretRedact, derived from the worker ctx via WithoutCancel
+			// so trace/request-id baggage survives the detach.
 			//
 			// Federated rows (TrustedSubjects non-empty) carry no key
 			// material in the response — nothing to redact, skip the goroutine.
@@ -246,17 +281,19 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	return &op, nil
 }
 
-// scheduleSecretRedact polls until the operation is marked done
-// (typically <100ms — the worker calls MarkDone immediately after `fn`
-// returns), then issues a single jsonb_set UPDATE replacing
-// `response.private_key_pem` with `"<redacted>"`. The legacy
-// `response.client_secret` field is also redacted for private_key_jwt wire-compat,
-// even though new keys always leave it empty.
+// redactCtxMargin — запас поверх grace-окна для ctx-таймаута redact-goroutine:
+// сначала ~2s поллинга done, затем grace, затем сам UPDATE. Таймаут обязан
+// пережить grace-окно, иначе ctx отменится до затирания.
+const redactCtxMargin = 10 * time.Second
+
+// scheduleSecretRedact дожидается, пока операция станет Done (worker вызывает
+// MarkDone сразу после `fn`), выдерживает grace-окно, затем одним UPDATE заменяет
+// `response.private_key_pem` на `"<redacted>"`. Legacy-поле `response.client_secret`
+// затирается тем же образом для wire-compat, хотя новые ключи оставляют его пустым.
 //
-// Bounded: max 100 attempts at 20ms intervals (2s total). If the op never
-// completes (worker panic / DB-down) the redact silently gives up; the
-// operations row stays as the worker left it (typically without a response,
-// or with an error result that never contained the secret).
+// Grace-окно (redactGrace) даёт поллящему клиенту время прочитать и сохранить
+// одноразовый ключ ДО затирания — без него клиент гарантированно проигрывает гонку
+// и получает "<redacted>". По истечении окна секрет всё равно вычищается из LRO.
 func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID string) {
 	// recover-guard: эта goroutine детачена от запроса и переживает его, поэтому
 	// неперехваченная паника (в opsRepo.Get / RedactResponseField) убила бы весь
@@ -271,30 +308,47 @@ func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID
 	if u.redactor == nil {
 		return
 	}
+	grace := u.redactGrace
+	if grace < 0 {
+		grace = 0
+	}
 	// Detach from the caller's cancellation (the redact must outlive the
 	// request-scoped ctx — the gRPC client already holds the Operation envelope)
-	// but PRESERVE its trace/request-id/slog baggage via WithoutCancel.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), 5*time.Second)
+	// but PRESERVE its trace/request-id/slog baggage via WithoutCancel. Таймаут =
+	// grace + margin, чтобы ctx не отменился до затирания (grace может быть 120s).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), grace+redactCtxMargin)
 	defer cancel()
+
+	if !u.awaitOpDone(ctx, opID) {
+		return // причина уже залогирована внутри awaitOpDone
+	}
+
+	// Grace-окно перед затиранием. op.response access-controlled на владельца
+	// операции, поэтому такая экспозиция приемлема — это осознанный компромисс
+	// между окном poll-retrieval у клиента и временем жизни секрета в LRO.
+	if grace > 0 {
+		select {
+		case <-time.After(grace):
+		case <-ctx.Done():
+			if u.logger != nil {
+				u.logger.WarnContext(ctx, "sa-key secret redaction ctx expired during the grace window — key material may remain",
+					slog.String("operation_id", opID))
+			}
+			return
+		}
+	}
+
+	u.redactSecretFields(ctx, opID)
+}
+
+// awaitOpDone поллит операцию, пока она не станет Done. Bounded: 100 попыток по
+// 20ms (~2s). Возвращает false, если операция не завершилась в бюджете (worker-
+// panic / DB-down) или ctx истёк — тогда затирать нечего (ответа с секретом нет).
+func (u *IssueSAKeyUseCase) awaitOpDone(ctx context.Context, opID string) bool {
 	for attempt := 0; attempt < 100; attempt++ {
 		op, err := u.opsRepo.Get(ctx, opID)
 		if err == nil && op != nil && op.Done {
-			// MarkDone has completed. Redact the private key (and the legacy
-			// client_secret field for wire-compat). A failed redaction leaves
-			// plaintext key material in operations.response_data, re-fetchable via
-			// Operation.Get — log on Error so the stuck secret is detectable, never
-			// silently discard the failure.
-			if rerr := u.redactor.RedactResponseField(ctx, opID,
-				[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
-				u.logger.ErrorContext(ctx, "sa-key private_key_pem redaction failed — plaintext key may remain in the operation response",
-					slog.String("operation_id", opID), slog.Any("err", rerr))
-			}
-			if rerr := u.redactor.RedactResponseField(ctx, opID,
-				[]string{"client_secret"}, `"<redacted>"`); rerr != nil && u.logger != nil {
-				u.logger.ErrorContext(ctx, "sa-key client_secret redaction failed",
-					slog.String("operation_id", opID), slog.Any("err", rerr))
-			}
-			return
+			return true
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):
@@ -303,12 +357,31 @@ func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID
 				u.logger.WarnContext(ctx, "sa-key secret redaction gave up before the operation completed — key material may remain",
 					slog.String("operation_id", opID))
 			}
-			return
+			return false
 		}
 	}
 	if u.logger != nil {
 		u.logger.WarnContext(ctx, "sa-key secret redaction exhausted retries before the operation completed — key material may remain",
 			slog.String("operation_id", opID))
+	}
+	return false
+}
+
+// redactSecretFields затирает одноразовый private_key_pem (и legacy client_secret
+// для wire-compat) в proto-marshalled response операции одним UPDATE на строку;
+// idempotent — повтор с тем же `<redacted>` no-op. Провал затирания оставляет
+// plaintext ключ в operations.response_data, re-fetchable через Operation.Get —
+// логируем на Error, чтобы застрявший секрет был обнаружим, никогда не глушим.
+func (u *IssueSAKeyUseCase) redactSecretFields(ctx context.Context, opID string) {
+	if rerr := u.redactor.RedactResponseField(ctx, opID,
+		[]string{"private_key_pem"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		u.logger.ErrorContext(ctx, "sa-key private_key_pem redaction failed — plaintext key may remain in the operation response",
+			slog.String("operation_id", opID), slog.Any("err", rerr))
+	}
+	if rerr := u.redactor.RedactResponseField(ctx, opID,
+		[]string{"client_secret"}, `"<redacted>"`); rerr != nil && u.logger != nil {
+		u.logger.ErrorContext(ctx, "sa-key client_secret redaction failed",
+			slog.String("operation_id", opID), slog.Any("err", rerr))
 	}
 }
 
@@ -344,7 +417,10 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		Scope:                   u.DefaultScope,
 		GrantTypes:              []string{"client_credentials"},
 		TokenEndpointAuthMethod: "private_key_jwt",
-		JWKS:                    &clients.JWKS{Keys: []clients.JWK{key.JWK}},
+		// Hydra обязан проверять client_assertion тем же alg, что несёт ключ (ES256);
+		// без этого Hydra дефолтит на RS256 → invalid_client на ES256-assertion.
+		TokenEndpointAuthSigningAlg: key.JWK.Alg,
+		JWKS:                        &clients.JWKS{Keys: []clients.JWK{key.JWK}},
 	}
 	hydraReq.Audience = u.resolveAudience(in)
 	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
@@ -459,6 +535,18 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
 	}
 
+	// Register an EXACT-subject jwt-bearer trust-grant per trusted subject: Hydra
+	// accepts an external assertion only when its `sub` equals the granted subject
+	// verbatim (allow_any_subject=false). The subject_pattern is already validated
+	// literal-anchored, so LiteralSubject always resolves here. On failure roll
+	// back the just-created Hydra client (external side-effect) and fail closed.
+	if u.trustGrants != nil {
+		if err := u.registerTrustGrants(ctx, in); err != nil {
+			_ = u.hydra.DeleteOAuthClient(ctx, hydraClient.ClientID)
+			return nil, err
+		}
+	}
+
 	row := domain.ServiceAccountOAuthClient{
 		ID:              keyID,
 		SvaID:           in.ServiceAccountID,
@@ -498,6 +586,43 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		Audiences: hydraReq.Audience,
 	}
 	return anypb.New(resp)
+}
+
+// registerTrustGrants registers one EXACT-subject jwt-bearer trust-grant per
+// trusted subject. allow_any_subject is always false — trusting an issuer must not
+// mean trusting an arbitrary subject from it. On the first failure the caller
+// rolls back the Hydra client and fails closed.
+func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInput) error {
+	expiresAt := u.trustGrantExpiry(in)
+	scope := strings.Fields(u.DefaultScope)
+	for i, ts := range in.TrustedSubjects {
+		subject, ok := ts.LiteralSubject()
+		if !ok {
+			// Defensive: Validate() already rejects non-literal patterns.
+			return status.Errorf(codes.InvalidArgument,
+				"trusted_subjects[%d].subject_pattern must be a literal anchored subject", i)
+		}
+		grant := clients.JWTBearerTrustGrant{
+			Issuer:          ts.Issuer,
+			Subject:         subject,
+			AllowAnySubject: false,
+			Scope:           scope,
+			ExpiresAt:       expiresAt,
+		}
+		if err := u.trustGrants.CreateJWTBearerTrustGrant(ctx, grant); err != nil {
+			return fmt.Errorf("%w: hydra create-trust-grant: %w", iamerr.ErrUnavailable, err)
+		}
+	}
+	return nil
+}
+
+// trustGrantExpiry — the trust-grant lifetime: the SA-key's expiry when set,
+// otherwise a long-lived default (the federation binding lives as long as the key).
+func (u *IssueSAKeyUseCase) trustGrantExpiry(in IssueInput) time.Time {
+	if in.TTLSeconds > 0 {
+		return u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+	}
+	return u.now().Add(10 * 365 * 24 * time.Hour)
 }
 
 // commitMapping persists the SA-OAuth-client mapping row in a fresh tx and

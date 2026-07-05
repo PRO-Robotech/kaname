@@ -48,6 +48,21 @@ type TokenEnrichmentSAPort interface {
 	FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error)
 }
 
+// TokenEnrichmentUserTokenPort — read-side dependency: resolve a User + its
+// personal-access-token (UserOAuthClient) mapping from a Hydra `client_id`.
+// Used for the User-token path (`client_credentials` → Hydra mints a token whose
+// `subject` is the Hydra client id; we map it back to the kacho User and stamp
+// principal_type=user + principal_id/account_id claims — the net-new mapping that
+// lets a personal token authenticate as `user:<id>` rather than a service account).
+type TokenEnrichmentUserTokenPort interface {
+	// LookupByOAuthClientID resolves the kacho-iam User-token (UserOAuthClient)
+	// mapping from a Hydra `client_id`. Returns iamerr.ErrNotFound when the
+	// client id is not a User-token client.
+	LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error)
+	// GetUser fetches the User referenced by a mapping row.
+	GetUser(ctx context.Context, id domain.UserID) (domain.User, error)
+}
+
 // TokenEnrichmentConfig — static issuer/audience metadata stamped into claims.
 type TokenEnrichmentConfig struct {
 	// Domain — public Kachō audience.
@@ -88,10 +103,11 @@ type TokenHookContext struct {
 
 // TokenEnrichmentService — use-case for token-hook claims assembly.
 type TokenEnrichmentService struct {
-	cfg   TokenEnrichmentConfig
-	users TokenEnrichmentUserPort
-	sas   TokenEnrichmentSAPort // optional; nil → SA enrichment disabled
-	now   func() time.Time
+	cfg        TokenEnrichmentConfig
+	users      TokenEnrichmentUserPort
+	sas        TokenEnrichmentSAPort        // optional; nil → SA enrichment disabled
+	userTokens TokenEnrichmentUserTokenPort // optional; nil → User-token enrichment disabled
+	now        func() time.Time
 }
 
 // NewTokenEnrichmentService — constructor. A nil now-func defaults to
@@ -106,6 +122,16 @@ func NewTokenEnrichmentService(cfg TokenEnrichmentConfig, users TokenEnrichmentU
 // and lets test wiring stay nil.
 func (s *TokenEnrichmentService) WithSAPort(p TokenEnrichmentSAPort) *TokenEnrichmentService {
 	s.sas = p
+	return s
+}
+
+// WithUserTokenPort wires the User-token lookup port enabling personal-access-token
+// enrichment (`kacho_principal_type=user` + principal_id + account_id claims for a
+// token minted from a UserOAuthClient client_credentials client). Returning the
+// receiver keeps the constructor chainable; nil-wiring keeps User-token enrichment
+// disabled.
+func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPort) *TokenEnrichmentService {
+	s.userTokens = p
 	return s
 }
 
@@ -163,6 +189,26 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
 			return nil, fmt.Errorf("lookup sa oauth client %s: %w", lookupID, err)
+		}
+	}
+
+	// 2b. User-token path (client_credentials with a personal access token).
+	//     `subject` is the Hydra client_id of a UserOAuthClient; map it back to
+	//     the owning User so the minted token's principal is `user:<id>` (net-new
+	//     relative to SA-keys, which map to serviceAccount:<id>). Tried after the
+	//     SA lookup (a client_id is either an SA-key or a User-token client, never
+	//     both — the UNIQUE hydra_client_id spans both tables via distinct rows).
+	if s.userTokens != nil {
+		uoc, err := s.userTokens.LookupByOAuthClientID(ctx, domain.OAuthClientID(subject))
+		if err == nil {
+			u, uErr := s.userTokens.GetUser(ctx, uoc.UserID)
+			if uErr != nil && !stderrors.Is(uErr, iamerr.ErrNotFound) {
+				return nil, fmt.Errorf("get user %s: %w", uoc.UserID, uErr)
+			}
+			return s.userTokenClaims(uoc, u, subject, hookCtx), nil
+		}
+		if !stderrors.Is(err, iamerr.ErrNotFound) {
+			return nil, fmt.Errorf("lookup user-token oauth client %s: %w", subject, err)
 		}
 	}
 
@@ -278,6 +324,34 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 		if sa.ProjectID != "" {
 			claims["kacho_project_id"] = string(sa.ProjectID)
 		}
+	}
+	return claims
+}
+
+// userTokenClaims assembles the ext_claims map for a personal-access-token-issued
+// token (UserOAuthClient client_credentials). The principal is the OWNING User —
+// `kacho_principal_type=user` + principal_id/account_id — so downstream authZ treats
+// the token exactly like an interactive session of that user. Permission resolution
+// stays out-of-band (FGA gate, same as the SA / interactive paths).
+func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u domain.User, subject string, hookCtx TokenHookContext) map[string]any {
+	claims := map[string]any{
+		"kacho_external_id":       subject,
+		"kacho_hydra_client_id":   subject,
+		"kacho_principal_type":    "user",
+		"kacho_principal_id":      string(uoc.UserID),
+		"kacho_user_id":           string(uoc.UserID),
+		"kacho_user_token_id":     string(uoc.ID),
+		"kacho_device_compliance": "unknown",
+		"kacho_jkt":               hookCtx.CnfJkt,
+		"kacho_x5t_s256":          hookCtx.CnfX5tS256,
+		"kacho_acr":               hookCtx.ACR,
+		"kacho_audience":          s.cfg.Domain,
+		"kacho_issuer":            s.cfg.HydraIssuer,
+		"kacho_issued_at":         s.now().Unix(),
+	}
+	if u.ID != "" {
+		claims["kacho_account_id"] = string(u.AccountID)
+		claims["kacho_active_account"] = string(u.AccountID)
 	}
 	return claims
 }

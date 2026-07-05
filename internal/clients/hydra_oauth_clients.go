@@ -57,6 +57,10 @@ type HydraOAuthClient struct {
 	Audience                []string `json:"audience,omitempty"`
 	Owner                   string   `json:"owner,omitempty"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"`
+	// TokenEndpointAuthSigningAlg — JOSE-alg, которым Hydra обязан проверять
+	// client_assertion (private_key_jwt). Для SA-ключей — "ES256"; без него Hydra
+	// дефолтит на RS256 и отвергает ES256-assertion (invalid_client).
+	TokenEndpointAuthSigningAlg string `json:"token_endpoint_auth_signing_alg,omitempty"`
 	// JWKS — embedded JSON Web Key Set; populated when
 	// `token_endpoint_auth_method == "private_key_jwt"`.
 	JWKS *JWKS `json:"jwks,omitempty"`
@@ -85,6 +89,8 @@ type CreateOAuthClientRequest struct {
 	// migrated to private_key_jwt. When non-empty, takes precedence over
 	// AuthMethod. Set to "private_key_jwt" for SA keys.
 	TokenEndpointAuthMethod string
+	// TokenEndpointAuthSigningAlg — JOSE-alg client_assertion ("ES256" для SA-ключей).
+	TokenEndpointAuthSigningAlg string
 	// JWKS — embedded public-key set published with the client (private_key_jwt:
 	// kacho-iam mints the keypair and registers the
 	// public JWK here). Hydra stores it, validates `client_assertion`
@@ -110,15 +116,16 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 		grants = []string{"client_credentials"}
 	}
 	payload := HydraOAuthClient{
-		ClientID:                req.ClientID,
-		ClientName:              req.ClientName,
-		GrantTypes:              grants,
-		ResponseTypes:           []string{"token"},
-		Scope:                   req.Scope,
-		Audience:                req.Audience,
-		Owner:                   req.Owner,
-		TokenEndpointAuthMethod: authMethod,
-		JWKS:                    req.JWKS,
+		ClientID:                    req.ClientID,
+		ClientName:                  req.ClientName,
+		GrantTypes:                  grants,
+		ResponseTypes:               []string{"token"},
+		Scope:                       req.Scope,
+		Audience:                    req.Audience,
+		Owner:                       req.Owner,
+		TokenEndpointAuthMethod:     authMethod,
+		TokenEndpointAuthSigningAlg: req.TokenEndpointAuthSigningAlg,
+		JWKS:                        req.JWKS,
 	}
 	// #nosec G117 -- client_secret is a legitimate field of the Hydra OAuth2 client-registration payload, not a leaked credential.
 	body, err := json.Marshal(payload)

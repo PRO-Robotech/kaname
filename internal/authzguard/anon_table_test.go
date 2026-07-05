@@ -29,7 +29,7 @@ import (
 	// Blank-import the iam proto package so its FileDescriptors register into
 	// protoregistry.GlobalFiles. Without this the test would only enumerate
 	// protos transitively imported by this package — incomplete.
-	_ "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	_ "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
 
 // iamServicePrefix — only enumerate services in the iam proto package.

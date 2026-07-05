@@ -30,7 +30,7 @@ import (
 	_ "github.com/PRO-Robotech/kacho-iam/internal/dto/toproto" // register Role transfer
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
 
 // TestMigration_F51_LegacyTablesDropped — the two legacy child tables are gone,
@@ -62,7 +62,7 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 }
 
 // TestMigration_F53_SystemRolesReseededWithRules — every system role has
-// non-empty rules after re-seed; count is exactly 64.
+// non-empty rules after re-seed; count is exactly 65.
 func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -75,7 +75,7 @@ func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	var total int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.roles WHERE is_system`).Scan(&total))
-	assert.Equal(t, 64, total, "F-53: exactly 64 system roles expected after re-seed (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035)")
+	assert.Equal(t, 65, total, "F-53: exactly 65 system roles expected after re-seed (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035 + registry module-SA mig 0044)")
 
 	var withoutRules int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -145,7 +145,7 @@ func TestMigration_F53_AccessNotSevered(t *testing.T) {
 
 	rolesBefore := countSystemRoles()
 	bindingsBefore := countSystemBindings()
-	require.Equal(t, 64, rolesBefore)
+	require.Equal(t, 65, rolesBefore)
 	require.Greater(t, bindingsBefore, 0,
 		"F-53: at least the cluster-admin (0004) + module-SA (0009) bindings on system roles must exist")
 

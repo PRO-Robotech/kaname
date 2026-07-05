@@ -101,15 +101,15 @@ func TestMaterializingSelectors_RolePersistence_ExpandsWildcard(t *testing.T) {
 }
 
 // TestOwnerRoleSelector_MigrationLockstep — the owner role_rule_selectors row is seeded
-// with HARD-CODED constants (rule_fp + object_types) by migration 0038, RE-SEEDED with
-// the iam-content-EXTENDED object_types list by migration 0039 (rbac-contract-a-fix).
+// with HARD-CODED constants (rule_fp + object_types), RE-SEEDED as the materializable
+// type set grows (iam-content types added by migration 0039; the registry namespace
+// resource added by the registry owner-selector migration).
 // They MUST equal the Go projection of domain.OwnerRoleRules(); if a future change to
 // the owner rule or the materializable type set drifts from the SQL constant, this guard
-// fails — forcing the migration to be updated in lockstep (issue #224 / review КФ-1).
+// fails — forcing the migration to be updated in lockstep.
 //
-// rule_fp is UNCHANGED across 0038→0039 (it hashes the RULE, not object_types); only
-// object_types grew by the five iam content types (role/group/serviceAccount/user/
-// accessBinding). The constant below mirrors migration 0039's seed list.
+// rule_fp is UNCHANGED across every re-seed (it hashes the RULE, not object_types); only
+// object_types grows. The constant below mirrors the latest re-seed migration's list.
 func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 	const migrationRuleFP = "3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4"
 	migrationObjectTypes := []string{
@@ -117,6 +117,7 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
+		"registry.registries", "registry.repositories",
 		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
 		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
 	}

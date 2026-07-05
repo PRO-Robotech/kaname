@@ -75,11 +75,17 @@ func (c AuthNConfig) ResolveDomain() string {
 	return d
 }
 
-// ResolveHydraIssuer returns the Hydra issuer. Default `https://hydra.<Domain>`.
-// If HydraIssuer is set explicitly we use it (supports custom deployments).
+// ResolveHydraIssuer returns the Hydra issuer. Precedence: explicit HydraIssuer
+// field → KACHO_IAM_HYDRA_ISSUER env → derived `https://hydra.<Domain>`. The env
+// fallback lets a deployment whose Hydra advertises a non-derivable issuer (e.g. a
+// dev-stand behind a path-prefixed public URL) align the shim's client_assertion
+// audience with Hydra's real issuer — otherwise the exchange fails invalid_client.
 func (c AuthNConfig) ResolveHydraIssuer() string {
 	if iss := strings.TrimSpace(c.HydraIssuer); iss != "" {
 		return iss
+	}
+	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_ISSUER")); v != "" {
+		return v
 	}
 	return "https://hydra." + c.ResolveDomain()
 }
@@ -90,9 +96,19 @@ func (c AuthNConfig) ResolveAudience() string {
 	return c.ResolveDomain()
 }
 
-// ResolveHydraAdminURL — URL of the Hydra admin API (for publishing JWKS).
-// Default https://hydra-admin.<Domain>; can be customised via env if needed.
+// ResolveHydraAdminURL — URL of the Hydra admin API (client-registration +
+// jwt-bearer trust-grants). Precedence: the explicit `authn.hydra-admin-url` /
+// ENV KACHO_IAM_HYDRA_ADMIN_URL override, then the derivation from the issuer
+// (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
+// cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
+// even when the external issuer host does not resolve in-cluster.
 func (c AuthNConfig) ResolveHydraAdminURL() string {
+	if v := strings.TrimSpace(c.HydraAdminURL); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_ADMIN_URL")); v != "" {
+		return v
+	}
 	if iss := c.ResolveHydraIssuer(); iss != "" {
 		u, err := url.Parse(iss)
 		if err == nil {
@@ -107,6 +123,30 @@ func (c AuthNConfig) ResolveHydraAdminURL() string {
 		}
 	}
 	return "https://hydra-admin." + c.ResolveDomain()
+}
+
+// ResolveHydraTokenEndpoint — the EXTERNAL issuer's token endpoint
+// (`<issuer>/oauth2/token`). This is the value Hydra recognises as the audience
+// of a client_assertion, and stays external regardless of the cluster-internal
+// POST target.
+func (c AuthNConfig) ResolveHydraTokenEndpoint() string {
+	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/oauth2/token"
+}
+
+// ResolveHydraTokenURL — the Hydra public token endpoint the `/iam/token` shim
+// POSTs the exchange to. Precedence: the explicit `authn.hydra-token-url` / ENV
+// KACHO_IAM_HYDRA_TOKEN_URL override (a cluster-internal Service, e.g.
+// http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token), then the
+// external token endpoint (back-compat). The `iss` of the resulting token remains
+// the external Hydra issuer; only the network target differs.
+func (c AuthNConfig) ResolveHydraTokenURL() string {
+	if v := strings.TrimSpace(c.HydraTokenURL); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_TOKEN_URL")); v != "" {
+		return v
+	}
+	return c.ResolveHydraTokenEndpoint()
 }
 
 // SessionRevocationsCacheTTL returns the TTL for the memo-cache over

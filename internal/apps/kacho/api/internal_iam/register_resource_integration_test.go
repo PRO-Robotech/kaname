@@ -33,7 +33,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
 
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	internaliam "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/internal_iam"
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"

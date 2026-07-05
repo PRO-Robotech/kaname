@@ -53,6 +53,14 @@ type APIServerConfig struct {
 	// tenant gRPC surface — exposing the registry there would leak internal
 	// cardinality (security.md). Empty disables the metrics listener.
 	MetricsEndpoint string `mapstructure:"metrics-endpoint"`
+	// RegistryToken — the Docker Registry v2 `/iam/token` auth-server HTTP
+	// listener. A SEPARATE, EXTERNAL-reachable plaintext port (default
+	// `tcp://0.0.0.0:9096`; TLS terminated at the ingress, like the hooks /
+	// metrics listeners) — docker clients hit `/iam/token` through the edge to
+	// exchange an SA-key for a short-lived identity-JWT. Distinct from the
+	// cluster-internal hooks (:9092) and metrics (:9095) listeners. Empty
+	// endpoint disables it.
+	RegistryToken RegistryTokenConfig `mapstructure:"registry-token"`
 }
 
 // RepositoryConfig — repository section. Postgres-only (the repository type
@@ -96,17 +104,28 @@ type PostgresConfig struct {
 //	HooksHTTPEndpoint     — HTTP listener for webhooks from Hydra/Kratos.
 //	                        Default `tcp://0.0.0.0:9092` (separate port from
 //	                        gRPC public 9090 / internal 9091).
+//	SAKeyRedactGrace      — задержка между Done-ом Issue-Operation и затиранием
+//	                        одноразового private_key_pem в её response. Даёт
+//	                        поллящему клиенту окно, чтобы забрать ключ до вычистки.
+//	                        Default 120s; override KACHO_IAM_SAKEY_REDACT_GRACE.
+//	UserTokenRedactGrace  — то же для UserTokenService.Issue (персональные токены
+//	                        пользователя). Default 120s; override
+//	                        KACHO_IAM_USERTOKEN_REDACT_GRACE.
 type AuthNConfig struct {
-	Mode                     Mode   `mapstructure:"mode"`
-	Domain                   string `mapstructure:"domain"`
-	HydraIssuer              string `mapstructure:"hydra-issuer"`
-	HookSharedSecret         string `mapstructure:"hook-shared-secret"`
-	HookSharedSecretEnv      string `mapstructure:"hook-shared-secret-env"`
-	JWKSEncryptionKeyHex     string `mapstructure:"jwks-encryption-key-hex"`
-	JWKSEncryptionKeyHexEnv  string `mapstructure:"jwks-encryption-key-hex-env"`
-	JWKSRotationDays         int    `mapstructure:"jwks-rotation-days"`
-	SessionRevocationsTTLSec int    `mapstructure:"session-revocations-cache-ttl-seconds"`
-	HooksHTTPEndpoint        string `mapstructure:"hooks-http-endpoint"`
+	Mode                     Mode          `mapstructure:"mode"`
+	Domain                   string        `mapstructure:"domain"`
+	HydraIssuer              string        `mapstructure:"hydra-issuer"`
+	HydraAdminURL            string        `mapstructure:"hydra-admin-url"`
+	HydraTokenURL            string        `mapstructure:"hydra-token-url"`
+	HookSharedSecret         string        `mapstructure:"hook-shared-secret"`
+	HookSharedSecretEnv      string        `mapstructure:"hook-shared-secret-env"`
+	JWKSEncryptionKeyHex     string        `mapstructure:"jwks-encryption-key-hex"`
+	JWKSEncryptionKeyHexEnv  string        `mapstructure:"jwks-encryption-key-hex-env"`
+	JWKSRotationDays         int           `mapstructure:"jwks-rotation-days"`
+	SessionRevocationsTTLSec int           `mapstructure:"session-revocations-cache-ttl-seconds"`
+	HooksHTTPEndpoint        string        `mapstructure:"hooks-http-endpoint"`
+	SAKeyRedactGrace         time.Duration `mapstructure:"sakey-redact-grace"`
+	UserTokenRedactGrace     time.Duration `mapstructure:"usertoken-redact-grace"`
 }
 
 // schemaOptionsParam — URL-encoded libpq parameter `options=-c search_path=…`.

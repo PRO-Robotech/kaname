@@ -44,6 +44,26 @@ var forbiddenProxyObjectTypes = map[string]struct{}{
 	"role":            {},
 }
 
+// moduleObjectDomain маппит service-short-name модуля (из mTLS SAN, напр. "nlb")
+// на префикс FGA-object-домена, которым реально владеют его ресурсы. Большинство
+// модулей совпадают с собственным именем (vpc→`vpc_*`, compute→`compute_*`), но
+// kacho-nlb владеет доменом loadbalancer, чьи FGA-object-типы префиксуются `lb_`
+// (lb_network_load_balancer / lb_listener / lb_target_group), НЕ `nlb_`. Без этого
+// маппинга verified-SAN domain-binding отвергал бы все owner-tuple nlb → LB-ресурсы
+// становились невидимы в authz-filtered List.
+var moduleObjectDomain = map[string]string{
+	"nlb": "lb",
+}
+
+// objectDomainForCaller — object-домен, которым модуль вправе владеть. По умолчанию
+// совпадает с service-именем; исключения — в moduleObjectDomain.
+func objectDomainForCaller(callerDomain string) string {
+	if d, ok := moduleObjectDomain[callerDomain]; ok {
+		return d
+	}
+	return callerDomain
+}
+
 // ValidateProxyTuple ограничивает FGA-proxy write-path до least-privilege: модуль
 // пишет owner-hierarchy tuple ТОЛЬКО на объект своего домена. callerDomain — svc
 // из verified mTLS SAN (vpc/compute/nlb); пустой (dev-mode, домен неизвестен)
@@ -67,10 +87,10 @@ func ValidateProxyTuple(callerDomain, subject, relation, object string) error {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	// Domain-binding: объект обязан принадлежать домену caller (vpc→`vpc_*`,
-	// compute→`compute_*`, nlb→`nlb_*`). Пустой callerDomain (dev-mode) пропускает
+	// compute→`compute_*`, nlb→`lb_*`). Пустой callerDomain (dev-mode) пропускает
 	// эту проверку, но forbidden-set + relation-allowlist выше все равно держат
 	// границу против cluster/iam/privilege.
-	if callerDomain != "" && !strings.HasPrefix(objType, callerDomain+"_") {
+	if callerDomain != "" && !strings.HasPrefix(objType, objectDomainForCaller(callerDomain)+"_") {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	return nil

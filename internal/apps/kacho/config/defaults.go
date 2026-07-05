@@ -26,6 +26,15 @@ func RegisterDefaults(v *viper.Viper) {
 	// Prometheus /metrics HTTP listener — separate cluster-internal port (never
 	// the public tenant gRPC surface). Override via KACHO_IAM_API_SERVER__METRICS_ENDPOINT.
 	v.SetDefault("api-server.metrics-endpoint", "tcp://0.0.0.0:9095")
+	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
+	// external-reachable plaintext port (ingress-terminated TLS), distinct from
+	// the hooks (:9092) and metrics (:9095) listeners. Issuer/service/TTL shape
+	// the minted identity-JWT and must match the data-plane's advertised Bearer
+	// realm. Override via KACHO_IAM_API_SERVER__REGISTRY_TOKEN__{ENDPOINT,ISSUER,SERVICE,TTL}.
+	v.SetDefault("api-server.registry-token.endpoint", "tcp://0.0.0.0:9096")
+	v.SetDefault("api-server.registry-token.issuer", "https://api.kacho.local/iam/token")
+	v.SetDefault("api-server.registry-token.service", "registry.kacho.local")
+	v.SetDefault("api-server.registry-token.ttl", 5*time.Minute)
 
 	// repository
 	v.SetDefault("repository.postgres.url", "postgres://iam@localhost:5432/kacho_iam")
@@ -51,6 +60,15 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.jwks-rotation-days", 90)
 	v.SetDefault("authn.session-revocations-cache-ttl-seconds", 5)
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
+	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
+	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
+	// иначе клиент проигрывает гонку и получает "<redacted>". Override —
+	// KACHO_IAM_SAKEY_REDACT_GRACE (или KACHO_IAM_AUTHN__SAKEY_REDACT_GRACE).
+	v.SetDefault("authn.sakey-redact-grace", 120*time.Second)
+	// User-токен: одноразовый private_key_pem отдаётся только в op.response; клиент
+	// поллит Operation.Get, чтобы его забрать. Grace-окно выдерживает это окно.
+	// Override — KACHO_IAM_USERTOKEN_REDACT_GRACE.
+	v.SetDefault("authn.usertoken-redact-grace", 120*time.Second)
 
 	// OpenFGA, the gateway-internal drainer, Enterprise SSO, Governance,
 	// Federation/CAEP/ComplianceReport/Notify and the dead healthcheck

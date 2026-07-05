@@ -13,8 +13,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 
-	operationpb "github.com/PRO-Robotech/kacho-corelib/proto/gen/go/kacho/cloud/operation"
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/handler"
 )
@@ -61,6 +61,11 @@ func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations
 	// Workload Identity Federation (FederationExchangeService) removed.
 	if svcs != nil && svcs.saKeysHandler != nil {
 		iamv1.RegisterSAKeyServiceServer(srv, svcs.saKeysHandler)
+	}
+	// UserToken (персональные access-токены пользователя via Hydra). Public под
+	// /iam/v1/users/{id}/tokens — зеркало SAKeyService на iam_user.
+	if svcs != nil && svcs.userTokensHandler != nil {
+		iamv1.RegisterUserTokenServiceServer(srv, svcs.userTokensHandler)
 	}
 }
 

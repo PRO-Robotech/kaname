@@ -107,7 +107,8 @@ func TestMigration0010_SECL_Idempotent_DownReverts(t *testing.T) {
 	}
 
 	require.Equal(t, 1, count(), "baseline: one operator system_viewer tuple after up")
-	require.Equal(t, 3, fgaWriterCount(), "0009 seeds 3 fga_writer tuples (vpc/compute/nlb)")
+	require.Equal(t, 4, fgaWriterCount(),
+		"at HEAD: 0009 seeds 3 fga_writer tuples (vpc/compute/nlb) + 0044 seeds the registry-SA tuple")
 
 	// Re-up the whole set: ON CONFLICT DO NOTHING keeps it at one (idempotent).
 	require.NoError(t, goose.Up(db, "."))
