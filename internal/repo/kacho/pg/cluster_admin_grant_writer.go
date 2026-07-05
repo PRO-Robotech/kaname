@@ -16,8 +16,10 @@
 //     existing row via diagnostic SELECT.
 //   - Self-revoke guard — CAS WHERE `subject_id != $principal`.
 //   - Last-admin guard — CAS WHERE
-//     `(SELECT count(*) FROM cluster_admin_grants WHERE granted_until IS NULL) > 1`
-//     — single-statement subquery, atomic vs concurrent revoke.
+//     `(SELECT count(*) FROM cluster_admin_grants WHERE granted_until IS NULL) > 1`,
+//     serialized cluster-wide by a tx-scoped advisory lock (see
+//     `revokeSerializeLockKey`) so the count(*) cannot be evaluated on a stale
+//     snapshot vs a concurrent revoke of a DISTINCT admin (write-skew).
 //   - Revoke NOT idempotent — CAS WHERE `granted_until IS NULL`;
 //     0 rows + history row OR no row → ErrNotFound.
 package pg
@@ -50,6 +52,20 @@ type ClusterAdminGrantWriter struct {
 func NewClusterAdminGrantWriter(pool *pgxpool.Pool) *ClusterAdminGrantWriter {
 	return &ClusterAdminGrantWriter{pool: pool}
 }
+
+// revokeSerializeLockKey — advisory-lock key that serializes ALL cluster-admin
+// revokes cluster-wide.
+//
+// The last-admin guard is a `count(*)` over sibling rows. Under READ COMMITTED
+// two concurrent revokes of DISTINCT admins each take a row-lock on their OWN
+// target row only — no lock on the sibling being revoked concurrently — so both
+// evaluate the count against a snapshot in which the other's revoke is still
+// uncommitted: both read count=2, both pass the `> 1` guard, both commit → zero
+// admins (write-skew, ban #10). A tx-scoped advisory lock forces revokes to run
+// one-at-a-time: the second revoke blocks until the first COMMITs, then re-reads
+// count=1 and is denied (ErrLastAdmin). Grants take no such lock — adding an
+// admin can never violate the "at least one admin" invariant.
+const revokeSerializeLockKey = "iam:cluster-admin-revoke:" + domain.ClusterSingletonID
 
 // Grant — INSERT a new permanent (`granted_until = NULL`) cluster_admin_grants
 // row, idempotent on (cluster_id, subject_id) UNIQUE conflict.
@@ -116,11 +132,23 @@ func (w *ClusterAdminGrantWriter) Grant(
 // Single-statement UPDATE with all 3 guards in WHERE: atomic vs concurrent
 // revoke (ban #10). 0 rows ⇒ diagnostic SELECTs determine
 // which guard fired and return the appropriate sentinel.
+//
+// A tx-scoped advisory lock is taken FIRST (before the guarded UPDATE) so the
+// last-admin `count(*)` guard cannot be defeated by a concurrent revoke of a
+// DISTINCT admin (write-skew — see revokeSerializeLockKey). The lock
+// auto-releases at COMMIT/ROLLBACK.
 func (w *ClusterAdminGrantWriter) Revoke(
 	ctx context.Context, txh service.Tx,
 	subject domain.SubjectID, principalID string,
 ) (domain.ClusterAdminGrant, error) {
 	tx := txAsPgx(txh)
+
+	// Serialize concurrent revokes cluster-wide (write-skew guard). Passed as a
+	// bind parameter (hashtext → int lock key) — no identifier splicing.
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext($1))`, revokeSerializeLockKey); err != nil {
+		return domain.ClusterAdminGrant{}, fmt.Errorf("cluster_admin_grants revoke advisory lock: %w", err)
+	}
 
 	const q = `
 		UPDATE kacho_iam.cluster_admin_grants

@@ -366,6 +366,109 @@ func TestRevoke_ConcurrentLastAdmin(t *testing.T) {
 	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
 }
 
+// ── TestRevoke_ConcurrentLastAdmin_WriteSkew ─────────────────────────────────
+//
+// Write-skew regression (sec-hardening-r7). Setup count=2 (S1, S2). Two
+// goroutines concurrently revoke DISTINCT admins (A revokes S2, B revokes S1)
+// and each holds its tx OPEN for `window` after the guarded UPDATE before
+// COMMIT.
+//
+// This deterministically forces the write-skew window that the flaky
+// TestRevoke_ConcurrentLastAdmin only hits by luck: without serialization,
+// each UPDATE's `count(*) WHERE granted_until IS NULL > 1` guard reads the
+// OTHER revoke as still-active (READ COMMITTED, sibling row not locked), so
+// BOTH read count=2, BOTH pass the guard, BOTH commit → ZERO admins.
+//
+// With the tx-scoped advisory lock inside Revoke, the second revoke BLOCKS on
+// the lock until the first COMMITs, then re-reads count=1 and is denied with
+// ErrLastAdmin. Invariant (verified): exactly one success + exactly one
+// ErrLastAdmin, and exactly one active admin survives — never zero.
+func TestRevoke_ConcurrentLastAdmin_WriteSkew(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	s1 := mustSeedUser(t, ctx, pool, "s1")
+	s2 := mustSeedUser(t, ctx, pool, "s2")
+	seedClusterAdmin(t, ctx, pool, s1)
+	seedClusterAdmin(t, ctx, pool, s2)
+	require.Equal(t, 2, countActiveAdmins(t, ctx, pool))
+
+	w := kachopg.NewClusterAdminGrantWriter(pool)
+
+	// window — how long each goroutine holds its tx open AFTER the guarded
+	// UPDATE, before COMMIT. Deliberately widens the read-then-write window so
+	// the unserialized (buggy) path is a DETERMINISTIC failure rather than a
+	// flaky one. Under the fix, one goroutine simply blocks on the advisory
+	// lock for ~window (well within the deadline below), so the value only
+	// affects the RED path's reliability, never correctness.
+	const window = 300 * time.Millisecond
+
+	type res struct {
+		grant domain.ClusterAdminGrant
+		err   error
+	}
+	out := make(chan res, 2)
+	start := make(chan struct{})
+
+	revoke := func(subject, principal domain.UserID) {
+		<-start // release both goroutines together
+		tx, ierr := pool.Begin(ctx)
+		if ierr != nil {
+			out <- res{err: ierr}
+			return
+		}
+		g, ierr := w.Revoke(ctx, tx, domain.SubjectID(subject), string(principal))
+		// Hold the tx open to widen the write-skew window (see `window`).
+		time.Sleep(window)
+		if ierr != nil {
+			_ = tx.Rollback(ctx)
+		} else {
+			_ = tx.Commit(ctx)
+		}
+		out <- res{grant: g, err: ierr}
+	}
+
+	go revoke(s2, s1) // A: S1 revokes S2
+	go revoke(s1, s2) // B: S2 revokes S1
+	close(start)
+
+	deadline := time.After(15 * time.Second)
+	results := []res{}
+	for i := 0; i < 2; i++ {
+		select {
+		case r := <-out:
+			results = append(results, r)
+		case <-deadline:
+			t.Fatal("concurrent revoke deadlocked / timed out > 15s")
+		}
+	}
+
+	successes, lastAdminErrs := 0, 0
+	for _, r := range results {
+		switch {
+		case r.err == nil:
+			successes++
+			require.False(t, r.grant.IsActive(), "successful revoke must mark grant inactive")
+		case stderrors.Is(r.err, iamerr.ErrLastAdmin):
+			lastAdminErrs++
+		default:
+			t.Fatalf("unexpected error: %v", r.err)
+		}
+	}
+	require.Equal(t, 1, successes,
+		"exactly one revoke may succeed — two successes is the write-skew (zero admins)")
+	require.Equal(t, 1, lastAdminErrs,
+		"the losing revoke must be denied with ErrLastAdmin")
+	require.Equal(t, 1, countActiveAdmins(t, ctx, pool),
+		"exactly one cluster admin must survive — never zero (write-skew)")
+}
+
 // ── TestRevoke_Self ──────────────────────────────────────────────────────────
 
 func TestRevoke_Self(t *testing.T) {
