@@ -113,9 +113,7 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload hydraRefreshHookRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		h.logger.Warn("refresh_hook: invalid payload", "err", err)
-		http.Error(w, `{"error":"invalid_payload"}`, http.StatusBadRequest)
+	if !decodeHookBody(w, r, &payload, h.logger, "refresh_hook") {
 		return
 	}
 	defer func() { _ = r.Body.Close() }()

@@ -176,6 +176,9 @@ func allObjectTypeValues() []string {
 	// set the package documents (kept in lockstep with fga_types.go).
 	pairs := [][2]string{
 		{"compute", "instance"}, {"compute", "disk"}, {"compute", "image"}, {"compute", "snapshot"},
+		{"compute", "diskPlacementGroup"}, {"compute", "hostGroup"}, {"compute", "filesystem"},
+		{"compute", "gpuCluster"}, {"compute", "placementGroup"}, {"compute", "reservedInstancePool"},
+		{"compute", "snapshotSchedule"}, {"compute", "hostType"},
 		{"vpc", "network"}, {"vpc", "subnet"}, {"vpc", "address"}, {"vpc", "securityGroup"},
 		{"vpc", "routeTable"}, {"vpc", "gateway"}, {"vpc", "networkInterface"}, {"vpc", "addressPool"},
 		{"loadbalancer", "networkLoadBalancers"}, {"loadbalancer", "targetGroups"}, {"loadbalancer", "listeners"},

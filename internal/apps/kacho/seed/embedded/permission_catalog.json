@@ -1221,8 +1221,8 @@
     "permission": "iam.authorize.check",
     "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "subject"
+      "object_type": "cluster",
+      "from_request_field": "*"
     },
     "required_acr_min": "2"
   },
@@ -1231,8 +1231,8 @@
     "permission": "iam.authorize.expand",
     "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "resource"
+      "object_type": "cluster",
+      "from_request_field": "*"
     },
     "required_acr_min": "2"
   },
@@ -1241,8 +1241,8 @@
     "permission": "iam.authorize.listObjects",
     "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "subject"
+      "object_type": "cluster",
+      "from_request_field": "*"
     },
     "required_acr_min": "2"
   },
@@ -1251,8 +1251,8 @@
     "permission": "iam.authorize.listSubjects",
     "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "resource"
+      "object_type": "cluster",
+      "from_request_field": "*"
     },
     "required_acr_min": "2"
   },
@@ -1280,7 +1280,7 @@
     "permission": "iam.conditions.delete",
     "required_relation": "editor",
     "scope_extractor": {
-      "object_type": "project",
+      "object_type": "iam_condition",
       "from_request_field": "condition_id"
     },
     "required_acr_min": "2"
@@ -1290,7 +1290,7 @@
     "permission": "iam.conditions.evaluate",
     "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "project",
+      "object_type": "iam_condition",
       "from_request_field": "condition_id"
     },
     "required_acr_min": "2"
@@ -1300,7 +1300,7 @@
     "permission": "iam.conditions.get",
     "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "project",
+      "object_type": "iam_condition",
       "from_request_field": "condition_id"
     },
     "required_acr_min": "2"
@@ -1320,7 +1320,7 @@
     "permission": "iam.conditions.update",
     "required_relation": "editor",
     "scope_extractor": {
-      "object_type": "project",
+      "object_type": "iam_condition",
       "from_request_field": "condition_id"
     },
     "required_acr_min": "2"

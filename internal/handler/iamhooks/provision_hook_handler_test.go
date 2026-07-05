@@ -157,3 +157,27 @@ func TestProvisionHook_WrongMethod_405(t *testing.T) {
 
 	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
+
+// TestProvisionHook_OversizedBody_413 — a post-auth caller (holding the hook
+// shared-secret) that streams a body larger than the hook body cap must be
+// rejected with 413 BEFORE the JSON decoder allocates it, and the use-case must
+// NOT be invoked (CWE-770 unbounded-allocation guard on the :9092 hook mux).
+func TestProvisionHook_OversizedBody_413(t *testing.T) {
+	prov := &fakeProvisioner{}
+	h := newProvisionHandler(t, prov, nil)
+
+	// >1 MiB of valid JSON: a single huge string field. The decoder must never
+	// buffer the whole thing — MaxBytesReader trips first.
+	huge := strings.Repeat("a", (1<<20)+4096)
+	body := `{"external_id":"` + huge + `","email":"a@b.c","display_name":"x"}`
+
+	req := httptest.NewRequest("POST", "/iam/v1/hooks/provision", strings.NewReader(body))
+	req.Header.Set("X-Kacho-Hook-Token", "secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"oversized hook body must be capped at 413; body: %s", w.Body.String())
+	called, _, _ := prov.snapshot()
+	assert.False(t, called, "use-case must not run on an over-cap body")
+}

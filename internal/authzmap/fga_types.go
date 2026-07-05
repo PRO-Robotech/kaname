@@ -146,30 +146,45 @@ func TypeHasVerbRelations(fgaType string) bool {
 // tier-carrying hierarchy ancestors (admin/editor/viewer write-authz anchors,
 // D-7); verb-bearing status is additive on top, not a replacement.
 var verbBearingTypes = map[string]bool{
-	"compute_instance":         true,
-	"compute_disk":             true,
-	"compute_image":            true,
-	"compute_snapshot":         true,
-	"vpc_network":              true,
-	"vpc_subnet":               true,
-	"vpc_address":              true,
-	"vpc_security_group":       true,
-	"vpc_route_table":          true,
-	"vpc_gateway":              true,
-	"vpc_network_interface":    true,
-	"vpc_address_pool":         true,
-	"vpc_anycast_address_pool": true,
-	"lb_network_load_balancer": true,
-	"lb_target_group":          true,
-	"lb_listener":              true,
-	"registry_registry":        true,
-	"registry_repository":      true,
-	"iam_user":                 true,
-	"iam_service_account":      true,
-	"iam_group":                true,
-	"iam_role":                 true,
-	"iam_access_binding":       true,
-	"iam_condition":            true,
+	"compute_instance": true,
+	"compute_disk":     true,
+	"compute_image":    true,
+	"compute_snapshot": true,
+	// compute placement / capacity / data-protection resources — each is a
+	// first-class by-id authz object (its Get/Update/Delete scope_extractor
+	// anchors on the object itself, per kacho-proto per-resource object_type),
+	// so the canonical model defines the full closed v_* set on each. host_type
+	// is read-only at the service layer (Get/List only) but still verb-bearing
+	// in the model (uniform v_* across resource types; read-only-ness is enforced
+	// by the absence of mutating RPCs, not by omitting model relations).
+	"compute_disk_placement_group":   true,
+	"compute_host_group":             true,
+	"compute_filesystem":             true,
+	"compute_gpu_cluster":            true,
+	"compute_placement_group":        true,
+	"compute_reserved_instance_pool": true,
+	"compute_snapshot_schedule":      true,
+	"compute_host_type":              true,
+	"vpc_network":                    true,
+	"vpc_subnet":                     true,
+	"vpc_address":                    true,
+	"vpc_security_group":             true,
+	"vpc_route_table":                true,
+	"vpc_gateway":                    true,
+	"vpc_network_interface":          true,
+	"vpc_address_pool":               true,
+	"vpc_anycast_address_pool":       true,
+	"lb_network_load_balancer":       true,
+	"lb_target_group":                true,
+	"lb_listener":                    true,
+	"registry_registry":              true,
+	"registry_repository":            true,
+	"iam_user":                       true,
+	"iam_service_account":            true,
+	"iam_group":                      true,
+	"iam_role":                       true,
+	"iam_access_binding":             true,
+	"iam_condition":                  true,
 	// rbac-2026 P3 / D-6: account/project are now verb-bearing (additive — they
 	// also keep their tier relations as write-authz anchors, D-7).
 	"account": true,
@@ -224,6 +239,17 @@ var objectTypes = map[string]string{
 	"compute.disk":     "compute_disk",
 	"compute.image":    "compute_image",
 	"compute.snapshot": "compute_snapshot",
+	// compute placement / capacity / data-protection resources (kacho-proto
+	// per-resource object_type). Each is a verb-bearing by-id authz object
+	// (see verbBearingTypes above).
+	"compute.diskPlacementGroup":   "compute_disk_placement_group",
+	"compute.hostGroup":            "compute_host_group",
+	"compute.filesystem":           "compute_filesystem",
+	"compute.gpuCluster":           "compute_gpu_cluster",
+	"compute.placementGroup":       "compute_placement_group",
+	"compute.reservedInstancePool": "compute_reserved_instance_pool",
+	"compute.snapshotSchedule":     "compute_snapshot_schedule",
+	"compute.hostType":             "compute_host_type",
 
 	// vpc
 	"vpc.network":            "vpc_network",

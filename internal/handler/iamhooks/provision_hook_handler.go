@@ -23,7 +23,6 @@ package iamhooks
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 )
@@ -96,9 +95,7 @@ func (h *ProvisionHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	var payload kratosProvisionRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		h.logger.Warn("provision_hook: invalid payload", "err", err)
-		http.Error(w, `{"error":"invalid_payload"}`, http.StatusBadRequest)
+	if !decodeHookBody(w, r, &payload, h.logger, "provision_hook") {
 		return
 	}
 	defer func() { _ = r.Body.Close() }()

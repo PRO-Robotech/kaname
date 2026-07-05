@@ -41,4 +41,8 @@ jobs:
       - run: go mod download
       # HARD gate: a failing or timed-out integration test fails the PR.
       # Whole module (./...) — see header: integration tests live outside repo/ too.
-      - run: go test ./... -race -count=1 -timeout 1800s
+      # -p 1 serialises package execution: many internal/repo/kacho/pg packages
+      # each spin their own testcontainers Postgres, and running them concurrently
+      # on a shared runner invites container-startup contention → flaky timeouts
+      # (testing.md: «Под нагрузкой Docker может таймаутить — гонять -p 1 при contention»).
+      - run: go test ./... -race -count=1 -timeout 1800s -p 1

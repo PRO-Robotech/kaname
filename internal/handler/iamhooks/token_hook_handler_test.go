@@ -278,3 +278,21 @@ func TestTokenHook_EmptyHookSecret_FailsClosed(t *testing.T) {
 	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "empty configured secret must fail-closed")
 }
+
+// TestTokenHook_OversizedBody_413 — post-auth body-size cap on the token hook
+// (CWE-770 guard; shared decodeHookBody helper).
+func TestTokenHook_OversizedBody_413(t *testing.T) {
+	users := &fakeUserLookup{}
+	audit := &fakeAudit{}
+	h := newTokenHookHandler(t, users, audit)
+
+	huge := strings.Repeat("a", (1<<20)+4096)
+	body := `{"subject":"` + huge + `"}`
+	req := httptest.NewRequest("POST", "/iam/v1/hooks/token", strings.NewReader(body))
+	req.Header.Set("X-Kacho-Hook-Token", "secret-hook-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"oversized token hook body must be capped at 413; body: %s", w.Body.String())
+}

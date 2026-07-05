@@ -426,3 +426,22 @@ func TestRefreshHook_AuthFailure(t *testing.T) {
 	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
+
+// TestRefreshHook_OversizedBody_413 — post-auth body-size cap on the refresh
+// hook (CWE-770 guard; shared decodeHookBody helper).
+func TestRefreshHook_OversizedBody_413(t *testing.T) {
+	users := &fakeUserLookup{}
+	revs := newFakeRevocations()
+	audit := &fakeAudit{}
+	h := newRefreshHandler(t, users, revs, audit)
+
+	huge := strings.Repeat("a", (1<<20)+4096)
+	body := `{"subject":"` + huge + `"}`
+	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
+	req.Header.Set("X-Kacho-Hook-Token", "secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"oversized refresh hook body must be capped at 413; body: %s", w.Body.String())
+}

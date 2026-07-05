@@ -39,6 +39,9 @@ func TestVerbBearing_AccountProjectAreVerbBearing(t *testing.T) {
 func TestVerbBearing_LeafTypesStillVerbBearing(t *testing.T) {
 	leaf := []string{
 		"compute_instance", "compute_disk", "compute_image", "compute_snapshot",
+		"compute_disk_placement_group", "compute_host_group", "compute_filesystem",
+		"compute_gpu_cluster", "compute_placement_group", "compute_reserved_instance_pool",
+		"compute_snapshot_schedule", "compute_host_type",
 		"vpc_network", "vpc_subnet", "vpc_address", "vpc_security_group",
 		"vpc_route_table", "vpc_gateway", "vpc_network_interface", "vpc_address_pool",
 		"lb_network_load_balancer", "lb_target_group", "lb_listener",
