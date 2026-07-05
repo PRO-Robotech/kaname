@@ -24,6 +24,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -161,7 +162,10 @@ func (uc *GrantAdminUseCase) Execute(
 
 	if err := uc.opsRepo.Create(ctx, op); err != nil {
 		// Non-fatal: mutation already committed; return op without persisting.
-		_ = err
+		// Log so a later OperationService.Get(op.id) returning NotFound is
+		// traceable to this persistence failure (CWE-390: no silent swallow).
+		slog.ErrorContext(ctx, "cluster GrantAdmin: operation persist failed",
+			"operation_id", op.ID, "err", err.Error())
 	}
 
 	return shared.OperationToProto(&op), nil

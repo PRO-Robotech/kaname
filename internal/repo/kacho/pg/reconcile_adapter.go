@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -900,17 +901,21 @@ func (a *ReconcileAdapter) ListSelectorBindingIDs(ctx context.Context) ([]domain
 // SAME fga_outbox rows is a safe no-op.
 type syncFGAWriter struct {
 	relations clients.RelationStore
+	// logger — surfaces per-tuple failures in the resilient fallback pass. nil →
+	// warnings are skipped (the async drainer remains the durable retry path).
+	logger *slog.Logger
 }
 
 // NewSyncFGAWriter builds the reconcile.SyncFGAWriter over a RelationStore. nil-safe:
 // a nil RelationStore yields a nil writer, so reconcile.WithSyncFGA(nil) leaves the
 // reconciler async-only (existing behaviour) — the composition root can pass an
-// unconfigured store without a special case.
-func NewSyncFGAWriter(relations clients.RelationStore) reconcile.SyncFGAWriter {
+// unconfigured store without a special case. logger may be nil (per-tuple warnings
+// skipped).
+func NewSyncFGAWriter(relations clients.RelationStore, logger *slog.Logger) reconcile.SyncFGAWriter {
 	if relations == nil {
 		return nil
 	}
-	return &syncFGAWriter{relations: relations}
+	return &syncFGAWriter{relations: relations, logger: logger}
 }
 
 // WriteTuples applies the create-path read-after-write tuple set to OpenFGA. It is the
@@ -949,7 +954,18 @@ func (w *syncFGAWriter) WriteTuples(ctx context.Context, tuples []reconcile.Sync
 	// the async drainer poisons them individually; the create-path closer's job is to
 	// land every applicable tuple now.
 	for i := range out {
-		_ = w.relations.WriteTuples(ctx, out[i:i+1])
+		if err := w.relations.WriteTuples(ctx, out[i:i+1]); err != nil && w.logger != nil {
+			// Non-fatal here (the async fga_outbox drainer re-poisons the row and
+			// retries durably), but no longer silent (CWE-778): a persistently
+			// failing authorization tuple must be observable so an authz gap is
+			// diagnosable even if the drainer also lags.
+			w.logger.WarnContext(ctx, "sync FGA per-tuple write failed — deferred to the async drainer",
+				slog.String("user", out[i].User),
+				slog.String("relation", out[i].Relation),
+				slog.String("object", out[i].Object),
+				slog.String("err", err.Error()),
+			)
+		}
 	}
 	return nil
 }

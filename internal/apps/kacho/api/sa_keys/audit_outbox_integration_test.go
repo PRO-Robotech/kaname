@@ -222,6 +222,25 @@ func (f *fakeHydra) DeleteOAuthClient(ctx context.Context, clientID string) erro
 	return nil
 }
 
+// collidingHydra returns a CONSTANT ClientID on every CreateOAuthClient, so the
+// second Issue's mapping INSERT collides on the (unchanged) UNIQUE hydra_client_id
+// index → the worker-tx rolls back. Used by the atomicity test after migration
+// 0047 relaxed sva_unique (N:1 keys per ServiceAccount) removed the previous
+// duplicate-Issue rollback trigger.
+type collidingHydra struct {
+	createCalls int
+	deleteCalls int
+}
+
+func (f *collidingHydra) CreateOAuthClient(_ context.Context, _ clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
+	f.createCalls++
+	return clients.HydraOAuthClient{ClientID: "hydra-cli-collision-const"}, nil
+}
+func (f *collidingHydra) DeleteOAuthClient(_ context.Context, _ string) error {
+	f.deleteCalls++
+	return nil
+}
+
 // ── 5.2-20 Issue emits durable iam.sa_key.issued WITHOUT key material ─────────
 
 func TestSAKeyAudit_5_2_20_IssueEmitsNoSecret(t *testing.T) {
@@ -323,8 +342,14 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 	require.Equal(t, 0, n, "the revoked mapping row must be deleted (commit-together)")
 }
 
-// ── 5.2-35 rollback-no-orphan: an Insert that violates the sva_unique index
-// rolls back the whole worker-tx → neither mapping nor audit row. ─────────────
+// ── 5.2-35 rollback-no-orphan: an Insert that violates a UNIQUE index rolls
+// back the whole worker-tx → neither mapping nor audit row. ───────────────────
+//
+// The trigger is the (unchanged) UNIQUE hydra_client_id index: migration 0047
+// relaxed sva_unique to N:1, so a duplicate sva no longer rolls back. We drive
+// the collision with a hydra stub that returns a CONSTANT client id, so the
+// second Issue's mapping INSERT deterministically fails and rolls the worker-tx
+// back — the atomicity property under test is unchanged.
 
 func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	if testing.Short() {
@@ -337,9 +362,9 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5235")
-	uc := buildIssueUC(pool, &fakeHydra{})
+	uc := buildIssueUC(pool, &collidingHydra{})
 
-	// First Issue succeeds (one key per sva — sva_unique index).
+	// First Issue succeeds and lands one key (hydra_client_id="…collision-const").
 	_, err = uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID, CreatedByUserID: string(uid),
 	})
@@ -352,16 +377,31 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond)
 	awaitAudit(ctx, t, pool, "iam.sa_key.issued", firstKey)
 
-	// Second Issue for the SAME sva — the Insert hits service_account_oauth_
-	// clients_sva_unique (23505) → the worker-tx rolls back. No second mapping
-	// row and no orphan audit row may exist.
-	_, err = uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
+	// Second Issue collides on UNIQUE hydra_client_id — the mapping Insert hits
+	// service_account_oauth_clients' hydra_client_id unique index (23505) → the
+	// worker-tx rolls back. No second mapping row and no orphan audit row.
+	op2, err := uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID, CreatedByUserID: string(uid),
 	})
 	require.NoError(t, err) // async — error surfaces on the Operation, not here
+	require.NotNil(t, op2)
 
-	// Give the worker time to attempt + roll back.
-	time.Sleep(500 * time.Millisecond)
+	// Deterministic barrier: block until the second Operation is Done (positive
+	// signal that the worker actually dequeued and attempted it), then assert it
+	// carries the constraint error — so the negative counts below only fire after
+	// the 23505-rollback path provably ran (not because the worker was merely slow).
+	opsRepo := operations.NewRepo(pool, "kacho_iam")
+	var finalOp *operations.Operation
+	require.Eventually(t, func() bool {
+		o, gerr := opsRepo.Get(ctx, op2.ID)
+		if gerr != nil || o == nil || !o.Done {
+			return false
+		}
+		finalOp = o
+		return true
+	}, 10*time.Second, 20*time.Millisecond, "second Issue Operation never reached Done")
+	require.NotNil(t, finalOp.Error,
+		"the rolled-back duplicate-hydra_client_id Issue Operation must carry the constraint error")
 
 	var keyCount int
 	require.NoError(t, pool.QueryRow(ctx,

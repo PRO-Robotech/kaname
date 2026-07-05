@@ -21,7 +21,6 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // Handler implements iamv1.InternalClusterServiceServer.
@@ -108,7 +107,7 @@ func clusterToProto(c domain.Cluster) *iamv1.Cluster {
 	}
 }
 
-func clusterAdminEntryToProto(e kachopg.ClusterAdminEntry) *iamv1.ClusterAdminEntry {
+func clusterAdminEntryToProto(e domain.ClusterAdminEntry) *iamv1.ClusterAdminEntry {
 	return &iamv1.ClusterAdminEntry{
 		ClusterAdminGrantId: e.ClusterAdminGrantID,
 		SubjectType:         iamv1.ClusterGrantSubjectType_USER,

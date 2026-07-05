@@ -121,7 +121,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		// otherwise miss the still-undrained fga_outbox tuple (403). The durable
 		// fga_outbox enqueue + async drainer remain the at-least-once backstop (idempotent
 		// re-apply). relationStore is always non-nil here (composition root fails fast).
-		WithSyncFGA(kachopg.NewSyncFGAWriter(relationStore))
+		WithSyncFGA(kachopg.NewSyncFGAWriter(relationStore, logger))
 
 	// AccountService.
 	accountCreate := accountapp.NewCreateAccountUseCase(kachoRepo, opsRepo).
@@ -489,6 +489,8 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	issueUC.WithLogger(logger)
 	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
+	// Surface the post-commit Hydra orphan-cleanup warning (eventual-consistency).
+	revokeUC.WithLogger(logger)
 	listKeysUC := sakeysapp.NewListSAKeysUseCase(saClientRepo)
 
 	logger.Info("sa_keys wired", "hydra_admin", hydraAdminURL)
@@ -522,6 +524,8 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	issueUC.WithLogger(logger)
 	revokeUC := usertokensapp.NewRevokeUserTokenUseCase(userClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
+	// Surface the post-commit Hydra orphan-cleanup warning (eventual-consistency).
+	revokeUC.WithLogger(logger)
 	listUC := usertokensapp.NewListUserTokensUseCase(userClientRepo)
 
 	logger.Info("user_tokens wired", "hydra_admin", hydraAdminURL)
@@ -562,7 +566,11 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 		ClusterAdminChecker: relationStore,
 	})
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kachoRepo, relationStore)
-	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC)
+	// WithCallerAuthority wires the inner defense-in-depth caller-authority gate
+	// (a tenant principal may only query authz decisions about itself, a resource
+	// it administers, or as a cluster-admin). The SAME OpenFGA client answers the
+	// authority Check; anonymous/system module PDP peer calls pass through.
+	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC).WithCallerAuthority(relationStore)
 
 	// RelationProjector — used by InternalAuthorizeService.
 	tupleWriter := service.NewRelationProjector(relationStore)

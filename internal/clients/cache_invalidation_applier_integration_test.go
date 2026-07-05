@@ -388,12 +388,39 @@ func TestIntegration_AtomicRollback_NoLeak(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Rollback(ctx), "force rollback must succeed")
 
-	// Give the drainer ample time to (incorrectly) pick the row up if
-	// atomicity were broken.
-	time.Sleep(1500 * time.Millisecond)
+	// Deterministic barrier (replaces a fixed 1500ms sleep): AFTER the rollback,
+	// COMMIT a sentinel outbox row and block until the drainer delivers it. That
+	// the drainer processed a row committed AFTER the rollback proves at least one
+	// full poll/notify cycle elapsed past the rolled-back INSERT — so if the
+	// rolled-back row were ever going to be (incorrectly) visible, it would have
+	// been delivered by now. The negative assertions below then fire on a proven
+	// post-rollback cycle, not on wall-clock luck.
+	// Use a deliverable (binding_delete/binding_revoke) shape for the sentinel so
+	// the drainer applies it and calls the fake gateway — a positive completion
+	// signal (the rolled-back row's op is irrelevant to the atomicity assertion).
+	_, err = pool.Exec(ctx, `
+		INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, event_type, payload)
+		VALUES ('usr_w1_2_22_sentinel', 'binding_delete', 'binding_revoke',
+		        '{"subject_id":"usr_w1_2_22_sentinel","op":"binding_delete","event_type":"binding_revoke","resource_type":"","resource_id":""}'::jsonb)`)
+	require.NoError(t, err)
 
-	assert.Equal(t, int64(0), fakeSrv.callCount(),
-		"rolled-back INSERT must not be visible to drainer (DB-level atomicity)")
+	// The applier delivers subjects prefixed as "user:<id>" (see the happy-path
+	// assertion earlier in this file).
+	require.Eventually(t, func() bool {
+		for _, s := range fakeSrv.snapshotSubjects() {
+			if s == "user:usr_w1_2_22_sentinel" {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 20*time.Millisecond, "sentinel row must be delivered by the drainer")
+
+	// The rolled-back subject must NEVER have been delivered (DB-level atomicity:
+	// uncommitted rows are invisible to the drainer).
+	for _, s := range fakeSrv.snapshotSubjects() {
+		assert.NotEqual(t, "user:usr_w1_2_22_rollback", s,
+			"rolled-back INSERT must not be visible to drainer (DB-level atomicity)")
+	}
 
 	var cnt int
 	require.NoError(t, pool.QueryRow(ctx,

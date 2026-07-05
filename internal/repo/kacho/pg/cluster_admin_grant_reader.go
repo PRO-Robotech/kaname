@@ -15,29 +15,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
-
-// ClusterAdminEntry — flat row shape for InternalClusterService.ListAdmins
-// response items.
-//
-// Lives in the repo package — the use-case layer maps it to the proto
-// `iamv1.ClusterAdminEntry` shape via dto/toproto/cluster.go.
-type ClusterAdminEntry struct {
-	ClusterAdminGrantID string
-	SubjectType         string
-	SubjectID           string
-	SubjectEmail        string
-	SubjectDisplayName  string
-	GrantedByUserID     string
-	GrantedByEmail      string // "" when granted_by == "bootstrap"
-	GrantedAt           time.Time
-}
 
 // ClusterAdminGrantReader — read-only port adapter. ListActive returns
 // only `granted_until IS NULL` rows ordered by `granted_at ASC` (stable
@@ -61,7 +44,7 @@ func NewClusterAdminGrantReader(pool *pgxpool.Pool) *ClusterAdminGrantReader {
 // Note: bootstrap-flow inserts grant with granted_by='bootstrap' (literal
 // string), which never matches users.id ⇒ u_by JOIN returns NULL ⇒
 // CASE ... ELSE u_by.email END is COALESCE'd to ”.
-func (r *ClusterAdminGrantReader) ListActive(ctx context.Context) ([]ClusterAdminEntry, error) {
+func (r *ClusterAdminGrantReader) ListActive(ctx context.Context) ([]domain.ClusterAdminEntry, error) {
 	const q = `
 		SELECT g.id,
 		       g.subject_type,
@@ -84,10 +67,10 @@ func (r *ClusterAdminGrantReader) ListActive(ctx context.Context) ([]ClusterAdmi
 	}
 	defer rows.Close()
 
-	out := []ClusterAdminEntry{}
+	out := []domain.ClusterAdminEntry{}
 	for rows.Next() {
 		var (
-			e             ClusterAdminEntry
+			e             domain.ClusterAdminEntry
 			grantedByMail sql.NullString
 		)
 		// grantedByMail is technically already coerced via COALESCE to '',

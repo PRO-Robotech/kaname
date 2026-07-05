@@ -213,6 +213,17 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 			return "role is in use by access bindings"
 		}
 		return fmt.Sprintf("Role %s not found", idHint)
+	case "access_binding_conditions_condition_fk":
+		// Direction-sensitive (migration 0048 — DB-level Condition reference):
+		//   INSERT attach row with a non-existent condition_id → "Condition <id> not found"
+		//   DELETE Condition still referenced by ANY attach row (23503 RESTRICT) → in-use text.
+		// ConditionsCRUDService.Delete passes kindHint "Condition.Delete"; this
+		// FK is what closes the delete-vs-attach TOCTOU (the software refcheck is
+		// only a best-effort early message).
+		if kindHint == "Condition.Delete" {
+			return "condition is in use by access bindings"
+		}
+		return fmt.Sprintf("Condition %s not found", idHint)
 	}
 	// Unmapped FK — generic text; never leak pgErr.Detail/Message (they embed
 	// the referenced table/column/value → schema reconnaissance).
@@ -247,6 +258,11 @@ func checkText(pgErr *pgconn.PgError, kindHint string) string {
 	return "Illegal argument: value violates a constraint"
 }
 
-func notNullText(pgErr *pgconn.PgError) string {
-	return fmt.Sprintf("%s is required", pgErr.ColumnName)
+// notNullText — client-facing text for 23502 (not_null_violation). The raw
+// pgErr.ColumnName is deliberately NOT echoed: it is an internal schema
+// identifier that differs from the public proto field name and aids schema
+// reconnaissance (data-integrity.md: no pgx leak). A 23502 reaching the DB is
+// normally caught earlier by domain validation, so a generic message suffices.
+func notNullText(_ *pgconn.PgError) string {
+	return "a required field is missing"
 }

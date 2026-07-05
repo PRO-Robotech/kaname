@@ -12,7 +12,7 @@ package cluster
 import (
 	"context"
 
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // ListAdminsUseCase — reads all active cluster admin grants.
@@ -26,6 +26,6 @@ func NewListAdminsUseCase(r grantReader) *ListAdminsUseCase {
 }
 
 // Execute — returns the slice of active ClusterAdminEntry rows.
-func (uc *ListAdminsUseCase) Execute(ctx context.Context) ([]kachopg.ClusterAdminEntry, error) {
+func (uc *ListAdminsUseCase) Execute(ctx context.Context) ([]domain.ClusterAdminEntry, error) {
 	return uc.reader.ListActive(ctx)
 }

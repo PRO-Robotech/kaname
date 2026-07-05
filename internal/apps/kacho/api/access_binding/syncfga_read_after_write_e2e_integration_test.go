@@ -67,7 +67,7 @@ func TestSyncFGA_ReadAfterWrite_AccountCreate_OwnerCheckImmediately(t *testing.T
 	// Reconciler wired with the SYNC-FGA direct writer pointed at the real OpenFGA.
 	// WithSyncFGA is nil-safe and additive: the durable fga_outbox enqueue still
 	// happens in the writer-tx; the sync write is purely the read-after-write closer.
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations))
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations, nil))
 
 	creator := mustSeedUser(t, ctx, pool, "syncacc")
 	createUC := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
@@ -108,7 +108,7 @@ func TestSyncFGA_ReadAfterWrite_BindingAndGroupCreate_OwnerCheckImmediately(t *t
 	pool := poolFromDSN(t, setupTestDB(t))
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations))
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations, nil))
 
 	creator := mustSeedUser(t, ctx, pool, "syncbg")
 	octx := asUser(ctx, creator)
@@ -173,7 +173,7 @@ func TestSyncFGA_ReadAfterWrite_ProjectCreate_OwnerCheckImmediately(t *testing.T
 	pool := poolFromDSN(t, setupTestDB(t))
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations))
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations, nil))
 
 	creator := mustSeedUser(t, ctx, pool, "syncprj")
 	octx := asUser(ctx, creator)
@@ -227,7 +227,7 @@ func TestSyncFGA_ReadAfterWrite_SystemViewGrantToPeer_OwnerViewerCheckImmediatel
 	pool := poolFromDSN(t, setupTestDB(t))
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations))
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations, nil))
 
 	owner := mustSeedUser(t, ctx, pool, "syncview")
 	octx := asUser(ctx, owner)
@@ -297,7 +297,7 @@ func TestSyncFGA_ReadAfterWrite_PopulatedAccount_OwnerViewerCheckImmediately(t *
 	pool := poolFromDSN(t, setupTestDB(t))
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations))
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil).WithSyncFGA(kachopg.NewSyncFGAWriter(fga.relations, nil))
 
 	owner := mustSeedUser(t, ctx, pool, "syncpop")
 	octx := asUser(ctx, owner)

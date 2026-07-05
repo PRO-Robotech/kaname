@@ -6,6 +6,7 @@ package authorize
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
 
@@ -184,6 +185,83 @@ func TestHandler_ListSubjects_Filter(t *testing.T) {
 		if !strings.HasPrefix(s, "user:") {
 			t.Errorf("filter dropped non-user; got %q", s)
 		}
+	}
+}
+
+// fgaSecret — sensitive OpenFGA transport detail (store id, backend endpoint)
+// a failing backend call could embed. It must NEVER reach the client-facing
+// gRPC status message (CWE-209: information exposure through error message).
+const fgaSecret = "openfga-store-id=01ABCDEF backend=http://fga.internal:8080"
+
+// errFGA — an Authorizer stub whose query methods fail with a backend error
+// carrying fgaSecret, to prove the handler collapses the raw text to a fixed,
+// schema-free message instead of forwarding err.Error() verbatim.
+type errFGA struct{ stubFGA }
+
+func (e *errFGA) ListObjects(context.Context, string, string, string, map[string]any, int) ([]string, error) {
+	return nil, stderrors.New(fgaSecret)
+}
+func (e *errFGA) ListSubjects(context.Context, string, string, string, int, string) ([]string, string, error) {
+	return nil, "", stderrors.New(fgaSecret)
+}
+func (e *errFGA) Expand(context.Context, string, string, string) (*clients.ExpandTree, error) {
+	return nil, stderrors.New(fgaSecret)
+}
+
+func newHandlerWithAuthorizer(a service.Authorizer) *Handler {
+	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
+		Relations: a,
+		ModelID:   "test-model",
+	})
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil))
+}
+
+// TestHandler_Authorize_RedactsBackendError — a failing OpenFGA backend call
+// must surface as codes.Unavailable with the FIXED text "authorization backend
+// unavailable"; the raw wrapped backend detail (store id / endpoint) must never
+// appear in the client-facing message.
+func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
+	h := newHandlerWithAuthorizer(&errFGA{})
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"ListObjects", func() error {
+			_, err := h.ListObjects(context.Background(), &iamv1.ListObjectsRequest{
+				Subject: "user:x", ResourceType: "y", Action: "x.x.list",
+			})
+			return err
+		}},
+		{"ListSubjects", func() error {
+			_, err := h.ListSubjects(context.Background(), &iamv1.ListSubjectsRequest{
+				Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Action: "x.x.list",
+			})
+			return err
+		}},
+		{"ExpandRelations", func() error {
+			_, err := h.ExpandRelations(context.Background(), &iamv1.ExpandRelationsRequest{
+				Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Relation: "viewer",
+			})
+			return err
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.call()
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			st, _ := status.FromError(err)
+			if st.Code() != codes.Unavailable {
+				t.Errorf("code = %v; want Unavailable", st.Code())
+			}
+			if strings.Contains(st.Message(), fgaSecret) {
+				t.Errorf("LEAK: client message %q contains raw backend detail", st.Message())
+			}
+			if st.Message() != "authorization backend unavailable" {
+				t.Errorf("message = %q; want fixed redacted text", st.Message())
+			}
+		})
 	}
 }
 

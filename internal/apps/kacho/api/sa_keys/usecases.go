@@ -108,6 +108,10 @@ type IssueSAKeyUseCase struct {
 	// (purely-additive; mutation contract unchanged). See WithAuditEmitter.
 	audit auditEmitter
 	now   func() time.Time
+	// graceTimer — injectable grace-window timer (defaults to time.After).
+	// Tests substitute a channel they control so the grace expiry is driven
+	// deterministically instead of racing wall-clock; production leaves it nil.
+	graceTimer func(time.Duration) <-chan time.Time
 	// logger — surfaces failures of the detached secret-redaction goroutine
 	// (redaction error / give-up / recovered panic), so a key that stays
 	// un-redacted in the operation response is detectable. nil → no logging.
@@ -328,7 +332,7 @@ func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID
 	// между окном poll-retrieval у клиента и временем жизни секрета в LRO.
 	if grace > 0 {
 		select {
-		case <-time.After(grace):
+		case <-u.graceAfter(grace):
 		case <-ctx.Done():
 			if u.logger != nil {
 				u.logger.WarnContext(ctx, "sa-key secret redaction ctx expired during the grace window — key material may remain",
@@ -339,6 +343,15 @@ func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID
 	}
 
 	u.redactSecretFields(ctx, opID)
+}
+
+// graceAfter returns the grace-window timer channel — the injected graceTimer
+// when set (deterministic tests), otherwise the wall-clock time.After.
+func (u *IssueSAKeyUseCase) graceAfter(d time.Duration) <-chan time.Time {
+	if u.graceTimer != nil {
+		return u.graceTimer(d)
+	}
+	return time.After(d)
 }
 
 // awaitOpDone поллит операцию, пока она не станет Done. Bounded: 100 попыток по
@@ -689,6 +702,9 @@ type RevokeSAKeyUseCase struct {
 	opsRepo operations.Repo
 	// audit — durable audit_outbox emitter. nil → no audit row.
 	audit auditEmitter
+	// logger — surfaces the eventual-consistency Hydra orphan-cleanup warning
+	// after the DB delete commits. nil → warning is skipped (degraded wiring).
+	logger *slog.Logger
 }
 
 // NewRevokeSAKeyUseCase constructs.
@@ -700,6 +716,13 @@ func NewRevokeSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, h OAuthClientA
 // Composition-root only. nil emitter → audit emit is skipped.
 func (u *RevokeSAKeyUseCase) WithAuditEmitter(a auditEmitter) *RevokeSAKeyUseCase {
 	u.audit = a
+	return u
+}
+
+// WithLogger wires the logger used to surface the post-commit Hydra
+// orphan-cleanup warning. Composition-root only; returns the receiver.
+func (u *RevokeSAKeyUseCase) WithLogger(l *slog.Logger) *RevokeSAKeyUseCase {
+	u.logger = l
 	return u
 }
 
@@ -781,11 +804,18 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 	// Delete from Hydra (idempotent — 404 OK).
 	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
 		if !errors.Is(err, clients.ErrHydraClientNotFound) {
-			// We've already committed the DB delete; surface a warning event,
-			// but treat this as eventual-consistency — the Hydra
-			// orphan-cleanup worker sweeps later. We return success with the
-			// orphan logged.
-			_ = err
+			// The DB delete already committed; this is eventual-consistency — the
+			// Hydra orphan-cleanup worker sweeps the leftover client later. Emit
+			// the promised structured warning (was silently swallowed via `_ =
+			// err`, CWE-390) so the orphan is observable to operators and the
+			// sweep has a signal; keep the RPC successful (non-fatal).
+			if u.logger != nil {
+				u.logger.WarnContext(ctx, "sa-key hydra oauth-client delete failed after DB commit — orphaned client left for the cleanup worker",
+					slog.String("oauth_client_id", string(cur.OAuthClientID)),
+					slog.String("key_id", string(in.KeyID)),
+					slog.String("err", err.Error()),
+				)
+			}
 		}
 	}
 	resp := &iamv1.RevokeSAKeyResponse{

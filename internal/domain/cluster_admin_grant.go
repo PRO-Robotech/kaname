@@ -49,6 +49,27 @@ func (g ClusterAdminGrant) Validate() error {
 	return errs
 }
 
+// ClusterAdminEntry — read-projection of one active cluster-admin grant with
+// denormalised user fields (subject email/display_name, granter email) resolved
+// by the ListActive read-adapter's users JOIN. Pure domain view used by the
+// InternalClusterService.ListAdmins use-case + handler; the pg adapter maps its
+// rows INTO this type so the use-case/handler never import the pgx adapter
+// package (Clean-Architecture dependency rule — the port speaks in domain types).
+//
+// Denormalised fields (SubjectEmail / SubjectDisplayName / GrantedByEmail) are
+// output-only mirrors; the authoritative subject/granter ids are
+// SubjectID / GrantedByUserID.
+type ClusterAdminEntry struct {
+	ClusterAdminGrantID string
+	SubjectType         string
+	SubjectID           string
+	SubjectEmail        string
+	SubjectDisplayName  string
+	GrantedByUserID     string
+	GrantedByEmail      string // "" when granted_by == "bootstrap"
+	GrantedAt           time.Time
+}
+
 // ClusterAdminGrantID — self-validating newtype, format `cag_<17-crockford>`.
 type ClusterAdminGrantID string
 

@@ -62,9 +62,15 @@ type User struct {
 // (matches DB CHECK users_invite_status_consistency).
 func (u User) Validate() error {
 	var errs error
-	// AccountID — opaque; format-check happens at the use-case layer via
-	// id-prefix check. Intentionally skipped here (placeholder).
-	_ = u.AccountID
+	// AccountID — required: every User belongs to exactly one Account (NOT NULL
+	// account_id + FK). Domain enforces non-emptiness here, consistent with the
+	// sibling self-validating types (Project/Group/ServiceAccount.Validate). The
+	// full id-prefix/length format check stays centralized at the use-case layer
+	// (shared.ValidateResourceID) — the domain gate is "the invariant holds",
+	// not the transport-format validation.
+	if u.AccountID == "" {
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument account_id: required"))
+	}
 	errs = multierr.Append(errs, u.Email.Validate())
 	errs = multierr.Append(errs, u.Labels.Validate())
 	if u.DisplayName != "" {

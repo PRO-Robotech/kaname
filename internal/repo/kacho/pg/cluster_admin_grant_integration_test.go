@@ -604,7 +604,7 @@ func TestList_JoinsUsers(t *testing.T) {
 	require.Len(t, entries, 2, "List must return only active admins")
 
 	// Build by-subject map for stable assertion.
-	bySubject := map[string]kachopg.ClusterAdminEntry{}
+	bySubject := map[string]domain.ClusterAdminEntry{}
 	for _, e := range entries {
 		bySubject[e.SubjectID] = e
 	}

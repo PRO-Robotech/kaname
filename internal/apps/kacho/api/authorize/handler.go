@@ -13,6 +13,7 @@ package authorize
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -22,8 +23,20 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
+)
+
+// Fixed client-facing messages for non-validation failures. Raw use-case /
+// OpenFGA error text ("authz listObjects: <transport detail>", "authz
+// unavailable: <raw>") embeds authz-backend topology (store id, endpoint,
+// status) and MUST NOT reach the caller (CWE-209). The detailed error is
+// logged server-side instead. Deterministic "Illegal argument …" validation
+// text is safe and is surfaced verbatim.
+const (
+	msgAuthzUnavailable = "authorization backend unavailable"
+	msgAuthzInternal    = "internal error"
 )
 
 // Handler — gRPC server.
@@ -31,12 +44,26 @@ type Handler struct {
 	iamv1.UnimplementedAuthorizeServiceServer
 	svc    *service.AuthorizeService
 	whoAmI *WhoAmIUseCase
+	// authority — FGA relation checker for the inner caller-authority gate
+	// (caller_authority.go). Optional / nil-safe: when unset the gate can still
+	// allow self-queries and passes through anonymous/system module PDP calls,
+	// but denies a non-self tenant principal that cannot be proven cluster-admin
+	// or resource-authority (fail-closed). Wired to the OpenFGA client in the
+	// composition root via WithCallerAuthority.
+	authority authzguard.RelationChecker
 }
 
 // NewHandler — builder. Both svc and whoAmI are required (composition root
 // wires both unconditionally; nil at construction time means a wiring bug).
 func NewHandler(svc *service.AuthorizeService, whoAmI *WhoAmIUseCase) *Handler {
 	return &Handler{svc: svc, whoAmI: whoAmI}
+}
+
+// WithCallerAuthority injects the FGA relation checker used by the inner
+// caller-authority defense-in-depth gate. Returns the receiver for chaining.
+func (h *Handler) WithCallerAuthority(checker authzguard.RelationChecker) *Handler {
+	h.authority = checker
+	return h
 }
 
 // Check — see iamv1.AuthorizeServiceServer.
@@ -50,6 +77,11 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	if req.GetAction() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
 	}
+	// Inner defense-in-depth: a tenant principal may only Check about itself, a
+	// resource it administers, or as a cluster-admin (caller_authority.go).
+	if err := h.authorizeCaller(ctx, req.GetSubject(), req.GetResource()); err != nil {
+		return nil, err
+	}
 	res, err := h.svc.Check(ctx, service.CheckRequest{
 		Subject: req.GetSubject(),
 		Resource: service.ResourceRef{
@@ -61,15 +93,18 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 		Context:          structToMap(req.GetContext()),
 	})
 	if err != nil {
-		// Validation errors → InvalidArgument; backend errors → Unavailable.
+		// Validation errors → InvalidArgument (verbatim, safe); backend errors →
+		// Unavailable/Internal with a fixed, redacted message (no raw pgx/FGA leak).
 		if strings.HasPrefix(err.Error(), "Illegal argument") {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		if strings.HasPrefix(err.Error(), "authz unavailable") ||
 			strings.HasPrefix(err.Error(), "policy unavailable") {
-			return nil, status.Error(codes.Unavailable, err.Error())
+			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "Check", "err", err.Error())
+			return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 		}
-		return nil, status.Error(codes.Internal, err.Error())
+		slog.ErrorContext(ctx, "authorize internal error", "op", "Check", "err", err.Error())
+		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
 	return &iamv1.AuthorizeCheckResponse{
 		Allowed:              res.Allowed,
@@ -83,6 +118,13 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheckRequest) (*iamv1.BatchAuthorizeCheckResponse, error) {
 	if len(req.GetChecks()) > 100 {
 		return nil, status.Errorf(codes.InvalidArgument, "Illegal argument checks: batch size %d > 100", len(req.GetChecks()))
+	}
+	// Inner defense-in-depth: gate every item's subject/resource before fanning
+	// out — a single unauthorized item denies the whole batch (caller_authority.go).
+	for _, c := range req.GetChecks() {
+		if err := h.authorizeCaller(ctx, c.GetSubject(), c.GetResource()); err != nil {
+			return nil, err
+		}
 	}
 	reqs := make([]service.CheckRequest, 0, len(req.GetChecks()))
 	for _, c := range req.GetChecks() {
@@ -99,7 +141,11 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 	}
 	results, err := h.svc.BatchCheck(ctx, reqs)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		if strings.HasPrefix(err.Error(), "Illegal argument") {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		slog.ErrorContext(ctx, "authorize internal error", "op", "BatchCheck", "err", err.Error())
+		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
 	out := &iamv1.BatchAuthorizeCheckResponse{
 		Responses: make([]*iamv1.AuthorizeCheckResponse, len(results)),
@@ -117,6 +163,12 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 
 // ListObjects — see iamv1.AuthorizeServiceServer.
 func (h *Handler) ListObjects(ctx context.Context, req *iamv1.ListObjectsRequest) (*iamv1.ListObjectsResponse, error) {
+	// Inner defense-in-depth: ListObjects has no single resource scope, so a
+	// tenant caller may only enumerate its OWN visible objects or act as a
+	// cluster-admin (caller_authority.go).
+	if err := h.authorizeCaller(ctx, req.GetSubject(), nil); err != nil {
+		return nil, err
+	}
 	res, err := h.svc.ListObjects(ctx, service.ListObjectsRequest{
 		Subject:      req.GetSubject(),
 		ResourceType: req.GetResourceType(),
@@ -129,7 +181,8 @@ func (h *Handler) ListObjects(ctx context.Context, req *iamv1.ListObjectsRequest
 		if strings.HasPrefix(err.Error(), "Illegal argument") {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		return nil, status.Error(codes.Unavailable, err.Error())
+		slog.ErrorContext(ctx, "authorize backend unavailable", "op", "ListObjects", "err", err.Error())
+		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 	}
 	return &iamv1.ListObjectsResponse{
 		ResourceIds: res.ResourceIDs,
@@ -145,6 +198,12 @@ func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsReque
 	if req.GetAction() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
 	}
+	// Inner defense-in-depth: ListSubjects enumerates WHO can act on a resource,
+	// so a tenant caller must administer that resource or be a cluster-admin
+	// (caller_authority.go) — otherwise it leaks the resource's authz graph.
+	if err := h.authorizeCaller(ctx, "", req.GetResource()); err != nil {
+		return nil, err
+	}
 	res, err := h.svc.ListSubjects(ctx, service.ListSubjectsRequest{
 		ResourceType:      req.GetResource().GetType(),
 		ResourceID:        req.GetResource().GetId(),
@@ -157,7 +216,8 @@ func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsReque
 		if strings.HasPrefix(err.Error(), "Illegal argument") {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		return nil, status.Error(codes.Unavailable, err.Error())
+		slog.ErrorContext(ctx, "authorize backend unavailable", "op", "ListSubjects", "err", err.Error())
+		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 	}
 	return &iamv1.ListSubjectsResponse{
 		Subjects:      res.Subjects,
@@ -173,6 +233,12 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 	if req.GetRelation() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument relation: required")
 	}
+	// Inner defense-in-depth: ExpandRelations discloses the full userset tree of
+	// a resource, so a tenant caller must administer that resource or be a
+	// cluster-admin (caller_authority.go).
+	if err := h.authorizeCaller(ctx, "", req.GetResource()); err != nil {
+		return nil, err
+	}
 	res, err := h.svc.ExpandRelations(ctx, service.ExpandRequest{
 		ResourceType: req.GetResource().GetType(),
 		ResourceID:   req.GetResource().GetId(),
@@ -180,7 +246,11 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 		MaxDepth:     int(req.GetMaxDepth()),
 	})
 	if err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		if strings.HasPrefix(err.Error(), "Illegal argument") {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		slog.ErrorContext(ctx, "authorize backend unavailable", "op", "ExpandRelations", "err", err.Error())
+		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 	}
 	return &iamv1.ExpandRelationsResponse{
 		Resource:             &iamv1.ResourceRef{Type: res.Resource.Type, Id: res.Resource.ID},

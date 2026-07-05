@@ -13,7 +13,6 @@ import (
 	"context"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
@@ -35,7 +34,7 @@ type grantWriter interface {
 // grantReader — port for read-only access to cluster_admin_grants.
 // Implemented by *kachopg.ClusterAdminGrantReader.
 type grantReader interface {
-	ListActive(ctx context.Context) ([]kachopg.ClusterAdminEntry, error)
+	ListActive(ctx context.Context) ([]domain.ClusterAdminEntry, error)
 }
 
 // relationOutboxEmitter — port for emitting relation tuple rows into

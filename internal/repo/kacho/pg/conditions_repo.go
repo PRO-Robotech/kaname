@@ -136,21 +136,30 @@ func (r *ConditionsRepo) List(ctx context.Context, f condition.ListFilter) ([]do
 }
 
 // CountReferences — count of AccessBindings referencing this condition via
-// access_binding_conditions.expression-bound rows. Best-effort.
+// access_binding_conditions. This is only a best-effort EARLY message on the
+// happy path ("Condition is in use by N AccessBindings"); it is NOT the
+// integrity guard. The real guard is the DB-level FK
+// access_binding_conditions.condition_id → conditions(id) ON DELETE RESTRICT
+// (migration 0048), which closes the count-then-delete TOCTOU: a concurrent
+// attach committing after this count read still makes the DELETE fail atomically
+// with 23503 → FailedPrecondition.
 func (r *ConditionsRepo) CountReferences(ctx context.Context, id domain.ConditionID) (int64, error) {
 	return countConditionReferences(ctx, r.pool, id)
 }
 
 // CountReferencesTx — tx-scoped CountReferences so the Delete worker can run the
-// refcheck inside the SAME tx as the delete + audit row.
+// early-message refcheck inside the SAME tx as the delete + audit row (the FK is
+// the actual race-proof enforcement — see CountReferences).
 func (r *ConditionsRepo) CountReferencesTx(ctx context.Context, txh service.Tx, id domain.ConditionID) (int64, error) {
 	return countConditionReferences(ctx, txAsPgx(txh), id)
 }
 
 func countConditionReferences(ctx context.Context, q condQuerier, id domain.ConditionID) (int64, error) {
-	// The reference relation is wired as access_binding_conditions.params
-	// JSONB → ('condition_id' -> id). There is no formal column — we read via
-	// params jsonb match. Returns 0 on no references.
+	// The reference relation is carried by access_binding_conditions.params
+	// JSONB ('condition_id' -> id) and, since migration 0048, mirrored into the
+	// real, FK-backed condition_id column (derived by a BEFORE trigger). We read
+	// via the params path so the count matches the column exactly. Returns 0 on
+	// no references.
 	var count int64
 	err := q.QueryRow(ctx,
 		`SELECT COUNT(*) FROM access_binding_conditions
@@ -295,7 +304,11 @@ func (r *ConditionsRepo) DeleteTx(ctx context.Context, txh service.Tx, id domain
 func deleteCondition(ctx context.Context, q condQuerier, id domain.ConditionID) error {
 	tag, err := q.Exec(ctx, `DELETE FROM conditions WHERE id = $1`, string(id))
 	if err != nil {
-		return mapErr(err, "", string(id))
+		// kindHint "Condition.Delete" — a 23503 here is the ON DELETE RESTRICT
+		// FK (migration 0048) firing because a concurrent attach referenced this
+		// Condition after the software CountReferences precheck read 0; map it to
+		// the in-use FailedPrecondition text (not "not found").
+		return mapErr(err, "Condition.Delete", string(id))
 	}
 	if tag.RowsAffected() == 0 {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "Condition %s not found", id)

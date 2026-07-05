@@ -76,13 +76,23 @@ func TestScheduleSecretRedact_WaitsGraceBeforeRedacting(t *testing.T) {
 // TestScheduleSecretRedact_PemPresentDuringGraceWindow — пока grace-окно не
 // истекло, ключ ОСТАЁТСЯ в op.response (redact ещё не случился), поэтому
 // параллельный клиентский поллинг успевает его прочитать.
+//
+// Deterministic: the grace expiry is driven by an injected timer channel (not a
+// wall-clock Sleep race) — the test releases the window only AFTER asserting the
+// key is still present, so it can never flake on a slow/loaded runner.
 func TestScheduleSecretRedact_PemPresentDuringGraceWindow(t *testing.T) {
-	const grace = 300 * time.Millisecond
 	rec := &recordingRedactor{}
+
+	graceCh := make(chan time.Time)
+	graceRequested := make(chan struct{})
 	uc := &IssueSAKeyUseCase{
 		opsRepo:     &stubOpsRepo{done: true},
 		redactor:    rec,
-		redactGrace: grace,
+		redactGrace: 300 * time.Millisecond, // >0 so the grace branch is taken
+		graceTimer: func(time.Duration) <-chan time.Time {
+			close(graceRequested) // signal: worker reached the grace wait
+			return graceCh
+		},
 	}
 
 	done := make(chan struct{})
@@ -91,11 +101,14 @@ func TestScheduleSecretRedact_PemPresentDuringGraceWindow(t *testing.T) {
 		close(done)
 	}()
 
-	// В первой трети grace-окна ключ ещё не затерт.
-	time.Sleep(grace / 3)
+	// Barrier: block until the worker has passed awaitOpDone and is parked on the
+	// (not-yet-fired) grace timer. At that point redaction provably has NOT run.
+	<-graceRequested
 	require.Empty(t, rec.snapshot(),
 		"private_key_pem must remain retrievable mid grace window")
 
+	// Release the grace window deterministically → redaction proceeds.
+	close(graceCh)
 	<-done
 	require.NotEmpty(t, rec.snapshot(),
 		"private_key_pem must be redacted once the grace window has elapsed")

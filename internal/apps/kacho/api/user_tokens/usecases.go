@@ -415,6 +415,9 @@ type RevokeUserTokenUseCase struct {
 	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
 	audit   auditEmitter
+	// logger — surfaces the post-commit Hydra orphan-cleanup warning.
+	// nil → skipped (degraded wiring).
+	logger *slog.Logger
 }
 
 // NewRevokeUserTokenUseCase конструирует.
@@ -425,6 +428,13 @@ func NewRevokeUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, h OAuthC
 // WithAuditEmitter проводит durable audit_outbox emitter. Composition-root only.
 func (u *RevokeUserTokenUseCase) WithAuditEmitter(a auditEmitter) *RevokeUserTokenUseCase {
 	u.audit = a
+	return u
+}
+
+// WithLogger wires the logger used to surface the post-commit Hydra
+// orphan-cleanup warning. Composition-root only; returns the receiver.
+func (u *RevokeUserTokenUseCase) WithLogger(l *slog.Logger) *RevokeUserTokenUseCase {
+	u.logger = l
 	return u
 }
 
@@ -504,9 +514,17 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 	// Delete из Hydra (idempotent — 404 OK).
 	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
 		if !errors.Is(err, clients.ErrHydraClientNotFound) {
-			// DB-delete уже закоммичен; трактуем как eventual-consistency — orphan
-			// подметёт Hydra orphan-cleanup позже. Возвращаем успех.
-			_ = err
+			// DB-delete уже закоммичен; eventual-consistency — orphan подметёт
+			// Hydra orphan-cleanup позже. Эмитим обещанное structured-warning
+			// (было молча проглочено через `_ = err`, CWE-390), чтобы orphan был
+			// наблюдаем и у sweep'а был сигнал; RPC остаётся успешным (non-fatal).
+			if u.logger != nil {
+				u.logger.WarnContext(ctx, "user-token hydra oauth-client delete failed after DB commit — orphaned client left for the cleanup worker",
+					slog.String("oauth_client_id", string(cur.OAuthClientID)),
+					slog.String("token_id", string(in.TokenID)),
+					slog.String("err", err.Error()),
+				)
+			}
 		}
 	}
 	resp := &iamv1.RevokeUserTokenResponse{
