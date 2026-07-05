@@ -42,7 +42,7 @@ import (
 	"sync"
 	"time"
 
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
 
 // ErrUnsupportedExpression — caller should fall back to FGA Check.

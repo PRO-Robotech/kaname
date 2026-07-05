@@ -51,7 +51,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-corelib/grpcclient"
 	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
-	apigatewayv1 "github.com/PRO-Robotech/kacho-corelib/proto/gen/go/kacho/cloud/apigateway/v1"
+	apigatewayv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/apigateway/v1"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )

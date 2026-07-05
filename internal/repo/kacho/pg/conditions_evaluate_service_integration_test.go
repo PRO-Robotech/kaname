@@ -40,7 +40,7 @@ import (
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
 	"github.com/PRO-Robotech/kacho-corelib/ids"
 
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	condhandler "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/conditions"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"

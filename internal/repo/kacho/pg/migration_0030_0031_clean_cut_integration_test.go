@@ -30,7 +30,7 @@ import (
 	_ "github.com/PRO-Robotech/kacho-iam/internal/dto/toproto" // register Role transfer
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
 
 // TestMigration_F51_LegacyTablesDropped — the two legacy child tables are gone,

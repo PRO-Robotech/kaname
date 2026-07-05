@@ -31,7 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"

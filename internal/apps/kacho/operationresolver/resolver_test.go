@@ -14,7 +14,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	iamv1 "github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
 
 func getPresent(_ context.Context, id domain.RoleID) (domain.Role, error) {
