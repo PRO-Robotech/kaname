@@ -25,6 +25,28 @@
 периметр не считается доверенным (defense-in-depth против lateral movement): mTLS на
 `:9091` обязателен и не освобождает от authz.
 
+## Trust-gating форвардинга principal (оба слушателя)
+
+`x-kacho-principal-*` metadata несет identity вызывающего пользователя, проброшенную
+форвардером (api-gateway после JWT-валидации; consumer-модули на своем request-path).
+На **обоих** gRPC-слушателях эта metadata раскрывается downstream (в
+`operations.principal_*` / audit / scope-filter) **только** когда peer прошел mTLS
+client-cert верификацию (`CertIdentityExtract` → `TrustedPrincipalExtract`): на
+непроверенном/бессертификатном peer'е форвардинг **снимается** (fallback на
+`SystemPrincipal`, трактуется как анонимный). Без этого любой, кто дозвонится до
+слушателя, мог бы **подделать** произвольный `user:<victim>` principal (impersonation).
+
+**Почему на `:9090` НЕТ gateway-only pin форвардера.** Публичный слушатель —
+**мульти-форвардерный**: помимо api-gateway (tenant-facing user-запросы), каждый
+verified consumer-модуль (`kacho-vpc`/`compute`/`nlb`/`geo`) дозванивается до
+`ProjectService.Get` и форвардит end-user principal ради tenant scope-filter. Пин
+«только gateway» сломал бы эту кросс-сервисную валидацию проектов. Достаточная защита —
+internal-CA + `RequireAndVerifyClientCert` на `:9090` (слушатель доступен только
+verified kacho-модулям) + trust-gate выше (unverified peer не может подделать
+principal). Остаточный риск (скомпрометированный verified-модуль подделывает
+произвольного user'а) присущ модели «доверенного форвардера» и митигируется
+scope'ом internal-CA + NetworkPolicy + hardening'ом pod'ов модулей.
+
 ## Публичный PDP (`AuthorizeService`) и режим production-strict
 
 `AuthorizeService` (`Check` / `ListObjects` / `ListSubjects`) — это PDP: api-gateway и
@@ -41,6 +63,33 @@
 Режим `dev` (анонимный доступ для локального стенда) допустим **только** в локальной
 разработке и CI-фикстурах — никогда в развернутом окружении. Любой кластерный деплой
 поднимается с production-strict + mTLS.
+
+### Остаточный риск: PDP как enumeration-oracle (by-design trade-off)
+
+PDP по своей природе — **оракул решений авторизации**: он отвечает на запросы вида
+«разрешено ли `(subject, relation, object)`?» для **произвольного** subject, а не только
+для самого вызывающего. Из-за этого аутентифицированный вызывающий, имеющий доступ к
+PDP, может **перечислять** authz-отношения о чужих subject'ах (enumeration). Это
+**осознанный компромисс**, а не незакрытый баг:
+
+- **Почему нельзя потребовать self-scoped subject** (caller спрашивает только о СЕБЕ):
+  api-gateway — единственная authz-front-door платформы — вызывает `Check` с subject'ом
+  **end-user'а** (`subj.FGA`), а НЕ со своей транспортной identity; он спрашивает «может
+  ли пользователь X сделать Y», не будучи пользователем X. Аналогично consumer-модули
+  (`vpc`/`compute`) на bootstrap вызывают `ListObjects`/`ListSubjects` про subject,
+  который не совпадает с их транспортной identity. Требование «subject == caller»
+  **сломало бы** и per-user Check у gateway, и кросс-сервисный preflight. Поэтому
+  self-scoping не применяется.
+- **Чем ограничен риск.** (1) Транспорт: production-strict + mTLS/JWT — PDP недостижим
+  анонимно из-вне периметра (анонимный запрос fail-closed до backend'а); слушатель
+  доступен только verified-модулям и JWT-аутентифицированным user'ам через edge.
+  (2) Данные: PDP возвращает лишь tenant-facing «разрешено/запрещено» по запрошенному
+  триплету — никаких инфра-чувствительных данных (placement/underlay), см. `security.md`.
+  (3) Сеть: NetworkPolicy сегментирует доступ к `:9090`.
+
+Вывод: публичность PDP — требование его роли; безопасность строится на транспортной
+аутентификации + строгом режиме + отсутствии data-leak, а не на сокрытии endpoint'а или
+на (ломающем flow) self-scoping.
 
 ## Целостность данных authz
 
