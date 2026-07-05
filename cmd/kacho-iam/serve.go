@@ -301,17 +301,32 @@ func runServe(cfg config.Config) error {
 			// latency/code covers the whole RPC (request count + handling
 			// seconds + grpc_code), for every public RPC including authz Check.
 			metricsReg.UnaryServerInterceptor(),
-			// Public listener — JWT-fronted principal source: the api-gateway has
-			// already done per-user authN (validated JWT) + authZ before forwarding
-			// the x-kacho-principal-* metadata, so the principal is taken as-is here.
-			// The cert-trust-gated variant is reserved for the internal :9091
-			// listener (module-to-module, anti-spoof). This deliberate split is
-			// pinned by TestInternalListener_PublicListenerUnaffected.
-			grpcsrv.UnaryPrincipalExtract(), //nolint:staticcheck // public JWT-fronted path keeps the unconditional extractor by design
+			// Public listener — trust-aware principal extraction (anti-spoof). The
+			// forwarded x-kacho-principal-* metadata is exposed downstream ONLY when
+			// the peer passed mTLS client-cert verification (UnaryCertIdentityExtract
+			// sets the verified flag; UnaryTrustedPrincipalExtract drops the metadata
+			// on an unverified/cert-less peer → SystemPrincipal fallback). Without
+			// this a peer reaching :9090 could FORGE an arbitrary user identity.
+			//
+			// NO gateway-only forwarder allow-list: :9090 is a MULTI-forwarder
+			// listener — besides the api-gateway (JWT-fronted user requests), every
+			// verified consumer module (kacho-vpc/compute/nlb/geo) dials the
+			// tenant-facing ProjectService.Get and forwards the end-user principal for
+			// the tenant scope-filter. Pinning gateway-only would break that
+			// cross-service project validation. The internal CA + RequireAndVerify
+			// ClientCert on :9090 already gates the listener to verified kacho modules;
+			// this layer only ensures an UNVERIFIED peer cannot forge a principal.
+			//
+			// On the insecure dev listener (no TLS) the trust invariant is inapplicable
+			// and the principal is accepted as before (backward-compat, byte-identical
+			// to the newman stand). CertIdentityExtract MUST run before Trusted.
+			grpcsrv.UnaryCertIdentityExtract(),
+			grpcsrv.UnaryTrustedPrincipalExtract(),
 			authzguard.AntiAnonymousUnary(logger),
 		),
 		grpc.ChainStreamInterceptor(
-			grpcsrv.StreamPrincipalExtract(), //nolint:staticcheck // public JWT-fronted path keeps the unconditional extractor by design
+			grpcsrv.StreamCertIdentityExtract(),
+			grpcsrv.StreamTrustedPrincipalExtract(),
 			authzguard.AntiAnonymousStream(logger),
 		),
 	)

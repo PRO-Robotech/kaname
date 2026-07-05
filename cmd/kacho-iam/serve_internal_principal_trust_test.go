@@ -3,11 +3,14 @@
 
 package main
 
-// serve_internal_principal_trust_test.go — anti-spoof guard for the
-// cluster-internal gRPC listener (:9091).
+// serve_internal_principal_trust_test.go — anti-spoof guard for BOTH gRPC
+// listeners (cluster-internal :9091 and public :9090).
 //
-// P1 SECURITY (audit): the internal listener MUST gate x-kacho-principal-*
+// P1 SECURITY (audit): each listener MUST gate x-kacho-principal-*
 // metadata on a VERIFIED mTLS client-cert (corelib FD-4 trust invariant).
+// The public listener (:9090) is a multi-forwarder surface (api-gateway +
+// consumer ProjectService.Get) — it trust-gates the principal but does NOT
+// pin a gateway-only forwarder (see TestPublicListener_* below).
 // Wiring it with the legacy grpcsrv.UnaryPrincipalExtract /
 // StreamPrincipalExtract stamps the forwarded principal UNCONDITIONALLY — a peer
 // reaching :9091 without a verified client-cert can then FORGE the user identity
@@ -90,22 +93,157 @@ func TestInternalListener_UsesTrustAwarePrincipalExtract(t *testing.T) {
 		"grpcsrv.StreamCertIdentityExtract()", "grpcsrv.StreamTrustedPrincipalExtract()")
 }
 
-// TestInternalListener_PublicListenerUnaffected — the PUBLIC listener path is a
-// different (JWT-fronted) principal source and must keep the legacy
-// UnaryPrincipalExtract / StreamPrincipalExtract. This guards against the fix
-// accidentally weakening or rewiring the public path.
-func TestInternalListener_PublicListenerUnaffected(t *testing.T) {
+// TestPublicListener_TrustGatesForwardedPrincipal — source-level wiring guard for
+// the PUBLIC listener (:9090).
+//
+// P1 SECURITY: :9090 is reachable in production not only by the api-gateway but by
+// every verified module that dials iam's tenant-facing ProjectService.Get
+// (kacho-vpc/compute/nlb/geo forward the end-user principal for the tenant
+// scope-filter). The legacy grpcsrv.UnaryPrincipalExtract stamped
+// x-kacho-principal-* UNCONDITIONALLY — even from a TLS peer WITHOUT a verified
+// client-cert — so anyone reaching :9090 could FORGE an arbitrary user identity
+// (impersonation). The public listener MUST trust-gate the forwarded principal on
+// a verified mTLS peer, exactly like :9091 (UnaryCertIdentityExtract →
+// UnaryTrustedPrincipalExtract).
+//
+// It deliberately does NOT pin a gateway-only forwarder allow-list: :9090
+// legitimately serves multiple forwarders (gateway + consumer ProjectService.Get),
+// all verified via the internal CA; a gateway-only pin would break cross-service
+// project validation (see TestPublicChain_HonorsVerifiedConsumerForwarder).
+//
+// RED-демонстрация: вернуть на public listener legacy
+// grpcsrv.UnaryPrincipalExtract()/StreamPrincipalExtract() → этот тест падает.
+func TestPublicListener_TrustGatesForwardedPrincipal(t *testing.T) {
 	src := readFileT(t, "serve.go")
 	public := publicServerBlock(t, src)
 
+	// Trust-aware variants must be wired on the public listener.
 	for _, want := range []string{
+		"grpcsrv.UnaryCertIdentityExtract()",
+		"grpcsrv.UnaryTrustedPrincipalExtract()",
+		"grpcsrv.StreamCertIdentityExtract()",
+		"grpcsrv.StreamTrustedPrincipalExtract()",
+	} {
+		if !strings.Contains(public, want) {
+			t.Errorf("public listener: missing %s — the forwarded principal is NOT trust-gated "+
+				"on :9090 (a peer without a verified client-cert could FORGE a user identity)", want)
+		}
+	}
+
+	// Legacy unconditional extractors must NOT appear on the public listener.
+	for _, banned := range []string{
 		"grpcsrv.UnaryPrincipalExtract()",
 		"grpcsrv.StreamPrincipalExtract()",
 	} {
-		if !strings.Contains(public, want) {
-			t.Errorf("public listener: %s was removed — the public JWT-fronted principal "+
-				"path must be unchanged by the internal-listener fix", want)
+		if strings.Contains(public, banned) {
+			t.Errorf("public listener: still wires legacy %s — x-kacho-principal-* is trusted "+
+				"UNCONDITIONALLY on :9090 (impersonation risk)", banned)
 		}
+	}
+
+	// Ordering contract: CertIdentityExtract MUST run before TrustedPrincipalExtract.
+	assertOrder(t, public,
+		"grpcsrv.UnaryCertIdentityExtract()", "grpcsrv.UnaryTrustedPrincipalExtract()")
+	assertOrder(t, public,
+		"grpcsrv.StreamCertIdentityExtract()", "grpcsrv.StreamTrustedPrincipalExtract()")
+}
+
+// TestPublicChain_DropsForgedPrincipal_HonorsVerified — behavioral guard over the
+// exact interceptor chain the public listener wires (CertIdentityExtract →
+// TrustedPrincipalExtract). Mirrors the internal-listener guard: a forged principal
+// from an unverified TLS peer is dropped (carrier stays SystemPrincipal); a verified
+// peer's principal is honored.
+func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
+	chain := publicUnaryChainUnderTest()
+
+	t.Run("unverified_tls_peer_forged_principal_dropped", func(t *testing.T) {
+		tlsPeer := &peer.Peer{AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{}}}
+		ctx := peer.NewContext(context.Background(), tlsPeer)
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(
+			grpcsrv.MDKeyPrincipalType, "user",
+			grpcsrv.MDKeyPrincipalID, "usr-mallory",
+			grpcsrv.MDKeyPrincipalDisplay, "mallory@example.com",
+		))
+
+		var carrierID string
+		var trusted = true
+		final := func(c context.Context, _ any) (any, error) {
+			carrierID = operations.PrincipalFromContext(c).ID
+			_, trusted = grpcsrv.TrustedPrincipalFromContext(c)
+			return nil, nil
+		}
+		if _, err := chain(ctx, nil, nil, final); err != nil {
+			t.Fatalf("chain returned error: %v", err)
+		}
+		if trusted {
+			t.Errorf("principal from unverified TLS peer must NOT be trusted on :9090")
+		}
+		if carrierID != operations.SystemPrincipal().ID {
+			t.Errorf("forged principal leaked into operations carrier: got %q, want system fallback %q",
+				carrierID, operations.SystemPrincipal().ID)
+		}
+		if carrierID == "usr-mallory" {
+			t.Errorf("impersonation: forged principal id 'usr-mallory' reached the use-case carrier")
+		}
+	})
+
+	t.Run("verified_mtls_peer_principal_honored", func(t *testing.T) {
+		leaf := &x509.Certificate{URIs: mustParseURIs(t,
+			"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway")}
+		tlsPeer := &peer.Peer{AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{
+			VerifiedChains: [][]*x509.Certificate{{leaf}},
+		}}}
+		ctx := peer.NewContext(context.Background(), tlsPeer)
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(
+			grpcsrv.MDKeyPrincipalType, "user",
+			grpcsrv.MDKeyPrincipalID, "usr-alice",
+			grpcsrv.MDKeyPrincipalDisplay, "alice@example.com",
+		))
+
+		var carrierID string
+		final := func(c context.Context, _ any) (any, error) {
+			carrierID = operations.PrincipalFromContext(c).ID
+			return nil, nil
+		}
+		if _, err := chain(ctx, nil, nil, final); err != nil {
+			t.Fatalf("chain returned error: %v", err)
+		}
+		if carrierID != "usr-alice" {
+			t.Errorf("verified principal not honored: got %q, want %q", carrierID, "usr-alice")
+		}
+	})
+}
+
+// TestPublicChain_HonorsVerifiedConsumerForwarder — a NON-gateway verified module
+// (kacho-vpc) dials :9090 ProjectService.Get and forwards the END-USER principal for
+// the tenant scope-filter. The trust-aware chain MUST honor it — the public listener
+// has NO gateway-only forwarder pin (that would break cross-service project
+// validation). This pins the deliberate multi-forwarder design of :9090.
+func TestPublicChain_HonorsVerifiedConsumerForwarder(t *testing.T) {
+	chain := publicUnaryChainUnderTest()
+
+	leaf := &x509.Certificate{URIs: mustParseURIs(t,
+		"spiffe://kacho.cloud/ns/kacho-vpc/sa/kacho-vpc")}
+	tlsPeer := &peer.Peer{AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{
+		VerifiedChains: [][]*x509.Certificate{{leaf}},
+	}}}
+	ctx := peer.NewContext(context.Background(), tlsPeer)
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(
+		grpcsrv.MDKeyPrincipalType, "user",
+		grpcsrv.MDKeyPrincipalID, "usr-alice",
+	))
+
+	var carrierID string
+	final := func(c context.Context, _ any) (any, error) {
+		carrierID = operations.PrincipalFromContext(c).ID
+		return nil, nil
+	}
+	if _, err := chain(ctx, nil, nil, final); err != nil {
+		t.Fatalf("chain returned error: %v", err)
+	}
+	if carrierID != "usr-alice" {
+		t.Errorf("verified consumer forwarder principal must be honored on :9090 "+
+			"(no gateway-only pin): got %q, want usr-alice", carrierID)
 	}
 }
 
@@ -194,6 +332,16 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 // order, that serve.go wires on the internal listener — without standing up a
 // real gRPC server. Kept in lockstep with serve.go's internal ChainUnaryInterceptor.
 func internalUnaryChainUnderTest() grpc.UnaryServerInterceptor {
+	return chainUnaryServer(
+		grpcsrv.UnaryCertIdentityExtract(),
+		grpcsrv.UnaryTrustedPrincipalExtract(),
+	)
+}
+
+// publicUnaryChainUnderTest composes the SAME unary trust-aware interceptors, in the
+// same order, that serve.go wires on the public listener (:9090) — without standing
+// up a real gRPC server. Kept in lockstep with serve.go's public ChainUnaryInterceptor.
+func publicUnaryChainUnderTest() grpc.UnaryServerInterceptor {
 	return chainUnaryServer(
 		grpcsrv.UnaryCertIdentityExtract(),
 		grpcsrv.UnaryTrustedPrincipalExtract(),
