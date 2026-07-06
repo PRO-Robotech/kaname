@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/grpcmw"
 	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho-iam/internal/registrytokenwire"
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
@@ -301,6 +302,11 @@ func runServe(cfg config.Config) error {
 			// latency/code covers the whole RPC (request count + handling
 			// seconds + grpc_code), for every public RPC including authz Check.
 			metricsReg.UnaryServerInterceptor(),
+			// Panic-recovery immediately inside metrics: a panic in any downstream
+			// interceptor or handler becomes a logged codes.Internal for that ONE
+			// request instead of crashing the whole PDP process (metrics still
+			// records the Internal code because recovery is inner of it).
+			grpcmw.UnaryRecovery(logger),
 			// Public listener — trust-aware principal extraction (anti-spoof). The
 			// forwarded x-kacho-principal-* metadata is exposed downstream ONLY when
 			// the peer passed mTLS client-cert verification (UnaryCertIdentityExtract
@@ -325,6 +331,7 @@ func runServe(cfg config.Config) error {
 			authzguard.AntiAnonymousUnary(logger),
 		),
 		grpc.ChainStreamInterceptor(
+			grpcmw.StreamRecovery(logger),
 			grpcsrv.StreamCertIdentityExtract(),
 			grpcsrv.StreamTrustedPrincipalExtract(),
 			authzguard.AntiAnonymousStream(logger),
@@ -370,6 +377,11 @@ func runServe(cfg config.Config) error {
 			// Metrics interceptor first — observe every internal RPC (the
 			// per-RPC authz-gate InternalIAMService.Check hot path lives here).
 			metricsReg.UnaryServerInterceptor(),
+			// Panic-recovery immediately inside metrics — same rationale as the
+			// public chain: a handler/interceptor panic on the PDP hot path must
+			// not crash the process (fail-closed cluster-wide); it degrades to a
+			// logged codes.Internal for that one request.
+			grpcmw.UnaryRecovery(logger),
 			grpcsrv.UnaryCertIdentityExtract(),
 			grpcsrv.UnaryTrustedPrincipalExtract(),
 			internalCallerPolicy.Unary(),
@@ -377,6 +389,7 @@ func runServe(cfg config.Config) error {
 			internalACRFloor.Unary(),
 		),
 		grpc.ChainStreamInterceptor(
+			grpcmw.StreamRecovery(logger),
 			grpcsrv.StreamCertIdentityExtract(),
 			grpcsrv.StreamTrustedPrincipalExtract(),
 			internalCallerPolicy.Stream(),

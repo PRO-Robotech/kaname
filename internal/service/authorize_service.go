@@ -37,12 +37,58 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
+
+// serverAuthoritativeCondKeys are CEL condition-context attributes that describe
+// the authenticated principal or the connection. They MUST be server-derived —
+// never taken from a client-supplied request body. AuthorizeService is reachable
+// on the PUBLIC listener and the inner caller-authority gate allows a self-query,
+// so a tenant could otherwise set these in `req.Context` and forge satisfaction
+// of a security condition (mfa_fresh / source_ip_in_range / non_expired /
+// device_compliant) it does not actually hold (CWE-807 / security.md "no
+// reliance on untrusted inputs in a security decision").
+var serverAuthoritativeCondKeys = []string{
+	"current_time",       // server clock (always forced below)
+	"acr_value",          // authentication assurance level (overlaid from trusted ctx)
+	"amr_claims",         // authentication methods
+	"mfa_at",             // last MFA timestamp
+	"client_ip",          // connection source address
+	"source_ip",          // connection source address (alias)
+	"valid_until",        // grant expiry
+	"device_attestation", // device posture
+}
+
+// buildCondContext assembles the CEL condition-context passed to OpenFGA. It
+// starts from the client-supplied req.Context but STRIPS every
+// server-authoritative attribute (a client cannot forge principal/connection
+// facts) and then overlays only values the server actually trusts: the server
+// clock as current_time, and the FD-4-trusted acr from the request ctx (the same
+// trusted acr the ACR-floor interceptor enforces). Attributes the server cannot
+// yet derive from a trusted source (amr_claims / mfa_at / client_ip /
+// device_attestation) are left ABSENT so the dependent condition fails CLOSED
+// rather than being satisfiable by a forged value. Genuinely request-scoped,
+// non-security attributes pass through unchanged.
+func buildCondContext(ctx context.Context, reqContext map[string]any, now time.Time) map[string]any {
+	condCtx := make(map[string]any, len(reqContext)+1)
+	for k, v := range reqContext {
+		condCtx[k] = v
+	}
+	for _, k := range serverAuthoritativeCondKeys {
+		delete(condCtx, k)
+	}
+	condCtx["current_time"] = now.Unix()
+	if acr, trusted := grpcsrv.TrustedACRFromContext(ctx); trusted && acr != "" {
+		condCtx["acr_value"] = acr
+	}
+	return condCtx
+}
 
 // Authorizer — port-iface narrowed to AuthorizeService needs.
 type Authorizer interface {
@@ -220,12 +266,9 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	}
 	object := fmt.Sprintf("%s:%s", req.Resource.Type, req.Resource.ID)
 
-	// Build conditions context — server forces current_time.
-	condCtx := make(map[string]any, len(req.Context)+1)
-	for k, v := range req.Context {
-		condCtx[k] = v
-	}
-	condCtx["current_time"] = now.Unix()
+	// Build the CEL condition-context: principal/connection attributes are
+	// server-derived (forged client values stripped); see buildCondContext.
+	condCtx := buildCondContext(ctx, req.Context, now)
 
 	// FGA Check.
 	if s.relations == nil {
@@ -453,11 +496,9 @@ func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsReque
 		return nil, fmt.Errorf("Illegal argument action %q", req.Action)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	condCtx := make(map[string]any, len(req.Context)+1)
-	for k, v := range req.Context {
-		condCtx[k] = v
-	}
-	condCtx["current_time"] = now.Unix()
+	// Same server-authoritative sanitisation as Check: forged principal/connection
+	// attributes are stripped, current_time / trusted acr are server-derived.
+	condCtx := buildCondContext(ctx, req.Context, now)
 	maxR := req.MaxResults
 	if maxR <= 0 {
 		maxR = 1000

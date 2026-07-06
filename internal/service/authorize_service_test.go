@@ -30,13 +30,19 @@ type mockRelations struct {
 	// deny_reasons on Check deny). Caller mutates per-test.
 	readResp []clients.ConditionalTuple
 	readErr  error
+	// lastCondCtx — captures the CEL condition-context the last Check/ListObjects
+	// passed to FGA, so a test can assert the server sanitised it (no forged
+	// principal/connection attributes; server-forced current_time / trusted acr).
+	lastCondCtx map[string]any
 }
 
 func (m *mockRelations) CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
 	m.checkCalls++
+	m.lastCondCtx = condCtx
 	return m.checkResp, m.checkErr
 }
 func (m *mockRelations) ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error) {
+	m.lastCondCtx = condCtx
 	return m.listResp, m.listErr
 }
 func (m *mockRelations) ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error) {

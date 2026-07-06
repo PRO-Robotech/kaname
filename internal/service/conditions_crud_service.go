@@ -62,22 +62,6 @@ type ConditionsRepoPort interface {
 	ConditionsTxWriter
 }
 
-// conditionsTxBeginner — opens a write tx for the audit-atomic worker path.
-// Returns the opaque service.Tx; implemented by kachopg.NewPoolTxBeginner in
-// the composition root.
-type conditionsTxBeginner interface {
-	Begin(ctx context.Context) (Tx, error)
-}
-
-// conditionsAuditEmitter — port for emitting one durable audit_outbox row inside
-// the ConditionsService worker-tx. Atomic with the condition
-// mutation (запрет #10). Implemented by *kachopg.AuditOutboxEmitter. nil → emit
-// is skipped (degraded/legacy wiring); the mutation contract is unchanged either
-// way (purely-additive audit).
-type conditionsAuditEmitter interface {
-	EmitTx(ctx context.Context, tx Tx, ev AuditEvent) error
-}
-
 // ConditionsCRUDService — use-case bundle for the ConditionsService gRPC
 // handler.
 type ConditionsCRUDService struct {
@@ -85,10 +69,12 @@ type ConditionsCRUDService struct {
 	ops       operations.Repo
 	evaluator ConditionsEvaluator
 	// txb — opens the worker-tx so the mutation + audit row commit atomically.
-	// nil → the legacy pool-direct path is used (no audit row).
-	txb conditionsTxBeginner
-	// audit — durable audit_outbox emitter. nil → no audit row.
-	audit conditionsAuditEmitter
+	// nil → the legacy pool-direct path is used (no audit row). Shared
+	// service.TxBeginner port (governance_ports.go) — no per-resource copy.
+	txb TxBeginner
+	// audit — durable audit_outbox emitter. nil → no audit row. Shared
+	// service.AuditOutboxEmitter port (governance_ports.go) — no per-resource copy.
+	audit AuditOutboxEmitter
 	// relations — FGA relation-Check port authorizing every read/write against
 	// the condition's owning project (folder) scope. nil → fail-closed (every
 	// non-cluster-admin read/write is denied), so an unwired composition root is
@@ -117,7 +103,7 @@ func (s *ConditionsCRUDService) WithRelationStore(relations authzguard.RelationC
 // transaction (запрет #10). Composition-root only. A nil emitter
 // or nil txb leaves the legacy pool-direct path active (no audit row); the
 // mutation contract is unchanged either way (purely-additive audit).
-func (s *ConditionsCRUDService) WithAuditEmitter(emitter conditionsAuditEmitter, txb conditionsTxBeginner) *ConditionsCRUDService {
+func (s *ConditionsCRUDService) WithAuditEmitter(emitter AuditOutboxEmitter, txb TxBeginner) *ConditionsCRUDService {
 	s.audit = emitter
 	s.txb = txb
 	return s

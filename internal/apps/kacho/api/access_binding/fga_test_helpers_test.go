@@ -60,26 +60,52 @@ func (c *fgaClient) listObjects(t *testing.T, user, relation, objType string) []
 const (
 	openfgaServerImage = "openfga/openfga:v1.8.4"
 	openfgaCLIImage    = "openfga/cli:v0.7.13"
+	fgaModelRelPath    = "proto/kacho/cloud/iam/v1/fga_model.fga"
 )
 
-// fgaModelPath resolves the canonical fga_model.fga in the sibling kacho-proto
-// checkout (the single source of truth). The test runs from the access_binding
-// package dir, so walk up to the workspace project root.
+// fgaRequireOrSkip converts a real-FGA-proof skip into a HARD failure when a CI
+// enforcement env var is set (KACHO_IAM_REQUIRE_REAL_FGA or the drift-gate's
+// KACHO_IAM_REQUIRE_FGA_MODEL), so the behavioral authz proof cannot silently
+// vanish from a pipeline (a skipped test is neither red nor green). Mirrors the
+// enforcement in internal/authzmap/fga_model_drift_test.go, which these harnesses
+// previously lacked. Without either var set it degrades to a documented skip for
+// Docker-less / offline local runs.
+func fgaRequireOrSkip(t *testing.T, format string, args ...any) {
+	t.Helper()
+	msg := fmt.Sprintf(format, args...)
+	if os.Getenv("KACHO_IAM_REQUIRE_REAL_FGA") != "" || os.Getenv("KACHO_IAM_REQUIRE_FGA_MODEL") != "" {
+		t.Fatal(msg + " [KACHO_IAM_REQUIRE_REAL_FGA/KACHO_IAM_REQUIRE_FGA_MODEL set: refusing to skip a security gate]")
+	}
+	t.Skip(msg)
+}
+
+// fgaModelPath resolves the canonical fga_model.fga (single source of truth). It
+// tries, in order: (1) a sibling kacho-proto checkout (walk-up from the package
+// dir — the workspace-dev layout), then (2) the PINNED kacho-proto Go module dir
+// (`go list -m`) — the standalone-CI layout where kacho-proto is a module, not a
+// sibling. Neither resolvable → env-gated skip/fatal (see fgaRequireOrSkip).
 func fgaModelPath(t *testing.T) string {
 	t.Helper()
-	// .../kacho-iam/internal/apps/kacho/api/access_binding → up to project/ then kacho-proto
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	// climb to the dir that contains kacho-proto
-	dir := wd
-	for i := 0; i < 12; i++ {
-		cand := filepath.Join(dir, "kacho-proto", "proto", "kacho", "cloud", "iam", "v1", "fga_model.fga")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for i := 0; i < 12; i++ {
+			cand := filepath.Join(dir, "kacho-proto", fgaModelRelPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+			dir = filepath.Dir(dir)
 		}
-		dir = filepath.Dir(dir)
 	}
-	t.Skip("canonical fga_model.fga not found (kacho-proto sibling absent) — skipping real-FGA proof")
+	if out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
+		"github.com/PRO-Robotech/kacho-proto").Output(); err == nil {
+		if modDir := strings.TrimSpace(string(out)); modDir != "" {
+			cand := filepath.Join(modDir, fgaModelRelPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+		}
+	}
+	fgaRequireOrSkip(t, "canonical fga_model.fga not found (no kacho-proto sibling and not in the pinned module) — real-FGA proof cannot run")
 	return ""
 }
 
@@ -100,7 +126,7 @@ func transformModelToJSON(t *testing.T, fgaPath string) []byte {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		t.Skipf("openfga/cli transform unavailable (%v): %s — skipping real-FGA proof", err, stderr.String())
+		fgaRequireOrSkip(t, "openfga/cli transform unavailable (%v): %s — real-FGA proof cannot run", err, stderr.String())
 	}
 	return stdout.Bytes()
 }
@@ -172,7 +198,7 @@ func (c *fgaClient) delete(t *testing.T, tuples []abrepo.RelationTuple) {
 func startOpenFGA(t *testing.T) *fgaClient {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("skipping real-OpenFGA integration test in -short mode")
+		fgaRequireOrSkip(t, "skipping real-OpenFGA integration test in -short mode")
 	}
 	ctx := context.Background()
 	modelJSON := transformModelToJSON(t, fgaModelPath(t))

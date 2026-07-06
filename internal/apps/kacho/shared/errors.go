@@ -52,6 +52,8 @@ func MapRepoErr(err error) error {
 		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
+	case stderrors.Is(err, iamerr.ErrAborted):
+		return status.Error(codes.Aborted, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrUnavailable):
 		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrInternal):

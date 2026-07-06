@@ -6,11 +6,10 @@ package pg
 // maperr.go — единая точка SQLSTATE → service.Err* трансляции
 // (within-service refs enforced at DB level).
 //
-// Тонкая обертка над `internal/errors.WrapPgErr`; конкретный маппинг
-// 23502/23503/23505/23514/23P01/40001/08000 + constraint_name-aware
-// канонический Kachō error-text живет в errors.WrapPgErr.
-
-import iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+// Тонкая обертка над `wrapPgErr` (pgmaperr.go, эта же adapter-пакет); конкретный
+// маппинг 23502/23503/23505/23514/23P01/40001/08000 + constraint_name-aware
+// канонический Kachō error-text живет в wrapPgErr. Мапперы держат pgconn в
+// adapter-слое — pure sentinel-пакет `internal/errors` остается pgx-free.
 
 // mapErr — repo-side хелпер: завернуть pgconn.PgError в sentinel-семейство.
 // kindHint:
@@ -21,5 +20,5 @@ import iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 // idHint — для канонического Kachō error-текста ("Account with name <X>...", "User <id> not found",
 // "Account <id> contains projects..."). Caller знает, что подставить.
 func mapErr(err error, kindHint, idHint string) error {
-	return iamerr.WrapPgErr(err, kindHint, idHint)
+	return wrapPgErr(err, kindHint, idHint)
 }

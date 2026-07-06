@@ -1,7 +1,11 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-package errors
+package pg
+
+// pgmaperr_test.go — unit coverage for the SQLSTATE→sentinel bridge that moved
+// out of internal/errors into this adapter layer (keeping internal/errors
+// pgx-free). No DB: exercises wrapPgErr against synthetic *pgconn.PgError values.
 
 import (
 	stderrors "errors"
@@ -9,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // Sensitive strings a raw *pgconn.PgError carries — they must NEVER reach the
@@ -44,11 +50,11 @@ func assertNoLeak(t *testing.T, out string) {
 // generic InvalidArgument message; the raw Postgres column name (internal schema
 // identifier, differs from the public proto field name) must never be echoed.
 func TestWrapPgErr_NotNull_NoColumnLeak(t *testing.T) {
-	err := WrapPgErr(mkPgErr("23502", ""), "", "")
-	if !stderrors.Is(err, ErrInvalidArg) {
+	err := wrapPgErr(mkPgErr("23502", ""), "", "")
+	if !stderrors.Is(err, iamerr.ErrInvalidArg) {
 		t.Fatalf("want ErrInvalidArg, got %v", err)
 	}
-	out := StripSentinel(err)
+	out := iamerr.StripSentinel(err)
 	if strings.Contains(out, "internal_hostid") {
 		t.Errorf("LEAK: client-facing text %q echoes raw pg column name", out)
 	}
@@ -67,19 +73,19 @@ func TestWrapPgErr_NoLeak_OnUnmappedConstraints(t *testing.T) {
 		sentinel error
 		wantText string
 	}{
-		{"unmapped-sqlstate", "XX000", ErrInternal, "database error"},
-		{"unmapped-unique", "23505", ErrAlreadyExists, "resource with these attributes already exists"},
-		{"unmapped-fk", "23503", ErrFailedPrecondition, "referenced resource not found or still in use"},
-		{"unmapped-check", "23514", ErrInvalidArg, "Illegal argument: value violates a constraint"},
-		{"exclusion", "23P01", ErrFailedPrecondition, "resource conflicts with an existing reservation"},
+		{"unmapped-sqlstate", "XX000", iamerr.ErrInternal, "database error"},
+		{"unmapped-unique", "23505", iamerr.ErrAlreadyExists, "resource with these attributes already exists"},
+		{"unmapped-fk", "23503", iamerr.ErrFailedPrecondition, "referenced resource not found or still in use"},
+		{"unmapped-check", "23514", iamerr.ErrInvalidArg, "Illegal argument: value violates a constraint"},
+		{"exclusion", "23P01", iamerr.ErrFailedPrecondition, "resource conflicts with an existing reservation"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := WrapPgErr(mkPgErr(c.code, secretConstraint), "", "")
+			err := wrapPgErr(mkPgErr(c.code, secretConstraint), "", "")
 			if !stderrors.Is(err, c.sentinel) {
 				t.Fatalf("want sentinel %v, got %v", c.sentinel, err)
 			}
-			out := StripSentinel(err)
+			out := iamerr.StripSentinel(err)
 			if out != c.wantText {
 				t.Errorf("text = %q; want %q", out, c.wantText)
 			}
@@ -88,14 +94,47 @@ func TestWrapPgErr_NoLeak_OnUnmappedConstraints(t *testing.T) {
 	}
 }
 
+// TestWrapPgErr_SerializationFailure_Aborted — 40001 (serialization_failure) is a
+// transient, retryable concurrency conflict; it must map to the retryable
+// ErrAborted (gRPC ABORTED), NOT ErrFailedPrecondition (which tells a client not
+// to retry). The message text and the sentinel must agree on "retry".
+func TestWrapPgErr_SerializationFailure_Aborted(t *testing.T) {
+	err := wrapPgErr(mkPgErr("40001", secretConstraint), "", "")
+	if !stderrors.Is(err, iamerr.ErrAborted) {
+		t.Fatalf("40001: want ErrAborted (retryable), got %v", err)
+	}
+	if stderrors.Is(err, iamerr.ErrFailedPrecondition) {
+		t.Fatalf("40001: must NOT be FailedPrecondition (non-retryable)")
+	}
+	out := iamerr.StripSentinel(err)
+	if out != "serialization conflict, retry" {
+		t.Errorf("text = %q; want %q", out, "serialization conflict, retry")
+	}
+	assertNoLeak(t, out)
+}
+
+// TestWrapPgErr_ConnFamily_Unavailable — an 08xxx connection-family SQLSTATE maps
+// to a retryable ErrUnavailable with a generic, schema-free message.
+func TestWrapPgErr_ConnFamily_Unavailable(t *testing.T) {
+	err := wrapPgErr(mkPgErr("08006", secretConstraint), "", "")
+	if !stderrors.Is(err, iamerr.ErrUnavailable) {
+		t.Fatalf("08006: want ErrUnavailable, got %v", err)
+	}
+	out := iamerr.StripSentinel(err)
+	if out != "database unavailable" {
+		t.Errorf("text = %q; want %q", out, "database unavailable")
+	}
+	assertNoLeak(t, out)
+}
+
 // TestWrapPgErr_KnownConstraint_KeepsVerbatimContract — the no-leak hardening
 // must NOT regress the constraint-aware verbatim Kachō text contract.
 func TestWrapPgErr_KnownConstraint_KeepsVerbatimContract(t *testing.T) {
-	err := WrapPgErr(mkPgErr("23505", "accounts_name_unique"), "", "my-acct")
-	if !stderrors.Is(err, ErrAlreadyExists) {
+	err := wrapPgErr(mkPgErr("23505", "accounts_name_unique"), "", "my-acct")
+	if !stderrors.Is(err, iamerr.ErrAlreadyExists) {
 		t.Fatalf("want ErrAlreadyExists, got %v", err)
 	}
-	if got := StripSentinel(err); got != "Account with name my-acct already exists" {
+	if got := iamerr.StripSentinel(err); got != "Account with name my-acct already exists" {
 		t.Errorf("verbatim contract text regressed: %q", got)
 	}
 }
@@ -108,28 +147,28 @@ func TestWrapPgErr_KnownConstraint_KeepsVerbatimContract(t *testing.T) {
 func TestWrapPgErr_ConditionFK_DirectionSensitive(t *testing.T) {
 	const constraint = "access_binding_conditions_condition_fk"
 
-	insErr := WrapPgErr(mkPgErr("23503", constraint), "", "cnd_x")
-	if !stderrors.Is(insErr, ErrFailedPrecondition) {
+	insErr := wrapPgErr(mkPgErr("23503", constraint), "", "cnd_x")
+	if !stderrors.Is(insErr, iamerr.ErrFailedPrecondition) {
 		t.Fatalf("insert side: want ErrFailedPrecondition, got %v", insErr)
 	}
-	if got := StripSentinel(insErr); got != "Condition cnd_x not found" {
+	if got := iamerr.StripSentinel(insErr); got != "Condition cnd_x not found" {
 		t.Errorf("insert side text = %q; want %q", got, "Condition cnd_x not found")
 	}
-	assertNoLeak(t, StripSentinel(insErr))
+	assertNoLeak(t, iamerr.StripSentinel(insErr))
 
-	delErr := WrapPgErr(mkPgErr("23503", constraint), "Condition.Delete", "cnd_x")
-	if !stderrors.Is(delErr, ErrFailedPrecondition) {
+	delErr := wrapPgErr(mkPgErr("23503", constraint), "Condition.Delete", "cnd_x")
+	if !stderrors.Is(delErr, iamerr.ErrFailedPrecondition) {
 		t.Fatalf("delete side: want ErrFailedPrecondition, got %v", delErr)
 	}
-	if got := StripSentinel(delErr); got != "condition is in use by access bindings" {
+	if got := iamerr.StripSentinel(delErr); got != "condition is in use by access bindings" {
 		t.Errorf("delete side text = %q; want in-use text", got)
 	}
-	assertNoLeak(t, StripSentinel(delErr))
+	assertNoLeak(t, iamerr.StripSentinel(delErr))
 }
 
 // TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware — migration 0050's BEFORE
 // DELETE trigger RAISEs 23503 tagged CONSTRAINT='access_binding_subjects_subject_ref'
-// when a User/SA/Group is still referenced as a subjects[0..N] grantee. WrapPgErr
+// when a User/SA/Group is still referenced as a subjects[0..N] grantee. wrapPgErr
 // must map it to FailedPrecondition with the canonical resource-aware text derived
 // from the repo's "<Resource>.Delete" kindHint (SEC r8), never leaking pgx text.
 func TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware(t *testing.T) {
@@ -145,14 +184,14 @@ func TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware(t *testing.T) {
 		{"", "prn_x", "Principal prn_x has active access bindings and cannot be deleted"},
 	}
 	for _, c := range cases {
-		err := WrapPgErr(mkPgErr("23503", constraint), c.kindHint, c.idHint)
-		if !stderrors.Is(err, ErrFailedPrecondition) {
+		err := wrapPgErr(mkPgErr("23503", constraint), c.kindHint, c.idHint)
+		if !stderrors.Is(err, iamerr.ErrFailedPrecondition) {
 			t.Fatalf("kindHint %q: want ErrFailedPrecondition, got %v", c.kindHint, err)
 		}
-		if got := StripSentinel(err); got != c.want {
+		if got := iamerr.StripSentinel(err); got != c.want {
 			t.Errorf("kindHint %q: text = %q; want %q", c.kindHint, got, c.want)
 		}
-		assertNoLeak(t, StripSentinel(err))
+		assertNoLeak(t, iamerr.StripSentinel(err))
 	}
 }
 
@@ -160,7 +199,7 @@ func TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware(t *testing.T) {
 // (the bridge only translates SQLSTATEs).
 func TestWrapPgErr_NonPgError_PassesThrough(t *testing.T) {
 	orig := stderrors.New("some domain error")
-	if got := WrapPgErr(orig, "", ""); got != orig {
+	if got := wrapPgErr(orig, "", ""); got != orig {
 		t.Errorf("non-pg error not passed through: %v", got)
 	}
 }

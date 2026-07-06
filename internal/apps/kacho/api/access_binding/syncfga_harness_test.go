@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,22 @@ const (
 	syncFGAServerImage = "openfga/openfga:v1.8.4"
 	syncFGACLIImage    = "openfga/cli:v0.7.13"
 )
+
+// syncFGARequireOrSkip converts a real-FGA-proof skip into a HARD failure when a
+// CI enforcement env var is set (KACHO_IAM_REQUIRE_REAL_FGA or the drift-gate's
+// KACHO_IAM_REQUIRE_FGA_MODEL), so the behavioral authz proof cannot silently
+// vanish from a pipeline (a skipped test is neither red nor green). Mirrors the
+// enforcement in internal/authzmap/fga_model_drift_test.go, which the earlier
+// harnesses lacked. Without either var set it degrades to a documented skip for
+// Docker-less / offline local runs.
+func syncFGARequireOrSkip(t *testing.T, format string, args ...any) {
+	t.Helper()
+	msg := fmt.Sprintf(format, args...)
+	if os.Getenv("KACHO_IAM_REQUIRE_REAL_FGA") != "" || os.Getenv("KACHO_IAM_REQUIRE_FGA_MODEL") != "" {
+		t.Fatal(msg + " [KACHO_IAM_REQUIRE_REAL_FGA/KACHO_IAM_REQUIRE_FGA_MODEL set: refusing to skip a security gate]")
+	}
+	t.Skip(msg)
+}
 
 // poolQuerier is the minimal pgx surface used by the test's raw-SQL lookups.
 type poolQuerier interface {
@@ -56,7 +73,7 @@ type syncFGAHarness struct {
 func startOpenFGAFromModel(t *testing.T) *syncFGAHarness {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("skipping real-OpenFGA integration test in -short mode")
+		syncFGARequireOrSkip(t, "skipping real-OpenFGA integration test in -short mode")
 	}
 	ctx := context.Background()
 	modelJSON := syncFGATransformModel(t, syncFGAModelPath(t))
@@ -110,21 +127,37 @@ func (h *syncFGAHarness) post(t *testing.T, path string, body any) map[string]an
 	return out
 }
 
-// syncFGAModelPath resolves the canonical fga_model.fga in the sibling kacho-proto
-// checkout (single source of truth). Walk up from the package dir to find it.
+// syncFGAModelRelPath — location of the canonical model inside the kacho-proto
+// tree (both the sibling checkout and the Go-module directory share this layout).
+const syncFGAModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
+
+// syncFGAModelPath resolves the canonical fga_model.fga (single source of truth).
+// It tries, in order: (1) a sibling kacho-proto checkout (walk-up from the package
+// dir — the workspace-dev layout), then (2) the PINNED kacho-proto Go module dir
+// (`go list -m`) — the standalone-CI layout where kacho-proto is a module, not a
+// sibling. Neither resolvable → env-gated skip/fatal (see syncFGARequireOrSkip).
 func syncFGAModelPath(t *testing.T) string {
 	t.Helper()
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	for i := 0; i < 12; i++ {
-		cand := filepath.Join(dir, "kacho-proto", "proto", "kacho", "cloud", "iam", "v1", "fga_model.fga")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for i := 0; i < 12; i++ {
+			cand := filepath.Join(dir, "kacho-proto", syncFGAModelRelPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+			dir = filepath.Dir(dir)
 		}
-		dir = filepath.Dir(dir)
 	}
-	t.Skip("canonical fga_model.fga not found (kacho-proto sibling absent) — skipping real-FGA proof")
+	if out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
+		"github.com/PRO-Robotech/kacho-proto").Output(); err == nil {
+		if modDir := strings.TrimSpace(string(out)); modDir != "" {
+			cand := filepath.Join(modDir, syncFGAModelRelPath)
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+		}
+	}
+	syncFGARequireOrSkip(t, "canonical fga_model.fga not found (no kacho-proto sibling and not in the pinned module) — real-FGA proof cannot run")
 	return ""
 }
 
@@ -145,7 +178,7 @@ func syncFGATransformModel(t *testing.T, fgaPath string) []byte {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		t.Skipf("openfga/cli transform unavailable (%v): %s — skipping real-FGA proof", err, stderr.String())
+		syncFGARequireOrSkip(t, "openfga/cli transform unavailable (%v): %s — real-FGA proof cannot run", err, stderr.String())
 	}
 	return stdout.Bytes()
 }

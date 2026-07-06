@@ -998,7 +998,7 @@ func padOrTrim20(s string) string {
 
 // assertSQLState — проверяет, что error соответствует ожидаемому SQLSTATE.
 // Поскольку repo wraps `pgconn.PgError` в iam-sentinel-error через
-// `iamerr.WrapPgErr` (см. internal/errors/errors.go::WrapPgErr), физический
+// `wrapPgErr` (см. internal/repo/kacho/pg/pgmaperr.go), физический
 // PgError может быть утерян. Поэтому assertSQLState mapping:
 //
 //	23505 → ErrAlreadyExists
@@ -1017,7 +1017,7 @@ func assertSQLState(t *testing.T, err error, sqlstate string) {
 		assert.Equal(t, sqlstate, pgErr.Code, "SQLSTATE mismatch (msg=%s)", pgErr.Message)
 		return
 	}
-	// Path 2: sentinel-wrapped (repo wraps via iamerr.WrapPgErr).
+	// Path 2: sentinel-wrapped (repo wraps via pg.wrapPgErr).
 	switch sqlstate {
 	case "23505":
 		assert.True(t, errors.Is(err, iamerr.ErrAlreadyExists),
