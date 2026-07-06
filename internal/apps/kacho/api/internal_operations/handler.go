@@ -12,8 +12,8 @@ package internal_operations
 import (
 	"context"
 
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 )

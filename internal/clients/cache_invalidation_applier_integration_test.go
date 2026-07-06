@@ -176,8 +176,8 @@ func TestIntegration_SingleEmit_EndToEnd(t *testing.T) {
 	d, err := drainer.New[clients.SubjectChangeEvent](
 		pool,
 		drainer.Config{
-			Table:   "kacho_iam.subject_change_outbox",
-			Channel: "kacho_iam_subject_outbox_added",
+			Table:     "kacho_iam.subject_change_outbox",
+			Channel:   "kacho_iam_subject_outbox_added",
 			BatchSize: 16,
 			// PollFallback well under the 1s delivery deadline so a NOTIFY that is
 			// missed because the row was INSERTed before the drainer finished
