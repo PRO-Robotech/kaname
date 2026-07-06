@@ -20,8 +20,8 @@ import (
 // accessors carry the same fallbacks so an unset struct (tests / partial config)
 // still resolves to a valid policy.
 const (
-	defaultRegistryTokenIssuer  = "https://api.kacho.local/iam/token"
-	defaultRegistryTokenService = "registry.kacho.local"
+	defaultRegistryTokenIssuer  = "https://api.kacho.local/iam/token" // #nosec G101 -- OIDC issuer URL default (iss claim), not a credential
+	defaultRegistryTokenService = "registry.kacho.local"              // #nosec G101 -- registry service-name default (aud claim), not a credential
 	defaultRegistryTokenTTL     = 5 * time.Minute
 )
 

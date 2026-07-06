@@ -25,7 +25,7 @@ const (
 	// auditEventUserTokenIssued — UserTokenService.Issue.
 	auditEventUserTokenIssued = "iam.user_token.issued"
 	// auditEventUserTokenRevoked — UserTokenService.Revoke.
-	auditEventUserTokenRevoked = "iam.user_token.revoked"
+	auditEventUserTokenRevoked = "iam.user_token.revoked" // #nosec G101 -- audit event-type constant, not a credential
 )
 
 // auditEmitter — порт для эмита одной durable audit_outbox compliance-строки
