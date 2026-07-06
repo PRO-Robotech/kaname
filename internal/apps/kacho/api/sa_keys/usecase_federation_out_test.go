@@ -37,9 +37,9 @@ func TestIssue_PrivateKeyJWT_AudienceOverridesPrefix(t *testing.T) {
 	u.AudiencePrefix = "https://internal.example/iam"
 
 	in := IssueInput{
-		ServiceAccountID: "sva_aws",
+		ServiceAccountID: "sva_ext",
 		CreatedByUserID:  "usr_admin",
-		Audience:         []string{"sts.amazonaws.com"},
+		Audience:         []string{"sts.example.com"},
 	}
 
 	_, err := u.Execute(context.Background(), in)
@@ -51,8 +51,8 @@ func TestIssue_PrivateKeyJWT_AudienceOverridesPrefix(t *testing.T) {
 	if !hydra.created {
 		t.Fatal("Hydra CreateOAuthClient never called")
 	}
-	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != "sts.amazonaws.com" {
-		t.Fatalf("Hydra audience = %v, want [sts.amazonaws.com] (caller override, NOT %s/sa/sva_aws)",
+	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != "sts.example.com" {
+		t.Fatalf("Hydra audience = %v, want [sts.example.com] (caller override, NOT %s/sa/sva_ext)",
 			hydra.gotReq.Audience, u.AudiencePrefix)
 	}
 
@@ -63,8 +63,8 @@ func TestIssue_PrivateKeyJWT_AudienceOverridesPrefix(t *testing.T) {
 	if err := anyUnmarshalTo(ops.lastResp, resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(resp.Audiences) != 1 || resp.Audiences[0] != "sts.amazonaws.com" {
-		t.Fatalf("Response.Audiences = %v, want [sts.amazonaws.com]", resp.Audiences)
+	if len(resp.Audiences) != 1 || resp.Audiences[0] != "sts.example.com" {
+		t.Fatalf("Response.Audiences = %v, want [sts.example.com]", resp.Audiences)
 	}
 	if resp.PrivateKeyPem == "" {
 		t.Error("Phase 3a private_key_pem must still be returned with caller audience")
@@ -82,7 +82,7 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 	u.AudiencePrefix = "https://internal.example/iam"
 
 	in := IssueInput{
-		ServiceAccountID: "sva_gcp",
+		ServiceAccountID: "sva_ext2",
 		CreatedByUserID:  "usr_admin",
 		TrustedSubjects: []domain.TrustedSubject{
 			{
@@ -91,7 +91,7 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 			},
 		},
 		Audience: []string{
-			"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/p/providers/x",
+			"//idp.example.com/pools/p/providers/x",
 		},
 	}
 
@@ -104,7 +104,7 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 	if !hydra.created {
 		t.Fatal("Hydra CreateOAuthClient never called")
 	}
-	want := "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/p/providers/x"
+	want := "//idp.example.com/pools/p/providers/x"
 	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != want {
 		t.Fatalf("Hydra audience = %v, want [%s]", hydra.gotReq.Audience, want)
 	}

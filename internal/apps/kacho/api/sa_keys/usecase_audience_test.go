@@ -30,9 +30,9 @@ func TestResolveAudience(t *testing.T) {
 			audiencePrefix: "kacho:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_abc",
-				Audience:         []string{"sts.amazonaws.com"},
+				Audience:         []string{"sts.example.com"},
 			},
-			want: []string{"sts.amazonaws.com"},
+			want: []string{"sts.example.com"},
 		},
 		{
 			name:           "multi-audience preserves order",
@@ -40,14 +40,14 @@ func TestResolveAudience(t *testing.T) {
 			in: IssueInput{
 				ServiceAccountID: "sva_abc",
 				Audience: []string{
-					"sts.amazonaws.com",
-					"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/p/providers/x",
+					"sts.example.com",
+					"//idp.example.com/pools/p/providers/x",
 					"api://acme-prod",
 				},
 			},
 			want: []string{
-				"sts.amazonaws.com",
-				"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/p/providers/x",
+				"sts.example.com",
+				"//idp.example.com/pools/p/providers/x",
 				"api://acme-prod",
 			},
 		},
@@ -56,9 +56,9 @@ func TestResolveAudience(t *testing.T) {
 			audiencePrefix: "kacho:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_abc",
-				Audience:         []string{"sts.amazonaws.com", "", "sts.amazonaws.com", "api://x"},
+				Audience:         []string{"sts.example.com", "", "sts.example.com", "api://x"},
 			},
-			want: []string{"sts.amazonaws.com", "api://x"},
+			want: []string{"sts.example.com", "api://x"},
 		},
 		{
 			name:           "fallback to internal prefix when caller omits audience",
@@ -122,10 +122,10 @@ func TestResolveAudienceFederatedPath(t *testing.T) {
 			Issuer:         "https://token.actions.githubusercontent.com",
 			SubjectPattern: "^repo:acme/infra:ref:refs/heads/main$",
 		}},
-		Audience: []string{"sts.amazonaws.com"},
+		Audience: []string{"sts.example.com"},
 	}
 	got := u.resolveAudience(in)
-	if len(got) != 1 || got[0] != "sts.amazonaws.com" {
-		t.Fatalf("federated audience leak: got %v want [sts.amazonaws.com]", got)
+	if len(got) != 1 || got[0] != "sts.example.com" {
+		t.Fatalf("federated audience leak: got %v want [sts.example.com]", got)
 	}
 }

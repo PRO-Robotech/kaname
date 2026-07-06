@@ -242,3 +242,46 @@ pass. No behavioural benefit; deferred as a dedicated refactor.
 components + cleanup funcs and have `runServe` call them in sequence.
 
 _Reviewed 2026-07-05 (r5 security-hardening audit)._
+
+---
+
+## 9. OpenFGA peer-client port interfaces live in the `internal/clients` adapter package, imported by the use-cases (deferred reorg)
+
+**Convention** (architecture.md dependency rule): a use-case **defines** the
+narrow port-interface it needs (`<Peer>Client`), and the concrete adapter in
+`internal/clients` **implements** it — the adapter depends on the use-case, never
+the reverse. `cluster/ports.go` and `service/governance_ports.go` follow this
+(ports declared in the consumer, adapters named only in doc-comments).
+
+**Divergence**: the OpenFGA peer-client ports `RelationStore` / `RelationQueries`
+(and the plain `RelationTuple` value type) are declared **inside** the adapter
+package `internal/clients` (`openfga_client.go`, `openfga_extensions.go`). ~64
+use-case files under `internal/apps/kacho/api/*` import `internal/clients` purely
+to name their port type (`clients.RelationStore` / `clients.RelationQueries` /
+`clients.RelationTuple`), so the use-case layer compile-time-couples to the
+adapter package rather than owning its own port.
+
+**Why (deferred, not fixed here)**: the value types the ports speak
+(`ConditionalTuple` / `TupleConditionRef` and the FGA query result structs) were
+**already** extracted to the neutral leaf package `internal/authztypes` in a prior
+pass precisely for this dependency-rule reason; `internal/clients` re-exports them
+as aliases. The remaining coupling is the two *interfaces* (a single shared peer
+port used identically by ~64 use-cases, not a per-use-case narrow port). Relocating
+them is a mechanical import-rewrite across ~64 of the most security-sensitive files
+in the tree with **zero** runtime, wire, or security impact — exactly the kind of
+high-churn reorg that §5/§6/§8 defer out of a hardening pass so refactor noise never
+masks a security-relevant diff. The interface is a shared port, so the leakage is
+bounded: no adapter-only concrete type (pgx, net/http, SDK) crosses into the
+use-case build graph — the aliased value types already live in the leaf package —
+so the practical "heavy dependency pulled into every use-case build/test graph"
+failure the rule guards against is not realised today; only the *package-name*
+coupling remains.
+
+**Convergence path (deferred)**: move the `RelationStore` / `RelationQueries`
+interface declarations (and `RelationTuple`) into `internal/authztypes` (the
+existing neutral home for their value types), keep `clients.RelationStore =
+authztypes.RelationStore` aliases for the adapter's ergonomics, and repoint the ~64
+use-case imports at the leaf package. Tracked as a dedicated refactor-only change,
+reviewed in isolation.
+
+_Reviewed 2026-07-06 (r7b security-hardening audit)._
