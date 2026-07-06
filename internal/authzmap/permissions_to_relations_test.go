@@ -82,27 +82,6 @@ func TestPermissionsToRelations_3SegLegacyRejectedAsViewer(t *testing.T) {
 	require.Equal(t, []string{"viewer"}, got, "3-seg legacy → least-privilege viewer")
 }
 
-// TestPermissionsToRelations_MAP_05_GranularRelationsOptIn — when every
-// permission has a granular registration, the granular set is returned.
-// One non-mapped entry triggers full tier-fallback.
-func TestPermissionsToRelations_MAP_05_GranularRelationsOptIn(t *testing.T) {
-	t.Cleanup(authzmap.ResetGranularRelationsForTest)
-
-	authzmap.RegisterGranularRelationForTest("vpc.networks.*.get", "vpc_network_get")
-	authzmap.RegisterGranularRelationForTest("vpc.networks.*.list", "vpc_network_list")
-
-	got := asStrings(authzmap.PermissionsToRelations([]string{"vpc.networks.*.get"}))
-	require.Equal(t, []string{"vpc_network_get"}, got)
-
-	got = asStrings(authzmap.PermissionsToRelations(
-		[]string{"vpc.networks.*.get", "vpc.networks.*.list"}))
-	require.Equal(t, []string{"vpc_network_get", "vpc_network_list"}, got)
-
-	got = asStrings(authzmap.PermissionsToRelations(
-		[]string{"vpc.networks.*.get", "compute.instances.*.list"}))
-	require.Equal(t, []string{"viewer"}, got, "any non-granular triggers tier fallback")
-}
-
 func TestPermissionsToRelations_Deduplicates(t *testing.T) {
 	got := asStrings(authzmap.PermissionsToRelations(
 		[]string{"vpc.networks.*.get", "vpc.networks.*.get", "compute.instances.*.list"}))

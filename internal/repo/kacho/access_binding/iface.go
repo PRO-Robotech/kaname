@@ -143,20 +143,14 @@ type WriterIface interface {
 		revokedByUserID *domain.UserID,
 	) (domain.AccessBinding, error)
 
-	// EmitSubjectChange writes a kacho_iam.subject_change_outbox row in the
-	// current transaction. op MUST be one of: binding_upsert, binding_delete,
-	// group_member_change (DB CHECK subject_change_op_check). Used to drive
-	// api-gateway authz-cache invalidation.
-	//
-	// Deprecated: prefer EmitSubjectChangeEvent which populates canonical
-	// event_type + payload (drainer requirement). This method is internally
-	// rewritten to call EmitSubjectChangeEvent with derived event_type.
-	EmitSubjectChange(ctx context.Context, subjectID, op string) error
-
-	// EmitSubjectChangeEvent — preferred form.
+	// EmitSubjectChangeEvent writes a kacho_iam.subject_change_outbox row in the
+	// current transaction, used to drive api-gateway authz-cache invalidation.
 	// Serialises the SubjectChangeEvent into the payload jsonb column AND
 	// writes denormalised columns (subject_id, op, event_type, resource_type,
-	// resource_id) in a single INSERT (atomic by construction).
+	// resource_id) in a single INSERT (atomic by construction). op MUST be one
+	// of: binding_upsert, binding_delete, group_member_change (DB CHECK
+	// subject_change_op_check); event_type/op are cross-derived when one is
+	// omitted.
 	//
 	// Caller MUST invoke inside the same Writer-tx as the domain state-change
 	// (запрет #10). Drainer (kacho-iam/internal/clients.NewSubjectChangeApplier)

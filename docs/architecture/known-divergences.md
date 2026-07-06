@@ -285,3 +285,100 @@ use-case imports at the leaf package. Tracked as a dedicated refactor-only chang
 reviewed in isolation.
 
 _Reviewed 2026-07-06 (r7b security-hardening audit)._
+
+---
+
+## 10. `ConditionsService` CRUD lives as one cohesive service, not slice-per-RPC use-cases
+
+**Convention** (architecture.md + evgeniy/godzila regime): each CRUD resource is
+implemented as slice-per-RPC `UseCase` structs under
+`internal/apps/kacho/api/<resource>/` (e.g. `CreateAccountUseCase`,
+`UpdateAccountUseCase`), with a thin handler as the composition target. The seven
+core IAM resources (account/project/user/group/role/access_binding/
+service_account) all follow this.
+
+**Divergence**: the standalone Condition resource (`cnd_…`,
+`internal/service/conditions_crud_service.go`) is implemented as a single
+`ConditionsCRUDService` type that bundles every RPC (Get/List/Create/Update/
+Delete/Evaluate), the folder-authz helpers, the CEL-evaluation glue, the
+outbox/audit wiring, and the `doCreate`/`doUpdate`/`doDelete` Operation-worker
+bodies. Its handler (`internal/apps/kacho/api/conditions/handler.go`) is a
+pass-through with its own inline required-field validation and a package-local
+`mapErr`, rather than a thin composition of per-RPC slices.
+
+**Why (by design, not a defect)**: Condition is not a tenant-owned CRUD aggregate
+like the seven core resources — it is an **authz-engine artefact** whose whole
+lifecycle is one tightly-coupled unit: a Create/Update/Delete is only meaningful
+together with CEL expression recognition (shared process-lifetime
+`ConditionsEvaluator` LRU), the reference-count gate against
+`access_bindings.condition_ref`, the tombstone→hard-delete Operation worker, and
+the audit-atomic worker-tx (ban #10). These do not decompose into independent
+per-RPC slices without threading the same evaluator + txb + audit ports through
+each — the cohesion is real, mirroring the *other* `internal/service` engine
+services (`authorize`, `internal_authorize`, `internal_iam`) that the regime
+already treats as legitimately single-responsibility. The shape carries **zero**
+proto/REST/DB contract difference; it is purely an internal code-organisation
+choice on the least tenant-facing resource in the domain.
+
+**Safety**: no runtime, wire, or security consequence — the service is exercised
+by the same unit + integration + newman coverage as the sibling resources, and
+the authz-critical CEL/refcount/audit paths are unchanged by the layout. The only
+cost is code-organisation asymmetry (a contributor copying the account slice
+pattern gets a different shape for Conditions).
+
+**Convergence path (deferred)**: if/when a per-RPC split buys real isolation
+(e.g. Conditions grows independent mutable fields with divergent CAS logic),
+split `ConditionsCRUDService` into `create.go/update.go/delete.go/get.go/list.go/
+evaluate.go` slices under `internal/apps/kacho/api/conditions/`, move required-
+field validation into the domain constructor, and drop the package-local `mapErr`
+in favour of the shared helper. Undertaken as a dedicated refactor-only change so
+the diff over the authz-critical path is reviewed in isolation — not folded into a
+hardening pass where refactor churn could mask a security-relevant change.
+
+_Reviewed 2026-07-06 (r8b security-hardening audit)._
+
+---
+
+## 11. Scope-filter visible-set fetch is client-unbounded (`ListObjects` limit 0)
+
+**Convention** (defense-in-depth against resource exhaustion, CWE-770): a request
+should not materialise an unbounded backend result set into memory.
+
+**Divergence**: every scope-filtered `List` (account/project/user/service_account/
+group/role and the access_binding helpers) calls
+`relationQueries.ListObjects(ctx, subject, relation, <type>, nil, 0)` — `0` =
+no client-side cap — for both the `viewer` and `v_list` relations, then
+post-filters the DB page against the resulting in-memory id set
+(`internal/apps/kacho/api/account/list.go` and siblings).
+
+**Why (by design, not a defect)**: the fetch is bounded where the data lives —
+OpenFGA enforces a **server-side** `listObjectsMaxResults` (default 1000) and
+`listObjectsDeadline` on `/list-objects`, so a single call returns at most that
+many objects regardless of how broad the grant is; two relations bound the
+per-request set to ~2× that. A **client-side** cap here would be actively wrong:
+the visible-set is intersected with the DB page to decide tenant visibility, so
+truncating it to N would silently drop authorised resources whose ids fall past
+the first N returned — a `List` that omits resources the caller is entitled to
+see (a listauthz **completeness** regression, and a worse failure than the memory
+concern for this low-severity item). Failing *closed* on a large set is equally
+unacceptable: a legitimately broad principal (an account-wide viewer service
+account) would have its `List` return `Unavailable`. Correct visibility therefore
+requires the full viewer∪v_list set, and its size bound is the authz backend's
+responsibility (server-side max-results/deadline), not a client truncation.
+
+**Safety**: the practical memory exposure is bounded by the OpenFGA server limits
+above (a deployment concern, tunable at the FGA layer), and the port already
+supports a `maxResults` argument for any future call-site that can tolerate
+truncation — the scope-filter call-sites deliberately pass `0` because they
+cannot. Both relation calls fail closed to `Unavailable` on any FGA error/timeout,
+so an over-large or slow response degrades to a denied request, never to an
+unfiltered/owner-only fallback.
+
+**Convergence path (deferred)**: if per-request memory must be bounded on the
+IAM side independent of the FGA backend, replace fetch-all-then-filter with a
+DB-page-then-batch-`Check` strategy (Check each id on the page instead of
+listing the whole visible set) — a request-path redesign of the scope filter,
+not a one-line cap. Tracked as a scalability item; no correctness or security
+gap exists today given the server-side FGA bounds.
+
+_Reviewed 2026-07-06 (r8b security-hardening audit)._

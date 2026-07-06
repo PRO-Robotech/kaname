@@ -372,7 +372,6 @@ func (fakeABW) TransitionStatus(
 ) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, nil
 }
-func (fakeABW) EmitSubjectChange(context.Context, string, string) error { return nil }
 func (fakeABW) EmitSubjectChangeEvent(context.Context, access_binding.SubjectChangeEvent) error {
 	return nil
 }

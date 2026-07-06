@@ -699,23 +699,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	return ab, nil
 }
 
-// EmitSubjectChange inserts a row into kacho_iam.subject_change_outbox within
-// the current transaction. The insert is atomic with the enclosing binding
-// mutation: a rollback of the surrounding TX rolls back the outbox row too.
-// op must satisfy the DB CHECK subject_change_op_check.
-//
-// Compatibility shim — forwards to EmitSubjectChangeEvent so the drainer can
-// drain via the corelib generic Drainer[T] (which requires payload jsonb +
-// event_type columns). Preserved API for existing callers.
-func (w *abWriter) EmitSubjectChange(ctx context.Context, subjectID, op string) error {
-	return w.EmitSubjectChangeEvent(ctx, access_binding.SubjectChangeEvent{
-		SubjectID: subjectID,
-		Op:        op,
-		EventType: deriveEventTypeFromOp(op),
-	})
-}
-
-// EmitSubjectChangeEvent — overload that writes both legacy denormalised
+// EmitSubjectChangeEvent — writes both legacy denormalised
 // columns AND the canonical event_type + payload jsonb in a single INSERT.
 // Single-row INSERT is atomic by construction; combined with the enclosing
 // writer-tx, the outbox row is committed iff the surrounding domain mutation

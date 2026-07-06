@@ -790,7 +790,6 @@ func (w *fakeABWtr) UpdateLabels(_ context.Context, id domain.AccessBindingID, l
 	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 
-func (w *fakeABWtr) EmitSubjectChange(_ context.Context, _, _ string) error { return nil }
 func (w *fakeABWtr) EmitSubjectChangeEvent(_ context.Context, _ ab_repo.SubjectChangeEvent) error {
 	return nil
 }

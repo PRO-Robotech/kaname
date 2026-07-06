@@ -18,6 +18,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
@@ -36,7 +37,9 @@ func TestAccessBindingWriter_EmitSubjectChange_InTx(t *testing.T) {
 	// Happy path: emit + commit → row visible.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	err = w.AccessBindingsW().EmitSubjectChange(ctx, "usr_test_subject", "binding_delete")
+	err = w.AccessBindingsW().EmitSubjectChangeEvent(ctx, access_binding.SubjectChangeEvent{
+		SubjectID: "usr_test_subject", Op: "binding_delete",
+	})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
@@ -50,7 +53,9 @@ func TestAccessBindingWriter_EmitSubjectChange_InTx(t *testing.T) {
 	// Rollback path: no orphan row.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	require.NoError(t, w2.AccessBindingsW().EmitSubjectChange(ctx, "usr_rollback", "binding_upsert"))
+	require.NoError(t, w2.AccessBindingsW().EmitSubjectChangeEvent(ctx, access_binding.SubjectChangeEvent{
+		SubjectID: "usr_rollback", Op: "binding_upsert",
+	}))
 	require.NoError(t, w2.Rollback(ctx))
 
 	var cnt int

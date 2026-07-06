@@ -59,8 +59,11 @@ func TestBootstrapReconciler_StopsAfterSuccess(t *testing.T) {
 	defer cancel()
 
 	require.NoError(t, rec.Run(ctx))
-	// Give the loop a moment to (incorrectly) keep going if it didn't stop.
-	time.Sleep(20 * time.Millisecond)
+	// Run drives the loop synchronously in THIS goroutine and returns the moment
+	// it stops — there is no background worker that could keep calling `run`
+	// afterwards. So the call count is final the instant Run returns: exactly one
+	// invocation proves it stopped on the first committed grant (a "fails to stop"
+	// regression would loop forever and never return, tripping the ctx deadline).
 	assert.Equal(t, int64(1), calls.Load(), "reconciler must stop after the first committed grant")
 }
 
@@ -76,7 +79,9 @@ func TestBootstrapReconciler_EmailEmpty_NoOp(t *testing.T) {
 	defer cancel()
 
 	require.NoError(t, rec.Run(ctx))
-	time.Sleep(20 * time.Millisecond)
+	// Run is synchronous (see StopsAfterSuccess): the count is final when it
+	// returns, so a single invocation proves the terminal "email empty" skip
+	// short-circuited instead of entering the retry loop.
 	assert.Equal(t, int64(1), calls.Load(), "email-empty must short-circuit to a single no-op run (no busy retry loop)")
 }
 

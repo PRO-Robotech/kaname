@@ -22,76 +22,26 @@
 //     read-only verbs : get | list | view | watch | describe → "viewer"
 //     write verbs     : create | update | delete | write | patch | put → "editor"
 //     admin / wildcard: admin | * | manage                            → "admin"
-//
-//  3. If EVERY permission has a registered granular relation in
-//     `GranularRelations` (post catalog unification) → return the granular
-//     set (no tier fallback). Default deployment has the set empty → tier
-//     fallback.
-//
-// Returned []Relation is stable-ordered (alphabetical) for byte-identical
-// fga_outbox payloads on identical inputs (idempotent drainer behaviour).
 package authzmap
 
-import (
-	"sort"
-	"strings"
-)
+import "strings"
 
 // Relation — typed string for FGA relation names.
 type Relation string
-
-// granularRelations — process-wide registry of `<module>.<resource>.<verb>` →
-// granular FGA relation (e.g. "vpc_network_get"). Default empty (ship tier-only
-// mapping). Future catalog unification will populate this from a generated
-// table. Read-only after process startup — registration helpers exist only for
-// tests.
-var granularRelations = map[string]string{}
-
-// RegisterGranularRelationForTest — test-only helper to add a granular
-// permission→relation mapping. Production code MUST NOT call this — the
-// future catalog unification will replace it with a generated table loaded at
-// startup.
-func RegisterGranularRelationForTest(permission, relation string) {
-	granularRelations[permission] = relation
-}
-
-// ResetGranularRelationsForTest — test-only helper to clear the registry
-// between test cases.
-func ResetGranularRelationsForTest() {
-	granularRelations = map[string]string{}
-}
 
 // PermissionsToRelations derives FGA relations from a role's permission list.
 //
 // See package-level doc-comment for the strategy.
 //
-// Output is deduplicated, stable-ordered, never nil (always at least one
-// relation — viewer fallback for the empty case).
+// Output is deduplicated, never nil (always at least one relation — viewer
+// fallback for the empty case).
 func PermissionsToRelations(permissions []string) []Relation {
 	if len(permissions) == 0 {
 		return []Relation{"viewer"}
 	}
 
-	// Pass 1: are ALL permissions granular-mapped? If so, return granular set
-	// (no tier fallback). Order is deterministic via sort below.
-	if len(granularRelations) > 0 {
-		allGranular := true
-		seen := map[string]struct{}{}
-		for _, p := range permissions {
-			rel, ok := granularRelations[p]
-			if !ok {
-				allGranular = false
-				break
-			}
-			seen[rel] = struct{}{}
-		}
-		if allGranular {
-			return sortedRelations(seen)
-		}
-	}
-
-	// Pass 2: tier mapping. Pick the STRONGEST tier present in the permission
-	// set (admin > editor > viewer). The strongest tier supersedes the others
+	// Tier mapping. Pick the STRONGEST tier present in the permission set
+	// (admin > editor > viewer). The strongest tier supersedes the others
 	// because the FGA model declares `admin` ⇒ `editor` ⇒ `viewer` via
 	// computed relations — emitting all three would just be redundant
 	// bookkeeping.
@@ -174,17 +124,4 @@ func verbClass(perm string) verbClassKind {
 		return classAdmin
 	}
 	return classUnknown
-}
-
-func sortedRelations(set map[string]struct{}) []Relation {
-	out := make([]string, 0, len(set))
-	for r := range set {
-		out = append(out, r)
-	}
-	sort.Strings(out)
-	res := make([]Relation, len(out))
-	for i, r := range out {
-		res[i] = Relation(r)
-	}
-	return res
 }

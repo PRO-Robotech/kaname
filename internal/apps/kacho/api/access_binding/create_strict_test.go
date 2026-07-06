@@ -270,7 +270,6 @@ func (w *strictDupABWriter) TransitionStatus(ctx context.Context, id domain.Acce
 	revokedByUserID *domain.UserID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, stderrors.New("not stubbed")
 }
-func (w *strictDupABWriter) EmitSubjectChange(_ context.Context, _, _ string) error { return nil }
 func (w *strictDupABWriter) EmitSubjectChangeEvent(_ context.Context, _ repoab.SubjectChangeEvent) error {
 	return nil
 }
