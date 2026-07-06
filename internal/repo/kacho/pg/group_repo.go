@@ -235,20 +235,30 @@ func (w *groupWriter) Update(ctx context.Context, g domain.Group, updateMask []s
 	return out, nil
 }
 
-// Delete — atomic CAS WHERE NOT EXISTS на access_bindings (subject_type='group').
-// group_members CASCADE автоматически (FK group_members_group_fk ON DELETE CASCADE).
+// Delete — atomic CAS WHERE NOT EXISTS на access_bindings + access_binding_subjects
+// (subject_type='group'). group_members CASCADE автоматически (FK
+// group_members_group_fk ON DELETE CASCADE).
+//
+// The access_bindings guard covers the legacy subjects[0] projection; the
+// access_binding_subjects guard covers subjects[1..N] — an independent grantee of a
+// multi-subject binding (migration 0028) the subjects[0]-only guard missed (SEC r8,
+// hard-rule #10). The concurrent delete-vs-add-subject window is closed at the DB
+// level by the BEFORE DELETE trigger (migration 0050); this software guard is the
+// fast common-case reject + canonical error text.
 func (w *groupWriter) Delete(ctx context.Context, id domain.GroupID) error {
 	const q = `
 		WITH del AS (
 			DELETE FROM groups g
 			WHERE g.id = $1
-			  AND NOT EXISTS (SELECT 1 FROM access_bindings WHERE subject_type = 'group' AND subject_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_bindings         WHERE subject_type = 'group' AND subject_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects WHERE subject_type = 'group' AND subject_id = $1)
 			RETURNING 1
 		)
 		SELECT
-		  (SELECT count(*) FROM del)::int                                                          AS deleted,
-		  EXISTS(SELECT 1 FROM groups          WHERE id = $1)                                      AS group_exists,
-		  EXISTS(SELECT 1 FROM access_bindings WHERE subject_type='group' AND subject_id = $1)     AS has_bindings
+		  (SELECT count(*) FROM del)::int                                                                    AS deleted,
+		  EXISTS(SELECT 1 FROM groups WHERE id = $1)                                                         AS group_exists,
+		  (EXISTS(SELECT 1 FROM access_bindings         WHERE subject_type='group' AND subject_id = $1)
+		   OR EXISTS(SELECT 1 FROM access_binding_subjects WHERE subject_type='group' AND subject_id = $1))  AS has_bindings
 	`
 	var (
 		deleted                  int

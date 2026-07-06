@@ -224,6 +224,19 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 			return "condition is in use by access bindings"
 		}
 		return fmt.Sprintf("Condition %s not found", idHint)
+	case "access_binding_subjects_subject_ref":
+		// Migration 0050 BEFORE DELETE trigger on users/service_accounts/groups: a
+		// principal still referenced as a subjects[0..N] grantee
+		// (access_binding_subjects) cannot be hard-deleted (SEC r8, hard-rule #10).
+		// The trigger is the race backstop for the concurrent add-subject-vs-delete
+		// window the software NOT EXISTS guard (a stale snapshot) cannot close; the
+		// common case is already rejected with the same text by the guard's probe.
+		// kindHint = "<Resource>.Delete" (set by the repo Delete) → canonical text.
+		res := strings.TrimSuffix(kindHint, ".Delete")
+		if res == "" {
+			res = "Principal"
+		}
+		return fmt.Sprintf("%s %s has active access bindings and cannot be deleted", res, idHint)
 	}
 	// Unmapped FK — generic text; never leak pgErr.Detail/Message (they embed
 	// the referenced table/column/value → schema reconnaissance).

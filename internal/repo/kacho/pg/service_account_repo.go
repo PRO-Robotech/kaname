@@ -185,21 +185,31 @@ func (w *saWriter) Update(ctx context.Context, sa domain.ServiceAccount, updateM
 	return out, nil
 }
 
-// Delete — атомарный DELETE с гвардом NOT EXISTS на access_bindings + group_members.
+// Delete — атомарный DELETE с гвардом NOT EXISTS на access_bindings +
+// access_binding_subjects + group_members.
+//
+// The access_bindings guard covers the legacy subjects[0] projection; the
+// access_binding_subjects guard covers subjects[1..N] — an independent grantee of a
+// multi-subject binding (migration 0028) the subjects[0]-only guard missed (SEC r8,
+// hard-rule #10). The concurrent delete-vs-add-subject window is closed at the DB
+// level by the BEFORE DELETE trigger (migration 0050); this software guard is the
+// fast common-case reject + canonical error text.
 func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error {
 	const q = `
 		WITH del AS (
 			DELETE FROM service_accounts s
 			WHERE s.id = $1
-			  AND NOT EXISTS (SELECT 1 FROM access_bindings WHERE subject_type = 'service_account' AND subject_id = $1)
-			  AND NOT EXISTS (SELECT 1 FROM group_members  WHERE member_type  = 'service_account' AND member_id  = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_bindings         WHERE subject_type = 'service_account' AND subject_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects WHERE subject_type = 'service_account' AND subject_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM group_members           WHERE member_type  = 'service_account' AND member_id  = $1)
 			RETURNING 1
 		)
 		SELECT
-		  (SELECT count(*) FROM del)::int                                                                              AS deleted,
-		  EXISTS(SELECT 1 FROM service_accounts WHERE id = $1)                                                         AS sa_exists,
-		  EXISTS(SELECT 1 FROM access_bindings  WHERE subject_type='service_account' AND subject_id = $1)              AS has_bindings,
-		  EXISTS(SELECT 1 FROM group_members    WHERE member_type='service_account'  AND member_id  = $1)              AS has_group_mems
+		  (SELECT count(*) FROM del)::int                                                                                     AS deleted,
+		  EXISTS(SELECT 1 FROM service_accounts WHERE id = $1)                                                                AS sa_exists,
+		  (EXISTS(SELECT 1 FROM access_bindings         WHERE subject_type='service_account' AND subject_id = $1)
+		   OR EXISTS(SELECT 1 FROM access_binding_subjects WHERE subject_type='service_account' AND subject_id = $1))         AS has_bindings,
+		  EXISTS(SELECT 1 FROM group_members WHERE member_type='service_account' AND member_id = $1)                          AS has_group_mems
 	`
 	var (
 		deleted                             int

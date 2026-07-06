@@ -127,6 +127,35 @@ func TestWrapPgErr_ConditionFK_DirectionSensitive(t *testing.T) {
 	assertNoLeak(t, StripSentinel(delErr))
 }
 
+// TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware — migration 0050's BEFORE
+// DELETE trigger RAISEs 23503 tagged CONSTRAINT='access_binding_subjects_subject_ref'
+// when a User/SA/Group is still referenced as a subjects[0..N] grantee. WrapPgErr
+// must map it to FailedPrecondition with the canonical resource-aware text derived
+// from the repo's "<Resource>.Delete" kindHint (SEC r8), never leaking pgx text.
+func TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware(t *testing.T) {
+	const constraint = "access_binding_subjects_subject_ref"
+	cases := []struct {
+		kindHint string
+		idHint   string
+		want     string
+	}{
+		{"User.Delete", "usr_x", "User usr_x has active access bindings and cannot be deleted"},
+		{"ServiceAccount.Delete", "sva_x", "ServiceAccount sva_x has active access bindings and cannot be deleted"},
+		{"Group.Delete", "grp_x", "Group grp_x has active access bindings and cannot be deleted"},
+		{"", "prn_x", "Principal prn_x has active access bindings and cannot be deleted"},
+	}
+	for _, c := range cases {
+		err := WrapPgErr(mkPgErr("23503", constraint), c.kindHint, c.idHint)
+		if !stderrors.Is(err, ErrFailedPrecondition) {
+			t.Fatalf("kindHint %q: want ErrFailedPrecondition, got %v", c.kindHint, err)
+		}
+		if got := StripSentinel(err); got != c.want {
+			t.Errorf("kindHint %q: text = %q; want %q", c.kindHint, got, c.want)
+		}
+		assertNoLeak(t, StripSentinel(err))
+	}
+}
+
 // TestWrapPgErr_NonPgError_PassesThrough — a non-pgx error is returned as-is
 // (the bridge only translates SQLSTATEs).
 func TestWrapPgErr_NonPgError_PassesThrough(t *testing.T) {
