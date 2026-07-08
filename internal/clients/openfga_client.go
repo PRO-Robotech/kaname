@@ -93,11 +93,19 @@ func (c *OpenFGAHTTPClient) Check(ctx context.Context, subject, relation, object
 	if c.Endpoint == "" || c.StoreID == "" {
 		return false, ErrNotConfigured
 	}
+	// Bound the per-RPC authz Check to the configured CheckTimeout (default 200ms):
+	// http.DefaultClient has no Timeout, so an OpenFGA that accepts the TCP connection
+	// but stops responding (GC pause / overload / half-open TCP after a partition)
+	// would otherwise hang the authz-interceptor goroutine forever instead of failing
+	// closed within the FGA budget (D-47 "FGA outage → Unavailable"). Mirrors the
+	// sibling CheckWithContext / c.do() paths, which are already time-bounded.
+	cctx, cancel := context.WithTimeout(ctx, c.checkTimeout())
+	defer cancel()
 	body, _ := json.Marshal(openfgaCheckRequest{
 		AuthorizationModelID: c.AuthorizationModel,
 		TupleKey:             openfgaTupleKey{User: subject, Relation: relation, Object: object},
 	})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+	req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
 		fmt.Sprintf("http://%s/stores/%s/check", c.Endpoint, c.StoreID),
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

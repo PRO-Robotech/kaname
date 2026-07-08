@@ -70,7 +70,8 @@ const validProvisionBody = `{
 
 func TestProvisionHook_HappyPath_CallsProvisionerAnd200(t *testing.T) {
 	prov := &fakeProvisioner{}
-	h := newProvisionHandler(t, prov, nil)
+	var logBuf bytes.Buffer
+	h := newProvisionHandler(t, prov, &logBuf)
 
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/provision", strings.NewReader(validProvisionBody))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
@@ -84,6 +85,9 @@ func TestProvisionHook_HappyPath_CallsProvisionerAnd200(t *testing.T) {
 	assert.Equal(t, "kratos-uuid-1", last.ExternalID)
 	assert.Equal(t, "alice@example.com", last.Email)
 	assert.Equal(t, "Alice Example", last.DisplayName)
+	// PII leak-lock (audit r3): the success INFO log must correlate by external_id
+	// only — the end-user email must NOT leak into logs.
+	assert.NotContains(t, logBuf.String(), "alice@example.com", "end-user email (PII) must not leak into logs")
 }
 
 func TestProvisionHook_MissingToken_401_ProvisionerNotCalled(t *testing.T) {
@@ -145,6 +149,8 @@ func TestProvisionHook_ProvisionerError_500_AndLogged(t *testing.T) {
 	called, _, _ := prov.snapshot()
 	assert.True(t, called)
 	assert.Contains(t, logBuf.String(), "provision", "the hook failure must be logged so it is observable")
+	// PII leak-lock (audit r3): the end-user email must NEVER appear in the failure log.
+	assert.NotContains(t, logBuf.String(), "alice@example.com", "end-user email (PII) must not leak into logs")
 }
 
 func TestProvisionHook_WrongMethod_405(t *testing.T) {

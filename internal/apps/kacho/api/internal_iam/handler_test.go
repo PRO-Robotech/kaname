@@ -147,19 +147,25 @@ func TestInternalIAM_Check_NilAuthorizer_FailsClosed(t *testing.T) {
 
 func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 	cases := []struct {
-		name string
-		err  error
-		want codes.Code
+		name    string
+		err     error
+		want    codes.Code
+		wantMsg string // if non-empty, the EXACT opaque gRPC message (leak-lock)
 	}{
 		// Backend-unavailable is classified by the typed iamerr.ErrUnavailable
 		// sentinel (robust to error-text rewording), not an error-string prefix.
-		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: openfga check: status 503"), codes.Unavailable},
-		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "policy unavailable: opa down"), codes.Unavailable},
-		{"illegal argument", errors.New("Illegal argument relation: required"), codes.InvalidArgument},
-		{"generic", errors.New("unexpected boom"), codes.Internal},
+		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: openfga check: status 503"), codes.Unavailable, ""},
+		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "policy unavailable: opa down"), codes.Unavailable, ""},
+		{"illegal argument", errors.New("Illegal argument relation: required"), codes.InvalidArgument, ""},
+		// Leak-lock (audit r3): the Internal default must be the OPAQUE fixed text,
+		// never err.Error() — an un-sentineled pgx/DB error carries driver text
+		// (host/port/user/db). Asserting the message (not just the code) is what
+		// regression-locks the fix: a refactor reintroducing err.Error() fails here.
+		{"generic — opaque, must not echo raw err", errors.New("unexpected boom"), codes.Internal, "internal error"},
 		// Regression-lock: a raw "authz unavailable" TEXT with no sentinel must NOT
-		// be classified as Unavailable anymore (the brittle string branch is gone).
-		{"raw unavailable text without sentinel", errors.New("authz unavailable: raw"), codes.Internal},
+		// be classified as Unavailable anymore (the brittle string branch is gone),
+		// and its message must be the opaque fixed text (no raw-text echo).
+		{"raw unavailable text without sentinel", errors.New("authz unavailable: raw"), codes.Internal, "internal error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,6 +178,10 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 			})
 			require.Error(t, err)
 			assert.Equal(t, tc.want, status.Code(err))
+			if tc.wantMsg != "" {
+				assert.Equal(t, tc.wantMsg, status.Convert(err).Message(),
+					"INTERNAL must be opaque fixed text — never echo raw err (pgx/DB leak)")
+			}
 		})
 	}
 }
