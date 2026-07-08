@@ -4,8 +4,9 @@
 // hook_auth.go — Bearer auth для Hydra hook endpoints.
 //
 // Bearer `X-Kacho-Hook-Token` validated против authn.hook-shared-secret. Если
-// configured secret пустой — accept без auth (только dev-mode; in production
-// mode handler возвращает 500 на nil secret).
+// configured secret пустой (misconfiguration) — fail-closed 500, БЕЗ auth-bypass
+// (никакого dev-mode "accept without auth" — hook endpoints обязаны быть
+// недоступны без валидного secret даже при пустой конфигурации).
 package iamhooks
 
 import (
@@ -16,14 +17,17 @@ import (
 const hookAuthHeader = "X-Kacho-Hook-Token"
 
 // requireHookAuth — middleware-style helper, проверяет Bearer-token из
-// header'а. Возвращает true если auth прошел; false + 401 если нет.
+// header'а. Возвращает true если auth прошел; false + error-response если нет.
 //
-// expected пустой — secret не настроен → fail-closed: 401. Это безопасное
-// default-behaviour, потому что hook endpoints не должны быть accessible без
-// auth даже в dev (Hydra всегда передает configured secret).
+// expected пустой — secret не настроен → fail-closed: 500
+// (`hook_secret_not_configured`), НЕ auth-bypass. Misconfiguration (secret не
+// задан в конфиге) — это operator-ошибка, не "no auth required"; hook
+// endpoints не должны быть accessible без валидного secret ни при каких
+// условиях (Hydra всегда передает configured secret).
 func requireHookAuth(w http.ResponseWriter, r *http.Request, expected string) bool {
 	if expected == "" {
-		// Misconfigured: secret должен быть set в production. Fail-closed.
+		// Misconfigured: secret должен быть set в production. Fail-closed: 500,
+		// не dev-mode-bypass.
 		http.Error(w, `{"error":"hook_secret_not_configured"}`, http.StatusInternalServerError)
 		return false
 	}
