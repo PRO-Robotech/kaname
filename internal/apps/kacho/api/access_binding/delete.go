@@ -30,6 +30,7 @@ package access_binding
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -47,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
 )
 
@@ -93,10 +95,16 @@ func (u *DeleteAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	binding, err := rd.AccessBindings().Get(ctx, id)
 	_ = rd.Rollback(ctx)
 	if err != nil {
-		// Non-existent AB → PermissionDenied (not NotFound) to prevent
-		// existence-leakage. The authz-deny garbage-per-resource scope expects 403
-		// for all subjects including authenticated non-owners.
-		return nil, authzguard.PermissionDenied()
+		if stderrors.Is(err, iamerr.ErrNotFound) {
+			// Non-existent AB → PermissionDenied (not NotFound) to prevent
+			// existence-leakage. The authz-deny garbage-per-resource scope expects 403
+			// for all subjects including authenticated non-owners.
+			return nil, authzguard.PermissionDenied()
+		}
+		// Any OTHER Get failure (transient DB fault) is NOT existence-hiding —
+		// map it to its real, retriable/terminal gRPC code (shared.MapRepoErr),
+		// not the non-retriable PermissionDenied a client would never retry.
+		return nil, shared.MapRepoErr(err)
 	}
 	// AUTHZ FIRST (#4/#6 — security-ordering). requireGrantAuthority MUST run before
 	// any state-dependent response (the deletion_protection pre-check below),

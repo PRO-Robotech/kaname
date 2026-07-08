@@ -169,11 +169,25 @@ jobs:
           # Inspect SARIF — any non-suppressed advisory blocks the merge (parity
           # with the gosec HIGH gate). A known-vulnerable dependency must never
           # merge green: report the advisories and fail the job.
-          fnd=$(jq '[.runs[].results[]] | length' govulncheck.sarif 2>/dev/null || echo 0)
-          echo "govulncheck findings: $fnd"
+          #
+          # SUPPRESS — documented allowlist of advisories that are (a) not
+          # imported/called by kacho-iam and (b) have NO fixed version, so they
+          # can never be cleared by a bump. Each entry MUST be justified here and
+          # confirmed not-called; the authoritative `govulncheck ./...` in ci.yaml
+          # (exit-code mode) also treats these as non-actionable (exit 0).
+          #   GO-2026-5932 — golang.org/x/crypto/openpgp, deprecated "unsafe by
+          #     design", Fixed: N/A. `go mod why golang.org/x/crypto/openpgp` →
+          #     "main module does not need package …": pulled only transitively
+          #     into the module graph (testcontainers test infra), never imported
+          #     or called by any kacho-iam package (prod or test). SARIF still
+          #     lists it at module level; exclude it from the blocking count.
+          SUPPRESS='GO-2026-5932'
+          all=$(jq '[.runs[].results[]] | length' govulncheck.sarif 2>/dev/null || echo 0)
+          fnd=$(jq --arg s "$SUPPRESS" '[.runs[].results[] | select((.ruleId // "") as $r | ($s|split(",")) | index($r) | not)] | length' govulncheck.sarif 2>/dev/null || echo 0)
+          echo "govulncheck findings: $fnd blocking ($all total, $(($all-$fnd)) suppressed)"
           if (( fnd > 0 )); then
-            jq -r '.runs[].results[] | "- \(.ruleId): \(.message.text)"' govulncheck.sarif
-            echo "::error::govulncheck found $fnd vulnerability advisor(ies). See Security tab."
+            jq --arg s "$SUPPRESS" -r '.runs[].results[] | select((.ruleId // "") as $r | ($s|split(",")) | index($r) | not) | "- \(.ruleId): \(.message.text)"' govulncheck.sarif
+            echo "::error::govulncheck found $fnd non-suppressed vulnerability advisor(ies). See Security tab."
             exit 1
           fi
 

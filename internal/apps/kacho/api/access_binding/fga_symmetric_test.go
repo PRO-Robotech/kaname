@@ -337,6 +337,11 @@ type abFakeRepo struct {
 	// abSubjects — access_binding_subjects backing store, keyed by
 	// binding id → ordered subjects. Mutated by InsertSubjects/DeleteSubject.
 	abSubjects map[domain.AccessBindingID][]domain.Subject
+	// forceGetErr — when set, fakeABRdr.Get returns this error unconditionally
+	// instead of the normal found/not-found lookup. Used by
+	// get_error_mapping_test.go to simulate a transient (non-not-found) Reader
+	// failure on the Update/Delete existence-check Get.
+	forceGetErr error
 	// emittedTuples — persisted exact emitted-set per binding
 	// (access_binding_emitted_tuples), keyed by binding id. Co-committing
 	// the grant tuples here lets revoke/Role.Update use the stored set
@@ -605,10 +610,13 @@ type fakeABRdr struct{ repo *abFakeRepo }
 func (a *fakeABRdr) Get(_ context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	a.repo.mu.Lock()
 	defer a.repo.mu.Unlock()
+	if a.repo.forceGetErr != nil {
+		return domain.AccessBinding{}, a.repo.forceGetErr
+	}
 	if a.repo.ab != nil && a.repo.ab.ID == id {
 		return *a.repo.ab, nil
 	}
-	return domain.AccessBinding{}, stderrors.New("access binding not found in fake")
+	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 func (a *fakeABRdr) ListByScope(_ context.Context, _ domain.ResourceType, _ string, _ ab_repo.PageFilter) ([]domain.AccessBinding, string, error) {
 	a.repo.mu.Lock()

@@ -195,7 +195,17 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 		}{TupleKeys: keys}
 	}
 	body, _ := json.Marshal(r)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+	// Bound the write/delete request to the configured WriteTimeout (default
+	// 1s): http.DefaultClient has no Timeout, so an OpenFGA that accepts the
+	// TCP connection but stops responding (GC pause / overload / half-open TCP
+	// after a partition) would otherwise hang the calling goroutine forever —
+	// especially harmful for the detached, deadline-less access_binding
+	// revoke retry loop (delete.go syncRemoveTuples), which has no caller-side
+	// deadline to fall back on. Mirrors the sibling Check / WriteConditionalTuples
+	// paths, which are already time-bounded.
+	cctx, cancel := context.WithTimeout(ctx, c.writeTimeout())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
 		fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID),
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

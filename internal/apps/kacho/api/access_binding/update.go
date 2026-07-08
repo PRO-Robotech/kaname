@@ -19,6 +19,7 @@ package access_binding
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // fieldDeletionProtection / fieldLabels — the mutable AccessBinding fields (T3.3-IMM-01).
@@ -108,8 +110,15 @@ func (u *UpdateAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	binding, err := rd.AccessBindings().Get(ctx, id)
 	_ = rd.Rollback(ctx)
 	if err != nil {
-		// Existence-leak parity with Delete: a non-existent binding → PermissionDenied.
-		return nil, authzguard.PermissionDenied()
+		if stderrors.Is(err, iamerr.ErrNotFound) {
+			// Existence-leak parity with Delete: a non-existent binding → PermissionDenied.
+			return nil, authzguard.PermissionDenied()
+		}
+		// Any OTHER Get failure (transient DB fault: statement-timeout, conn
+		// reset, ...) is NOT existence-hiding — it must map to its real,
+		// retriable/terminal gRPC code (shared.MapRepoErr), not the
+		// non-retriable PermissionDenied a client would never retry.
+		return nil, shared.MapRepoErr(err)
 	}
 	// Same grant-authority gate as Create/Delete (owner-of-account OR FGA admin on
 	// the scope): only a grant authority may mutate the binding.
