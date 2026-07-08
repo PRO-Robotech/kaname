@@ -112,14 +112,16 @@ func (h *ProvisionHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if err := h.provisioner.Provision(r.Context(), in); err != nil {
 		// LOG так, чтобы сломанный hook был НАБЛЮДАЕМ (а не молчал — вся суть
 		// C4). 5xx → Kratos не считает hook успешным.
+		// PII: the end-user email is intentionally NOT logged — external_id is the
+		// stable non-PII correlation key; emails must not leak into log sinks.
 		h.logger.Error("provision_hook: user provisioning failed",
-			"external_id", payload.ExternalID, "email", payload.Email, "err", err)
+			"external_id", payload.ExternalID, "err", err)
 		http.Error(w, `{"error":"provision_failed"}`, http.StatusInternalServerError)
 		return
 	}
 
 	h.logger.Info("provision_hook: user provisioned from identity",
-		"external_id", payload.ExternalID, "email", payload.Email)
+		"external_id", payload.ExternalID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	// Kratos трактует 200 (без тела либо с JSON-объектом) как hook-OK. Пустой
