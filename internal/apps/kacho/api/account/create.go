@@ -221,8 +221,10 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, a
 		}
 	}()
 
-	// FK accounts_owner_fk (23503): пользователь не существует — verbatim
-	// "User <id> not found" (maperr accounts_owner_fk).
+	// FK accounts_owner_fk (23503): пользователь не существует. Constraint —
+	// DEFERRABLE INITIALLY DEFERRED, поэтому этот INSERT НЕ падает — нарушение
+	// всплывает на COMMIT (см. writeTx.Commit), где мапится в
+	// FailedPrecondition "User <id> not found" через тот же constraint-aware bridge.
 	inserted, ierr := w.AccountsW().Insert(ctx, a)
 	if ierr != nil {
 		return nil, shared.MapRepoErr(ierr)

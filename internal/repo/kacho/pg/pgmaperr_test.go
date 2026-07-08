@@ -195,6 +195,35 @@ func TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware(t *testing.T) {
 	}
 }
 
+// TestWrapPgErr_AccountsOwnerFK_CommitTime — accounts_owner_fk is DEFERRABLE
+// INITIALLY DEFERRED, so a non-existent account owner is NOT caught by the INSERT
+// statement: the 23503 surfaces at COMMIT (writeTx.Commit runs the commit error
+// through this same bridge with the owner-id hint recorded by accountWriter.Insert).
+// It must map to FailedPrecondition with the canonical "User <id> not found" text —
+// NOT the sentinel-only INTERNAL fallback that a raw *pgconn.PgError would trigger.
+func TestWrapPgErr_AccountsOwnerFK_CommitTime(t *testing.T) {
+	err := wrapPgErr(mkPgErr("23503", "accounts_owner_fk"), "", "usr_missing")
+	if !stderrors.Is(err, iamerr.ErrFailedPrecondition) {
+		t.Fatalf("commit-time accounts_owner_fk: want ErrFailedPrecondition, got %v", err)
+	}
+	if stderrors.Is(err, iamerr.ErrInternal) {
+		t.Fatalf("commit-time accounts_owner_fk: must NOT map to ErrInternal")
+	}
+	out := iamerr.StripSentinel(err)
+	if out != "User usr_missing not found" {
+		t.Errorf("text = %q; want %q", out, "User usr_missing not found")
+	}
+	assertNoLeak(t, out)
+}
+
+// TestWrapPgErr_NilPassesThrough — a nil error (successful commit) must stay nil
+// so writeTx.Commit's wrapping is a no-op on the happy path.
+func TestWrapPgErr_NilPassesThrough(t *testing.T) {
+	if got := wrapPgErr(nil, "", "usr_x"); got != nil {
+		t.Errorf("wrapPgErr(nil) = %v; want nil", got)
+	}
+}
+
 // TestWrapPgErr_NonPgError_PassesThrough — a non-pgx error is returned as-is
 // (the bridge only translates SQLSTATEs).
 func TestWrapPgErr_NonPgError_PassesThrough(t *testing.T) {

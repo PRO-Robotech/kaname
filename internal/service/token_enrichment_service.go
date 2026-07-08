@@ -143,8 +143,13 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 //     `trusted_subjects` entry on a SA-OAuth-client mapping.
 //  2. SA by Hydra client_id (Phase 3a `client_credentials`). For federated
 //     tokens this is also tried as a fallback using `OAuthClientID`.
-//  3. User by external_id (interactive Kratos sessions).
-//  4. iamerr.ErrNotFound — caller falls back to MinimalClaims.
+//  3. User-token by Hydra client_id (personal-access-token `client_credentials`):
+//     `subject` is the client_id of a UserOAuthClient; mapped back to the owning
+//     User → `principal_type=user`. Tried after the SA lookup (a client_id is
+//     either an SA-key or a User-token client, never both). Skipped when the
+//     User-token port is unwired.
+//  4. User by external_id (interactive Kratos sessions).
+//  5. iamerr.ErrNotFound — caller falls back to MinimalClaims.
 func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject string, hookCtx TokenHookContext) (map[string]any, error) {
 	// 1. Federated SA path (Phase 3b). `subject` here is the EXTERNAL
 	//    assertion sub; `hookCtx.OAuthClientID` is the kacho-issued client.

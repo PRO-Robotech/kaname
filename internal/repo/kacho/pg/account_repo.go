@@ -148,6 +148,14 @@ func (r *accountReader) CountAccountsByOwner(ctx context.Context, ownerUserID do
 // (G.2 — writer видит свои writes в рамках той же TX).
 type accountWriter struct {
 	accountReader
+	// ownerFKHintSink — optional back-pointer into the enclosing writeTx (set by
+	// writeTx.AccountsW). accounts_owner_fk is DEFERRABLE INITIALLY DEFERRED, so an
+	// owner that does not exist is NOT caught by this INSERT statement — the 23503
+	// surfaces at COMMIT. On a successful (deferred) INSERT we record the owner id
+	// here so writeTx.Commit can render the canonical "User <id> not found" text if
+	// the deferred FK fires at commit-time (otherwise the raw pgx error would hit
+	// the sentinel-only INTERNAL fallback in shared.MapRepoErr).
+	ownerFKHintSink *string
 }
 
 // Insert — INSERT INTO accounts ... RETURNING (id, created_at).
@@ -183,6 +191,12 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 			}
 		}
 		return domain.Account{}, mapErr(err, "", string(a.ID))
+	}
+	// Deferred accounts_owner_fk: the INSERT succeeded but the owner-existence
+	// check runs at COMMIT. Record the owner id so writeTx.Commit can produce the
+	// canonical "User <id> not found" text on a commit-time 23503.
+	if w.ownerFKHintSink != nil {
+		*w.ownerFKHintSink = string(a.OwnerUserID)
 	}
 	return out, nil
 }

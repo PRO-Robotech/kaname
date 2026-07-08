@@ -61,10 +61,18 @@ func (r *readTx) Rollback(ctx context.Context) error { return r.tx.Rollback(ctx)
 // writeTx — kacho.Writer поверх pgx.Tx (RW).
 type writeTx struct {
 	readTx
+	// ownerFKHint — owner id of the account inserted on this tx (if any). Set by
+	// accountWriter.Insert via the AccountsW sink; consumed by Commit to render the
+	// canonical "User <id> not found" text when the DEFERRABLE accounts_owner_fk
+	// fires at commit-time (see Commit below).
+	ownerFKHint string
 }
 
 func (w *writeTx) AccountsW() account.WriterIface {
-	return &accountWriter{accountReader: accountReader{tx: w.tx}}
+	return &accountWriter{
+		accountReader:   accountReader{tx: w.tx},
+		ownerFKHintSink: &w.ownerFKHint,
+	}
 }
 
 func (w *writeTx) ProjectsW() project.WriterIface {
@@ -84,6 +92,19 @@ func (w *writeTx) RolesW() role.WriterIface {
 }
 func (w *writeTx) AccessBindingsW() access_binding.WriterIface {
 	return &abWriter{abReader: abReader{tx: w.tx}}
+}
+
+// Commit overrides readTx.Commit for the write path so a constraint violation
+// that only surfaces at COMMIT — notably the DEFERRABLE INITIALLY DEFERRED
+// accounts_owner_fk (a non-existent account owner is NOT caught by the INSERT
+// statement) — is translated through the constraint-aware SQLSTATE→sentinel
+// bridge instead of leaking the raw *pgconn.PgError to the caller, which would
+// hit shared.MapRepoErr's sentinel-only INTERNAL fallback and misclassify a
+// tenant-precondition failure as codes.Internal "internal error". The owner-id
+// hint (recorded by accountWriter.Insert) yields the canonical Kachō
+// "User <id> not found" FailedPrecondition text. mapErr(nil, …) is nil-safe.
+func (w *writeTx) Commit(ctx context.Context) error {
+	return mapErr(w.tx.Commit(ctx), "", w.ownerFKHint)
 }
 
 // EmitAuditEvent appends one durable audit_outbox compliance row on THIS
