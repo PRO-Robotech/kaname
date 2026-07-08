@@ -100,8 +100,8 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 
-	switch {
-	case resp.StatusCode/100 == 2:
+	switch resp.StatusCode / 100 {
+	case 2:
 		var parsed struct {
 			AccessToken string `json:"access_token"`
 			ExpiresIn   int    `json:"expires_in"`
@@ -112,7 +112,7 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 			return TokenResponse{}, fmt.Errorf("%w: malformed token response", ErrHydraUnavailable)
 		}
 		return TokenResponse{AccessToken: parsed.AccessToken, ExpiresIn: parsed.ExpiresIn}, nil
-	case resp.StatusCode/100 == 4:
+	case 4:
 		// OAuth2 client/grant rejection — invalid/expired/revoked credential.
 		// The raw body is intentionally NOT included (no auth oracle).
 		return TokenResponse{}, ErrHydraRejected

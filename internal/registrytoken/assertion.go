@@ -69,14 +69,7 @@ func SignClientAssertionES256(kid, privateKeyPEM string, claims AssertionClaims)
 	if err != nil {
 		return "", fmt.Errorf("registrytoken: marshal header: %w", err)
 	}
-	pl, err := json.Marshal(assertionPayload{
-		Issuer:    claims.Issuer,
-		Subject:   claims.Subject,
-		Audience:  claims.Audience,
-		IssuedAt:  claims.IssuedAt,
-		ExpiresAt: claims.ExpiresAt,
-		JTI:       claims.JTI,
-	})
+	pl, err := json.Marshal(assertionPayload(claims))
 	if err != nil {
 		return "", fmt.Errorf("registrytoken: marshal payload: %w", err)
 	}
