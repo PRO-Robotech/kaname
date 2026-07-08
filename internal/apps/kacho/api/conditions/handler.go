@@ -191,5 +191,9 @@ func mapErr(err error) error {
 	// returned wrapped in iamerr.ErrFailedPrecondition by the use-case and is
 	// caught by the ErrFailedPrecondition sentinel branch above — no error-string
 	// substring match here (robust to rewording).
-	return status.Error(codes.Internal, err.Error())
+	//
+	// SEC (audit r2): any UNMAPPED error is opaque INTERNAL — never echo err.Error()
+	// to the tenant (an un-sentineled pgx/DB error would leak driver/connection text:
+	// host/port/user/db). Matches shared.MapRepoErr / grpcmw recovery fixed-string.
+	return status.Error(codes.Internal, "internal error")
 }

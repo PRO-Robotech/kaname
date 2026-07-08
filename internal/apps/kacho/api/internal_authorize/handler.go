@@ -73,10 +73,11 @@ func (h *Handler) WriteTuples(ctx context.Context, req *iamv1.WriteTuplesRequest
 		&iamv1.WriteTuplesMetadata{IdempotencyKey: req.GetIdempotencyKey()},
 	)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		// Opaque INTERNAL — never echo err.Error() (leak of pgx/DB driver text).
+		return nil, status.Error(codes.Internal, "create operation failed")
 	}
 	if err := h.ops.Create(ctx, op); err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Error(codes.Internal, "create operation failed")
 	}
 	operations.Run(ctx, h.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
 		ins, del, werr := h.writer.WriteRaw(ctx, writes, deletes)

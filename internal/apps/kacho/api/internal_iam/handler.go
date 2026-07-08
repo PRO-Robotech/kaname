@@ -281,7 +281,9 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 			// error-text rewording), not an error-string prefix.
 			return nil, status.Error(codes.Unavailable, iamerr.StripSentinel(err))
 		default:
-			return nil, status.Error(codes.Internal, err.Error())
+			// Opaque INTERNAL — unmapped errors must not echo err.Error() (would
+			// leak pgx/DB driver text: host/port/user/db).
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 	}
 
