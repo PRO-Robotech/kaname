@@ -75,6 +75,13 @@ const (
 	defaultFGAWriteTimeout = 1000 * time.Millisecond
 )
 
+// maxErrBodyBytes caps how much of a non-2xx OpenFGA response body is read into
+// an error/log line, mirroring the sibling read paths (openfga_list.go
+// listUsersOfType, hydra_* clients). A misbehaving / compromised OpenFGA that
+// returns a multi-KB 400 body must not spike memory or bloat the interpolated
+// error+log line.
+const maxErrBodyBytes = 4096
+
 // checkTimeout / listTimeout / writeTimeout — resolve the effective per-op
 // deadline, falling back to the package default when the field is zero.
 func (c *OpenFGAHTTPClient) checkTimeout() time.Duration {

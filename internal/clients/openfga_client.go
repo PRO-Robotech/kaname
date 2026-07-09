@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -226,8 +227,12 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 		return nil
 	}
 	if resp.StatusCode == http.StatusBadRequest {
+		// Cap the 400-body read (io.LimitReader) like the sibling read paths
+		// (openfga_list.go) so a misbehaving OpenFGA cannot spike memory / bloat
+		// the error+log line with a multi-KB body. The idempotent markers
+		// (already_exists / cannot_delete) appear within the first bytes.
 		buf := new(bytes.Buffer)
-		_, _ = buf.ReadFrom(resp.Body)
+		_, _ = buf.ReadFrom(io.LimitReader(resp.Body, maxErrBodyBytes))
 		s := buf.String()
 		// Idempotent replay: writing a tuple that already exists, or deleting
 		// one that no longer exists, is a success at the adapter — the desired

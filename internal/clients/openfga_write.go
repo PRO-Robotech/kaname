@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -86,9 +87,12 @@ func (c *OpenFGAHTTPClient) WriteConditionalTuples(ctx context.Context, writes, 
 		return nil
 	}
 	if resp.StatusCode == http.StatusBadRequest {
-		// Read body briefly; if contains "already_exists" or "not_found" — idempotent.
+		// Read body (capped) briefly; if it contains "already_exists" or
+		// "cannot_delete" the write is idempotent. Cap via io.LimitReader like
+		// the sibling read path (openfga_list.go) so a misbehaving OpenFGA cannot
+		// spike memory / bloat the error+log line with a multi-KB body.
 		buf := new(bytes.Buffer)
-		_, _ = buf.ReadFrom(resp.Body)
+		_, _ = buf.ReadFrom(io.LimitReader(resp.Body, maxErrBodyBytes))
 		s := buf.String()
 		if bytes.Contains([]byte(s), []byte("already_exists")) ||
 			bytes.Contains([]byte(s), []byte("cannot_delete")) {
