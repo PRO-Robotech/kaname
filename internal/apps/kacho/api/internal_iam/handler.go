@@ -239,7 +239,11 @@ func (h *Handler) WriteCreatorTuple(ctx context.Context, req *iamv1.WriteCreator
 		Object:   req.GetObject(),
 	}})
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "fga write failed: %v", err)
+		// Opaque UNAVAILABLE — never echo err.Error(): the raw OpenFGA transport
+		// error carries the cluster-internal FGA endpoint host:port + store id
+		// (leak, applies on :9091 too; hardening-invariant #1). Fixed text mirrors
+		// internal_authorize.ReadTuples / GetFGAStoreInfo.
+		return nil, status.Error(codes.Unavailable, "authz backend unavailable")
 	}
 	return &iamv1.WriteCreatorTupleResponse{}, nil
 }

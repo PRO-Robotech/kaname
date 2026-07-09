@@ -275,6 +275,29 @@ func TestInternalIAM_WriteCreatorTuple_PrivilegeTupleDenied(t *testing.T) {
 	}
 }
 
+// TestInternalIAM_WriteCreatorTuple_WriterError_OpaqueMessage — leak-lock (audit r11):
+// the raw OpenFGA transport error must never reach the gRPC status message — it
+// carries the cluster-internal FGA endpoint host:port + store id. The message must
+// be the fixed opaque text, not err.Error() (%v). Mirrors internal_authorize's
+// ReadTuples/GetFGAStoreInfo scrub. security.md hardening-invariant #1 (:9091 not exempt).
+func TestInternalIAM_WriteCreatorTuple_WriterError_OpaqueMessage(t *testing.T) {
+	rawErr := `openfga write: Post "http://fga-host.internal:8080/stores/01STOREID/write": dial tcp 10.1.2.3:8080: connect: connection refused`
+	gate := &fakeGate{}
+	writer := &fakeRelationWriter{err: errors.New(rawErr)}
+	h := newWriteCreatorHandler(writer, gate)
+
+	_, err := h.WriteCreatorTuple(context.Background(), &iamv1.WriteCreatorTupleRequest{
+		SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+	msg := status.Convert(err).Message()
+	assert.Equal(t, "authz backend unavailable", msg,
+		"UNAVAILABLE must be opaque fixed text — never echo raw FGA transport err (endpoint/store-id leak)")
+	assert.NotContains(t, msg, "fga-host.internal", "FGA endpoint host:port leaked into status message")
+	assert.NotContains(t, msg, "01STOREID", "FGA store id leaked into status message")
+}
+
 // TestInternalIAM_WriteCreatorTuple_NilGateFailsClosed — an unwired gate → deny
 // (never silently allow an unconfigured gate).
 func TestInternalIAM_WriteCreatorTuple_NilGateFailsClosed(t *testing.T) {

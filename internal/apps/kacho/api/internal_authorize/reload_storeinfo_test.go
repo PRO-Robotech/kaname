@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -60,20 +59,26 @@ func (f *storeInfoFake) GetStoreInfo(_ context.Context) (clients.StoreInfo, erro
 
 // ── ReloadModel ──────────────────────────────────────────────────────────
 
-func TestReloadModel_AcceptsNewModelID(t *testing.T) {
-	// Given a handler started with model "model-old".
+// doc-truthfulness lock (audit r11): the model pin is env-configured and fixed for
+// the process lifetime (the OpenFGA client captures it at construction; nothing
+// re-reads a handler field at evaluation time). A caller-supplied id is advisory
+// only — ReloadModel reports the id currently in force and does NOT adopt the
+// requested one. A refactor that reintroduces a live-mutable-but-unread field fails here.
+func TestReloadModel_ReportsPinnedID_RequestedIDNotAdopted(t *testing.T) {
+	// Given a handler pinned to "model-old".
 	w := service.NewRelationProjector(&storeInfoFake{})
 	h := NewHandler(w, nil, "model-old")
 
-	// When ReloadModel is called with an explicit new id.
+	// When ReloadModel is called with a different requested id.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{
 		AuthorizationModelId: "model-new",
 	})
 
-	// Then the response echoes the new id and the handler's currentModelID is mutated.
+	// Then the response reports the pinned id — the requested id is not adopted
+	// (runtime re-pin is unsupported; it requires a process restart).
 	require.NoError(t, err)
-	assert.Equal(t, "model-new", resp.GetAuthorizationModelId())
-	assert.Equal(t, "model-new", h.currentModelID, "currentModelID must be mutated to the new id")
+	assert.Equal(t, "model-old", resp.GetAuthorizationModelId(),
+		"requested id must not be adopted — the live pin is env-only")
 }
 
 func TestReloadModel_SetsReloadedAt(t *testing.T) {
@@ -98,10 +103,9 @@ func TestReloadModel_EmptyID_KeepsCurrentWhenNoEnvFallback(t *testing.T) {
 	// (== the initial live id here) is (re-)applied.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{})
 
-	// Then the configured id is retained (no overwrite to empty).
+	// Then the configured id is reported (no overwrite to empty).
 	require.NoError(t, err)
 	assert.Equal(t, "model-current", resp.GetAuthorizationModelId())
-	assert.Equal(t, "model-current", h.currentModelID)
 }
 
 func TestReloadModel_EmptyID_FallsBackToInjectedDefault(t *testing.T) {
@@ -115,10 +119,9 @@ func TestReloadModel_EmptyID_FallsBackToInjectedDefault(t *testing.T) {
 	// When ReloadModel is called with an empty request id.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{})
 
-	// Then the INJECTED default is adopted — the divergent env value is ignored.
+	// Then the INJECTED default is reported — the divergent env value is ignored.
 	require.NoError(t, err)
 	assert.Equal(t, "model-configured", resp.GetAuthorizationModelId())
-	assert.Equal(t, "model-configured", h.currentModelID)
 }
 
 // ── GetFGAStoreInfo ──────────────────────────────────────────────────────
@@ -194,32 +197,4 @@ func TestReadTuples_BackendUnavailable_OpaqueMessage(t *testing.T) {
 	msg := status.Convert(err).Message()
 	assert.Equal(t, "authz backend unavailable", msg)
 	assert.NotContains(t, strings.ToLower(msg), "fga-host.internal", "FGA host:port leaked into status message")
-}
-
-// ── ReloadModel concurrency ──────────────────────────────────────────────
-
-// concurrency-regression (audit r9): currentModelID is shared mutable state.
-// Concurrent ReloadModel calls read-modify-write it; without synchronization the
-// -race detector flags a data race. Deterministic under -race (no time.Sleep).
-func TestReloadModel_ConcurrentCalls_NoRace(t *testing.T) {
-	w := service.NewRelationProjector(&storeInfoFake{})
-	h := NewHandler(w, nil, "model-0")
-
-	const n = 32
-	var wg sync.WaitGroup
-	wg.Add(n)
-	start := make(chan struct{})
-	for i := 0; i < n; i++ {
-		go func() {
-			defer wg.Done()
-			<-start
-			_, _ = h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{
-				AuthorizationModelId: "model-x",
-			})
-		}()
-	}
-	close(start)
-	wg.Wait()
-
-	assert.Equal(t, "model-x", h.currentModelID)
 }

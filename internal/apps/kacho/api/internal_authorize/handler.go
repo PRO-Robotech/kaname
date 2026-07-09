@@ -19,7 +19,6 @@ package internal_authorize
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -44,24 +43,18 @@ type Handler struct {
 	iamv1.UnimplementedInternalAuthorizeServiceServer
 	writer *service.RelationProjector
 	ops    operations.Repo
-	// mu guards currentModelID: ReloadModel runs per-gRPC-goroutine and does a
-	// read-modify-write on it, so concurrent invocations would race without it.
-	mu sync.Mutex
-	// currentModelID — the live authorization_model_id; captured at process start
-	// from the injected config value and mutated by ReloadModel. Guarded by mu.
-	currentModelID string
-	// defaultModelID — the composition-root-configured model id (immutable). Used
-	// as the fallback for an empty ReloadModel request instead of a request-time
-	// os.Getenv read (which would drift from the model the process was started
-	// with, and scatters config access into the transport layer).
-	defaultModelID string
+	// modelID — the env-configured authorization_model_id the process is pinned
+	// to. Immutable for the process lifetime: the OpenFGA client captures this id
+	// at construction (composition root) and every Check/Write/ListObjects sends
+	// it; nothing re-reads a handler field at evaluation time. ReloadModel reports
+	// this id — it does NOT re-pin the live client (see ReloadModel).
+	modelID string
 }
 
 // NewHandler — builder. modelID is the composition-root-configured
-// authorization_model_id (the single source of truth), used both as the initial
-// live id and as the empty-request ReloadModel fallback.
+// authorization_model_id (the single source of truth) the process is pinned to.
 func NewHandler(writer *service.RelationProjector, ops operations.Repo, modelID string) *Handler {
-	return &Handler{writer: writer, ops: ops, currentModelID: modelID, defaultModelID: modelID}
+	return &Handler{writer: writer, ops: ops, modelID: modelID}
 }
 
 // WriteTuples — see iamv1.InternalAuthorizeServiceServer.
@@ -136,22 +129,18 @@ func (h *Handler) ReadTuples(ctx context.Context, req *iamv1.ReadTuplesRequest) 
 	}, nil
 }
 
-// ReloadModel — see iamv1.InternalAuthorizeServiceServer.
-func (h *Handler) ReloadModel(ctx context.Context, req *iamv1.ReloadModelRequest) (*iamv1.ReloadModelResponse, error) {
-	newID := req.GetAuthorizationModelId()
-	if newID == "" {
-		// Fall back to the composition-root-configured default (injected at
-		// construction) — NOT a request-time env read (config drift / layering).
-		newID = h.defaultModelID
-	}
-	h.mu.Lock()
-	if newID != "" {
-		h.currentModelID = newID
-	}
-	current := h.currentModelID
-	h.mu.Unlock()
+// ReloadModel — reports the live authorization_model_id the process is pinned to.
+//
+// The pin is env-configured (KACHO_IAM_OPENFGA_MODEL_ID) and captured by the
+// OpenFGA client at construction: every Check/Write/ListObjects sends that id for
+// the process lifetime. A runtime re-pin is NOT supported — adopting a new model
+// requires a process restart with the new env value. The caller-supplied
+// authorization_model_id is therefore advisory only; this RPC reports the id
+// currently in force and does not mutate live authz evaluation (doc-truthfulness:
+// the handler previously mutated a field no evaluation path ever read).
+func (h *Handler) ReloadModel(_ context.Context, _ *iamv1.ReloadModelRequest) (*iamv1.ReloadModelResponse, error) {
 	return &iamv1.ReloadModelResponse{
-		AuthorizationModelId: current,
+		AuthorizationModelId: h.modelID,
 		ReloadedAt:           shared.TimestampProto(time.Now().UTC()),
 	}, nil
 }
