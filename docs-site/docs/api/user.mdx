@@ -1,0 +1,182 @@
+---
+id: user
+sidebar_position: 4
+title: User
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# User
+
+**User** — человек-субъект платформы: сотрудник, которому выдаётся доступ. В модели Kachō User —
+это **проекция личности** из провайдера аутентификации (Ory Kratos) в пределах одного аккаунта.
+Один и тот же человек (одна Kratos-identity) может иметь несколько User-строк — по одной на
+каждый аккаунт, куда он приглашён. Пользователь — это то, к чему привязываются роли; сам вход
+(пароль / passkey) живёт в Kratos, а IAM хранит лишь снимок личности и её статус.
+
+Пользователи заводятся не через `Create`, а через **приглашение** (`Invite`) по email: backend
+создаёт `PENDING`-строку, которая становится `ACTIVE` при первом входе через Kratos с совпадением
+email.
+
+## Поля
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Внутренний идентификатор (префикс <code>usr</code>)</td></tr>
+    <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Kratos <code>sub</code>. Пусто для <code>PENDING</code> (ещё не входил)</td></tr>
+    <tr><td><code>email</code></td><td>string</td><td>output-only</td><td>Email (case-insensitive lookup)</td></tr>
+    <tr><td><code>displayName</code></td><td>string</td><td>output-only</td><td>Отображаемое имя (снимок из Kratos identity traits)</td></tr>
+    <tr><td><code>accountId</code></td><td>string</td><td>immutable</td><td>Аккаунт-scope: каждая User-строка принадлежит ровно одному аккаунту</td></tr>
+    <tr><td><code>inviteStatus</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>BLOCKED</code></td></tr>
+    <tr><td><code>invitedBy</code></td><td>string</td><td>output-only</td><td>User.id пригласившего (пусто для self-signup bootstrap)</td></tr>
+    <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64; User label-selectable для scoped-грантов</td></tr>
+    <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (RFC 3339, усечён до секунд)</td></tr>
+  </tbody>
+</table>
+
+### Значения inviteStatus
+
+<table>
+  <thead><tr><th>Значение</th><th>Смысл</th></tr></thead>
+  <tbody>
+    <tr><td><code>PENDING</code></td><td>Приглашён, ещё ни разу не входил (<code>externalId</code> пуст)</td></tr>
+    <tr><td><code>ACTIVE</code></td><td>Вошёл через Kratos, <code>externalId</code> заполнен</td></tr>
+    <tr><td><code>BLOCKED</code></td><td>Доступ отключён администратором</td></tr>
+  </tbody>
+</table>
+
+## Методы
+
+`UserService` — чтение (`Get`/`List`), приглашение (`Invite`), обновление меток (`Update`),
+удаление (`Delete`) и журнал операций. Классического `Create` нет — пользователи появляются
+только через `Invite`.
+
+### Get — получить пользователя
+
+<ApiOperation method="GET" endpoint="/iam/v1/users/{user_id}">
+
+Возвращает пользователя по идентификатору. Требует `v_get`.
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "usr_5m1p7rt4b9k3d",
+      "externalId": "ory:kratos:9f2c…",
+      "email": "dev@acme.example",
+      "displayName": "Dev One",
+      "accountId": "acc_2k9f3qw8x7m2n",
+      "inviteStatus": "ACTIVE",
+      "createdAt": "2026-06-24T10:00:00Z"
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### List — список пользователей аккаунта
+
+<ApiOperation method="GET" endpoint="/iam/v1/users">
+
+Возвращает пользователей аккаунта, **видимых вызывающему** (default-deny через scope-filter,
+не 403): handler оставляет только пользователей аккаунтов, где вызывающий — участник. Обычному
+пользователю `accountId` обязателен; поддерживает `filter` по `email` / `externalId` /
+`inviteStatus`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/users?accountId=acc_2k9f3qw8x7m2n&pageSize=50' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+:::note Пользователь всегда видит себя
+Вызывающий всегда присутствует в результате `List` своего аккаунта (self-floor) даже без явной
+роли — иначе он не смог бы найти собственную запись.
+:::
+
+</ApiOperation>
+
+### Invite — пригласить пользователя
+
+<ApiOperation method="POST" endpoint="/iam/v1/users:invite" async>
+
+Приглашает пользователя по email: создаётся `PENDING`-строка. Идемпотентно — повторное
+приглашение уже приглашённого возвращает `Operation` без дублирования. Опционально — сразу
+выдать роль на проекте (`projectId` + `roleId`), тогда AccessBinding создаётся атомарно.
+Требует `editor` на аккаунте. Асинхронно (`response: User`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/users:invite' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "accountId": "acc_2k9f3qw8x7m2n",
+            "email": "dev@acme.example",
+            "displayName": "Dev One"
+          }'
+  `}
+</CodeBlock>
+
+`Operation.metadata` (`InviteUserMetadata`) несёт `magicLinkUrl` — recovery/magic-link Kratos,
+который админ передаёт приглашённому вручную (автоотправка email не интегрирована). Для
+повторного приглашения уже активного пользователя ссылка пустая.
+
+</ApiOperation>
+
+### Update — изменить метки пользователя
+
+<ApiOperation method="PATCH" endpoint="/iam/v1/users/{user_id}" async>
+
+Единственное mutable-поле — `labels` (делает пользователя label-selectable наравне с
+account/project). Identity-поля (`externalId` и прочие, проецируемые из IdP) hard-immutable: их
+наличие в `updateMask` → `INVALID_ARGUMENT` (`"<field> is immutable after User.Create"`).
+Требует `v_update`. Асинхронно.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X PATCH 'http://localhost:18080/iam/v1/users/usr_5m1p7rt4b9k3d' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "updateMask": "labels", "labels": { "team": "platform" } }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Delete — удалить пользователя
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/users/{user_id}" async>
+
+Удаляет пользователя. Требует `v_delete`. Асинхронно.
+
+</ApiOperation>
+
+### ListOperations — операции над пользователем
+
+<ApiOperation method="GET" endpoint="/iam/v1/users/{user_id}/operations">
+
+Возвращает операции над пользователем. Sync, курсорная пагинация. Требует `v_list`.
+
+</ApiOperation>
+
+## Ошибки и граничные случаи
+
+<table>
+  <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td>Get/Update/Delete несуществующего пользователя</td><td><code>NOT_FOUND</code></td><td><code>"User &lt;id&gt; not found"</code></td></tr>
+    <tr><td>Identity-поле в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"&lt;field&gt; is immutable after User.Create"</code></td></tr>
+    <tr><td>Invite без <code>editor</code> на аккаунте</td><td><code>PERMISSION_DENIED</code></td><td>Приглашать может только editor/admin аккаунта</td></tr>
+    <tr><td>List без <code>accountId</code> (обычный пользователь)</td><td><code>INVALID_ARGUMENT</code></td><td>Scope-фильтр требует аккаунт</td></tr>
+  </tbody>
+</table>
+
+:::tip Активация при первом входе
+Приглашённый пользователь становится `ACTIVE` автоматически при первом успешном входе через
+Kratos: hook сопоставляет email и заполняет `externalId`. Механика — на странице
+[Идентичность и токены](/architecture/identity).
+:::

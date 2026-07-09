@@ -1,0 +1,222 @@
+---
+id: getting-started
+sidebar_position: 2
+title: Быстрый старт
+---
+
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Быстрый старт
+
+Эта страница проводит от нуля до рабочей модели доступа: собрать бинарь и мигратор, накатить
+схему, запустить сервис, а затем пройти базовый сценарий — создать аккаунт, пригласить
+пользователя, объявить роль и привязать её. Все примеры используют нейтральные идентификаторы.
+
+:::info Что нужно
+Go-тулчейн (для сборки из исходников), доступный PostgreSQL и **OpenFGA** (ReBAC-хранилище).
+Для интерактивного входа и выпуска токенов дополнительно нужны Ory Kratos и Ory Hydra — в
+локальном стенде они поднимаются helm-umbrella. REST-примеры идут через `api-gateway` (порт
+указан как `18080` для локального стенда — подставьте свой).
+:::
+
+## 1. Собрать сервис и мигратор
+
+В репозитории две сборочные цели: API-сервер и отдельный бинарь миграций (`cmd/migrator`).
+
+<CodeBlock language="bash">
+  {dedent`
+    # API-сервер → bin/kacho-iam
+    make build
+
+    # мигратор → bin/kacho-migrator
+    make build-migrator
+  `}
+</CodeBlock>
+
+## 2. Накатить миграции
+
+Схема `kacho_iam` создаётся набором goose-миграций: таблицы аккаунтов, проектов, пользователей,
+сервис-аккаунтов, групп (+ `group_members`), ролей, привязок доступа, а также audit-outbox и
+`fga_register_outbox` (материализация tuple'ов в OpenFGA). Мигратор — отдельный бинарь.
+
+<CodeBlock language="bash">
+  {dedent`
+    # применить все миграции (up)
+    KACHO_IAM_DB_PASSWORD=secret bin/kacho-migrator up
+
+    # посмотреть текущий статус
+    KACHO_IAM_DB_PASSWORD=secret bin/kacho-migrator status
+  `}
+</CodeBlock>
+
+Те же шаги обёрнуты в Make-цели: `make migrate-up`, `make migrate-status`.
+
+:::note Подключение к БД
+Параметры задаются переменными `KACHO_IAM_DB_*` (хост, порт, пользователь, имя БД, sslmode).
+Полный список ключей — на странице [Конфигурация](/install/configuration).
+:::
+
+## 3. Запустить сервис
+
+API-сервер поднимает **несколько listener'ов**: публичный tenant-facing (`:9090`),
+cluster-internal (`:9091`, `InternalIAMService.Check` для peer-сервисов), listener хуков
+идентичности (`:9092`) и Prometheus-метрики (`:9095`). Для авторизации нужен доступный OpenFGA.
+
+<CodeBlock language="bash">
+  {dedent`
+    KACHO_IAM_DB_PASSWORD=secret \\
+    KACHO_IAM_OPENFGA_ENDPOINT=localhost:8080 \\
+    bin/kacho-iam serve
+  `}
+</CodeBlock>
+
+Production-режим обязывает mTLS на публичном и internal listener'ах и сконфигурированный
+OpenFGA — иначе сервис откажется стартовать (fail-closed, без «insecure downgrade»). Детали —
+[Конфигурация](/install/configuration).
+
+## 4. Создать аккаунт
+
+Аккаунт — верхнеуровневый tenant-контейнер. Создание — self-service: аутентифицированный
+пользователь заводит свой аккаунт, а `ownerUserId` должен совпадать с самим вызывающим
+(anti-hijacking). Мутация асинхронна — возвращает `Operation`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/accounts' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "name": "acme",
+            "description": "ACME production account",
+            "ownerUserId": "usr_5m1p7rt4b9k3d"
+          }'
+  `}
+</CodeBlock>
+
+Ответ — `Operation`; дождитесь `done=true` (поллинг `OperationService.Get`) и заберите
+созданный аккаунт из `response`:
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "iop_8b0c4d2e6f1a3",
+      "description": "create account acme",
+      "done": true,
+      "metadata": { "accountId": "acc_2k9f3qw8x7m2n" },
+      "response": {
+        "id": "acc_2k9f3qw8x7m2n",
+        "name": "acme",
+        "ownerUserId": "usr_5m1p7rt4b9k3d",
+        "createdAt": "2026-06-24T10:00:00Z"
+      }
+    }
+  `}
+</CodeBlock>
+
+## 5. Создать проект
+
+Проект — контейнер ресурсов внутри аккаунта. Создание требует отношения `editor` на аккаунте.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/projects' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "accountId": "acc_2k9f3qw8x7m2n", "name": "web-prod" }'
+  `}
+</CodeBlock>
+
+## 6. Пригласить пользователя
+
+Пользователи заводятся не через `Create`, а через **приглашение по email**: backend создаёт
+`PENDING`-строку, а `ACTIVE` она становится при первом входе через Kratos. Опционально можно
+сразу выдать роль на проекте (`projectId` + `roleId`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/users:invite' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "accountId": "acc_2k9f3qw8x7m2n",
+            "email": "dev@acme.example",
+            "displayName": "Dev One"
+          }'
+  `}
+</CodeBlock>
+
+`Operation.metadata` вернёт `magicLinkUrl` — recovery/magic-link Kratos, который админ
+передаёт приглашённому вручную (автоотправка email не интегрирована).
+
+## 7. Объявить кастомную роль
+
+Роль — набор `rules[]`: каждое правило — однородный грант «глаголы × ресурсы» ровно одного
+модуля, опционально суженный по id (`resourceNames`) или меткам (`matchLabels`). Пример:
+роль-читатель VPC-сетей.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/roles' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "accountId": "acc_2k9f3qw8x7m2n",
+            "name": "vpc-viewer",
+            "description": "Read-only VPC networks",
+            "rules": [
+              { "module": "vpc", "resources": ["networks"], "verbs": ["get", "list"] }
+            ]
+          }'
+  `}
+</CodeBlock>
+
+Готовый каталог тоже есть: **system-роли** (например `viewer` / `editor` / `admin` на нужном
+уровне) seed'ятся миграциями и доступны через `RoleService.List` без создания своих.
+
+## 8. Привязать роль к субъекту
+
+AccessBinding соединяет субъект (User / ServiceAccount / Group) с ролью на выбранном уровне
+иерархии (`scopeRef.tier` = CLUSTER / ACCOUNT / PROJECT). Пример: выдать роль `vpc-viewer`
+пользователю на проекте.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/accessBindings' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "subjects": [ { "type": "SUBJECT_TYPE_USER", "id": "usr_5m1p7rt4b9k3d" } ],
+            "roleId": "rol_6t4v9x2k8m1p5",
+            "scopeRef": { "tier": "PROJECT", "id": "prj_7d3h5j9q2w4e6" }
+          }'
+  `}
+</CodeBlock>
+
+:::tip Grant-latency — проверяйте через poll-retry
+После создания привязки решение доступа материализуется в OpenFGA не мгновенно (пропагация
+~0.6–2 c). Если сразу за `Create` вызвать authz-filtered `List` или `AuthorizeService.Check`,
+результат может ещё не отражать грант — используйте poll-retry, а не мгновенный assert.
+:::
+
+## 9. Проверить, что видит пользователь
+
+`WhoAmI` возвращает личность вызывающего и снимок прав (cluster-флаги + членство в аккаунтах) —
+удобно для bootstrap UI. `AuthorizeService.Check` отвечает на точечный вопрос «можно ли».
+
+<CodeBlock language="bash">
+  {dedent`
+    # кто я и что вижу
+    curl 'http://localhost:18080/iam/v1/me' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+## Дальше
+
+- Конвенции, порты, формат ошибок и пагинация — [Обзор API](/api/overview).
+- Модель прав (ReBAC, verb-bearing отношения, scope) — [Авторизация](/architecture/authz).
+- Личности и токены (Kratos / Hydra) — [Идентичность и токены](/architecture/identity).
+- Поля и все методы ресурсов — [Account](/api/account) … [AccessBinding](/api/access-binding).
+- Конфигурация и развёртывание — [Конфигурация](/install/configuration) и
+  [Развёртывание](/install/deploy).

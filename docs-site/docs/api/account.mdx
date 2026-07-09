@@ -1,0 +1,198 @@
+---
+id: account
+sidebar_position: 2
+title: Account
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Account
+
+**Account** — верхнеуровневый tenant-контейнер платформы Kachō. Это «организационная единица»,
+которая владеет проектами, кастомными ролями, группами и сервис-аккаунтами. Аккаунт — корень
+иерархии владения (`Account → Project`); почти все прочие ресурсы IAM живут в его пределах.
+Каждый аккаунт имеет ровно одного **владельца** (`ownerUserId`) — пользователя-администратора,
+получающего полный доступ к содержимому аккаунта.
+
+Аккаунт создаётся **self-service**: аутентифицированный пользователь заводит собственный аккаунт,
+и `ownerUserId` обязан совпадать с самим вызывающим (защита от захвата чужого владения).
+
+## Поля
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор аккаунта (префикс <code>acc</code>)</td></tr>
+    <tr><td><code>name</code></td><td>string</td><td>mutable</td><td>Уникальное в домене имя, 3–63 симв., <code>&#91;a-z&#93;(&#91;-a-z0-9&#93;&#123;0,61&#125;&#91;a-z0-9&#93;)?</code></td></tr>
+    <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов</td></tr>
+    <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64; аккаунт label-selectable для scoped-грантов</td></tr>
+    <tr><td><code>ownerUserId</code></td><td>string</td><td>immutable</td><td>User-владелец (админ аккаунта). Задаётся при Create, не меняется</td></tr>
+    <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (RFC 3339, усечён до секунд)</td></tr>
+  </tbody>
+</table>
+
+## Методы
+
+`AccountService` — стандартный CRUD (`Create`/`Update`/`Delete` асинхронны, возвращают
+`Operation`; `Get`/`List` синхронны) плюс два read-RPC для журнала операций.
+
+### Get — получить аккаунт
+
+<ApiOperation method="GET" endpoint="/iam/v1/accounts/{account_id}">
+
+Возвращает аккаунт по идентификатору. Требует отношение `v_get`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "acc_2k9f3qw8x7m2n",
+      "name": "acme",
+      "description": "ACME production account",
+      "ownerUserId": "usr_5m1p7rt4b9k3d",
+      "createdAt": "2026-06-24T10:00:00Z"
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### List — список аккаунтов
+
+<ApiOperation method="GET" endpoint="/iam/v1/accounts">
+
+Возвращает аккаунты, **видимые вызывающему**. Это default-deny через scope-filter, а не 403:
+handler возвращает 200 и только те аккаунты, где вызывающий — участник (владелец / роль);
+пустой список, если участия нет. Поддерживает `filter` по `name`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/accounts?pageSize=50' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "accounts": [
+        { "id": "acc_2k9f3qw8x7m2n", "name": "acme", "ownerUserId": "usr_5m1p7rt4b9k3d", "createdAt": "2026-06-24T10:00:00Z" }
+      ],
+      "nextPageToken": ""
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Create — создать аккаунт
+
+<ApiOperation method="POST" endpoint="/iam/v1/accounts" async>
+
+Создаёт аккаунт. Self-service: `ownerUserId` обязан совпадать с вызывающим (иначе
+`INVALID_ARGUMENT`). `ownerUserId` должен ссылаться на существующего пользователя — иначе
+операция завершится `FAILED_PRECONDITION`. Асинхронно: ответ — `Operation` с `response: Account`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/accounts' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "name": "acme",
+            "description": "ACME production account",
+            "ownerUserId": "usr_5m1p7rt4b9k3d"
+          }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Update — изменить аккаунт
+
+<ApiOperation method="PATCH" endpoint="/iam/v1/accounts/{account_id}" async>
+
+Меняет изменяемые поля (`name`, `description`, `labels`) по `updateMask`. **`ownerUserId`
+immutable** — его наличие в `updateMask` вернёт `INVALID_ARGUMENT`
+(`"owner_user_id is immutable after Account.Create"`). Требует `v_update`. Асинхронно.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X PATCH 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "updateMask": "description", "description": "ACME prod (EU)" }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Delete — удалить аккаунт
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/accounts/{account_id}" async>
+
+Удаляет аккаунт. Если у аккаунта есть проекты — удаление блокируется `FAILED_PRECONDITION`
+(сначала удалите проекты). Требует `v_delete`. Асинхронно.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X DELETE 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### ListOperations — операции над аккаунтом
+
+<ApiOperation method="GET" endpoint="/iam/v1/accounts/{account_id}/operations">
+
+Возвращает операции над самим ресурсом Account (Create/Update/Delete этого аккаунта). Sync,
+курсорная пагинация. Требует `v_list`.
+
+</ApiOperation>
+
+### ListAllOperations — все операции аккаунта
+
+<ApiOperation method="GET" endpoint="/iam/v1/accounts/{account_id}/operations:all">
+
+Агрегированный журнал: **все** IAM-операции, чей владеющий ресурс принадлежит аккаунту
+(Account / Project / SA / Group + изменения членства + удаление пользователей +
+account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Требует `v_list`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n/operations:all?pageSize=50' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+## Ошибки и граничные случаи
+
+<table>
+  <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td>Get/Update/Delete несуществующего аккаунта</td><td><code>NOT_FOUND</code></td><td><code>"Account &lt;id&gt; not found"</code></td></tr>
+    <tr><td><code>ownerUserId</code> ≠ вызывающий при Create</td><td><code>INVALID_ARGUMENT</code></td><td>Self-service anti-hijacking</td></tr>
+    <tr><td><code>ownerUserId</code> ссылается на несуществующего User</td><td><code>FAILED_PRECONDITION</code></td><td>Проверяется в async-операции</td></tr>
+    <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"owner_user_id is immutable after Account.Create"</code></td></tr>
+    <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала удалить все проекты аккаунта</td></tr>
+    <tr><td>Нет нужного отношения</td><td><code>PERMISSION_DENIED</code></td><td>Authz-Check не прошёл</td></tr>
+  </tbody>
+</table>
+
+:::tip Владелец получает доступ автоматически
+При создании аккаунта владельцу заводится защищённая owner-привязка (`deletionProtection=true`),
+чтобы создатель не потерял доступ к своему аккаунту. Подробнее о привязках —
+[AccessBinding](/api/access-binding).
+:::

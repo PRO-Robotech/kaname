@@ -1,0 +1,223 @@
+---
+id: access-binding
+sidebar_position: 8
+title: AccessBinding
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# AccessBinding
+
+**AccessBinding** — это то, что *включает* доступ. Роль ([Role](/api/role)) описывает *что можно
+делать*, но пока она ни к кому не привязана, она бездействует. AccessBinding связывает три вещи:
+**субъект(ы)** (User / ServiceAccount / Group), **роль** и **уровень иерархии** (`scope`), на
+котором роль действует. Это единственный источник истины для грантов в домене IAM; в рантайме
+проверка доступа резолвится через OpenFGA-tuple'ы, которые IAM материализует из привязок.
+
+Одна привязка может содержать **несколько субъектов** (1–32) — тогда каждый получает независимый
+набор tuple'ов и независимую audit-линию (per-subject revoke/audit). Привязка несёт lifecycle
+(`status`), опциональную TTL (`expiresAt`), ABAC-условие (`conditionId` / `builtinCondition`),
+защиту от удаления (`deletionProtection`) и audit-метаданные.
+
+## Scope — уровень иерархии
+
+Каноническое поле scope — вложенное `scopeRef { tier, id }`:
+
+<table>
+  <thead><tr><th>tier</th><th>id-якорь</th><th>Смысл</th></tr></thead>
+  <tbody>
+    <tr><td><code>CLUSTER</code></td><td><code>cluster_kacho_root</code></td><td>Весь кластер (платформенный уровень)</td></tr>
+    <tr><td><code>ACCOUNT</code></td><td><code>acc…</code></td><td>Аккаунт и всё под ним</td></tr>
+    <tr><td><code>PROJECT</code></td><td><code>prj…</code></td><td>Конкретный проект</td></tr>
+  </tbody>
+</table>
+
+Wildcard-правила роли (без `resourceNames`/`matchLabels`) разворачиваются под этим якорем;
+concrete-правила (`resourceNames`) эмитят прямые per-object tuple'ы. Для обратной совместимости
+на входе допустима и «плоская» пара `resourceType` / `resourceId` — если заданы обе формы, они
+должны быть derived-эквивалентны, иначе `INVALID_ARGUMENT`. На чтении сервер заполняет **обе**
+формы (`scopeRef` и legacy-поля).
+
+## Поля
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор (префикс <code>acb</code>)</td></tr>
+    <tr><td><code>subjects</code></td><td>Subject[]</td><td>immutable</td><td>1–32 субъекта: <code>&#123; type, id &#125;</code> (USER / SERVICE_ACCOUNT / GROUP)</td></tr>
+    <tr><td><code>roleId</code></td><td>string</td><td>immutable</td><td>Привязанная роль</td></tr>
+    <tr><td><code>scopeRef</code></td><td>ScopeRef</td><td>immutable</td><td>Каноническая scope-пара <code>&#123; tier, id &#125;</code></td></tr>
+    <tr><td><code>status</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>REVOKED</code> (REVOKED — терминальный)</td></tr>
+    <tr><td><code>expiresAt</code></td><td>timestamp</td><td>immutable</td><td>Опц. жёсткий TTL; при истечении грант перестаёт действовать</td></tr>
+    <tr><td><code>conditionId</code> / <code>builtinCondition</code></td><td>string / enum</td><td>immutable</td><td>Опц. ABAC-условие (logical-oneof — не более одного)</td></tr>
+    <tr><td><code>deletionProtection</code></td><td>bool</td><td>mutable</td><td>Защита от удаления; owner-привязка ставит <code>true</code></td></tr>
+    <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки самого ресурса привязки</td></tr>
+    <tr><td><code>grantedByUserId</code></td><td>string</td><td>output-only</td><td>Кто создал привязку (audit)</td></tr>
+    <tr><td><code>revokedAt</code> / <code>revokedByUserId</code></td><td>timestamp / string</td><td>output-only</td><td>Когда и кем отозвана</td></tr>
+    <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (усечён до секунд)</td></tr>
+  </tbody>
+</table>
+
+`Subject.type` — закрытый enum: `SUBJECT_TYPE_USER` / `SUBJECT_TYPE_SERVICE_ACCOUNT` /
+`SUBJECT_TYPE_GROUP`; `id` — субъект с соответствующим префиксом (`usr…` / `sva…` / `grp…`).
+Условия (`builtinCondition`) — well-known каталог (MFA-freshness, TTL, IP-range, JIT-window,
+business-hours, device-attestation); см. [Модель авторизации](/architecture/authz#условия-abac).
+
+## Методы
+
+`AccessBindingService` — мутации (`Create`/`Update`/`Delete`, async) плюс **семь** read-RPC
+для разных срезов («кому что», «кто держит роль», «кто реально имеет доступ») и журнал операций.
+
+### Get — получить привязку
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings/{access_binding_id}">
+
+Возвращает привязку по идентификатору (полная dual-projection: и `subjects[]`/`scopeRef`, и
+legacy-поля). Требует `v_get`.
+
+</ApiOperation>
+
+### Create — создать привязку
+
+<ApiOperation method="POST" endpoint="/iam/v1/accessBindings" async>
+
+Создаёт привязку: (субъекты) + (роль) на (scope). Идемпотентный INSERT — дубль возвращает
+существующую. Авторизация — **grant-authority** на scope: владелец аккаунта-владельца ИЛИ FGA
+`admin` на объекте scope (проверяется в handler'е, а не на gateway, т.к. тип объекта зависит от
+запроса). admin/editor-роль на GROUP-субъект дополнительно требует grant-authority (group-guard).
+Асинхронно (`response: AccessBinding`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/accessBindings' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "subjects": [ { "type": "SUBJECT_TYPE_USER", "id": "usr_5m1p7rt4b9k3d" } ],
+            "roleId": "rol_6t4v9x2k8m1p5",
+            "scopeRef": { "tier": "PROJECT", "id": "prj_7d3h5j9q2w4e6" }
+          }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Update — изменить привязку
+
+<ApiOperation method="PATCH" endpoint="/iam/v1/accessBindings/{access_binding_id}" async>
+
+Меняет **только** `deletionProtection` и `labels` (по `updateMask`). Остальные поля
+(роль/субъекты/scope) immutable — привязка иначе пересоздаётся (Delete + Create). Типичное
+применение — снять защиту перед удалением защищённой привязки. Требует `v_update`. Асинхронно.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X PATCH 'http://localhost:18080/iam/v1/accessBindings/acb_1z5k9m3q7w2e4' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "updateMask": "deletion_protection", "deletionProtection": false }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Delete — удалить привязку
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/accessBindings/{access_binding_id}" async>
+
+Удаляет привязку (отзыв доступа). Если `deletionProtection=true` → `FAILED_PRECONDITION`
+(`"access binding <id> has deletion_protection enabled; clear it via Update before Delete"`) —
+сначала снять флаг через Update. Требует `v_delete`. Асинхронно.
+
+</ApiOperation>
+
+### Read-срезы
+
+Семь синхронных read-RPC отвечают на разные вопросы аудита доступа. Все — scope-filtered:
+вызывающий видит только строки на объектах, которые вправе читать.
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listByScope">
+
+**«Что привязано к этому scope»** — привязки на якоре (`resourceType`/`resourceId` =
+project|account|cluster). Требует `viewer` на scope.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listBySubject">
+
+**«Что назначено этому субъекту»** — привязки субъекта (`subjectType`/`subjectId`). Типичный
+паттерн — self-list (subject = вызывающий). Cluster-scoped gate.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listSubjectPrivileges">
+
+**«Привилегии субъекта, с именами ролей»** — обогащённые привязки User/ServiceAccount: имя роли
+резолвится server-side (JOIN, без N+1). Авторизация — self ИЛИ account-admin домашнего аккаунта
+субъекта; cross-account → 403. Well-formed-но-нет субъект → `NOT_FOUND`.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listAssignableRoles">
+
+**«Какие роли можно выдать здесь»** — роли, которые `Create` принял бы на
+(`resourceType`, `resourceId`). Один предикат `isRoleAssignable` разделяют этот RPC и
+enforcement Create («что показано» == «что можно создать»). Каждая роль помечена `scopeGroup`
+(SYSTEM / ACCOUNT / PROJECT) для группировки в UI.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listByRole">
+
+**«Кто держит роль R»** — привязки, несущие данную роль (audit). Scope-filtered; сортировка
+`(createdAt, id)` ASC, keyset-пагинация.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings:expandAccess">
+
+**«Кто реально имеет доступ»** — раскрывает userset на объекте+отношении в конкретных
+принципалов: резолвит членство групп (group → members) в USER/SERVICE_ACCOUNT. Закрывает
+audit-пробел «привязка на GROUP показывает лишь группу, а не её текущих членов». Viewer-floor.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/accounts/{account_id}/accessBindings">
+
+**`ListByAccount`** — все привязки аккаунта (по всем субъектам): напрямую на аккаунт плюс на
+каждый его проект. Требует `admin` на аккаунте (админ видит всех, включая тех, кого не он
+выдавал). Фильтры: `subjectTypeFilter`, `includeRevoked` (по умолчанию false). Требует `v_list`.
+
+</ApiOperation>
+
+### ListOperations — операции над привязкой
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings/{access_binding_id}/operations">
+
+Возвращает операции над привязкой. Sync. Требует `v_list`.
+
+</ApiOperation>
+
+## Ошибки и граничные случаи
+
+<table>
+  <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td>Get/Delete несуществующей привязки</td><td><code>NOT_FOUND</code></td><td><code>"AccessBinding &lt;id&gt; not found"</code></td></tr>
+    <tr><td>Create дубля (same subject+role+scope)</td><td>— (idempotent)</td><td>Возвращает существующую привязку</td></tr>
+    <tr><td>Delete привязки с <code>deletionProtection=true</code></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала снять флаг через Update</td></tr>
+    <tr><td>Create без grant-authority на scope</td><td><code>PERMISSION_DENIED</code></td><td>Нужен owner/admin на объекте scope</td></tr>
+    <tr><td>Пустой / &gt;32 <code>subjects[]</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument subjects (must be 1..32)"</code></td></tr>
+    <tr><td>Immutable-поле (role/subjects/scope) в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td>Мутабельны только <code>deletion_protection</code> и <code>labels</code></td></tr>
+    <tr><td><code>scopeRef</code> и legacy-пара не эквивалентны</td><td><code>INVALID_ARGUMENT</code></td><td>Обе формы scope должны быть derived-эквивалентны</td></tr>
+  </tbody>
+</table>
+
+:::tip Отзыв доступа = удалить привязку
+Чтобы забрать доступ, удалите привязку (или снимите субъект из multi-subject-привязки —
+пересозданием). Снятие метки со scope, по которому доступ был выдан через `matchLabels`, тоже
+отзывает грант — метка перестаёт матчить правило. Поэтому изменение меток аккаунта/проекта —
+security-значимая операция.
+:::
