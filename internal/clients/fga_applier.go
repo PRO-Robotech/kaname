@@ -148,7 +148,7 @@ func isFGAPermanentMsg(msg string) bool {
 	return containsAny(msg,
 		// OpenFGA validation-error markers.
 		"validation_error", "validation_failed",
-		"type_not_found", "type 'is undefined", "is undefined in the authorization model",
+		"type_not_found", "is undefined in the authorization model",
 		"relation_not_found", "relation is undefined",
 		"invalid_input",
 		// Generic 400 marker — last-resort. Comes AFTER the explicit

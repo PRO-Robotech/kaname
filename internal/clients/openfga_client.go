@@ -119,9 +119,18 @@ func (c *OpenFGAHTTPClient) Check(ctx context.Context, subject, relation, object
 		//: a 400 is a client-side validation error (relation absent
 		// on the object type, typed-wildcard object, ...) — such a Check can
 		// never resolve, so it is a clean DENY, not an outage.
+		// Drain (capped) before Close so the keep-alive connection returns to
+		// the idle pool instead of being torn down — mirrors the sibling
+		// writeOrDelete / listUsersOfType drain paths. Critical on the hot
+		// authz path: a degraded OpenFGA emitting a burst of 400s must not also
+		// churn fresh TCP connections (fd + TLS/handshake pressure).
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
+		// Same drain-for-reuse rationale as the 400 branch above: a degraded
+		// OpenFGA returning 5xx on every Check must not churn connections.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return false, fmt.Errorf("openfga check: status %d", resp.StatusCode)
 	}
 	var r openfgaCheckResponse
