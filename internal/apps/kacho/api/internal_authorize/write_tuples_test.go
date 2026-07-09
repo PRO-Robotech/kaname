@@ -150,6 +150,40 @@ func TestWriteTuples_BatchTooLarge_InvalidArgument(t *testing.T) {
 	ops.mu.Unlock()
 }
 
+// TestWriteTuples_CombinedBatchTooLarge_InvalidArgument — OpenFGA's
+// maxTuplesPerWrite (100) caps writes+deletes COMBINED per /write request, and
+// the admin WriteRaw path (WriteConditionalTuples) does NOT chunk. A batch that
+// stays ≤100 in each direction but exceeds 100 combined (here 60 writes + 60
+// deletes = 120) must therefore be rejected synchronously — otherwise it is sent
+// as one over-limit request that OpenFGA rejects wholesale (400 validation_error),
+// applying NONE of the tuples, and the Operation fails opaquely.
+func TestWriteTuples_CombinedBatchTooLarge_InvalidArgument(t *testing.T) {
+	ops := newWTFakeOps()
+	h := NewHandler(service.NewRelationProjector(&capturingRelWriter{}), ops, "model-x")
+
+	writes := make([]*iamv1.Tuple, 60)
+	for i := range writes {
+		writes[i] = tuple("user:usr_x", "owner", "account:acc_x")
+	}
+	deletes := make([]*iamv1.Tuple, 60)
+	for i := range deletes {
+		deletes[i] = tuple("user:usr_y", "viewer", "account:acc_x")
+	}
+
+	op, err := h.WriteTuples(context.Background(), &iamv1.WriteTuplesRequest{
+		Writes:  writes,
+		Deletes: deletes,
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, op)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	// No Operation must have been created for a rejected batch.
+	ops.mu.Lock()
+	assert.Empty(t, ops.ops, "no Operation should be created on sync rejection")
+	ops.mu.Unlock()
+}
+
 // TestWriteTuples_OpsCreateFails_OpaqueInternal — when the operations.Repo
 // Create fails, the handler must return a FIXED opaque INTERNAL message and
 // never echo the underlying error text (which could carry pgx/DB driver detail).

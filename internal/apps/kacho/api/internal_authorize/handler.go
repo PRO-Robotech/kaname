@@ -64,8 +64,13 @@ func NewHandler(writer *service.RelationProjector, ops operations.Repo, modelID 
 func (h *Handler) WriteTuples(ctx context.Context, req *iamv1.WriteTuplesRequest) (*operationpb.Operation, error) {
 	writes := protoTuplesToInternal(req.GetWrites())
 	deletes := protoTuplesToInternal(req.GetDeletes())
-	if len(writes) > 100 || len(deletes) > 100 {
-		return nil, status.Error(codes.InvalidArgument, "Illegal argument writes/deletes: ≤100 per batch")
+	// OpenFGA's maxTuplesPerWrite (100) caps writes+deletes COMBINED per /write
+	// request, and this admin path (writer.WriteRaw → WriteConditionalTuples) does
+	// NOT chunk — so the guard must count both directions together, not each ≤100
+	// independently (60+60 would pass a per-direction guard yet be rejected wholesale
+	// by OpenFGA as a single 121-tuple request).
+	if len(writes)+len(deletes) > 100 {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument writes/deletes: ≤100 combined per batch")
 	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,

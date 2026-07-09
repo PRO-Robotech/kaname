@@ -194,8 +194,9 @@ func (c *OpenFGAHTTPClient) listUsersOfType(ctx context.Context, objectType, obj
 }
 
 // ListSubjects — OpenFGA does not expose a 1:1 ListSubjects in stable
-// upstream; this client implements it via filtered Read + cascade-resolve.
-// Returns direct + group-expanded subjects.
+// upstream; this client implements it via a filtered Read on the exact
+// (object, relation) node. Returns ONLY the direct-tuple subjects — no group
+// or cascade expansion.
 //
 // DEPRECATED for principal-resolution: a flat Read sees only literal tuples on
 // the exact (object, relation) node — it does NOT traverse computed usersets /

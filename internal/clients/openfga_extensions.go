@@ -42,8 +42,11 @@ type RelationQueries interface {
 	// the subject has `relation` on, within `objectType`.
 	ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error)
 
-	// ListSubjects — inverse of ListObjects; returns subjects directly
-	// assigned + cascaded; group expansion is handled by FGA.
+	// ListSubjects — inverse of ListObjects. Returns ONLY the subjects on the
+	// literal (object, relation) tuple: a flat /read that does NOT traverse
+	// computed-userset cascades (admin⇒editor⇒viewer), scope_grant indirection
+	// or group#member usersets. For the effective (graph-expanded) principal set
+	// use ExpandRelations / ListUsers (see openfga_list.go).
 	ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error)
 
 	// Expand — Zanzibar userset tree for (object, relation).

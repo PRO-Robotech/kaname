@@ -136,9 +136,13 @@ func (c *OpenFGAHTTPClient) Check(ctx context.Context, subject, relation, object
 // reconciler's create-path synchronous write (reconcile.applyAfterCommit) batches the
 // entire tuple-set of one ReconcileObject pass, which exceeds 100 when the object is
 // matched by multiple bounded `*.*` ARM_ANCHOR bindings on a populated account (the
-// iam-access-binding read-after-write tail, #232). Chunking here keeps every batch
-// caller (sync-FGA + admin WriteRaw) under the wire limit; the async fga_outbox drainer
-// already applies row-by-row, so it is unaffected. Set to exactly OpenFGA's documented
+// iam-access-binding read-after-write tail, #232). Chunking here keeps the sync-FGA
+// reconciler path (WriteTuples/DeleteTuples) under the wire limit; the async fga_outbox
+// drainer already applies row-by-row, so it is unaffected. The admin WriteRaw path
+// (WriteConditionalTuples) does NOT chunk — it is bounded instead by the
+// InternalAuthorize.WriteTuples handler's per-batch guard, which must count
+// writes+deletes COMBINED against this same wire cap (OpenFGA's maxTuplesPerWrite counts
+// both directions in one request). Set to exactly OpenFGA's documented
 // default (100); the deploy does not lower the server limit (no maxTuplesPerWrite
 // override in the umbrella chart).
 const maxTuplesPerWriteRequest = 100
