@@ -1,16 +1,24 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// interceptor.go — gRPC unary/stream interceptor for kacho-iam, a minimal
-// anti-anonymous gate in front of every mutating RPC. Until the full
-// OpenFGA Check with permission_map is in place, this is the sole defence
-// against anonymous mutation of Account/Project/AccessBinding/Group/SA/
+// interceptor.go — gRPC unary/stream interceptor for kacho-iam, a
+// defence-in-depth anti-anonymous floor in front of every mutating RPC.
+//
+// This is NOT the platform's per-user PDP: the api-gateway is the single
+// authZ front door — it validates the JWT and runs per-user ReBAC via
+// iam.Check with the permission catalogue (seed.LoadPermissionRegistry).
+// iam does NOT re-ReBAC the end user on its own listeners (see serve.go
+// "iam does NOT re-ReBAC the end user here"). This gate exists only to
+// fail closed against an *unauthenticated* principal reaching a mutating
+// RPC (defence-in-depth against a mis-wired listener / direct dial),
+// blocking anonymous mutation of Account/Project/AccessBinding/Group/SA/
 // Role/custom-Role-with-iam.*.* resources.
 //
 // Policy: default-deny anonymous unless (a) FullMethod is in
 // whitelistFullMethod, or (b) the method-name ends in a read-only suffix
-// (Get/List/Watch/Resolve/BatchGet/Search/Check/Whoami). Read paths apply
-// scope-filtering inside the use-case itself.
+// (Get/List/Watch/Resolve/BatchGet/Search/Check/Whoami). Object-scoped
+// authZ and read-path scope-filtering live inside the use-cases; this gate
+// does not attempt them.
 
 package authzguard
 
