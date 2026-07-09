@@ -268,6 +268,40 @@ func TestAuthorize_BatchCheck_PerItemFailureDoesNotAbort(t *testing.T) {
 	}
 }
 
+// TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak — a transient
+// FGA-transport failure (the inner err carries the OpenFGA endpoint+store id,
+// like a *url.Error `Post "http://fga:8080/stores/<id>/check": dial tcp ...`)
+// must NOT be collapsed into a per-item deny_reason: that (a) leaks infra
+// topology onto a user-facing surface and (b) mis-signals a transient outage as
+// a permanent deny. BatchCheck must mirror the standalone Check sibling and fail
+// the whole batch with iamerr.ErrUnavailable (handler → retryable gRPC
+// Unavailable, empty responses), never surfacing the raw text as a deny_reason.
+func TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak(t *testing.T) {
+	const fgaTransportLeak = `Post "http://fga.internal:8080/stores/01ABC/check": dial tcp 10.0.0.5:8080: connect: connection refused`
+	svc := NewAuthorizeService(AuthorizeServiceConfig{
+		Relations: &mockRelations{checkErr: errors.New(fgaTransportLeak)},
+	})
+	results, err := svc.BatchCheck(context.Background(), []CheckRequest{
+		{Subject: "user:usr_alice", Resource: ResourceRef{Type: "x", ID: "1"}, Action: "x.x.list"},
+	})
+	if err == nil {
+		t.Fatalf("expected whole-batch failure on FGA-unavailable; got results=%v err=nil", results)
+	}
+	if !errors.Is(err, iamerr.ErrUnavailable) {
+		t.Errorf("expected ErrUnavailable sentinel (retryable, fail-closed); got %v", err)
+	}
+	if results != nil {
+		t.Errorf("expected nil results on whole-batch failure; got %v", results)
+	}
+	for _, r := range results {
+		for _, dr := range r.DenyReasons {
+			if strings.Contains(dr, "fga.internal") || strings.Contains(dr, "10.0.0.5") {
+				t.Errorf("LEAK: deny_reason surfaces FGA transport detail: %q", dr)
+			}
+		}
+	}
+}
+
 func TestAuthorize_BatchCheck_TooLarge(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{checkResp: true},

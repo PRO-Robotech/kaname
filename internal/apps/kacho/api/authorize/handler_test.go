@@ -198,6 +198,9 @@ const fgaSecret = "openfga-store-id=01ABCDEF backend=http://fga.internal:8080"
 // schema-free message instead of forwarding err.Error() verbatim.
 type errFGA struct{ stubFGA }
 
+func (e *errFGA) CheckWithContext(context.Context, string, string, string, map[string]any) (bool, error) {
+	return false, stderrors.New(fgaSecret)
+}
 func (e *errFGA) ListObjects(context.Context, string, string, string, map[string]any, int) ([]string, error) {
 	return nil, stderrors.New(fgaSecret)
 }
@@ -262,6 +265,34 @@ func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
 				t.Errorf("message = %q; want fixed redacted text", st.Message())
 			}
 		})
+	}
+}
+
+// TestHandler_BatchCheck_RedactsBackendUnavailable — when the FGA backend is
+// unavailable mid-batch, the failing check must surface as codes.Unavailable
+// with the FIXED "authorization backend unavailable" text (mirroring the
+// standalone Check sibling), NOT as a per-item Allowed=false whose deny_reason
+// echoes the raw transport error (store id / endpoint leak) nor as a misleading
+// permanent Internal/PermissionDenied.
+func TestHandler_BatchCheck_RedactsBackendUnavailable(t *testing.T) {
+	h := newHandlerWithAuthorizer(&errFGA{})
+	resp, err := h.BatchCheck(context.Background(), &iamv1.BatchAuthorizeCheckRequest{
+		Checks: []*iamv1.AuthorizeCheckRequest{
+			{Subject: "user:x", Resource: &iamv1.ResourceRef{Type: "y", Id: "1"}, Action: "x.x.list"},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected whole-batch Unavailable; got resp=%v err=nil", resp)
+	}
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Unavailable {
+		t.Errorf("code = %v; want Unavailable (retryable, fail-closed)", st.Code())
+	}
+	if strings.Contains(st.Message(), fgaSecret) {
+		t.Errorf("LEAK: client message %q contains raw backend detail", st.Message())
+	}
+	if st.Message() != "authorization backend unavailable" {
+		t.Errorf("message = %q; want fixed redacted text", st.Message())
 	}
 }
 

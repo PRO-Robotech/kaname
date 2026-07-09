@@ -164,6 +164,13 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 		if strings.HasPrefix(err.Error(), "Illegal argument") {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
+		// Backend-unavailable fails the whole batch (mirror Check): surface a
+		// retryable Unavailable with the fixed redacted text, never the raw FGA
+		// transport error (endpoint/store id leak).
+		if stderrors.Is(err, iamerr.ErrUnavailable) {
+			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "BatchCheck", "err", err.Error())
+			return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
+		}
 		slog.ErrorContext(ctx, "authorize internal error", "op", "BatchCheck", "err", err.Error())
 		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}

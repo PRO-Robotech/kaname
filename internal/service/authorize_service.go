@@ -33,6 +33,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -437,8 +438,19 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	for i, r := range reqs {
 		res, err := s.check(ctx, r, caMemo)
 		if err != nil {
-			// Per-item failure surfaces as allowed=false + deny=[err]; the
-			// whole batch does NOT fail.
+			// An FGA-backend-unavailable failure is NOT a per-item deny: mirror
+			// the standalone Check sibling and fail the WHOLE batch with the
+			// ErrUnavailable sentinel (handler → retryable gRPC Unavailable with a
+			// fixed redacted message). Collapsing it into a deny_reason would leak
+			// the raw OpenFGA transport error (endpoint host:port + store id) onto
+			// a user-facing surface AND mis-signal a transient outage as a
+			// permanent 403 (security.md hardening-invariant #1).
+			if errors.Is(err, iamerr.ErrUnavailable) {
+				return nil, err
+			}
+			// Genuine per-item validation failure (e.g. "Illegal argument …",
+			// deterministic + leak-free) surfaces as allowed=false + deny=[err];
+			// the whole batch does NOT fail.
 			out[i] = &CheckResult{
 				Allowed:     false,
 				DenyReasons: []string{err.Error()},
