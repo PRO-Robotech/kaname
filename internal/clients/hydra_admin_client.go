@@ -4,7 +4,7 @@
 // hydra_admin_client.go — client for the Ory Hydra Admin API.
 //
 // Endpoints:
-//   - POST   /admin/keys/<set>          — publish new key (JWK).
+//   - PUT    /admin/keys/<set>          — publish new key (JWK) (create-or-update keyset).
 //   - DELETE /admin/keys/<set>/<kid>    — delete key.
 //
 // Used by JWKSRotationService to sync the Kachō JWKS table with Hydra
@@ -58,8 +58,8 @@ func NewHydraAdminClient(baseURL, bearerToken string) *HydraAdminClient {
 
 // PublishKey реализует service.JWKSPublisher.
 //
-// Конвертирует PEM-formatted public key в JWK (per RFC 7517) и POST'ит в Hydra
-// admin /admin/keys/<set>.
+// Конвертирует PEM-formatted public key в JWK (per RFC 7517) и PUT'ит в Hydra
+// admin /admin/keys/<set> (create-or-update keyset).
 func (c *HydraAdminClient) PublishKey(ctx context.Context, alg domain.JWKSAlg, kid string, publicKeyPEM string) error {
 	jwk, err := publicKeyPEMToJWK(alg, kid, publicKeyPEM)
 	if err != nil {
