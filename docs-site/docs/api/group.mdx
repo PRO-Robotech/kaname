@@ -1,0 +1,177 @@
+---
+id: group
+sidebar_position: 6
+title: Group
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Group
+
+**Group** — набор субъектов (пользователей и/или сервис-аккаунтов) внутри аккаунта, которым роль
+выдаётся **оптом**. Вместо того чтобы привязывать роль к каждому человеку по отдельности, роль
+привязывается к группе — и её получают все текущие члены. Добавили нового члена — он сразу
+наследует все гранты группы; удалили — теряет их. Это основной инструмент управления доступом
+на масштабе: команды, отделы, роли-по-функции.
+
+Члены группы хранятся отдельно (`group_members`) и меняются через `AddMember` / `RemoveMember`.
+
+## Поля
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор (префикс <code>grp</code>)</td></tr>
+    <tr><td><code>accountId</code></td><td>string</td><td>immutable</td><td>Аккаунт-владелец</td></tr>
+    <tr><td><code>name</code></td><td>string</td><td>mutable</td><td>Имя, уникальное в аккаунте, 3–63 симв.</td></tr>
+    <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов</td></tr>
+    <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64</td></tr>
+    <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (RFC 3339, усечён до секунд)</td></tr>
+  </tbody>
+</table>
+
+Член группы (`GroupMember`) описывается тройкой: `memberType` (`"user"` | `"service_account"`),
+`memberId` и `addedAt`.
+
+## Методы
+
+`GroupService` — CRUD (`Create`/`Update`/`Delete` async; `Get`/`List` sync) + управление
+членством (`AddMember` / `RemoveMember` / `ListMembers`) + журнал операций.
+
+### Get / List
+
+<ApiOperation method="GET" endpoint="/iam/v1/groups/{group_id}">
+
+Возвращает группу по идентификатору. Требует `v_get`.
+
+</ApiOperation>
+
+<ApiOperation method="GET" endpoint="/iam/v1/groups">
+
+Возвращает группы аккаунта, **видимые вызывающему** (default-deny через scope-filter, не 403).
+Обязателен `accountId`; поддерживает `filter` по `name`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/groups?accountId=acc_2k9f3qw8x7m2n&pageSize=50' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Create — создать группу
+
+<ApiOperation method="POST" endpoint="/iam/v1/groups" async>
+
+Создаёт группу в аккаунте. Требует `editor` на аккаунте. Асинхронно (`response: Group`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/groups' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "accountId": "acc_2k9f3qw8x7m2n", "name": "platform-team" }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Update / Delete
+
+<ApiOperation method="PATCH" endpoint="/iam/v1/groups/{group_id}" async>
+
+Меняет `name` / `description` / `labels` по `updateMask`. Требует `v_update`. Асинхронно.
+
+</ApiOperation>
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/groups/{group_id}" async>
+
+Удаляет группу. Требует `v_delete`. Асинхронно.
+
+</ApiOperation>
+
+### AddMember — добавить члена
+
+<ApiOperation method="POST" endpoint="/iam/v1/groups/{group_id}:addMember" async>
+
+Добавляет пользователя или сервис-аккаунт в группу. **Идемпотентно**: повторное добавление того
+же члена — no-op. Несуществующий член → `FAILED_PRECONDITION`. Требует `v_update` на группе.
+Асинхронно.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/groups/grp_3n8w5e2q9k1m4:addMember' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "memberType": "user", "memberId": "usr_5m1p7rt4b9k3d" }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### RemoveMember — удалить члена
+
+<ApiOperation method="POST" endpoint="/iam/v1/groups/{group_id}:removeMember" async>
+
+Удаляет члена из группы. **Идемпотентно**: удаление несуществующего членства — no-op. Требует
+`v_update`. Асинхронно.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/groups/grp_3n8w5e2q9k1m4:removeMember' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "memberType": "user", "memberId": "usr_5m1p7rt4b9k3d" }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### ListMembers — члены группы
+
+<ApiOperation method="GET" endpoint="/iam/v1/groups/{group_id}:listMembers">
+
+Возвращает членов группы (sync, курсорная пагинация). Требует `v_list`.
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "members": [
+        { "memberType": "user", "memberId": "usr_5m1p7rt4b9k3d", "addedAt": "2026-06-24T10:20:00Z" },
+        { "memberType": "service_account", "memberId": "sva_9q2r5t8k1m4p7", "addedAt": "2026-06-24T10:21:00Z" }
+      ],
+      "nextPageToken": ""
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### ListOperations — операции над группой
+
+<ApiOperation method="GET" endpoint="/iam/v1/groups/{group_id}/operations">
+
+Возвращает операции над группой (включая изменения членства). Sync. Требует `v_list`.
+
+</ApiOperation>
+
+## Ошибки и граничные случаи
+
+<table>
+  <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td>Get/Update/Delete несуществующей группы</td><td><code>NOT_FOUND</code></td><td><code>"Group &lt;id&gt; not found"</code></td></tr>
+    <tr><td>Create с дублирующим именем в аккаунте</td><td><code>ALREADY_EXISTS</code></td><td>Нарушение UNIQUE в пределах аккаунта</td></tr>
+    <tr><td>AddMember несуществующего субъекта</td><td><code>FAILED_PRECONDITION</code></td><td>Member должен существовать</td></tr>
+    <tr><td>Повторный AddMember / RemoveMember</td><td>— (no-op)</td><td>Идемпотентно, операция успешна</td></tr>
+  </tbody>
+</table>
+
+:::warning Группа усиливает грант
+Привязка admin/editor-роли на GROUP-субъект даёт её всем членам сразу. Поэтому создание такой
+привязки на группу дополнительно требует grant-authority на scope (группо-амплификационный
+guard). Подробнее — [AccessBinding](/api/access-binding).
+:::

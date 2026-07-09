@@ -1,0 +1,17 @@
+name: iam-docs
+replicas: 1
+image: kacho-iam-docs:dev
+imagePullPolicy: IfNotPresent
+port: 8080
+
+ingress:
+  enabled: true
+  host: iam-docs.kacho.local
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi

@@ -1,0 +1,198 @@
+---
+id: authorize
+sidebar_position: 10
+title: Авторизация и каталог
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Авторизация и каталог
+
+Эта страница — **публичная проекция слоя авторизации**. Пока остальные ресурсы IAM управляют
+*описанием* прав (роли, привязки), `AuthorizeService` отвечает на прямые вопросы *решения*: «может
+ли этот субъект сделать X над Y?». Это policy decision point (PDP), которым пользуются UI (превью
+доступности кнопок), SDK и admin-инструменты — не для гейтинга RPC (это делает внутренний
+`InternalIAMService.Check`), а для явных tenant-facing запросов.
+
+Рядом — `PermissionCatalogService`: грантабельная таксономия для редактора ролей.
+
+:::info Subject-binding и защита от подглядывания
+Каждый вызов принимает субъект в форме `user:<usr…>` / `service_account:<sva…>` /
+`group:<grp…>#member`. Gateway-интерсептор гарантирует, что вызывающий может спрашивать только про
+**себя** (или про субъектов там, где у него есть право). Cross-tenant snooping отклоняется на
+gateway, а внутри handler'а — defense-in-depth (self ∨ cluster-admin ∨ resource-authority).
+:::
+
+## AuthorizeService
+
+Все методы, кроме `WhoAmI`, — POST на `/iam/v1/authorize:*` и синхронны (это read-запросы к
+решению доступа). Гейтятся `viewer` на singleton-объекте `cluster:cluster_kacho_root`, а точное
+per-subject/per-resource решение принимает handler.
+
+### Check — одиночная проверка
+
+<ApiOperation method="POST" endpoint="/iam/v1/authorize:check">
+
+Возвращает `allowed=true`, если FGA-модель резолвит отношение между `subject` и `resource` **и**
+все условия по пути резолюции истинны для `context`. При отказе — `denyReasons` с коротким
+упорядоченным списком (`["mfa_fresh: acr=2 (need 3)"]` или `["no path"]`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/authorize:check' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "subject": "user:usr_5m1p7rt4b9k3d",
+            "resource": { "type": "vpc_network", "id": "enp_2f9k3qw8x7m2n" },
+            "action": "vpc.networks.get"
+          }'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "allowed": true,
+      "denyReasons": [],
+      "authorizationModelId": "01KV…",
+      "checkedAt": "2026-06-24T10:30:00Z"
+    }
+  `}
+</CodeBlock>
+
+`action` — строка `<domain>.<resource>.<verb>`; сервер резолвит её в FGA-отношение. Опциональный
+`context` (`google.protobuf.Struct`) несёт данные условий — `acr_value`, `amr_claims`, `mfa_at`,
+`client_ip`, `device_attestation` (см. [условия ABAC](/architecture/authz#условия-abac)).
+
+</ApiOperation>
+
+### BatchCheck — пакет проверок
+
+<ApiOperation method="POST" endpoint="/iam/v1/authorize:batchCheck">
+
+До 100 проверок в одном RPC (иначе `INVALID_ARGUMENT`). Сервер разворачивает их конкурентно;
+порядок результатов совпадает с порядком `checks`. Пофайловая ошибка (например, malformed subject)
+даёт `allowed=false` с per-item `denyReasons`, но не валит весь пакет. Удобно для UI, оценивающего
+доступность многих действий разом.
+
+</ApiOperation>
+
+### ListObjects — что доступно субъекту
+
+<ApiOperation method="POST" endpoint="/iam/v1/authorize:listObjects">
+
+Возвращает все id типа `resourceType`, на которых субъект имеет `action`. Признак
+`wildcardGrant=true` означает неограниченный охват (cluster-wildcard) — тогда клиент пропускает
+WHERE-IN-фильтр и возвращает все строки.
+
+:::note Skeleton-интеграция
+`ListObjects` — предварительная интеграция; при `KACHO_AUTHZ_LISTOBJECTS=off` (по умолчанию)
+метод возвращает `Unimplemented`. Полное per-handler-подключение планируется.
+:::
+
+</ApiOperation>
+
+### ListSubjects — кто имеет доступ к ресурсу
+
+<ApiOperation method="POST" endpoint="/iam/v1/authorize:listSubjects">
+
+Обратен `ListObjects`: возвращает всех субъектов с `action` на данном ресурсе (виджет «кто имеет
+доступ»). Page size ≤ 1000. Опциональный `subjectTypeFilter`.
+
+</ApiOperation>
+
+### ExpandRelations — дерево userset
+
+<ApiOperation method="POST" endpoint="/iam/v1/authorize:expandRelations">
+
+Возвращает Zanzibar-дерево userset для пары (resource, relation): узлы — прямые субъекты,
+computed-usersets (`#admin → #viewer`) и tuple-to-userset. Используется audit-инструментами для
+объяснения решения. Максимальная глубина — 32 (глубже — `PartialTree` с маркером усечения).
+
+</ApiOperation>
+
+### WhoAmI — кто я и что вижу
+
+<ApiOperation method="GET" endpoint="/iam/v1/me">
+
+Возвращает личность вызывающего и снимок прав: `subject`, `userId`, `email`, `displayName`,
+флаги `systemAdmin` / `clusterViewer` и `accounts[]` (членство в аккаунтах с грубой ролью). Любой
+аутентифицированный принципал вызывает WhoAmI на себя (субъект берётся из auth-контекста, не из
+тела). Ответ per-request свежий (без кэша), намеренно грубый — полный per-RPC гейтинг всё равно
+делает middleware. Анонимный вызов → `UNAUTHENTICATED`.
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "subject": "user:usr_5m1p7rt4b9k3d",
+      "userId": "usr_5m1p7rt4b9k3d",
+      "email": "dev@acme.example",
+      "displayName": "Dev One",
+      "systemAdmin": false,
+      "clusterViewer": true,
+      "accounts": [
+        { "accountId": "acc_2k9f3qw8x7m2n", "accountName": "acme", "roles": ["editor"] }
+      ],
+      "checkedAt": "2026-06-24T10:30:00Z"
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+## PermissionCatalog
+
+`PermissionCatalogService` отдаёт **грантабельную таксономию** для редактора правил роли: какие
+`(module, resource)`-токены можно грантить, каков закрытый набор глаголов и wildcard-политика.
+Каталог зеркалит ground-truth backend'а — «не больше и не меньше», поэтому редактор ролей строится
+на нём, а не на захардкоженной копии.
+
+### ListPermissionCatalog
+
+<ApiOperation method="GET" endpoint="/iam/v1/permissionCatalog">
+
+Возвращает всю таксономию одним sync-чтением (без параметров: каталог — одна платформенная
+таксономия, растёт только с релизом backend'а). Доступен любому аутентифицированному вызывающему.
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "modules": [
+        {
+          "module": "vpc",
+          "resources": [
+            { "resource": "networks", "hasVerbRelations": true, "hasListEndpoint": true, "labelSelectable": true },
+            { "resource": "securityGroup", "hasVerbRelations": true, "hasListEndpoint": true, "labelSelectable": true }
+          ]
+        }
+      ],
+      "closedVerbs": ["get", "list", "create", "update", "delete"],
+      "wildcardPolicy": {
+        "verbWildcardAllowedCustom": true,
+        "moduleResourceWildcardSystemOnly": true
+      }
+    }
+  `}
+</CodeBlock>
+
+Каждый `CatalogResource` несёт editor-флаги: `hasVerbRelations` (verb-bearing leaf vs
+tier-only ancestor), `hasListEndpoint` (есть ли публичный filtered `List` — тогда пикер id
+рендерит Select видимых экземпляров, иначе — free-text), `labelSelectable` (можно ли применять
+`matchLabels`).
+
+</ApiOperation>
+
+## Латентность и коды
+
+- Бюджет `Check` — ≤ 30 ms p95; `BatchCheck` линеен по размеру пакета.
+- Недоступность OpenFGA на request-path → `UNAVAILABLE` (fail-closed).
+- Cross-tenant запрос про чужого субъекта → `PERMISSION_DENIED` (gateway) либо отфильтрован в
+  handler'е.
+
+:::tip Check ≠ гейтинг RPC
+`AuthorizeService.Check` — для UI-превью и SDK-хелперов. Реальный per-RPC гейтинг сервисов делает
+внутренний `InternalIAMService.Check` (порт :9091, mTLS) — см. [Авторизация](/architecture/authz).
+:::

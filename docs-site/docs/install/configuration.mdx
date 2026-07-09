@@ -1,0 +1,110 @@
+---
+id: configuration
+sidebar_position: 2
+title: Конфигурация
+---
+
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Конфигурация
+
+Kachō IAM конфигурируется через переменные окружения с префиксом **`KACHO_IAM_`** (плюс
+опциональный YAML-файл через `KACHO_IAM_CONFIG_PATH`). Эта страница перечисляет ключевые группы
+настроек: подключение к БД, OpenFGA, провайдеры идентичности (Kratos / Hydra), listener'ы и mTLS,
+режим аутентификации. Секреты (пароли, токены) подаются из окружения / секрет-хранилища, не
+хардкодятся.
+
+## Подключение к БД
+
+<table>
+  <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>KACHO_IAM_DB_HOST</code> / <code>KACHO_IAM_DB_PORT</code></td><td>Хост и порт PostgreSQL</td></tr>
+    <tr><td><code>KACHO_IAM_DB_USER</code> / <code>KACHO_IAM_DB_PASSWORD</code></td><td>Учётные данные</td></tr>
+    <tr><td><code>KACHO_IAM_DB_NAME</code></td><td>Имя БД (схема <code>kacho_iam</code>)</td></tr>
+    <tr><td><code>KACHO_IAM_DB_SSLMODE</code></td><td>Режим SSL (<code>require</code> в проде)</td></tr>
+    <tr><td><code>KACHO_IAM_DB_MAX_CONNS</code></td><td>Размер пула pgx</td></tr>
+    <tr><td><code>KACHO_IAM_DB_URL</code></td><td>Альтернатива — полный DSN одной строкой</td></tr>
+  </tbody>
+</table>
+
+## OpenFGA (авторизация)
+
+<table>
+  <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>KACHO_IAM_OPENFGA_ENDPOINT</code></td><td>Адрес OpenFGA (например <code>kacho-umbrella-openfga:8080</code>)</td></tr>
+    <tr><td><code>KACHO_IAM_OPENFGA_STORE_ID</code> / <code>KACHO_IAM_OPENFGA_MODEL_ID</code></td><td>Store и pinned authorization model</td></tr>
+    <tr><td><code>KACHO_IAM_FGA_CHECK_TIMEOUT_MS</code></td><td>Таймаут одиночного <code>Check</code></td></tr>
+    <tr><td><code>KACHO_IAM_FGA_WRITE_TIMEOUT_MS</code></td><td>Таймаут записи tuple'ов</td></tr>
+    <tr><td><code>KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS</code></td><td>Таймаут <code>ListObjects</code></td></tr>
+    <tr><td><code>KACHO_AUTHZ_LISTOBJECTS</code></td><td><code>off</code> (по умолчанию) → <code>ListObjects</code> отдаёт <code>Unimplemented</code></td></tr>
+  </tbody>
+</table>
+
+## Идентичность (Kratos / Hydra)
+
+<table>
+  <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>KACHO_IAM_HYDRA_ADMIN_URL</code> / <code>KACHO_IAM_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов)</td></tr>
+    <tr><td><code>KACHO_IAM_HYDRA_ISSUER</code> / <code>KACHO_IAM_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra</td></tr>
+    <tr><td><code>KACHO_IAM_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
+    <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code> / <code>KACHO_IAM_JWKS_ROTATION_DAYS</code></td><td>Шифрование и ротация JWKS выпускаемых токенов</td></tr>
+    <tr><td><code>KACHO_IAM_SAKEY_REDACT_GRACE</code> / <code>KACHO_IAM_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
+  </tbody>
+</table>
+
+## Listener'ы и mTLS
+
+Сервис поднимает публичный (`:9090`), internal (`:9091`), hooks (`:9092`) и metrics (`:9095`)
+listener'ы. Каждый может требовать mTLS.
+
+<table>
+  <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>KACHO_IAM_GRPC_PORT</code> / <code>KACHO_IAM_INTERNAL_PORT</code></td><td>Порты public / internal listener'ов</td></tr>
+    <tr><td><code>KACHO_IAM_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
+    <tr><td><code>KACHO_IAM_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
+    <tr><td><code>KACHO_IAM_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (Kratos identity-хуки)</td></tr>
+    <tr><td><code>KACHO_IAM_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
+    <tr><td><code>KACHO_IAM_METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>:9095</code>)</td></tr>
+    <tr><td><code>KACHO_IAM_GATEWAY_INTERNAL_…</code></td><td>Адрес и клиентский mTLS до internal-mux api-gateway (subject-change)</td></tr>
+  </tbody>
+</table>
+
+## Режим аутентификации
+
+<table>
+  <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>KACHO_IAM_AUTHN__MODE</code></td><td>Режим аутентификации (dev-фикстуры vs production-strict)</td></tr>
+    <tr><td><code>KACHO_IAM_AUTHZ_PROVIDER</code></td><td>Провайдер авторизации (OpenFGA)</td></tr>
+    <tr><td><code>KACHO_IAM_HOOK_TOKEN</code></td><td>Токен для identity-хуков Kratos</td></tr>
+  </tbody>
+</table>
+
+:::warning Production-режим — fail-closed
+В production-профиле сервис обязывает mTLS на публичном (`:9090`) и internal (`:9091`)
+listener'ах и сконфигурированный OpenFGA. Без них он **откажется стартовать** («refusing to start
+with insecure :9090/:9091») — никакого молчаливого insecure-downgrade. Анонимный доступ отклонён
+на всех портах. См. [Особенности дизайна](/advanced/design-decisions).
+:::
+
+## Пример (локальный dev)
+
+<CodeBlock language="bash">
+  {dedent`
+    export KACHO_IAM_DB_HOST=localhost
+    export KACHO_IAM_DB_PORT=5432
+    export KACHO_IAM_DB_USER=kacho
+    export KACHO_IAM_DB_PASSWORD=secret
+    export KACHO_IAM_DB_NAME=kacho_iam
+    export KACHO_IAM_DB_SSLMODE=disable
+    export KACHO_IAM_OPENFGA_ENDPOINT=localhost:8080
+
+    bin/kacho-migrator up
+    bin/kacho-iam serve
+  `}
+</CodeBlock>

@@ -1,0 +1,90 @@
+---
+id: design-decisions
+sidebar_position: 1
+title: Особенности дизайна
+---
+
+# Особенности дизайна Kachō IAM
+
+Kachō IAM — собственный продукт со своими требованиями. Эта страница собирает **осознанные
+проектные решения** модели личностей и доступа: что и почему сделано именно так. Это не «отличия
+от чего-то», а обоснование выбранной модели.
+
+## Решения и обоснования
+
+<table>
+  <thead><tr><th>Решение</th><th>Почему так</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>ReBAC поверх OpenFGA</strong> — доступ как граф отношений, не как код-правила</td>
+      <td>Единая проверяемая модель: «может ли субъект X сделать Y» резолвится в графе отношений. Роли и привязки — удобный tenant-facing способ объявить отношения; исполнение — в одном движке для всей платформы</td>
+    </tr>
+    <tr>
+      <td><strong>Verb-bearing отношения</strong> (<code>v_get</code>/<code>v_update</code>/<code>v_delete</code>/<code>v_list</code>), развязанные с tier-ролями</td>
+      <td>Точный гейтинг per-метод исключает завышение прав, когда широкая tier-роль «протекает» в мелкие действия. Наличие <code>editor</code> не даёт автоматически <code>v_get</code> — verb-грант выдаётся явно правилом роли</td>
+    </tr>
+    <tr>
+      <td><strong>Явная per-object flat-модель</strong> (без неявного каскада, без org-уровня)</td>
+      <td>Доступ выражен прямыми отношениями на объекте. Нет «магического» наследования вниз по иерархии, которое трудно аудировать; «иерархия» — набор явных tuple'ов, а не рекурсивная функция</td>
+    </tr>
+    <tr>
+      <td><strong>Роль = <code>rules[]</code></strong> «глаголы × ресурсы одного модуля»</td>
+      <td>Роль читаема и грантабельна из одной структуры; клиенты рендерят её напрямую. Сужение по id (<code>resourceNames</code>) или меткам (<code>matchLabels</code>) даёт как pin-by-id, так и динамический отбор по меткам</td>
+    </tr>
+    <tr>
+      <td><strong>List — scope-filter, а не default-deny 403</strong></td>
+      <td>У списка нет единого объекта для <code>Check</code>; фильтрация в handler'е возвращает 200 и только видимое (<code>viewer ∪ v_list</code>). Пользователь не получает 403 просто за вызов List — он видит ровно свой срез</td>
+    </tr>
+    <tr>
+      <td><strong>Мутации асинхронны (<code>Operation</code>)</strong></td>
+      <td>Единый способ отслеживать любую мутацию и её ошибку; материализация tuple'ов в OpenFGA идёт через outbox — синхронный ответ ресурсом скрыл бы grant-latency</td>
+    </tr>
+    <tr>
+      <td><strong>Tuple-outbox</strong> (Postgres → OpenFGA в одной TX + drainer)</td>
+      <td>Согласование двух хранилищ (модель прав в БД, исполнение в FGA) без распределённой транзакции: at-least-once, идемпотентно, переживает рестарты. Цена — небольшая grant-latency (~0.6–2 c)</td>
+    </tr>
+    <tr>
+      <td><strong>User — проекция identity, вход через Ory Kratos</strong></td>
+      <td>IAM не изобретает хранение паролей / passkey; зрелый Ory-слой отвечает за вход, а control-plane — за модель прав. Один человек = N User-строк (по одной на аккаунт) — доступ изолирован per-Account</td>
+    </tr>
+    <tr>
+      <td><strong>Invite вместо Create для пользователей</strong></td>
+      <td>Пользователь появляется по email-приглашению и активируется при первом входе — нельзя завести «фантомную» личность без реального входа. <code>inviteStatus</code> честно отражает состояние</td>
+    </tr>
+    <tr>
+      <td><strong>Токены через Hydra, приватный ключ показывается один раз</strong></td>
+      <td>Стандартный OAuth 2.0 (<code>private_key_jwt</code> / <code>jwt-bearer</code>); секрет не хранится нигде — только публичный JWK в Hydra. Утечка БД IAM не раскрывает креды</td>
+    </tr>
+    <tr>
+      <td><strong>Multi-subject AccessBinding</strong> (1–32 субъекта, независимые tuple-линии)</td>
+      <td>Одна привязка выдаёт роль набору субъектов; per-subject revoke/audit не задевает других (нет double-grant аномалии, когда пользователь и содержащая его группа перечислены вместе)</td>
+    </tr>
+    <tr>
+      <td><strong>deletion_protection на owner-привязке</strong></td>
+      <td>Создатель аккаунта не может случайно удалить собственный owner-грант; снять защиту нужно явно (Update), затем Delete — атомарный CAS против TOCTOU</td>
+    </tr>
+    <tr>
+      <td><strong>Step-up (ACR floor) на чувствительных RPC</strong></td>
+      <td>Управление доступом и выпуск кредов требуют свежей second-factor аутентификации — защита от stale-сессий независимо от наличия отношения</td>
+    </tr>
+    <tr>
+      <td><strong>Anti-anonymous везде + fail-closed</strong></td>
+      <td>Освобождение RPC от <code>Check</code> снимает только авторизацию, но не аутентификацию; анонимный запрос отвергается на всех портах. Недоступность OpenFGA → отказ, не «разрешить». Production обязывает mTLS (иначе не стартует)</td>
+    </tr>
+  </tbody>
+</table>
+
+## Границы текущей фазы
+
+- **`AuthorizeService.ListObjects`** — skeleton-интеграция; по умолчанию (`KACHO_AUTHZ_LISTOBJECTS=off`)
+  отдаёт `Unimplemented`, полное per-handler-подключение планируется.
+- **PENDING-статус AccessBinding** зарезервирован под JIT-approval workflow; в текущей фазе
+  привязки создаются сразу `ACTIVE`.
+- Composite-роли (aggregationRule) — не реализованы; будут добавлены append-only.
+
+## Инварианты платформы
+
+IAM соблюдает non-negotiables Kachō: без ORM (sqlc + handwritten pgx); within-service инварианты —
+на уровне БД (FK/UNIQUE/CHECK/CAS/OCC), не software-проверками; мутации возвращают `Operation`;
+`Internal.*`-методы не публикуются на external endpoint; применённые миграции не редактируются
+(только новые). Модель — secure-by-default.

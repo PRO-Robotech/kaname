@@ -1,0 +1,169 @@
+---
+id: tokens
+sidebar_position: 9
+title: Токены доступа
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Токены доступа
+
+**Токены доступа** — креды, которыми субъект аутентифицируется программно, без интерактивного
+входа. Их два вида, симметричных по устройству:
+
+- **SAKey** — статический ключ [ServiceAccount](/api/service-account): идентичность рабочей
+  нагрузки (CI, под, интеграция);
+- **UserToken** — персональный access-токен [User](/api/user): CLI и скрипты, действующие от
+  имени человека.
+
+Оба реализованы поверх **Ory Hydra** (OAuth 2.0 authorization server). При выпуске kacho-iam
+генерирует пару ключей ECDSA P-256, регистрирует публичный JWK в Hydra и возвращает **приватный
+ключ ровно один раз**. Владелец подписывает им `client_assertion` (RFC 7521/7523) и обменивает
+его в Hydra `/oauth2/token` на kacho-JWT, принципалом которого становится сам субъект. Секрет не
+хранится нигде: Hydra держит только публичный JWK, kacho-iam — маппинг на субъект.
+
+:::warning Приватный ключ показывается один раз
+`privateKeyPem` возвращается **только** в ответе `Issue` и невосстановим. Сохраните его сразу; при
+утере — выпустите новый ключ и отзовите старый.
+:::
+
+## Ключи сервис-аккаунтов (SAKeyService)
+
+Ключи scoped на сервис-аккаунт (`iam_service_account`). Мутации требуют `v_update`, чтение —
+`v_list`.
+
+### Issue — выпустить ключ
+
+<ApiOperation method="POST" endpoint="/iam/v1/serviceAccounts/{service_account_id}/keys" async>
+
+Выпускает ключ. По умолчанию — режим `private_key_jwt` (kacho-iam чеканит пару ключей). Опции:
+`ttlSeconds` (0 = бессрочный, максимум ~2 года), `description`. Асинхронно (`response:
+IssueSAKeyResponse` с одноразовым `privateKeyPem`, `keyId`, `algorithm: "ES256"`, `clientId`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/serviceAccounts/sva_9q2r5t8k1m4p7/keys' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "description": "CI builder key", "ttlSeconds": 2592000, "createdByUserId": "usr_5m1p7rt4b9k3d" }'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "key": { "id": "soc_4k7m2q9w5e1t8", "svaId": "sva_9q2r5t8k1m4p7", "hydraClientId": "…" },
+      "clientId": "…",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\\n… (показывается один раз) …\\n-----END PRIVATE KEY-----",
+      "algorithm": "ES256",
+      "keyId": "soc_4k7m2q9w5e1t8"
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+#### Федерация SA-ключа (OIDC trust)
+
+`Issue` поддерживает federated-режим для внешних рабочих нагрузок без выдачи приватного ключа:
+
+- **`trustedSubjects[]`** (federation IN) — при непустом списке ключ регистрируется в
+  `jwt-bearer`-режиме: внешняя нагрузка (CI-runner, k8s-под, внешний OIDC IdP) предъявляет
+  **свой** OIDC-JWT в Hydra `/oauth2/token`. Каждая запись — `issuer` (внешний `iss`) +
+  `subjectPattern` (RE2-regex, которому обязан соответствовать внешний `sub`). Приватный ключ в
+  ответе при этом отсутствует.
+- **`audience[]`** (federation OUT) — kacho-JWT чеканится с этими значениями в claim `aud`,
+  чтобы токен принимали внешние STS / workload-identity-federation провайдеры. Пусто =
+  kacho-internal audience.
+
+### List — ключи сервис-аккаунта
+
+<ApiOperation method="GET" endpoint="/iam/v1/serviceAccounts/{service_account_id}/keys">
+
+Возвращает выпущенные ключи (без приватной части). Sync, курсорная пагинация. Требует `v_list`.
+
+</ApiOperation>
+
+### Revoke — отозвать ключ
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/serviceAccounts/{service_account_id}/keys/{key_id}" async>
+
+Отзывает ключ (снимает OAuth-клиента в Hydra). Требует `v_update`. Асинхронно (`response:
+RevokeSAKeyResponse` с `revokedAt`).
+
+</ApiOperation>
+
+## Персональные токены (UserTokenService)
+
+Токены scoped на пользователя (`iam_user`), режим `private_key_jwt`. У одного пользователя может
+быть несколько токенов (N:1). Все три RPC требуют отношение `token_admin` на пользователе и
+step-up (`required_acr_min=2`) — выпуск и просмотр креда чувствительны.
+
+### Issue — выпустить токен
+
+<ApiOperation method="POST" endpoint="/iam/v1/users/{user_id}/tokens" async>
+
+Выпускает персональный токен. Опции: `ttlSeconds` (0 = бессрочный), `description`. Асинхронно
+(`response: IssueUserTokenResponse` с одноразовым `privateKeyPem`, `keyId`, `algorithm: "ES256"`,
+`clientId`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/users/usr_5m1p7rt4b9k3d/tokens' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "description": "laptop CLI", "createdByUserId": "usr_5m1p7rt4b9k3d" }'
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### List — токены пользователя
+
+<ApiOperation method="GET" endpoint="/iam/v1/users/{user_id}/tokens">
+
+Возвращает выпущенные токены (без приватной части, `id` с префиксом `uoc`). Sync. Требует
+`token_admin`.
+
+</ApiOperation>
+
+### Revoke — отозвать токен
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/users/{user_id}/tokens/{token_id}" async>
+
+Отзывает токен (снимает OAuth-клиента в Hydra). Требует `token_admin`. Асинхронно (`response:
+RevokeUserTokenResponse` с `revokedAt`).
+
+</ApiOperation>
+
+## Как получить kacho-JWT из ключа
+
+```mermaid
+flowchart LR
+  wl["Рабочая нагрузка<br/>(SA / CLI пользователя)"] -->|"1. подпись client_assertion (ES256)"| wl
+  wl -->|"2. POST /oauth2/token"| hydra["Ory Hydra"]
+  hydra -->|"3. валидация JWK / assertion"| hydra
+  hydra -->|"4. kacho-JWT (access_token)"| wl
+  wl -->|"5. Authorization: Bearer kacho-JWT"| agw["api-gateway → kacho-iam"]
+```
+
+1. Клиент подписывает `client_assertion` приватным ключом (заголовок `kid` = `keyId` из ответа
+   `Issue`).
+2. Отправляет его в Hydra `/oauth2/token` (grant `client_credentials` для `private_key_jwt`,
+   либо `jwt-bearer` для федерации).
+3. Hydra валидирует подпись по зарегистрированному JWK и чеканит kacho-JWT.
+4. Клиент шлёт kacho-JWT как `Authorization: Bearer` во все API Kachō.
+
+## Ошибки и граничные случаи
+
+<table>
+  <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td>Issue/List/Revoke на несуществующем субъекте</td><td><code>NOT_FOUND</code></td><td>Субъект должен существовать</td></tr>
+    <tr><td>Revoke несуществующего ключа/токена</td><td><code>NOT_FOUND</code></td><td>Ключ/токен не найден</td></tr>
+    <tr><td>Без нужного отношения (v_update / token_admin)</td><td><code>PERMISSION_DENIED</code></td><td>Authz-Check не прошёл</td></tr>
+    <tr><td>Hydra недоступна на request-path</td><td><code>UNAVAILABLE</code></td><td>Fail-closed для мутации</td></tr>
+  </tbody>
+</table>
