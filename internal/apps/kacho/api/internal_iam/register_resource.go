@@ -36,6 +36,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
@@ -301,7 +302,14 @@ func validateRelationString(field, v string) error {
 	if colon <= 0 || colon == len(v)-1 {
 		return shared.InvalidArg(field, "invalid "+field)
 	}
-	// No second ':' beyond a userset separator (already rejected '#').
+	// Exactly one ':' — a second colon is rejected. objectType() splits on the
+	// FIRST colon, so a two-colon value would make the resource_mirror /
+	// reconcile-outbox key ("a:b" from "type:a:b") diverge from the verbatim FGA
+	// tuple object string ("type:a:b") — the mirror row and the tuple then
+	// reference different objects.
+	if strings.IndexByte(v[colon+1:], ':') >= 0 {
+		return shared.InvalidArg(field, "invalid "+field)
+	}
 	return nil
 }
 
@@ -312,7 +320,11 @@ func validateRelationString(field, v string) error {
 func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool) error {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		// Backend-down at connection acquisition → retriable Unavailable (the
+		// handler maps ErrUnavailable → codes.Unavailable; the caller's
+		// transactional-outbox drainer then re-delivers). Fixed opaque message —
+		// never surface the raw pgx driver text (host/port/user/db).
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
@@ -364,7 +376,10 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
+		// contract as Begin). The row/tuple did not durably land; the caller's
+		// drainer re-delivers.
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	return nil
 }

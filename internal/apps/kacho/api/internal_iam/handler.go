@@ -27,6 +27,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
@@ -155,7 +156,12 @@ func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResou
 		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
 	}
 	if err := h.registrar.Register(ctx, req); err != nil {
-		return nil, err
+		// Map the use-case error via the single sentinel→gRPC translator:
+		// validation status errors pass through, ErrUnavailable → Unavailable
+		// (retriable fail-closed), any un-sentineled pgx/DB error → opaque
+		// codes.Internal "internal error" (hardening-invariant #1: never echo the
+		// raw driver text — host/port/user/db — nor leak it as codes.Unknown).
+		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.RegisterResourceResponse{}, nil
 }
@@ -175,7 +181,9 @@ func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterR
 		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
 	}
 	if err := h.registrar.Unregister(ctx, req); err != nil {
-		return nil, err
+		// Same sentinel→gRPC mapping as RegisterResource (opaque Internal for
+		// un-sentineled pgx/DB errors; no raw-text leak, no codes.Unknown).
+		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.UnregisterResourceResponse{}, nil
 }
