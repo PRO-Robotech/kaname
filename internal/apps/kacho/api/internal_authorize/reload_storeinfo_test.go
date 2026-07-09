@@ -16,6 +16,8 @@ package internal_authorize
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +37,7 @@ import (
 type storeInfoFake struct {
 	info    clients.StoreInfo
 	infoErr error
+	readErr error
 }
 
 func (f *storeInfoFake) WriteConditionalTuples(_ context.Context, _, _ []clients.ConditionalTuple) error {
@@ -42,6 +45,9 @@ func (f *storeInfoFake) WriteConditionalTuples(_ context.Context, _, _ []clients
 }
 
 func (f *storeInfoFake) ReadTuples(_ context.Context, _, _, _ string, _ int, _ string) ([]clients.ConditionalTuple, string, error) {
+	if f.readErr != nil {
+		return nil, "", f.readErr
+	}
 	return nil, "", nil
 }
 
@@ -152,4 +158,68 @@ func TestGetFGAStoreInfo_BackendUnavailable_Unavailable(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+// leak-regression (audit r9): the raw OpenFGA transport error must never reach
+// the gRPC status message — it carries the cluster-internal FGA host:port /
+// connection string. The message must be the fixed opaque text, not err.Error().
+func TestGetFGAStoreInfo_BackendUnavailable_OpaqueMessage(t *testing.T) {
+	rawErr := "openfga storeinfo: dial tcp fga-host.internal:8080: connect: connection refused"
+	w := service.NewRelationProjector(&storeInfoFake{infoErr: errors.New(rawErr)})
+	h := NewHandler(w, nil, "model-xyz")
+
+	_, err := h.GetFGAStoreInfo(context.Background(), &iamv1.GetFGAStoreInfoRequest{})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+	msg := status.Convert(err).Message()
+	assert.Equal(t, "authz backend unavailable", msg)
+	assert.NotContains(t, msg, "fga-host.internal", "FGA host:port leaked into status message")
+}
+
+// ── ReadTuples ───────────────────────────────────────────────────────────
+
+func TestReadTuples_BackendUnavailable_OpaqueMessage(t *testing.T) {
+	// Given a writer whose ReadTuples fails (OpenFGA unreachable). The raw error
+	// carries the FGA endpoint host:port — it must be scrubbed.
+	rawErr := "openfga read: dial tcp fga-host.internal:8080: connect: connection refused"
+	w := service.NewRelationProjector(&storeInfoFake{readErr: errors.New(rawErr)})
+	h := NewHandler(w, nil, "model-xyz")
+
+	resp, err := h.ReadTuples(context.Background(), &iamv1.ReadTuplesRequest{})
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+	msg := status.Convert(err).Message()
+	assert.Equal(t, "authz backend unavailable", msg)
+	assert.NotContains(t, strings.ToLower(msg), "fga-host.internal", "FGA host:port leaked into status message")
+}
+
+// ── ReloadModel concurrency ──────────────────────────────────────────────
+
+// concurrency-regression (audit r9): currentModelID is shared mutable state.
+// Concurrent ReloadModel calls read-modify-write it; without synchronization the
+// -race detector flags a data race. Deterministic under -race (no time.Sleep).
+func TestReloadModel_ConcurrentCalls_NoRace(t *testing.T) {
+	w := service.NewRelationProjector(&storeInfoFake{})
+	h := NewHandler(w, nil, "model-0")
+
+	const n = 32
+	var wg sync.WaitGroup
+	wg.Add(n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{
+				AuthorizationModelId: "model-x",
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.Equal(t, "model-x", h.currentModelID)
 }

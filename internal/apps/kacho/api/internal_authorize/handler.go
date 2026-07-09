@@ -19,6 +19,7 @@ package internal_authorize
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -43,8 +44,11 @@ type Handler struct {
 	iamv1.UnimplementedInternalAuthorizeServiceServer
 	writer *service.RelationProjector
 	ops    operations.Repo
+	// mu guards currentModelID: ReloadModel runs per-gRPC-goroutine and does a
+	// read-modify-write on it, so concurrent invocations would race without it.
+	mu sync.Mutex
 	// currentModelID — the live authorization_model_id; captured at process start
-	// from the injected config value and mutated by ReloadModel.
+	// from the injected config value and mutated by ReloadModel. Guarded by mu.
 	currentModelID string
 	// defaultModelID — the composition-root-configured model id (immutable). Used
 	// as the fallback for an empty ReloadModel request instead of a request-time
@@ -107,7 +111,10 @@ func (h *Handler) ReadTuples(ctx context.Context, req *iamv1.ReadTuplesRequest) 
 		req.GetPageToken(),
 	)
 	if err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		// Opaque UNAVAILABLE — never echo err.Error(): the raw OpenFGA transport
+		// error carries the cluster-internal FGA endpoint host:port / connection
+		// string (leak, applies on :9091 too). Fixed text mirrors authzguard.
+		return nil, status.Error(codes.Unavailable, "authz backend unavailable")
 	}
 	pbs := make([]*iamv1.Tuple, 0, len(tuples))
 	for _, t := range tuples {
@@ -137,11 +144,14 @@ func (h *Handler) ReloadModel(ctx context.Context, req *iamv1.ReloadModelRequest
 		// construction) — NOT a request-time env read (config drift / layering).
 		newID = h.defaultModelID
 	}
+	h.mu.Lock()
 	if newID != "" {
 		h.currentModelID = newID
 	}
+	current := h.currentModelID
+	h.mu.Unlock()
 	return &iamv1.ReloadModelResponse{
-		AuthorizationModelId: h.currentModelID,
+		AuthorizationModelId: current,
 		ReloadedAt:           shared.TimestampProto(time.Now().UTC()),
 	}, nil
 }
@@ -150,7 +160,9 @@ func (h *Handler) ReloadModel(ctx context.Context, req *iamv1.ReloadModelRequest
 func (h *Handler) GetFGAStoreInfo(ctx context.Context, _ *iamv1.GetFGAStoreInfoRequest) (*iamv1.GetFGAStoreInfoResponse, error) {
 	info, err := h.writer.StoreInfo(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		// Opaque UNAVAILABLE — never echo err.Error() (FGA host:port / connection
+		// string leak, applies on :9091 too). Fixed text mirrors authzguard.
+		return nil, status.Error(codes.Unavailable, "authz backend unavailable")
 	}
 	resp := &iamv1.GetFGAStoreInfoResponse{
 		StoreId:              info.StoreID,
