@@ -57,7 +57,10 @@ func MapRepoErr(err error) error {
 	case stderrors.Is(err, iamerr.ErrUnavailable):
 		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrInternal):
-		return status.Error(codes.Internal, iamerr.StripSentinel(err))
+		// hardening-invariant #1: INTERNAL carries a FIXED opaque text, never the
+		// wrapped detail (a wrapped ErrInternal may embed subject/principal ids,
+		// row-counts or pgx/SQL text). Detail stays in the error chain for logs.
+		return status.Error(codes.Internal, "internal error")
 	}
 	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
 		return err

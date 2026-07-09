@@ -10,7 +10,6 @@
 //	                                     {client_id, client_secret, ...}).
 //	GET    /admin/clients/{client_id}  — get OAuth2 client (no secret).
 //	DELETE /admin/clients/{client_id}  — delete OAuth2 client.
-//	GET    /admin/clients?owner=<sa>   — list OAuth2 clients owned by SA.
 //
 // The plaintext `client_secret` is returned EXACTLY ONCE by Create — we
 // propagate it back through Operation.response.IssueSAKeyResponse and never
