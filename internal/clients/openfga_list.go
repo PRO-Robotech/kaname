@@ -48,6 +48,9 @@ func (c *OpenFGAHTTPClient) ListObjects(ctx context.Context, subject, relation, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Drain (capped) before Close so the keep-alive connection returns to
+		// the idle pool — mirrors the sibling listUsersOfType drain path.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return nil, fmt.Errorf("openfga listObjects: status %d", resp.StatusCode)
 	}
 	var r fgaWireListObjectsResponse
@@ -229,6 +232,9 @@ func (c *OpenFGAHTTPClient) ListSubjects(ctx context.Context, objectType, object
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Drain (capped) before Close so the keep-alive connection returns to
+		// the idle pool — mirrors the sibling listUsersOfType drain path.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return nil, "", fmt.Errorf("openfga read: status %d", resp.StatusCode)
 	}
 	var r fgaWireReadResponse

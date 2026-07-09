@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -52,9 +53,21 @@ func (c *OpenFGAHTTPClient) CheckWithContext(ctx context.Context, subject, relat
 		// surface as `authz unavailable` and fail-closed to a misleading
 		// 503; a clean deny (false, nil) yields the correct gRPC
 		// PermissionDenied (403).
+		//
+		// Drain (capped) before Close so the keep-alive connection returns to
+		// the idle pool instead of being torn down — mirrors the sibling
+		// Check / writeOrDelete / listUsersOfType drain paths. Critical on the
+		// hot authz path (CheckWithContext backs both the public authorize and
+		// the internal per-RPC gate): a degraded OpenFGA emitting a burst of
+		// 400s must not also churn fresh TCP connections (fd + handshake
+		// pressure).
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
+		// Same drain-for-reuse rationale as the 400 branch above: a degraded
+		// OpenFGA returning non-200 on every Check must not churn connections.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return false, fmt.Errorf("openfga check: status %d", resp.StatusCode)
 	}
 	var r fgaWireCheckResponse

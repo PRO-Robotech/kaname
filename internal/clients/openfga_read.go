@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -61,6 +62,9 @@ func (c *OpenFGAHTTPClient) ReadTuples(ctx context.Context, subjectFilter, relat
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Drain (capped) before Close so the keep-alive connection returns to
+		// the idle pool — mirrors the sibling listUsersOfType drain path.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return nil, "", fmt.Errorf("openfga read: status %d", resp.StatusCode)
 	}
 	var r fgaWireReadResponse

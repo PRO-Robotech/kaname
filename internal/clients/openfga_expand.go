@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
@@ -76,6 +77,9 @@ func (c *OpenFGAHTTPClient) Expand(ctx context.Context, objectType, objectID, re
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Drain (capped) before Close so the keep-alive connection returns to
+		// the idle pool — mirrors the sibling listUsersOfType drain path.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
 		return nil, fmt.Errorf("openfga expand: status %d", resp.StatusCode)
 	}
 	var r fgaWireExpandResponse
