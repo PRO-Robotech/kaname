@@ -12,7 +12,7 @@ package shared
 import (
 	"context"
 
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 // DoWithWriteTx оборачивает стандартный writer-tx паттерн вокруг одной

@@ -34,7 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // BootstrapAdminInput — bootstrap-run parameters.

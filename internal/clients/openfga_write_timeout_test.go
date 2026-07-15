@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 func TestOpenFGAHTTPClient_WriteTuples_BoundedByWriteTimeout(t *testing.T) {

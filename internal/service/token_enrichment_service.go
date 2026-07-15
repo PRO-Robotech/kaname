@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // TokenEnrichmentUserPort — read-side dependency: resolve a User mirror by its

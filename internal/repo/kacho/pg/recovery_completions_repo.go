@@ -25,7 +25,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 const recoveryCols = "recovery_jti, external_id, user_id, revoked_session_count"

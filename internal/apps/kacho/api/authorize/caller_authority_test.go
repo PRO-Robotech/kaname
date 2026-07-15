@@ -10,12 +10,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // authorityStub — configurable authzguard.RelationChecker for the inner

@@ -30,11 +30,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 )
 
 // callerAuthorityRelations — FGA relations on the queried resource that grant a

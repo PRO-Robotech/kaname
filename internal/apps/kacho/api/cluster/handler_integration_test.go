@@ -35,16 +35,16 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
-	clusterapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/cluster"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	clusterapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/cluster"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 )
 
 // ── test helpers ────────────────────────────────────────────────────────────

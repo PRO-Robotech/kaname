@@ -20,10 +20,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	repoproject "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
 )
 
 // seclFGAStub — captures the subject, supports per-type id-sets and an

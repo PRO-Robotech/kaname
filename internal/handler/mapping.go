@@ -4,10 +4,10 @@
 package handler
 
 import (
-	"github.com/PRO-Robotech/kacho-corelib/operations"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
+	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 )
 
 // operationToProto конвертирует domain Operation в proto Operation

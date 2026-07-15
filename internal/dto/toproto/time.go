@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/dto"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
 )
 
 // tsTruncate — the single truncation granularity for every proto timestamp in

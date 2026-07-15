@@ -35,7 +35,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // closedVerbRelations — the per-verb relation set the emitter materializes
@@ -90,7 +90,7 @@ func resolveFGAModel() (string, bool) {
 	if wd, err := os.Getwd(); err == nil {
 		dir := wd
 		for i := 0; i < 12; i++ {
-			cand := filepath.Join(dir, "kacho-proto", fgaModelRelPath)
+			cand := filepath.Join(dir, fgaModelRelPath)
 			if _, err := os.Stat(cand); err == nil {
 				return cand, true
 			}
@@ -100,7 +100,7 @@ func resolveFGAModel() (string, bool) {
 	// Standalone CI: kacho-proto is a pinned Go module. Its module dir carries
 	// the whole repo tree (including proto/…/fga_model.fga once shipped there).
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
-		"github.com/PRO-Robotech/kacho-proto").Output()
+		"github.com/PRO-Robotech/kacho").Output()
 	if err == nil {
 		modDir := strings.TrimSpace(string(out))
 		if modDir != "" {

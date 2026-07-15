@@ -22,11 +22,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/ids"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // setupTestDB starts a fresh Postgres testcontainer, runs goose migrations,

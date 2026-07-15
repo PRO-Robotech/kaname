@@ -40,10 +40,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 var sessionEvtIDRe = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)

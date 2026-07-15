@@ -16,11 +16,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 // Repo — узкий port-iface, чтобы не тащить весь Repository в этот use-case.

@@ -54,7 +54,7 @@ func FuzzJWTVerify(f *testing.F) {
 		}()
 
 		// Wire to real verifier in kacho-iam:
-		//   import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/authn/jwt"
+		//   import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/authn/jwt"
 		//   _, err := jwt.Verify(context.Background(), token, jwks)
 		//
 		// Stub verifies the parse structure produces stable error for invalid input.

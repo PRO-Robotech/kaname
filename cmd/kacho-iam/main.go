@@ -21,9 +21,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/PRO-Robotech/kacho-corelib/observability"
+	"github.com/PRO-Robotech/kacho/pkg/observability"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
 
 // configPathEnv — путь к YAML-конфигу. Пустое значение допустимо (defaults +

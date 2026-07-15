@@ -17,18 +17,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	repoaccount "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
-	repoproject "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	repoaccount "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
+	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
 )
 
 // ───────────── fake repo built specifically for list scenarios ───────────

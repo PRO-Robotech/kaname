@@ -27,10 +27,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/condition"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/condition"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // condQuerier — minimal surface shared by *pgxpool.Pool and pgx.Tx, so the

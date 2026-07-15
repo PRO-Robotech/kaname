@@ -13,7 +13,7 @@ package authzguard
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
 // PrincipalUserID returns the principal's user-id for user / service-account

@@ -17,14 +17,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/ids"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	accessbindingapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	reporole "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	accessbindingapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 )
 
 func asUser(ctx context.Context, uid domain.UserID) context.Context {

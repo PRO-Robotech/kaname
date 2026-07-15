@@ -37,9 +37,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // scopeGrantOutboxCount counts ANY scope_grant:* fga_outbox row (P4 invariant: the

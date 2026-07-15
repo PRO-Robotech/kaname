@@ -30,8 +30,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	repoaccount "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	repoaccount "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
 )
 
 // ───────────── relation-aware FGA stub (viewer vs v_list distinguished) ──────

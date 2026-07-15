@@ -27,6 +27,24 @@ logger:
   level: INFO
 apiServer:
   gracefulShutdown: 10s
+  # ─── Docker Registry v2 token shim (`/iam/token`, :9096) ────────────────────
+  # Пусто → работают built-in дефолты (registry.kacho.local / api.kacho.local),
+  # пригодные только для локального стенда. На развёрнутом окружении ОБА поля
+  # обязаны нести РЕАЛЬНЫЙ публичный хост реестра, иначе `docker login` ломается:
+  #
+  #   `service` — это НЕ только fallback для `?service=`. Оно же уходит в
+  #   issueUC.RegistryAudience (#321) → whitelist'ится как audience в Hydra-клиенте
+  #   КАЖДОГО выпускаемого SA-ключа. Если оно расходится с тем, что docker шлёт в
+  #   `?service=`, Hydra отвергает обмен:
+  #     "Requested audience '<host>' has not been whitelisted by the OAuth 2.0 Client"
+  #   → shim отдаёт 401 → `docker login: unauthorized`. Ключи, выпущенные с неверным
+  #   значением, придётся ПЕРЕВЫПУСТИТЬ (audience фиксируется в клиенте при создании).
+  #
+  #   `issuer` — `iss` + realm в WWW-Authenticate; должен совпадать с realm'ом,
+  #   который анонсирует data-plane реестра (KACHO_REGISTRY_TOKEN_REALM).
+  registryToken:
+    issuer: ""
+    service: ""
 metrics:
   enable: true
 healthcheck:

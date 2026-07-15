@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 )
 
 // TestNewRegistry_HandlerServesMetrics — /metrics endpoint serves the

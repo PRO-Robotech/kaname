@@ -40,12 +40,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount — N concurrent

@@ -43,14 +43,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/ids"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 var condEvtIDRe = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)

@@ -35,18 +35,18 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/ids"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	accountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/account"
-	groupapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/group"
-	projectapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project"
-	saapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
-	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/fgatest"
+	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
+	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
+	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
+	saapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
+	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
 // readAuthzFixture bundles a live repo + FGA harness with a seeded topology:

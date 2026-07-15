@@ -30,7 +30,7 @@ import (
 	"net/http"
 	"time"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
+	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
 )
 
 // TokenPath — the token endpoint path. MUST equal the data-plane's Bearer realm

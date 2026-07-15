@@ -13,7 +13,7 @@ package pg
 import (
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // txAsPgx recovers the concrete pgx.Tx from the service layer's opaque

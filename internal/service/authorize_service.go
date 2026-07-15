@@ -38,13 +38,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // serverAuthoritativeCondKeys are CEL condition-context attributes that describe

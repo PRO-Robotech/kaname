@@ -24,12 +24,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/condition"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/condition"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // fakeConditionsRepo — minimal ConditionsRepoPort for Evaluate use-case tests.

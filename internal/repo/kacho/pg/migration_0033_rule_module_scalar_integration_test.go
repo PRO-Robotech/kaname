@@ -31,11 +31,11 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/ids"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // migrate0033Env brings a fresh DB up to a target version with goose and returns

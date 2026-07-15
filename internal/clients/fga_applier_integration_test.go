@@ -37,12 +37,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/observability"
-	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/observability"
+	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // setupFGAOutboxDB spins up a Postgres testcontainer, runs the kacho-iam

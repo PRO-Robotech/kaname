@@ -16,7 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // PoolTxBeginner — wraps *pgxpool.Pool to implement service.TxBeginner.

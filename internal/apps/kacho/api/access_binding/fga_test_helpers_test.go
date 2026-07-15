@@ -29,7 +29,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 // listObjects calls OpenFGA ListObjects and returns the bare ids (objType prefix
@@ -89,7 +89,7 @@ func fgaModelPath(t *testing.T) string {
 	if wd, err := os.Getwd(); err == nil {
 		dir := wd
 		for i := 0; i < 12; i++ {
-			cand := filepath.Join(dir, "kacho-proto", fgaModelRelPath)
+			cand := filepath.Join(dir, fgaModelRelPath)
 			if _, err := os.Stat(cand); err == nil {
 				return cand
 			}
@@ -97,7 +97,7 @@ func fgaModelPath(t *testing.T) string {
 		}
 	}
 	if out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
-		"github.com/PRO-Robotech/kacho-proto").Output(); err == nil {
+		"github.com/PRO-Robotech/kacho").Output(); err == nil {
 		if modDir := strings.TrimSpace(string(out)); modDir != "" {
 			cand := filepath.Join(modDir, fgaModelRelPath)
 			if _, err := os.Stat(cand); err == nil {

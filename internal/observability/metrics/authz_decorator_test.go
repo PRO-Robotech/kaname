@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // fakeAuthorizer — stub implementing the relation-native check the decorator

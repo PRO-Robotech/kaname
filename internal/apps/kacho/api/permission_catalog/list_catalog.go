@@ -22,9 +22,9 @@ package permission_catalog
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // Catalog — the grantable taxonomy projection (use-case DTO; the handler maps

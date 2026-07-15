@@ -29,12 +29,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/ids"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // countAuditRows returns the number of audit_outbox rows whose payload binding_id

@@ -27,9 +27,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	sessionrevapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/session_revocations"
+	sessionrevapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/session_revocations"
 )
 
 func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {

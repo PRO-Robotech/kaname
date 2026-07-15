@@ -21,11 +21,11 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 )
 
 // fakeOpsList — minimal operations.Repo stub that echoes a canned page.

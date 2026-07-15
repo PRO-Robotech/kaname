@@ -26,9 +26,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 // buildBindingTuples builds the FULL FGA tuple set a (thin) binding emits for a

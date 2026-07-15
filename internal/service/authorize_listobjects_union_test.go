@@ -24,7 +24,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // unionRelations — relation-aware ListObjects fake: returns a distinct id set per

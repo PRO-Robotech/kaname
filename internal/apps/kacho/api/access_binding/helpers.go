@@ -12,16 +12,16 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/dto"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 
-	_ "github.com/PRO-Robotech/kacho-iam/internal/dto/toproto"
+	_ "github.com/PRO-Robotech/kacho/services/iam/internal/dto/toproto"
 )
 
 // auditTenantAccountID derives the Account scope for the audit_outbox

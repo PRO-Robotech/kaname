@@ -11,7 +11,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // UserLookupPort — read-side dependency для token/refresh hooks.

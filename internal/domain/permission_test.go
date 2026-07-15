@@ -18,7 +18,7 @@ package domain_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 func TestPermission_Validate(t *testing.T) {

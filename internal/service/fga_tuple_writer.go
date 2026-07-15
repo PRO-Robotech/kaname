@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
 // RelationWriter — port-iface narrowed to writer-needs.

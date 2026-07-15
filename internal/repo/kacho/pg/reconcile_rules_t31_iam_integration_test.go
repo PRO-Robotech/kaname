@@ -36,15 +36,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/internal_iam"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // newRegisterUCWired builds the RegisterResource use-case wired exactly like the

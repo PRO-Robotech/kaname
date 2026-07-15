@@ -33,7 +33,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // openfgaLimitServer emulates the OpenFGA /write endpoint enforcing

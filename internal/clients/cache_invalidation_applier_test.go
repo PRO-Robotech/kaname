@@ -24,7 +24,7 @@ import (
 	"sync"
 	"testing"
 
-	apigatewayv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/apigateway/v1"
+	apigatewayv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/apigateway/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -32,9 +32,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
+	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

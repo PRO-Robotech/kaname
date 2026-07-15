@@ -15,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // failingRelationStore fails every WriteTuples so the resilient per-tuple pass

@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
 // ConditionalTuple / TupleConditionRef are neutral value types owned by

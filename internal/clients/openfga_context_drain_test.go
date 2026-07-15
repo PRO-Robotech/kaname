@@ -31,7 +31,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 func newDrainTestClient(endpoint string) *clients.OpenFGAHTTPClient {

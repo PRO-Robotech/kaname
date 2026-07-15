@@ -23,8 +23,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 // membershipReconciler — the per-binding membership reconcile entry point (the γ

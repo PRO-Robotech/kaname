@@ -21,18 +21,18 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
 )
 
 // ── Fake repo plumbing (narrow surface for WhoAmI: Users().Get +

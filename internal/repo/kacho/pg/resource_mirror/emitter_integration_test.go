@@ -25,10 +25,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
 )
 
 func TestResourceMirror_UpsertTx_InsertsRowAtomically(t *testing.T) {

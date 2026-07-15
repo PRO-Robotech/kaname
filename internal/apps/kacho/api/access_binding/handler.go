@@ -19,14 +19,14 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho-corelib/safeconv"
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	"github.com/PRO-Robotech/kacho/pkg/safeconv"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	reporole "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 )
 
 type Handler struct {

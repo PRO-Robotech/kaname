@@ -12,11 +12,11 @@ package access_binding
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	roleapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/role"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	ab_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	ab_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 // ─── ordered, deduped emitted-tuple store ────────────────────────────────────

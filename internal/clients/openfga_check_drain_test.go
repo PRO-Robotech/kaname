@@ -26,7 +26,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // countingStatusServer returns the given status with a non-trivial body and

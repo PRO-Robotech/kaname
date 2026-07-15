@@ -25,11 +25,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // failBeginTxBeginner fails at connection acquisition (Begin), simulating a

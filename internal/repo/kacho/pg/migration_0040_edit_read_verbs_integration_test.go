@@ -30,9 +30,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // md5hex17 mirrors the migration/fixture role-id derivation `substr(md5(name),1,17)`.

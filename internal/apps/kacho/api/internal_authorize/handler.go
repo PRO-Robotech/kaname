@@ -26,16 +26,16 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
-	"github.com/PRO-Robotech/kacho-corelib/safeconv"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // Handler — gRPC server.

@@ -15,18 +15,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	reconcileapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
-	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	handlerinternal "github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	reconcileapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
+	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	handlerinternal "github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // buildHooksMux — собирает HTTP mux для AuthN hooks.

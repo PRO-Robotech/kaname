@@ -21,7 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // wrapPgErr — SQLSTATE → ErrXxx mapping point, constraint-name aware. The

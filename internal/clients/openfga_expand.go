@@ -13,7 +13,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
 // The Zanzibar userset-tree types are neutral value types owned by

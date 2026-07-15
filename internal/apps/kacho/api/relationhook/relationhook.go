@@ -31,7 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // WriteHierarchyTuple writes a single parent-pointer tuple

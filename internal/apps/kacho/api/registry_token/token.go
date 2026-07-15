@@ -22,7 +22,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytoken"
 )
 
 // Credential — the verified SA-key identity a client_assertion is built from.

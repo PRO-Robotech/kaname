@@ -11,7 +11,7 @@ package cluster
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // GetClusterUseCase — reads the singleton cluster row.

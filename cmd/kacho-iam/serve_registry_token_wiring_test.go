@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho-iam/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytokenwire"
 )
 
 // TestRegistryTokenListener_ConfiguredSeparatePort — the composition root must

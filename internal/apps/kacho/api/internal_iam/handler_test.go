@@ -26,11 +26,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // fakeAuthorizer — in-memory implementation of the authorizer port-iface.

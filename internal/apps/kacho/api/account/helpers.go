@@ -8,13 +8,13 @@ import (
 
 	"google.golang.org/protobuf/types/known/anypb"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/dto"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
 
 	// Blank-import регистрирует трансферы Account/time через init().
-	_ "github.com/PRO-Robotech/kacho-iam/internal/dto/toproto"
+	_ "github.com/PRO-Robotech/kacho/services/iam/internal/dto/toproto"
 )
 
 // marshalAccount конвертирует domain.Account в *anypb.Any через DTO-реестр.

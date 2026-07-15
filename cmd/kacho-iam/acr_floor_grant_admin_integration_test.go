@@ -36,12 +36,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 )
 
 const (

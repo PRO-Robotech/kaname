@@ -31,9 +31,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // регистрирует "pgx" driver для sql.Open
 	"github.com/spf13/cobra"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/migrator"
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/migrator"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 const (

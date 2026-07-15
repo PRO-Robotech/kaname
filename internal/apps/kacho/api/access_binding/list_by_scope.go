@@ -10,10 +10,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 type ListByScopeUseCase struct {

@@ -20,14 +20,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
-	accountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/account"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	repoacct "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
+	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	repoacct "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 func TestAccountCreate_P6_OwnerBinding_CoCommit_E2E(t *testing.T) {

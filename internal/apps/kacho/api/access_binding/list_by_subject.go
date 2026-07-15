@@ -8,12 +8,12 @@ package access_binding
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 type ListBySubjectUseCase struct {

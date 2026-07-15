@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 func TestOpenFGAStubClient_WriteCheck(t *testing.T) {

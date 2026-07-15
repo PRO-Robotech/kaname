@@ -33,8 +33,8 @@ package cluster
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // adminChecker — narrow ReBAC port (Check(subject, relation, object)) satisfied

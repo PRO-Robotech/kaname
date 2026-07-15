@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 // TestFGAModel_VBC01_VGetSatisfies_VListNoGet_NoViewerUnion — VBC-01: a v_get

@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // TestPublicKeyPEMToJWK_ES256 — ES256 EC-ключ корректно кодируется в JWK: x/y —

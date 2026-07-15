@@ -25,9 +25,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // Well-formed AccessBinding ids (prefix "acb" + domain.ShortIDLen==20 total)

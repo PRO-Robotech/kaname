@@ -28,17 +28,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/ids"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // recoveryAuditFaultErr — the injected mid-tx failure (fault-injection path).

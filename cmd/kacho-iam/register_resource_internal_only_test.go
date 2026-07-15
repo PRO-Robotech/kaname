@@ -33,9 +33,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	internaliamapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/internal_iam"
+	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
 )
 
 // serveBufconn starts a gRPC server fed by the given registrar over an

@@ -42,7 +42,7 @@ import (
 	"sync"
 	"time"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 )
 
 // Default recognition-cache tuning — used by NewBuiltinEvaluator and as the

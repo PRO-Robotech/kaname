@@ -23,8 +23,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // backfillSingletonLockKey — the well-known advisory-lock key for the backfill

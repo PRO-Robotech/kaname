@@ -14,7 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // Sensitive strings a raw *pgconn.PgError carries — they must NEVER reach the

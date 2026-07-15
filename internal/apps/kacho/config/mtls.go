@@ -12,8 +12,8 @@ import (
 	"go.uber.org/multierr"
 	"google.golang.org/grpc"
 
-	corecfg "github.com/PRO-Robotech/kacho-corelib/config"
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	corecfg "github.com/PRO-Robotech/kacho/pkg/config"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
 // mtlsEnvPrefix — корневой сегмент env-имен для per-edge server-side mTLS.

@@ -36,20 +36,20 @@ import (
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
-	ab_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	acct_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
-	proj_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
-	role_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
-	sa_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
-	user_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	ab_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	acct_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
+	proj_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
+	role_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	sa_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
+	user_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // ─── Symmetric FGA grant/revoke ────────────────────────────────────────────

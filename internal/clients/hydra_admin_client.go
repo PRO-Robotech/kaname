@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // HydraAdminClient — HTTP-клиент к Hydra admin API.

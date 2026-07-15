@@ -13,7 +13,7 @@ package authzmap_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 func TestRegistryObjectTypes(t *testing.T) {

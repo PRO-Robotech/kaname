@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
 
 // Sub-phase 5.5 — per-edge clientAuthMode for the HTTP hooks (:9092) + metrics

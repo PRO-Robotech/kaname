@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
 
 // unsetAuthModeEnv removes both the legacy and the namespaced AUTH_MODE env

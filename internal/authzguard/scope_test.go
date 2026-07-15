@@ -20,9 +20,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 )
 
 func scopeUserCtx(id string) context.Context {

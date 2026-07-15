@@ -8,7 +8,7 @@ package account
 // iface'ы из repo-слоя.
 
 import (
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 // Type-alias (не type wrap) — тип взаимозаменяем с источником.

@@ -26,8 +26,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	pg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	pg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // jitTestSubjectID / jitTestAccountID — the fixed subject seeded for the parent

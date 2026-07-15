@@ -28,8 +28,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	reporole "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 )
 
 // roleUnionFGAStub — relation-aware ListObjects stub: distinguishes viewer vs

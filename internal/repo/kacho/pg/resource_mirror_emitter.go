@@ -14,8 +14,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/resource_mirror"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // ResourceMirrorEmitter — adapter implementing service.ResourceMirrorEmitter on

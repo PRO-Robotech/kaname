@@ -18,8 +18,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 func TestModuleSetDrift_AuthzmapVsDomain(t *testing.T) {

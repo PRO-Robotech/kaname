@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // mockRelations — minimal Authorizer for unit tests.

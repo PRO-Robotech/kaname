@@ -8,7 +8,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
 func TestPrincipalUserID_User(t *testing.T) {

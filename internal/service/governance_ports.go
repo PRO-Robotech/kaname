@@ -16,7 +16,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/outboxtypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/outboxtypes"
 )
 
 // TxBeginner opens a transaction. The returned handle is the opaque service.Tx

@@ -6,7 +6,7 @@ package user
 // iface.go — re-export CQRS-типов под коротким именем (parity с account/iface.go).
 
 import (
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 type (

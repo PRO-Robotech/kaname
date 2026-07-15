@@ -33,13 +33,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
-	"github.com/PRO-Robotech/kacho-corelib/observability"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/observability"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 const configPathEnv = "KACHO_IAM_CONFIG_PATH"

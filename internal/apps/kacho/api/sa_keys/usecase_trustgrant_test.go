@@ -11,8 +11,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // fakeTrustGrants — records the trust-grants the federated Issue registers.

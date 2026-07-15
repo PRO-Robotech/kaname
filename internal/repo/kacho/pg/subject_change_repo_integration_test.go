@@ -15,9 +15,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // TestSubjectChangeRepo_PollSubjectChanges verifies:

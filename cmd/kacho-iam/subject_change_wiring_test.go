@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcclient"
+	"github.com/PRO-Robotech/kacho/pkg/grpcclient"
 )
 
 // TestGatewayDialOpts_IncludesIdleKeepalive — KA-02: subject-drainer conn →

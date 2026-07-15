@@ -37,7 +37,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 const (
@@ -171,7 +171,7 @@ func resolveFGAModel() (string, bool) {
 	if wd, err := os.Getwd(); err == nil {
 		dir := wd
 		for i := 0; i < 12; i++ {
-			cand := filepath.Join(dir, "kacho-proto", fgaModelRelPath)
+			cand := filepath.Join(dir, fgaModelRelPath)
 			if _, statErr := os.Stat(cand); statErr == nil {
 				return cand, true
 			}
@@ -179,7 +179,7 @@ func resolveFGAModel() (string, bool) {
 		}
 	}
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
-		"github.com/PRO-Robotech/kacho-proto").Output()
+		"github.com/PRO-Robotech/kacho").Output()
 	if err == nil {
 		if modDir := strings.TrimSpace(string(out)); modDir != "" {
 			cand := filepath.Join(modDir, fgaModelRelPath)

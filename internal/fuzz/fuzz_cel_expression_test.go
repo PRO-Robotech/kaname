@@ -45,7 +45,7 @@ func FuzzCELExpression(f *testing.F) {
 		}()
 
 		// Wire to:
-		//   import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/conditions"
+		//   import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/conditions"
 		//   _, err := conditions.Parse(input)
 		valid := parseCELStub(input)
 		celTestSink = valid

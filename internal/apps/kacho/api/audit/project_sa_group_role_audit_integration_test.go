@@ -14,11 +14,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/group"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/role"
-	service_account "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
+	service_account "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // ── 5.2-13 Project C/U/D ───────────────────────────────────────────────────────

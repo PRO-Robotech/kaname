@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 // groupMemberTuple mirrors the production member-tuple AddMember co-commits:

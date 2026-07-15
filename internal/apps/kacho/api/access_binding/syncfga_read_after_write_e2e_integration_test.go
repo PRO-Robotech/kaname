@@ -34,17 +34,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	accessbindingapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding"
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
-	accountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/account"
-	groupapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/group"
-	projectapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
-	repoacct "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	accessbindingapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
+	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
+	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
+	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	repoacct "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // TestSyncFGA_ReadAfterWrite_AccountCreate_OwnerCheckImmediately is the foundational

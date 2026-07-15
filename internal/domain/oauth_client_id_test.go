@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-corelib/ids"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
 )
 
 func TestSAOAuthClientID_Validate_BothFormats(t *testing.T) {

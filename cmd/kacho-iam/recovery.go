@@ -9,10 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/operationresolver"
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/operationresolver"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 // startLROReconciler wires the orphan-reconciler backstop. Without it an operation

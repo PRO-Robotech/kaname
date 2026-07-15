@@ -48,7 +48,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
 // ownRoleMaterializedTuples returns the EXACT per-object tuple set the reconciler

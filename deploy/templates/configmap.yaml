@@ -25,6 +25,19 @@ data:
       endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.grpc | quote }}
       internal-endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.internalGrpc | quote }}
       graceful-shutdown: {{ default "10s" .Values.apiServer.gracefulShutdown | quote }}
+      {{- $rt := .Values.apiServer.registryToken | default dict }}
+      {{- if or $rt.issuer $rt.service }}
+      # Docker Registry v2 token shim. `service` также whitelist'ится как audience в
+      # Hydra-клиенте каждого выпускаемого SA-ключа (#321) — расхождение с тем, что
+      # docker шлёт в `?service=`, ломает login (Hydra: audience not whitelisted).
+      registry-token:
+        {{- with $rt.issuer }}
+        issuer: {{ . | quote }}
+        {{- end }}
+        {{- with $rt.service }}
+        service: {{ . | quote }}
+        {{- end }}
+      {{- end }}
 
     metrics:
       enable: {{ default true .Values.metrics.enable }}

@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
 // acr_floor_test.go — unit tests for ACRFloor.

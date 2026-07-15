@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // authzProvider resolves the configured authorization-provider backend from

@@ -26,12 +26,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	clusterapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/cluster"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	clusterapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/cluster"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // fakeAdminChecker — in-memory authzguard.RelationChecker. Records the last

@@ -37,7 +37,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
+	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 )
 
 // FGAOutboxEvent is the typed payload of one row in `kacho_iam.fga_outbox`.

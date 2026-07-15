@@ -32,12 +32,12 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	corevalidate "github.com/PRO-Robotech/kacho-corelib/validate"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // relationOutboxEmitter — narrow write port: emit FGA tuple

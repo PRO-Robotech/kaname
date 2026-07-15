@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // relationAuthorizer is the relation-native authz port the InternalIAMService

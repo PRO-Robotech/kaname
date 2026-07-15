@@ -43,8 +43,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
-	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
 // TestInternalListener_UsesTrustAwarePrincipalExtract — source-level wiring guard.

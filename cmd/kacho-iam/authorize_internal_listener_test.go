@@ -39,11 +39,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	authorizeapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/authorize"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	authorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/authorize"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // authzStubAuthorizer — minimal service.Authorizer for the registration test.

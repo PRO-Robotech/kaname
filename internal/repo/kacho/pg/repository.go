@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	kacho "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kacho "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 // Repository — реализация kacho.Repository поверх pgxpool.

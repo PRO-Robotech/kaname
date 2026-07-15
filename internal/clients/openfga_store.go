@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
 // StoreInfo — FGA store metadata. Neutral value type owned by

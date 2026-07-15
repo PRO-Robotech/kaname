@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // bigBadRequestServer returns HTTP 400 with a body of `bodyLen` bytes that does

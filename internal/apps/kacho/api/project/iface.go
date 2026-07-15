@@ -7,7 +7,7 @@ package project
 // (`Repo` / `Reader` / `Writer`). Parity с account/iface.go.
 
 import (
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 type (

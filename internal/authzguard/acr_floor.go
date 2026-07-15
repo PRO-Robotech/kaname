@@ -49,7 +49,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
 // ACRRequirementLookup — narrow port resolving an RPC's `required_acr_min` from

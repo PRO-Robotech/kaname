@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // TestMapErr_UnmappedError_OpaqueInternal — the Internal branch: an unmapped

@@ -4,7 +4,7 @@
 package access_binding
 
 import (
-	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
 type (

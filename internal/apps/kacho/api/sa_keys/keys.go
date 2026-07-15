@@ -18,7 +18,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // generatedKey holds all artifacts produced by generateES256Key.
