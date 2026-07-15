@@ -470,6 +470,12 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	auditEmitter := kachopg.NewAuditOutboxEmitter(pool)
 
 	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	// Always whitelist the configured registry service audience on every issued
+	// SA-key's Hydra client (#320) — the SAME value the `/iam/token` Docker-
+	// Registry shim requests during the client_credentials exchange
+	// (serve.go passes it as registrytokenwire.BuildConfig.Service). Without it
+	// Hydra rejects a docker-login exchange as an un-whitelisted audience.
+	issueUC.RegistryAudience = cfg.APIServer.RegistryToken.TokenService()
 	// Register exact-subject jwt-bearer trust-grants for federated (k8s/CI) keys —
 	// the same Hydra admin client carries the trust-grant endpoint.
 	issueUC.WithTrustGrantAdmin(hydraAdmin)

@@ -128,6 +128,15 @@ type IssueSAKeyUseCase struct {
 	DefaultScope string
 	// AudiencePrefix — appended with `/<svaID>` as Hydra audience.
 	AudiencePrefix string
+	// RegistryAudience — the configured registry service audience (the same
+	// value the `/iam/token` Docker-Registry shim requests from Hydra during the
+	// client_credentials exchange, sourced from
+	// `api-server.registry-token.service`). ALWAYS whitelisted on every issued
+	// SA-key's Hydra client so a docker/registry key works out of the box —
+	// without it Hydra rejects the exchange with "Requested audience … has not
+	// been whitelisted by the OAuth 2.0 Client" (#320). Empty → not added
+	// (test / registry-disabled wiring). Set in the composition root.
+	RegistryAudience string
 }
 
 // WithResponseRedactor wires the post-Issue secret redactor.
@@ -481,41 +490,55 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	return anypb.New(resp)
 }
 
-// resolveAudience derives the Hydra `audience` list for a new SA client.
+// resolveAudience derives the Hydra `audience` whitelist for a new SA client.
 //
-// Audience semantics:
-//   - in.Audience non-empty → use it verbatim (after dedup + empty drop).
-//     External-federation rollout requires
-//     the audience to match what the external IdP expects EXACTLY — the
-//     internal `AudiencePrefix` default would invalidate the token.
-//   - in.Audience empty AND AudiencePrefix set → legacy kacho-internal
-//     audience `<prefix>/sa/<svaID>`. Backwards-compat for callers that
-//     do not yet specify audience.
-//   - both empty → nil (Hydra mints tokens with no `aud` claim; valid for
-//     kacho-internal API gateway which doesn't require aud, but rejected by
-//     any external RP that enforces audience).
+// Audience semantics (each layer is unioned, order-preserving, deduplicated):
+//   - in.Audience non-empty → its entries lead the list (empties dropped).
+//     External-federation rollout requires the audience to match what the
+//     external IdP expects — those caller values are preserved verbatim.
+//   - in.Audience empty AND AudiencePrefix set → append the legacy
+//     kacho-internal audience `<prefix>/sa/<svaID>`. Backwards-compat for
+//     callers that do not specify audience. (Skipped when the caller supplied
+//     an explicit audience, keeping the external-federation contract: the
+//     internal default is not force-mixed into a deliberate external list.)
+//   - RegistryAudience set → ALWAYS appended so a docker/registry SA-key works
+//     out of the box. The `/iam/token` shim requests `audience=<registry
+//     service>` during the client_credentials exchange; Hydra rejects that
+//     exchange unless this client whitelists that audience (#320). Whitelisting
+//     it is additive — it never changes the `aud` a token actually carries
+//     (that is chosen per-exchange by the requested `audience` param).
+//   - everything empty → nil (Hydra mints tokens with no `aud` claim; valid for
+//     the kacho-internal API gateway which doesn't require aud).
 func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
-	if len(in.Audience) > 0 {
-		seen := make(map[string]struct{}, len(in.Audience))
-		out := make([]string, 0, len(in.Audience))
-		for _, a := range in.Audience {
-			if a == "" {
-				continue
-			}
-			if _, dup := seen[a]; dup {
-				continue
-			}
-			seen[a] = struct{}{}
-			out = append(out, a)
+	seen := make(map[string]struct{}, len(in.Audience)+2)
+	out := make([]string, 0, len(in.Audience)+2)
+	add := func(a string) {
+		if a == "" {
+			return
 		}
-		if len(out) > 0 {
-			return out
+		if _, dup := seen[a]; dup {
+			return
 		}
+		seen[a] = struct{}{}
+		out = append(out, a)
 	}
-	if u.AudiencePrefix != "" {
-		return []string{strings.TrimRight(u.AudiencePrefix, "/") + "/sa/" + string(in.ServiceAccountID)}
+
+	for _, a := range in.Audience {
+		add(a)
 	}
-	return nil
+	// Fall back to the kacho-internal default only when the caller supplied no
+	// (non-empty) audience — a deliberate external-federation list is not mixed
+	// with the internal default.
+	if len(out) == 0 && u.AudiencePrefix != "" {
+		add(strings.TrimRight(u.AudiencePrefix, "/") + "/sa/" + string(in.ServiceAccountID))
+	}
+	// Always whitelist the configured registry service audience (#320).
+	add(u.RegistryAudience)
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // doIssueFederated — register Hydra client for RFC 7523
