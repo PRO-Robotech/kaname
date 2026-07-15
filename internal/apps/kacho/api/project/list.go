@@ -80,7 +80,7 @@ func (u *ListProjectsUseCase) Execute(ctx context.Context, f project.ListFilter)
 	}
 
 	// Resolve owner-visible accounts (intra-account ownership; unchanged).
-	accts, _, err := rd.Accounts().List(ctx, account_ListFilter())
+	accts, _, err := rd.Accounts().List(ctx, accountListFilter())
 	if err != nil {
 		return nil, "", shared.MapRepoErr(err)
 	}
@@ -149,8 +149,8 @@ func principalSubject(p operations.Principal) string {
 	}
 }
 
-// account_ListFilter — minimal ListFilter без pagination (для inline-load
+// accountListFilter — minimal ListFilter без pagination (для inline-load
 // всех accounts при post-filter Projects.List).
-func account_ListFilter() accountrepo.ListFilter {
+func accountListFilter() accountrepo.ListFilter {
 	return accountrepo.ListFilter{PageSize: 1000}
 }
