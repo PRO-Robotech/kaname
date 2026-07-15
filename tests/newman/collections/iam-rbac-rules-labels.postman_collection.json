@@ -153,7 +153,7 @@
       ]
     },
     {
-      "name": "RBACLBL-IAMTYPE-ACCEPTED — ARM_LABELS rule on iam content type iam.role → Role.Create accepted (T3.3-FEED-01, feed-gate reversed)",
+      "name": "RBACLBL-IAMTYPE-ACCEPTED — ARM_LABELS rule on iam content type iam.role → Role.Create accepted (feed-gate reversed)",
       "description": "class:RBAC | class:RULES | class:LABELS | class:HAPPY | priority:P0",
       "item": [
         {

@@ -195,16 +195,20 @@ echo "===== Summary ====="
 
 # ─── Coverage gate ───────────────────────────────────────────────────────
 # After running all newman collections, summarise RPC→case-id coverage by
-# parsing the in-repo iam .proto files (proto/kacho/cloud/iam/v1, owned by this
-# repo after proto-decentralization) vs ./collections/*.json. Exit-code is
-# 0 unless COVERAGE_MIN is set AND coverage% drops below it (set this in CI
-# to enforce a floor).
+# parsing the iam .proto files vs ./collections/*.json. Exit-code is 0 unless
+# COVERAGE_MIN is set AND coverage% drops below it (set this in CI to enforce a
+# floor).
+#
+# The .proto live ONLY in kacho-proto (proto is centralized; there is no in-repo
+# proto/ dir). COVERAGE_PROTO_GLOB overrides the glob so CI can point it at the
+# kacho-proto sibling checkout (absolute path); the default is kept as a local-dev
+# convenience for a checkout that vendors a sibling kacho-proto alongside this repo.
 if command -v python3 >/dev/null 2>&1 && [ -f scripts/coverage.py ]; then
   echo
   echo "===== coverage ====="
   COV_MIN="${COVERAGE_MIN:-0}"
   if python3 scripts/coverage.py \
-       --proto-glob '../../proto/kacho/cloud/iam/v1/*.proto' \
+       --proto-glob "${COVERAGE_PROTO_GLOB:-../../../kacho-proto/proto/kacho/cloud/iam/v1/*.proto}" \
        --collections-glob 'collections/*.postman_collection.json' \
        --min "$COV_MIN" | tee out/coverage.txt; then
     :

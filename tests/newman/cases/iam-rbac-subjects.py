@@ -48,10 +48,18 @@ Test-design techniques applied:
 
 Fixture dependency (tests/authz-fixtures/setup-jwt.py + setup.py): jwtAccountAdminA,
 jwtNoBindings, accountAId, userAAAId, userAABId, userNOBId. AccessBinding subjects
-are soft-ref (no FK, any non-empty string) so synthetic `grp-*`/`usr-*` ids suffixed
-with {{runId}} are valid for the create/projection cases; the ExpandAccess case uses
-a REAL group with REAL user members (the group_members trigger requires existing
-users) so the userset can resolve to concrete principals.
+must reference an EXISTING user/service_account/group in the iam DB — migration 0049
+(subject_ref_exists BEFORE INSERT/UPDATE trigger) closes the (subject_type,
+subject_id) within-service reference at the DB level (phantom-grant / delete-race,
+hard-rule #10), so a made-up `usr-*`/`grp-*` string is rejected 23503 →
+FAILED_PRECONDITION at Create. The create/projection cases therefore mint a fresh
+REAL user per run via `mint_user()` (the PUBLIC UserService.Invite flow — a PENDING
+user row that satisfies the existence trigger; UpsertFromIdentity is Internal-only,
+no public REST route) and, for the multi-subject case, create a fresh REAL group; the
+ExpandAccess case likewise uses
+a REAL group with REAL user members (the group_members trigger requires existing users)
+so the userset can resolve to concrete principals. Each minted principal is runId-scoped
+(unique per run, no active-grant UNIQUE collision) and referenced by no other suite.
 
 DEPLOY NOTE: the `subjects[]` Create field and the `:expandAccess` / `:listByRole`
 public RPCs are registered (public mux) and the IAM build is live on the stack —
@@ -207,14 +215,91 @@ def teardown_delete(acb_var, auth="jwtAccountAdminA"):
     )
 
 
+def mint_user(env_var, ext, auth="jwtAccountAdminA"):
+    """Mint a fresh REAL user via the PUBLIC invite flow (UserService.Invite,
+    POST /iam/v1/users:invite), wait for the user row to COMMIT, and stash its id —
+    so it can be an AccessBinding subject.
+
+    Returns TWO steps: the invite + a poll of the returned Operation to done.
+
+    WHY REAL (migration 0049 — access_bindings subject_ref_exists trigger): a
+    binding's (subject_type, subject_id) must reference an EXISTING
+    user/service_account/group in the iam DB (a within-service invariant closing the
+    phantom-grant / delete-race holes, hard-rule #10). A synthetic `usr-*-{{runId}}`
+    string that was never created is rejected 23503 → FAILED_PRECONDITION at Create,
+    so subjects can no longer be made up on the fly.
+
+    WHY INVITE (not UpsertFromIdentity): UpsertFromIdentity is an Internal* RPC with
+    no PUBLIC REST route — it lives ONLY on the api-gateway cluster-internal listener
+    (:8081), so POSTing it at the public {{baseUrl}} (:8080) returns 404 (ban #6). The
+    PUBLIC user-mint path a tenant admin can drive over REST is Invite: it INSERTs a
+    PENDING user row (invite.go InsertPending) and returns metadata.userId synchronously.
+    The row EXISTS in kacho_iam.users, so the 0049 trigger (existence, status-agnostic)
+    passes and the id is a valid binding subject. email is runId-scoped → a distinct real
+    user per run (unique per-run subject → no active-grant UNIQUE collision) referenced
+    by no other suite (→ no cross-suite pollution — the property the old synthetic ids
+    gave, now with a real principal). Idempotent by (account, email); jwtAccountAdminA
+    can invite into account-A (canInviteUsers editor cascade). The invited id carries the
+    `usr` prefix (domain.PrefixUser). This is the SAME public flow the GREEN
+    iam-user IAM-USR-SETUP-INVITE-INV-TO-B case uses.
+
+    WHY POLL: Invite is async (operations.Run → LRO worker commits the row in a
+    dispatcher goroutine); the response returns before the row is committed. The
+    immediately-following binding Create would race the commit and re-trip the 0049
+    trigger. So we deterministically wait for the mint Operation to report done (not
+    time.Sleep) — then the user row is committed and usable as a subject. metadata.userId
+    is set synchronously (pre-allocated candidate id) and is stable for a fresh
+    runId-scoped email."""
+    op_var = f"{env_var}MintOp"
+    return [
+        Step(
+            name=f"mint-{env_var}",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={
+                "accountId": "{{accountAId}}",
+                "email": f"{ext}-{{{{runId}}}}@kacho.local",
+                "displayName": f"rbac-subjects {ext} {{{{runId}}}}",
+            },
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", op_var),
+                *save_from_response("(j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id", env_var),
+                f"pm.test('minted {env_var} has usr prefix', () => pm.expect(pm.environment.get('{env_var}') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));",
+            ],
+        ),
+        Step(
+            name=f"mint-poll-{env_var}",
+            method="GET",
+            path="/operations/{{" + op_var + "}}",
+            auth=auth,
+            test_script=[
+                "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                "const j = pm.response.json();",
+                "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                f"if (!j.done && pc < {POLL_CAP}) {{",
+                "  pm.environment.set('_pollCount', String(pc + 1));",
+                "  postman.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_pollCount');",
+                "pm.environment.unset('_pollStarted');",
+                f"pm.test('minted {env_var} committed (operation done, no error)', () => {{",
+                "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                "});",
+            ],
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # RBACSUBJ-CR-MULTI-OK: Create binding with 2 independent subjects (user +
 # group) via the canonical subjects[]+scopeRef input → Operation done → Get shows
 # subjects[] of length 2, each subject preserved. (R-5 — subjects independence.)
 # ---------------------------------------------------------------------------
-
-E30_USER  = "usr-e30-u-{{runId}}"
-E30_GROUP = "grp-e30-g-{{runId}}"
 
 CASES.append(Case(
     id="RBACSUBJ-CR-MULTI-OK",
@@ -223,14 +308,34 @@ CASES.append(Case(
     priority="P0",
     steps=[
         # verifies (subjects[] independence — no double-grant anomaly)
+        # Both subjects must be REAL principals (migration 0049 subject_ref_exists):
+        # mint a fresh user and create a fresh group, then bind BOTH.
+        *mint_user("e30UserId", "usr-e30"),
+        Step(
+            name="create-e30-group",
+            method="POST",
+            path="/iam/v1/groups",
+            body={
+                "accountId": "{{accountAId}}",
+                "name": "rbac-e30-grp-{{runId}}",
+                "description": "newman multi-subject probe group",
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "e30GrpOpId"),
+                *save_from_response("j.metadata && j.metadata.groupId", "e30GroupId"),
+            ],
+        ),
+        poll_op_done("e30GrpOpId", out_id_var="e30GroupId"),
         Step(
             name="create-multi-subject",
             method="POST",
             path="/iam/v1/accessBindings",
             body={
                 "subjects": [
-                    {"type": "SUBJECT_TYPE_USER", "id": E30_USER},
-                    {"type": "SUBJECT_TYPE_GROUP", "id": E30_GROUP},
+                    {"type": "SUBJECT_TYPE_USER", "id": "{{e30UserId}}"},
+                    {"type": "SUBJECT_TYPE_GROUP", "id": "{{e30GroupId}}"},
                 ],
                 "roleId": ROLE_COMPUTE_ADMIN,
                 "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
@@ -244,7 +349,15 @@ CASES.append(Case(
             ],
         ),
         poll_capture_acb("e30OpId", "e30AcbId"),
-        Step(
+        # Read-after-write on the fresh binding OBJECT: the owner/account-admin's
+        # per-object v_get tuple forward-materializes a beat after Create→Operation-done
+        # (flat-RBAC grant→visibility window), so a single-shot GET intermittently hits
+        # the hide-existence 404 (read-deny == NOT_FOUND) before convergence — observed
+        # on this FIRST case with a cold fga drainer (the binding EXISTS: the teardown
+        # DELETE got 403, not 404). Poll past the 403/404 window to the terminal 200
+        # (parity with the get-new-fills-legacy case; a genuine never-converge still
+        # surfaces at the cap, never masked).
+        poll_request_until_status(
             name="get-subjects-len-2",
             method="GET",
             path="/iam/v1/accessBindings/{{e30AcbId}}",
@@ -258,12 +371,12 @@ CASES.append(Case(
                 "});",
                 "pm.test('subjects[] carries the USER subject', () => {",
                 "  const subs = pm.response.json().subjects || [];",
-                "  const want = ('usr-e30-u-' + pm.environment.get('runId'));",
+                "  const want = pm.environment.get('e30UserId');",
                 "  pm.expect(subs.some(s => s.type === 'SUBJECT_TYPE_USER' && s.id === want), JSON.stringify(subs)).to.be.true;",
                 "});",
                 "pm.test('subjects[] carries the GROUP subject (independent)', () => {",
                 "  const subs = pm.response.json().subjects || [];",
-                "  const want = ('grp-e30-g-' + pm.environment.get('runId'));",
+                "  const want = pm.environment.get('e30GroupId');",
                 "  pm.expect(subs.some(s => s.type === 'SUBJECT_TYPE_GROUP' && s.id === want), JSON.stringify(subs)).to.be.true;",
                 "});",
             ],
@@ -357,8 +470,6 @@ CASES.append(Case(
 # pre-E clients don't break. Output-only projection (O-6).
 # ---------------------------------------------------------------------------
 
-E34_NEW_SUBJ = "usr-e34-new-{{runId}}"
-
 CASES.append(Case(
     id="RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED",
     title="Create via NEW subjects[]+scopeRef → Get fills legacy subjectType/subjectId (=subjects[0]) AND resourceType/resourceId/scope",
@@ -366,6 +477,8 @@ CASES.append(Case(
     priority="P0",
     steps=[
         # verifies (new-author → legacy-fields-filled)
+        # subject must be a REAL user (migration 0049) — mint one for this run.
+        *mint_user("e34NewUserId", "usr-e34-new"),
         Step(
             name="create-new-form",
             method="POST",
@@ -374,7 +487,7 @@ CASES.append(Case(
                 # Canonical NEW input ONLY — no legacy subjectType/subjectId,
                 # no legacy resourceType/resourceId.
                 "subjects": [
-                    {"type": "SUBJECT_TYPE_USER", "id": E34_NEW_SUBJ},
+                    {"type": "SUBJECT_TYPE_USER", "id": "{{e34NewUserId}}"},
                 ],
                 "roleId": ROLE_COMPUTE_ADMIN,
                 "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
@@ -408,7 +521,7 @@ CASES.append(Case(
                 # Legacy subject projection = subjects[0].
                 "pm.test('legacy subjectType filled = user (subjects[0])', () => pm.expect(pm.response.json().subjectType).to.eql('user'));",
                 "pm.test('legacy subjectId filled = subjects[0].id', () => {",
-                "  const want = ('usr-e34-new-' + pm.environment.get('runId'));",
+                "  const want = pm.environment.get('e34NewUserId');",
                 "  pm.expect(pm.response.json().subjectId).to.eql(want);",
                 "});",
                 # Legacy scope projection derived from scopeRef.
@@ -429,8 +542,6 @@ CASES.append(Case(
 # projection of the new-author case.
 # ---------------------------------------------------------------------------
 
-E34_LEGACY_SUBJ = "usr-e34-leg-{{runId}}"
-
 CASES.append(Case(
     id="RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED",
     title="Create via LEGACY single subjectType/subjectId → Get fills subjects[] with exactly one element matching the legacy single (parity new←legacy)",
@@ -438,6 +549,8 @@ CASES.append(Case(
     priority="P0",
     steps=[
         # verifies (legacy-author → subjects[]-filled)
+        # subject must be a REAL user (migration 0049) — mint one for this run.
+        *mint_user("e34LegUserId", "usr-e34-leg"),
         Step(
             name="create-legacy-form",
             method="POST",
@@ -445,7 +558,7 @@ CASES.append(Case(
             body={
                 # LEGACY single input ONLY — no subjects[], no scopeRef.
                 "subjectType": "user",
-                "subjectId": E34_LEGACY_SUBJ,
+                "subjectId": "{{e34LegUserId}}",
                 "roleId": ROLE_COMPUTE_ADMIN,
                 "resourceType": "account",
                 "resourceId": "{{accountAId}}",
@@ -459,7 +572,9 @@ CASES.append(Case(
             ],
         ),
         poll_capture_acb("e34LegOpId", "e34LegAcbId"),
-        Step(
+        # Read-after-write on the fresh binding OBJECT (same grant→visibility window as
+        # get-new-fills-legacy / get-subjects-len-2): poll past the 403/404 hide window.
+        poll_request_until_status(
             name="get-legacy-fills-subjects",
             method="GET",
             path="/iam/v1/accessBindings/{{e34LegAcbId}}",
@@ -469,7 +584,7 @@ CASES.append(Case(
                 # Legacy single unchanged.
                 "pm.test('legacy subjectType unchanged = user', () => pm.expect(pm.response.json().subjectType).to.eql('user'));",
                 "pm.test('legacy subjectId unchanged', () => {",
-                "  const want = ('usr-e34-leg-' + pm.environment.get('runId'));",
+                "  const want = pm.environment.get('e34LegUserId');",
                 "  pm.expect(pm.response.json().subjectId).to.eql(want);",
                 "});",
                 # Reverse projection: subjects[] = exactly one matching element.
@@ -479,7 +594,7 @@ CASES.append(Case(
                 "});",
                 "pm.test('subjects[0] matches the legacy single', () => {",
                 "  const subs = pm.response.json().subjects || [];",
-                "  const want = ('usr-e34-leg-' + pm.environment.get('runId'));",
+                "  const want = pm.environment.get('e34LegUserId');",
                 "  pm.expect(subs[0] && subs[0].type, JSON.stringify(subs)).to.eql('SUBJECT_TYPE_USER');",
                 "  pm.expect(subs[0] && subs[0].id, JSON.stringify(subs)).to.eql(want);",
                 "});",
@@ -496,8 +611,6 @@ CASES.append(Case(
 # ROLE_COMPUTE_ADMIN, then ListByRole(ROLE_COMPUTE_ADMIN) must include it.
 # ---------------------------------------------------------------------------
 
-E33_SUBJ = "usr-e33-{{runId}}"
-
 CASES.append(Case(
     id="RBACSUBJ-LISTBYROLE-OK",
     title="ListByRole(roleId) → lists the bindings carrying the role (incl. the one just created)",
@@ -505,12 +618,14 @@ CASES.append(Case(
     priority="P0",
     steps=[
         # verifies (audit who holds role R)
+        # subject must be a REAL user (migration 0049) — mint one for this run.
+        *mint_user("e33UserId", "usr-e33"),
         Step(
             name="create-binding-for-role",
             method="POST",
             path="/iam/v1/accessBindings",
             body={
-                "subjects": [{"type": "SUBJECT_TYPE_USER", "id": E33_SUBJ}],
+                "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{e33UserId}}"}],
                 "roleId": ROLE_COMPUTE_ADMIN,
                 "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
             },
@@ -522,11 +637,18 @@ CASES.append(Case(
             ],
         ),
         poll_capture_acb("e33OpId", "e33AcbId"),
-        Step(
+        # Read-after-write on a LIST: ListByRole returns 200 immediately, but the
+        # freshly-created binding enters the AUTHZ-FILTERED result only once the caller's
+        # per-object v_get/v_list tuple propagates (same grant→visibility window). A
+        # single-shot list can therefore miss the fresh row. Retry (retry_predicate)
+        # while the created id is not yet in the set; assert on the terminal list (a
+        # genuine never-appears still fails at the cap, never masked).
+        poll_request_until_status(
             name="listbyrole-includes-binding",
             method="GET",
             path="/iam/v1/accessBindings:listByRole?roleId=" + ROLE_COMPUTE_ADMIN,
             auth="jwtAccountAdminA",
+            retry_predicate="(() => { const j = pm.response.json(); const id = pm.environment.get('e33AcbId'); return id && !((j.accessBindings)||[]).some(b => b.id === id); })()",
             test_script=[
                 *assert_status(200),
                 "pm.test('response carries accessBindings[]', () => {",
@@ -877,6 +999,13 @@ CASES.append(Case(
                 "if (pm.environment.get('_gmChkStarted') !== pm.info.requestName) { pm.environment.set('_gmChkCount', '0'); pm.environment.set('_gmChkStarted', pm.info.requestName); }",
                 "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('userAABId'));",
                 "pm.environment.set('_gmChkObj', 'account:' + pm.environment.get('accountAId'));",
+                "// InternalIAMService.Check (/iam/v1/internal/iam:check) is an Internal* RPC —",
+                "// it lives ONLY on the api-gateway cluster-internal REST listener, NOT the",
+                "// public cmux. Reach it via internalBaseUrl (:18081 in CI); the public baseUrl",
+                "// 404s /iam/v1/internal/* by design (ban #6). If internalBaseUrl is unset",
+                "// (local dev without the internal-rest port-forward) the URL is left on baseUrl.",
+                "const _intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                "if (_intBase) { pm.request.url = _intBase + '/iam/v1/internal/iam:check'; }",
             ],
             body={
                 "subjectId": "{{_gmChkSubj}}",

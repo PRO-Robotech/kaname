@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "IAM-INT-NEG-EXT-USER-UPSERT — InternalUserService.UpsertFromIdentity on external TLS endpoint → 404 (internal-only, CLAUDE.md §Запрет 6)",
+      "name": "IAM-INT-NEG-EXT-USER-UPSERT — InternalUserService.UpsertFromIdentity on external TLS endpoint → 404 (internal-only)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
@@ -659,6 +659,30 @@
           },
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only POSITIVE control: send this request to the api-gateway",
+                  "// cluster-internal REST listener (Internal* paths live ONLY there).",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
+                  "  postman.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/users:upsertFromIdentity';",
+                  "}"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -673,9 +697,76 @@
                   "});",
                   "try {",
                   "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('createdInternalUserOpId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
                   "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('createdInternalUserId', String(v));",
                   "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-INT-OK-INT-USER-UPSERT :: upsert-poll-done",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{createdInternalUserOpId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{createdInternalUserOpId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('upsert poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('INT-UPSERT: user committed (operation done, no error)', () => {",
+                  "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                  "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                  "});"
                 ]
               }
             }
@@ -720,6 +811,30 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only POSITIVE control: send this request to the api-gateway",
+                  "// cluster-internal REST listener (Internal* paths live ONLY there).",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
+                  "  postman.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/users:upsertFromIdentity';",
+                  "}"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -780,6 +895,30 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only POSITIVE control: send this request to the api-gateway",
+                  "// cluster-internal REST listener (Internal* paths live ONLY there).",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
+                  "  postman.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:lookupSubject';",
+                  "}"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -843,6 +982,30 @@
           },
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only POSITIVE control: send this request to the api-gateway",
+                  "// cluster-internal REST listener (Internal* paths live ONLY there).",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
+                  "  postman.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:lookupSubject';",
+                  "}"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -894,6 +1057,30 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only POSITIVE control: send this request to the api-gateway",
+                  "// cluster-internal REST listener (Internal* paths live ONLY there).",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
+                  "  postman.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
+                  "}"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {

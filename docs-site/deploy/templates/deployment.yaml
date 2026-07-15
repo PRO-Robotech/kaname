@@ -13,10 +13,30 @@ spec:
       labels:
         app: {{ .Values.name }}
     spec:
+      # Pod hardening (trivy KSV-0118): non-root + seccomp RuntimeDefault. uid 101 =
+      # the nginx-unprivileged runtime user.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: iam-docs
           image: {{ .Values.image }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # Container hardening (trivy KSV-0014/KSV-0118): read-only rootfs, no priv
+          # escalation, drop ALL caps. nginx-unprivileged writes only to the emptyDir
+          # mounts below (pid+temp → /tmp, proxy/client cache → /var/cache/nginx).
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - name: http
               containerPort: {{ .Values.port }}
@@ -39,3 +59,13 @@ spec:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
               memory: {{ .Values.resources.limits.memory }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}

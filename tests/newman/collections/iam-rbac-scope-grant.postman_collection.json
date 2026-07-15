@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "RBACSG-ESCALATION-CLOSED — all_in_scope compute.instance admin @ ACCOUNT → grant succeeds; scope_grant primitive removed (D-4 / #177 closed by construction)",
+      "name": "RBACSG-ESCALATION-CLOSED — all_in_scope compute.instance admin @ ACCOUNT → grant succeeds; scope_grant primitive removed (closed by construction)",
       "description": "class:FGA | class:AUTHZ | class:ESCALATION | class:MATRIX | priority:P0",
       "item": [
         {
@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"sg_admin_{{runId}}\", \"description\": \"newman scope_grant #177 probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"list\", \"create\", \"update\", \"delete\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"sg_admin_{{runId}}\", \"description\": \"newman scope_grant probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"list\", \"create\", \"update\", \"delete\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -557,7 +557,7 @@
       ]
     },
     {
-      "name": "RBACSG-PER-VERB — per-verb {get,create} all_in_scope grant succeeds; scope_grant carrier removed for every verb (D-4)",
+      "name": "RBACSG-PER-VERB — per-verb {get,create} all_in_scope grant succeeds; scope_grant carrier removed for every verb",
       "description": "class:FGA | class:AUTHZ | class:PER-VERB | priority:P0",
       "item": [
         {
@@ -583,7 +583,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"sg_getcreate_{{runId}}\", \"description\": \"newman scope_grant #177 probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"create\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"sg_getcreate_{{runId}}\", \"description\": \"newman scope_grant probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"create\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"

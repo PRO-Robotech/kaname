@@ -2979,7 +2979,7 @@
       ]
     },
     {
-      "name": "IAM-ACC-LSOP-CRUD-OK — ListOperations for a freshly-created account → 200, operations array non-empty (verifies #152)",
+      "name": "IAM-ACC-LSOP-CRUD-OK — ListOperations for a freshly-created account → 200, operations array non-empty",
       "description": "class:CRUD | priority:P1",
       "item": [
         {

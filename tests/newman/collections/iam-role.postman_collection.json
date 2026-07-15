@@ -387,7 +387,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-NEG-MODULE-UNKNOWN — Create custom role with an unknown module token (banana) → 400 InvalidArgument (closed-set reject) [H-03]",
+      "name": "IAM-ROL-CR-NEG-MODULE-UNKNOWN — Create custom role with an unknown module token (banana) → 400 InvalidArgument (closed-set reject)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -459,7 +459,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-NEG-PERMISSIONS-REJECTED — Create custom role with output-only `permissions` field populated → 400 INVALID_ARGUMENT (compiled/output-only) [A-02]",
+      "name": "IAM-ROL-CR-NEG-PERMISSIONS-REJECTED — Create custom role with output-only `permissions` field populated → 400 INVALID_ARGUMENT (compiled/output-only)",
       "description": "class:NEG | class:VAL | priority:P0",
       "item": [
         {
@@ -857,7 +857,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-GT-NEG-FOREIGN-CUSTOM-404 — Get accountA custom role (crudRoleId) as jwtAccountAdminB (ungranted) → 404 NotFound, no rules[] leak [D-1/D-44]",
+      "name": "IAM-ROL-GT-NEG-FOREIGN-CUSTOM-404 — Get accountA custom role (crudRoleId) as jwtAccountAdminB (ungranted) → 404 NotFound, no rules[] leak",
       "description": "class:NEG | class:CONF | priority:P0",
       "item": [
         {
@@ -988,7 +988,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-LS-SYSTEM-PLUS-CUSTOM-WITH-ACCOUNT — List roles ?accountId=accountAId → 200, contains system roles + crudRoleId [verifies #185]",
+      "name": "IAM-ROL-LS-SYSTEM-PLUS-CUSTOM-WITH-ACCOUNT — List roles ?accountId=accountAId → 200, contains system roles + crudRoleId",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -1337,7 +1337,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-LS-BVA-PAGESIZE-OVER — List roles pageSize=1001 (over-max) → 400 InvalidArgument [verifies #184]",
+      "name": "IAM-ROL-LS-BVA-PAGESIZE-OVER — List roles pageSize=1001 (over-max) → 400 InvalidArgument",
       "description": "class:BVA | class:VAL | priority:P1",
       "item": [
         {
@@ -2178,7 +2178,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-DL-NEG-IN-USE — Delete custom role with a binding → async FAILED_PRECONDITION (role is in use); purge binding → delete OK → Get 404 [A-16]",
+      "name": "IAM-ROL-DL-NEG-IN-USE — Delete custom role with a binding → async FAILED_PRECONDITION (role is in use); purge binding → delete OK → Get 404",
       "description": "class:NEG | class:STATE | class:CRUD | priority:P0",
       "item": [
         {
@@ -3224,7 +3224,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-VERB-STAR-OK — Create custom role with verbs:['*'] → Operation done; Get shows rules[0].verbs==['*'], permissions empty [A-04]",
+      "name": "IAM-ROL-CR-RULES-VERB-STAR-OK — Create custom role with verbs:['*'] → Operation done; Get shows rules[0].verbs==['*'], permissions empty",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -3428,7 +3428,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-MODULE-STAR-DENY — Create custom role with module:'*' → 400 INVALID_ARGUMENT (wildcard system-only) [A-05/H-04]",
+      "name": "IAM-ROL-CR-RULES-MODULE-STAR-DENY — Create custom role with module:'*' → 400 INVALID_ARGUMENT (wildcard system-only)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -3500,7 +3500,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-RESOURCE-STAR-DENY — Create custom role with resources:['*'] → 400 INVALID_ARGUMENT (wildcard system-only) [A-05]",
+      "name": "IAM-ROL-CR-RULES-RESOURCE-STAR-DENY — Create custom role with resources:['*'] → 400 INVALID_ARGUMENT (wildcard system-only)",
       "description": "class:NEG | class:VAL | priority:P2",
       "item": [
         {
@@ -3568,7 +3568,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-FEEDGATE-IAMROLE-OK — Create custom role with matchLabels on iam content type (iam.role) → Operation succeeds (feed-gate reversed) [T3.3-FEED-01]",
+      "name": "IAM-ROL-CR-RULES-FEEDGATE-IAMROLE-OK — Create custom role with matchLabels on iam content type (iam.role) → Operation succeeds (feed-gate reversed)",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -3696,7 +3696,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-FEEDGATE-IAMPROJECT-OK — Create label-only custom role (single matchLabels rule on iam.project) → Operation succeeds, Get returns rules[] [A-10]",
+      "name": "IAM-ROL-CR-RULES-FEEDGATE-IAMPROJECT-OK — Create label-only custom role (single matchLabels rule on iam.project) → Operation succeeds, Get returns rules[]",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -3944,7 +3944,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-XOR-DENY — Create custom role with both resourceNames and matchLabels in one rule → 400 (mutually exclusive) [A-13]",
+      "name": "IAM-ROL-CR-RULES-XOR-DENY — Create custom role with both resourceNames and matchLabels in one rule → 400 (mutually exclusive)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -4016,7 +4016,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-EMPTY-DENY — Create custom role with empty rules[] → 400 INVALID_ARGUMENT (must be non-empty) [A-13]",
+      "name": "IAM-ROL-CR-RULES-EMPTY-DENY — Create custom role with empty rules[] → 400 INVALID_ARGUMENT (must be non-empty)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -4084,7 +4084,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-CAP-OVER-DENY — Create custom role whose rules compile to >1024 permissions → 400 (compiled permissions exceed 1024) [A-12]",
+      "name": "IAM-ROL-CR-RULES-CAP-OVER-DENY — Create custom role whose rules compile to >1024 permissions → 400 (compiled permissions exceed 1024)",
       "description": "class:NEG | class:VAL | class:BVA | priority:P1",
       "item": [
         {
@@ -4156,7 +4156,7 @@
       ]
     },
     {
-      "name": "IAM-ROLE-F52-RULES-PUBLIC — F-52: Role.Get on a system role → non-empty rules[], empty/absent permissions (rules is the public policy surface)",
+      "name": "IAM-ROLE-F52-RULES-PUBLIC — Role.Get on a system role → non-empty rules[], empty/absent permissions (rules is the public policy surface)",
       "description": "class:CONF | class:CLEANCUT | priority:P0",
       "item": [
         {
@@ -4260,12 +4260,12 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('F-52 system Role.Get carries non-empty rules[]', () => {",
+                  "pm.test('system Role.Get carries non-empty rules[]', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.rules, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.rules.length, 'rules[] must be non-empty (public policy surface)').to.be.greaterThan(0);",
                   "});",
-                  "pm.test('F-52 permissions empty/absent on public surface (compiled/output-only)', () => {",
+                  "pm.test('permissions empty/absent on public surface (compiled/output-only)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect((j.permissions || []).length, JSON.stringify(j)).to.eql(0);",
                   "});"
@@ -4277,7 +4277,7 @@
       ]
     },
     {
-      "name": "IAM-ROLE-F52-PERMS-REJECTED — F-52: Role.Create with non-empty permissions[] in the body → 400 INVALID_ARGUMENT (permissions write-rejected)",
+      "name": "IAM-ROLE-F52-PERMS-REJECTED — Role.Create with non-empty permissions[] in the body → 400 INVALID_ARGUMENT (permissions write-rejected)",
       "description": "class:NEG | class:VAL | class:CLEANCUT | priority:P0",
       "item": [
         {
@@ -4345,7 +4345,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-PROJECT-SCOPED — Create PROJECT-scoped custom role (CreateRoleRequest.project_id) → Operation done → Get confirms projectId set, accountId empty, isSystem=false (#212)",
+      "name": "IAM-ROL-CR-PROJECT-SCOPED — Create PROJECT-scoped custom role (CreateRoleRequest.project_id) → Operation done → Get confirms projectId set, accountId empty, isSystem=false",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -4371,7 +4371,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"prj212-{{runId}}\", \"description\": \"newman #212 project-scoped role host\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"prj212-{{runId}}\", \"description\": \"newman project-scoped role host\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4557,7 +4557,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectId212}}\", \"name\": \"prj_role_{{runId}}\", \"description\": \"newman #212 project-scoped custom role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\", \"list\"]}]}",
+              "raw": "{\"projectId\": \"{{projectId212}}\", \"name\": \"prj_role_{{runId}}\", \"description\": \"newman project-scoped custom role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\", \"list\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4721,7 +4721,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.test('Role.id prefix rol', () => pm.expect(pm.response.json().id).to.match(/^rol[a-z0-9]+$/));",
                   "pm.test('Role.isSystem=false', () => pm.expect(pm.response.json().isSystem).to.eql(false));",
-                  "pm.test('Role.projectId matches the project (#212 project-scoped)', () => {",
+                  "pm.test('Role.projectId matches the project (project-scoped)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.projectId, JSON.stringify(j)).to.eql(pm.environment.get('projectId212'));",
                   "});",
@@ -4737,7 +4737,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-NEG-BOTH-SCOPES — Create role with BOTH accountId and projectId → 400 INVALID_ARGUMENT (scope XOR, #212)",
+      "name": "IAM-ROL-CR-NEG-BOTH-SCOPES — Create role with BOTH accountId and projectId → 400 INVALID_ARGUMENT (scope XOR)",
       "description": "class:NEG | class:VAL | priority:P0",
       "item": [
         {
@@ -4805,7 +4805,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-NEG-NO-SCOPE — Create role with NEITHER accountId nor projectId → 400 INVALID_ARGUMENT (scope required, #212)",
+      "name": "IAM-ROL-CR-NEG-NO-SCOPE — Create role with NEITHER accountId nor projectId → 400 INVALID_ARGUMENT (scope required)",
       "description": "class:NEG | class:VAL | priority:P0",
       "item": [
         {
@@ -4873,7 +4873,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-UP-T33-LABELS-OK — T3.3 Update crudRoleId labels (updateMask=labels) → Operation done, Get confirms own-resource labels",
+      "name": "IAM-ROL-UP-T33-LABELS-OK — Update crudRoleId labels (updateMask=labels) → Operation done, Get confirms own-resource labels",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -5057,7 +5057,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('Role.labels persisted (own-resource, T3.3)', () => {",
+                  "pm.test('Role.labels persisted (own-resource)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.labels, 'labels map present').to.be.an('object');",
                   "  pm.expect(j.labels.team, JSON.stringify(j.labels)).to.eql('payments');",
@@ -5112,7 +5112,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('account-admin lists own custom role (viewer-tier, T3.3 List unaffected)', () => {",
+                  "pm.test('account-admin lists own custom role (viewer-tier, List unaffected)', () => {",
                   "  const j = pm.response.json();",
                   "  const ids = (j.roles || []).map(r => r.id);",
                   "  pm.expect(ids, JSON.stringify(ids)).to.include(pm.environment.get('crudRoleId'));",
@@ -5125,7 +5125,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-T33-NEG-BADLABELS — T3.3 Create role with invalid labels (uppercase/special) → 400 INVALID_ARGUMENT (request-layer annotation parity)",
+      "name": "IAM-ROL-CR-T33-NEG-BADLABELS — Create role with invalid labels (uppercase/special) → 400 INVALID_ARGUMENT (request-layer annotation parity)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {

@@ -205,11 +205,11 @@
       ]
     },
     {
-      "name": "AUTHZ-SA-NET-LS-A2-EMPTY — [EMPTY] List networks ?projectId=A2 (cross-project, no grant) → scope-filter empty as service-account-A (vpc-editor on project-A1)",
-      "description": "class:AUTHZ | class:SCOPE | priority:P1",
+      "name": "AUTHZ-SA-NET-LS-A2-DENY — [DENY] List networks ?projectId=A2 (cross-project, no project-viewer) → 403 gated List as service-account-A (vpc-editor on project-A1)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
-          "name": "AUTHZ-SA-NET-LS-A2-EMPTY :: get",
+          "name": "AUTHZ-SA-NET-LS-A2-DENY :: get",
           "request": {
             "method": "GET",
             "header": [
@@ -251,9 +251,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-NET-LS-A2-EMPTY] EMPTY: status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(200));",
-                  "const body = pm.response.json();",
-                  "pm.test('[AUTHZ-SA-NET-LS-A2-EMPTY] EMPTY: zero networks (scope-filter)', () => pm.expect((body && body.networks || []).length).to.equal(0));"
+                  "pm.test('[AUTHZ-SA-NET-LS-A2-DENY] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('[AUTHZ-SA-NET-LS-A2-DENY] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
+                  "pm.test('[AUTHZ-SA-NET-LS-A2-DENY] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
                 ]
               }
             }
@@ -388,11 +389,11 @@
       ]
     },
     {
-      "name": "AUTHZ-SA-NET-LS-B1-EMPTY — [EMPTY] List networks ?projectId=B1 → scope-filter empty as service-account-A (vpc-editor on project-A1)",
-      "description": "class:AUTHZ | class:SCOPE | priority:P1",
+      "name": "AUTHZ-SA-NET-LS-B1-DENY — [DENY] List networks ?projectId=B1 (cross-account, no project-viewer) → 403 gated List as service-account-A (vpc-editor on project-A1)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
-          "name": "AUTHZ-SA-NET-LS-B1-EMPTY :: get",
+          "name": "AUTHZ-SA-NET-LS-B1-DENY :: get",
           "request": {
             "method": "GET",
             "header": [
@@ -434,9 +435,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-NET-LS-B1-EMPTY] EMPTY: status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(200));",
-                  "const body = pm.response.json();",
-                  "pm.test('[AUTHZ-SA-NET-LS-B1-EMPTY] EMPTY: zero networks (scope-filter)', () => pm.expect((body && body.networks || []).length).to.equal(0));"
+                  "pm.test('[AUTHZ-SA-NET-LS-B1-DENY] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('[AUTHZ-SA-NET-LS-B1-DENY] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
+                  "pm.test('[AUTHZ-SA-NET-LS-B1-DENY] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
                 ]
               }
             }
@@ -969,11 +971,11 @@
       ]
     },
     {
-      "name": "AUTHZ-SANG-NET-LS-A1-EMPTY — [EMPTY] List networks ?projectId=A1 (no grants) → scope-filter empty as service-account-no-grant",
-      "description": "class:AUTHZ | class:SCOPE | priority:P1",
+      "name": "AUTHZ-SANG-NET-LS-A1-DENY — [DENY] List networks ?projectId=A1 (no grants, no project-viewer) → 403 gated List as service-account-no-grant",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
-          "name": "AUTHZ-SANG-NET-LS-A1-EMPTY :: get",
+          "name": "AUTHZ-SANG-NET-LS-A1-DENY :: get",
           "request": {
             "method": "GET",
             "header": [
@@ -1015,9 +1017,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SANG-NET-LS-A1-EMPTY] EMPTY: status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(200));",
-                  "const body = pm.response.json();",
-                  "pm.test('[AUTHZ-SANG-NET-LS-A1-EMPTY] EMPTY: zero networks (scope-filter)', () => pm.expect((body && body.networks || []).length).to.equal(0));"
+                  "pm.test('[AUTHZ-SANG-NET-LS-A1-DENY] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('[AUTHZ-SANG-NET-LS-A1-DENY] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
+                  "pm.test('[AUTHZ-SANG-NET-LS-A1-DENY] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
                 ]
               }
             }
@@ -1383,11 +1386,11 @@
       ]
     },
     {
-      "name": "AUTHZ-APITOK-NET-LS-B1-EMPTY — [EMPTY] List networks ?projectId=B1 (out-of-scope) → scope-filter empty as api-token-valid (in-scope vpc.* on project-A1)",
-      "description": "class:AUTHZ | class:SCOPE | priority:P1",
+      "name": "AUTHZ-APITOK-NET-LS-B1-DENY — [DENY] List networks ?projectId=B1 (out-of-scope, no project-viewer) → 403 gated List as api-token-valid (in-scope vpc.* on project-A1)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
-          "name": "AUTHZ-APITOK-NET-LS-B1-EMPTY :: get",
+          "name": "AUTHZ-APITOK-NET-LS-B1-DENY :: get",
           "request": {
             "method": "GET",
             "header": [
@@ -1429,9 +1432,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-APITOK-NET-LS-B1-EMPTY] EMPTY: status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(200));",
-                  "const body = pm.response.json();",
-                  "pm.test('[AUTHZ-APITOK-NET-LS-B1-EMPTY] EMPTY: zero networks (scope-filter)', () => pm.expect((body && body.networks || []).length).to.equal(0));"
+                  "pm.test('[AUTHZ-APITOK-NET-LS-B1-DENY] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('[AUTHZ-APITOK-NET-LS-B1-DENY] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
+                  "pm.test('[AUTHZ-APITOK-NET-LS-B1-DENY] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
                 ]
               }
             }

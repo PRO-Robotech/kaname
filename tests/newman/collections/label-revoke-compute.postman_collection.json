@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c-sa-disk-{{runId}}\", \"description\": \"newman T3.1 compute label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c-sa-disk-{{runId}}\", \"description\": \"newman compute label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -424,7 +424,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c_disk_{{runId}}\", \"description\": \"newman T3.1 compute ARM_LABELS probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"disk\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"tier\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c_disk_{{runId}}\", \"description\": \"newman compute ARM_LABELS probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"disk\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"tier\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -646,7 +646,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-disk: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-disk: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-disk: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-disk: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -952,7 +952,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c-sa-snapshot-{{runId}}\", \"description\": \"newman T3.1 compute label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c-sa-snapshot-{{runId}}\", \"description\": \"newman compute label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1454,7 +1454,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c_snapshot_{{runId}}\", \"description\": \"newman T3.1 compute ARM_LABELS probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"snapshot\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"tier\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c_snapshot_{{runId}}\", \"description\": \"newman compute ARM_LABELS probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"snapshot\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"tier\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1676,7 +1676,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-snapshot: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-snapshot: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-snapshot: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-snapshot: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -1982,7 +1982,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c-sa-image-{{runId}}\", \"description\": \"newman T3.1 compute label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c-sa-image-{{runId}}\", \"description\": \"newman compute label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2484,7 +2484,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c_image_{{runId}}\", \"description\": \"newman T3.1 compute ARM_LABELS probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"image\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"tier\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31c_image_{{runId}}\", \"description\": \"newman compute ARM_LABELS probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"image\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"tier\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2706,7 +2706,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-image: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-image: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-image: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-image: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"

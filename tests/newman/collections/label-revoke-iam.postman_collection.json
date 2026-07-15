@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 — project label-clear via updateMask=labels + empty body empties labels (was silent no-op, #260)",
+      "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 — project label-clear via updateMask=labels + empty body empties labels (was silent no-op)",
       "description": "class:IAM | class:LABELS | class:REVOKE | class:NEG | priority:P0",
       "item": [
         {
@@ -378,7 +378,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('project labels now empty (clear is NOT a no-op, #260)', () => {",
+                  "pm.test('project labels now empty (clear is NOT a no-op)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
                   "});"
@@ -390,7 +390,7 @@
       ]
     },
     {
-      "name": "IAM-LBLREVOKE-PROJECT-01 — project label-clear via updateMask=labels revokes ARM_LABELS grant (Check v_list True→False, #260)",
+      "name": "IAM-LBLREVOKE-PROJECT-01 — project label-clear via updateMask=labels revokes ARM_LABELS grant (Check v_list True→False)",
       "description": "class:IAM | class:LABELS | class:REVOKE | class:FGA | class:AUTHZ | class:STATE | priority:P0",
       "item": [
         {
@@ -1207,7 +1207,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('project labels now empty (clear is NOT a no-op, #260)', () => {",
+                  "pm.test('project labels now empty (clear is NOT a no-op)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
                   "});"

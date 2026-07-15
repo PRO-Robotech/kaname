@@ -44,9 +44,13 @@ Gotchas:
     Only ListByScope and ListBySubject are exposed (with_list=False
     in authz-deny.py define_account_scoped). Calling GET /iam/v1/accessBindings
     returns a 404/405/501 — this is by design, not a bug.
-  - subject_id / resource_id stored WITHOUT FK (cross-DB polymorphic) — no
-    software refcheck for FK; role_id HAS a FK (access_bindings_role_fk → roles.id).
-    Non-existent role_id → async FailedPrecondition (FK RESTRICT).
+  - subject_id existence IS enforced (migration 0049 subject_ref_exists BEFORE
+    INSERT/UPDATE trigger — a polymorphic-FK substitute): the (subject_type,
+    subject_id) pair must resolve to an existing user/service_account/group in the
+    iam DB, else 23503 → async FailedPrecondition. A made-up subject id can NOT be
+    bound (phantom-grant / delete-race close, hard-rule #10) — see mint_user().
+    role_id HAS a real FK (access_bindings_role_fk → roles.id): non-existent role_id
+    → async FailedPrecondition (FK RESTRICT). resource_id is stored as opaque TEXT.
   - ListBySubject authz semantics: user principal may only query
     their OWN bindings (subject_type=user, subject_id=<self>); cross-user
     ListBySubject → 403 PermissionDenied.
@@ -137,6 +141,76 @@ def _delete_acb_teardown(name, acb_var, auth="jwtAccountAdminA"):
 
 def _f51_teardown():
     return _delete_acb_teardown("teardown-f51", "f51AcbId")
+
+
+def mint_user(env_var, ext, auth="jwtAccountAdminA"):
+    """Mint a fresh REAL user via the PUBLIC invite flow (UserService.Invite,
+    POST /iam/v1/users:invite), wait for it to COMMIT, and stash its id — so it can
+    be an AccessBinding subject. Returns TWO steps: the invite + a poll of the
+    returned Operation to done.
+
+    Migration 0049 (access_bindings subject_ref_exists trigger) makes the binding's
+    (subject_type, subject_id) a within-service reference that MUST resolve to an
+    existing user/service_account/group — a made-up `usr-*` string is rejected 23503
+    → FAILED_PRECONDITION at Create (phantom-grant / delete-race close, hard-rule #10).
+    So a subject can no longer be invented inline; mint a real one.
+
+    We use Invite (not UpsertFromIdentity): UpsertFromIdentity is an Internal* RPC with
+    no PUBLIC REST route — it is served ONLY on the api-gateway cluster-internal listener
+    (:8081), so at the public {{baseUrl}} (:8080) it 404s (ban #6). Invite is the PUBLIC
+    REST mint a tenant admin can drive: it INSERTs a PENDING user row and returns
+    metadata.userId synchronously; the row EXISTS in kacho_iam.users, so the 0049 trigger
+    (existence, status-agnostic) passes and the id is a valid subject. email is
+    runId-scoped → a distinct real user per run (unique subject, no active-grant UNIQUE
+    collision) referenced by no other suite (→ no cross-suite pollution). jwtAccountAdminA
+    can invite into account-A (canInviteUsers editor cascade); the invited id carries the
+    `usr` prefix. Same PUBLIC flow as the GREEN iam-user IAM-USR-SETUP-INVITE-INV-TO-B case.
+    Invite is async (LRO worker commits the row in a goroutine), so the poll
+    deterministically waits for the mint Operation done → the row is committed before the
+    binding Create uses it."""
+    op_var = f"{env_var}MintOp"
+    return [
+        Step(
+            name=f"mint-{env_var}",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={
+                "accountId": "{{accountAId}}",
+                "email": f"{ext}-{{{{runId}}}}@kacho.local",
+                "displayName": f"acb {ext} {{{{runId}}}}",
+            },
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", op_var),
+                *save_from_response("(j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id", env_var),
+                f"pm.test('minted {env_var} has usr prefix', () => pm.expect(pm.environment.get('{env_var}') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));",
+            ],
+        ),
+        Step(
+            name=f"mint-poll-{env_var}",
+            method="GET",
+            path="/operations/{{" + op_var + "}}",
+            auth=auth,
+            test_script=[
+                "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                "const j = pm.response.json();",
+                "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                f"if (!j.done && pc < {POLL_CAP}) {{",
+                "  pm.environment.set('_pollCount', String(pc + 1));",
+                "  postman.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_pollCount');",
+                "pm.environment.unset('_pollStarted');",
+                f"pm.test('minted {env_var} committed (operation done, no error)', () => {{",
+                "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                "});",
+            ],
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1943,13 +2017,15 @@ CASES.append(Case(
     priority="P0",
     steps=[
         # verifies (unknown target/selector keys ignored on Create)
+        # subject must be a REAL user (migration 0049 subject_ref_exists) — mint one.
+        *mint_user("f51UserId", "usr-f51"),
         Step(
             name="create-with-unknown-target-keys",
             method="POST",
             path="/iam/v1/accessBindings",
             body={
                 "subjectType": "user",
-                "subjectId": "usr-f51-{{runId}}",
+                "subjectId": "{{f51UserId}}",
                 "roleId": ROLE_VIEW,
                 "resourceType": "account",
                 "resourceId": "{{accountAId}}",

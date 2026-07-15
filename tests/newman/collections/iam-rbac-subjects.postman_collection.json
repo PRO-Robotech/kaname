@@ -24,9 +24,269 @@
   ],
   "item": [
     {
-      "name": "RBACSUBJ-CR-MULTI-OK — E-30: Create AccessBinding with subjects[]=[user, group] → Operation done; Get carries subjects[] of length 2, each independent",
+      "name": "RBACSUBJ-CR-MULTI-OK — Create AccessBinding with subjects[]=[user, group] → Operation done; Get carries subjects[] of length 2, each independent",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:CRUD | class:HAPPY | priority:P0",
       "item": [
+        {
+          "name": "RBACSUBJ-CR-MULTI-OK :: mint-e30UserId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"email\": \"usr-e30-{{runId}}@kacho.local\", \"displayName\": \"rbac-subjects usr-e30 {{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e30UserIdMintOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e30UserId', String(v));",
+                  "} catch (e) {}",
+                  "pm.test('minted e30UserId has usr prefix', () => pm.expect(pm.environment.get('e30UserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-CR-MULTI-OK :: mint-poll-e30UserId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{e30UserIdMintOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{e30UserIdMintOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('minted e30UserId committed (operation done, no error)', () => {",
+                  "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                  "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-CR-MULTI-OK :: create-e30-group",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rbac-e30-grp-{{runId}}\", \"description\": \"newman multi-subject probe group\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e30GrpOpId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.groupId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e30GroupId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-CR-MULTI-OK :: poll-e30GrpOpId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{e30GrpOpId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{e30GrpOpId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.response && j.response.id && !pm.environment.get('e30GroupId')) { pm.environment.set('e30GroupId', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "RBACSUBJ-CR-MULTI-OK :: create-multi-subject",
           "request": {
@@ -50,7 +310,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"usr-e30-u-{{runId}}\"}, {\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"grp-e30-g-{{runId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e30UserId}}\"}, {\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{e30GroupId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -196,6 +456,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_get_subjects_len_2') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_get_subjects_len_2', '0');",
+                  "  pm.environment.set('_poll200_started_get_subjects_len_2', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -205,19 +471,30 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_get_subjects_len_2') || '0', 10);",
+                  "const _p200retryCode = [403,404].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_get_subjects_len_2', String(_p200c + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_get_subjects_len_2');",
+                  "pm.environment.unset('_poll200_started_get_subjects_len_2');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('E-30 subjects[] length is 2', () => {",
+                  "pm.test('subjects[] length is 2', () => {",
                   "  const subs = pm.response.json().subjects || [];",
                   "  pm.expect(subs.length, JSON.stringify(subs)).to.eql(2);",
                   "});",
-                  "pm.test('E-30 subjects[] carries the USER subject', () => {",
+                  "pm.test('subjects[] carries the USER subject', () => {",
                   "  const subs = pm.response.json().subjects || [];",
-                  "  const want = ('usr-e30-u-' + pm.environment.get('runId'));",
+                  "  const want = pm.environment.get('e30UserId');",
                   "  pm.expect(subs.some(s => s.type === 'SUBJECT_TYPE_USER' && s.id === want), JSON.stringify(subs)).to.be.true;",
                   "});",
-                  "pm.test('E-30 subjects[] carries the GROUP subject (independent)', () => {",
+                  "pm.test('subjects[] carries the GROUP subject (independent)', () => {",
                   "  const subs = pm.response.json().subjects || [];",
-                  "  const want = ('grp-e30-g-' + pm.environment.get('runId'));",
+                  "  const want = pm.environment.get('e30GroupId');",
                   "  pm.expect(subs.some(s => s.type === 'SUBJECT_TYPE_GROUP' && s.id === want), JSON.stringify(subs)).to.be.true;",
                   "});"
                 ]
@@ -278,7 +555,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-CR-VAL-SUBJECTS-EMPTY — E-32: Create with subjects[]=[] (and no legacy single) → 400 INVALID_ARGUMENT 'Illegal argument subjects (must be 1..32)' (below-min BVA)",
+      "name": "RBACSUBJ-CR-VAL-SUBJECTS-EMPTY — Create with subjects[]=[] (and no legacy single) → 400 INVALID_ARGUMENT 'Illegal argument subjects (must be 1..32)' (below-min BVA)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:VAL | class:BVA | class:NEGATIVE | priority:P0",
       "item": [
         {
@@ -334,9 +611,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('E-32 empty subjects rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
-                  "pm.test('E-32 error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
-                  "pm.test('E-32 error text: Illegal argument subjects (must be 1..32)', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('illegal argument subjects'));"
+                  "pm.test('empty subjects rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
+                  "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
+                  "pm.test('error text: Illegal argument subjects (must be 1..32)', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('illegal argument subjects'));"
                 ]
               }
             }
@@ -345,7 +622,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-CR-VAL-SUBJECTS-OVER32 — E-32: Create with subjects[] of 33 elements → 400 INVALID_ARGUMENT 'Illegal argument subjects (must be 1..32)' (above-max BVA)",
+      "name": "RBACSUBJ-CR-VAL-SUBJECTS-OVER32 — Create with subjects[] of 33 elements → 400 INVALID_ARGUMENT 'Illegal argument subjects (must be 1..32)' (above-max BVA)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:VAL | class:BVA | class:NEGATIVE | priority:P0",
       "item": [
         {
@@ -404,9 +681,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('E-32 >32 subjects rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
-                  "pm.test('E-32 error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
-                  "pm.test('E-32 error text: Illegal argument subjects (must be 1..32)', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('illegal argument subjects'));"
+                  "pm.test('>32 subjects rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
+                  "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
+                  "pm.test('error text: Illegal argument subjects (must be 1..32)', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('illegal argument subjects'));"
                 ]
               }
             }
@@ -415,9 +692,140 @@
       ]
     },
     {
-      "name": "RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED — E-34a: Create via NEW subjects[]+scopeRef → Get fills legacy subjectType/subjectId (=subjects[0]) AND resourceType/resourceId/scope",
+      "name": "RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED — Create via NEW subjects[]+scopeRef → Get fills legacy subjectType/subjectId (=subjects[0]) AND resourceType/resourceId/scope",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:PROJECTION | class:DELTA | priority:P0",
       "item": [
+        {
+          "name": "RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED :: mint-e34NewUserId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"email\": \"usr-e34-new-{{runId}}@kacho.local\", \"displayName\": \"rbac-subjects usr-e34-new {{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e34NewUserIdMintOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e34NewUserId', String(v));",
+                  "} catch (e) {}",
+                  "pm.test('minted e34NewUserId has usr prefix', () => pm.expect(pm.environment.get('e34NewUserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED :: mint-poll-e34NewUserId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{e34NewUserIdMintOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{e34NewUserIdMintOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('minted e34NewUserId committed (operation done, no error)', () => {",
+                  "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                  "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED :: create-new-form",
           "request": {
@@ -441,7 +849,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"usr-e34-new-{{runId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e34NewUserId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -614,18 +1022,18 @@
                   "pm.environment.unset('_poll200_get_new_fills_legacy');",
                   "pm.environment.unset('_poll200_started_get_new_fills_legacy');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('E-34a subjects[] length 1 (input)', () => {",
+                  "pm.test('subjects[] length 1 (input)', () => {",
                   "  const subs = pm.response.json().subjects || [];",
                   "  pm.expect(subs.length, JSON.stringify(subs)).to.eql(1);",
                   "});",
-                  "pm.test('E-34a legacy subjectType filled = user (subjects[0])', () => pm.expect(pm.response.json().subjectType).to.eql('user'));",
-                  "pm.test('E-34a legacy subjectId filled = subjects[0].id', () => {",
-                  "  const want = ('usr-e34-new-' + pm.environment.get('runId'));",
+                  "pm.test('legacy subjectType filled = user (subjects[0])', () => pm.expect(pm.response.json().subjectType).to.eql('user'));",
+                  "pm.test('legacy subjectId filled = subjects[0].id', () => {",
+                  "  const want = pm.environment.get('e34NewUserId');",
                   "  pm.expect(pm.response.json().subjectId).to.eql(want);",
                   "});",
-                  "pm.test('E-34a legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().resourceType).to.eql('account'));",
-                  "pm.test('E-34a legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().resourceId).to.eql(pm.environment.get('accountAId')));",
-                  "pm.test('E-34a legacy enum scope filled = ACCOUNT (from scopeRef)', () => pm.expect(pm.response.json().scope).to.eql('ACCOUNT'));"
+                  "pm.test('legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().resourceType).to.eql('account'));",
+                  "pm.test('legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().resourceId).to.eql(pm.environment.get('accountAId')));",
+                  "pm.test('legacy enum scope filled = ACCOUNT (from scopeRef)', () => pm.expect(pm.response.json().scope).to.eql('ACCOUNT'));"
                 ]
               }
             }
@@ -684,9 +1092,140 @@
       ]
     },
     {
-      "name": "RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED — E-34b: Create via LEGACY single subjectType/subjectId → Get fills subjects[] with exactly one element matching the legacy single (parity new←legacy)",
+      "name": "RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED — Create via LEGACY single subjectType/subjectId → Get fills subjects[] with exactly one element matching the legacy single (parity new←legacy)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:PROJECTION | class:DELTA | priority:P0",
       "item": [
+        {
+          "name": "RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED :: mint-e34LegUserId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"email\": \"usr-e34-leg-{{runId}}@kacho.local\", \"displayName\": \"rbac-subjects usr-e34-leg {{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e34LegUserIdMintOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e34LegUserId', String(v));",
+                  "} catch (e) {}",
+                  "pm.test('minted e34LegUserId has usr prefix', () => pm.expect(pm.environment.get('e34LegUserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED :: mint-poll-e34LegUserId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{e34LegUserIdMintOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{e34LegUserIdMintOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('minted e34LegUserId committed (operation done, no error)', () => {",
+                  "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                  "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED :: create-legacy-form",
           "request": {
@@ -710,7 +1249,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"usr-e34-leg-{{runId}}\", \"roleId\": \"rolfe4e91e8c9f6542a6\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{e34LegUserId}}\", \"roleId\": \"rolfe4e91e8c9f6542a6\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -856,6 +1395,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_get_legacy_fills_subjects') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_get_legacy_fills_subjects', '0');",
+                  "  pm.environment.set('_poll200_started_get_legacy_fills_subjects', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -865,19 +1410,30 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_get_legacy_fills_subjects') || '0', 10);",
+                  "const _p200retryCode = [403,404].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_get_legacy_fills_subjects', String(_p200c + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_get_legacy_fills_subjects');",
+                  "pm.environment.unset('_poll200_started_get_legacy_fills_subjects');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('E-34b legacy subjectType unchanged = user', () => pm.expect(pm.response.json().subjectType).to.eql('user'));",
-                  "pm.test('E-34b legacy subjectId unchanged', () => {",
-                  "  const want = ('usr-e34-leg-' + pm.environment.get('runId'));",
+                  "pm.test('legacy subjectType unchanged = user', () => pm.expect(pm.response.json().subjectType).to.eql('user'));",
+                  "pm.test('legacy subjectId unchanged', () => {",
+                  "  const want = pm.environment.get('e34LegUserId');",
                   "  pm.expect(pm.response.json().subjectId).to.eql(want);",
                   "});",
-                  "pm.test('E-34b subjects[] length is exactly 1', () => {",
+                  "pm.test('subjects[] length is exactly 1', () => {",
                   "  const subs = pm.response.json().subjects || [];",
                   "  pm.expect(subs.length, JSON.stringify(subs)).to.eql(1);",
                   "});",
-                  "pm.test('E-34b subjects[0] matches the legacy single', () => {",
+                  "pm.test('subjects[0] matches the legacy single', () => {",
                   "  const subs = pm.response.json().subjects || [];",
-                  "  const want = ('usr-e34-leg-' + pm.environment.get('runId'));",
+                  "  const want = pm.environment.get('e34LegUserId');",
                   "  pm.expect(subs[0] && subs[0].type, JSON.stringify(subs)).to.eql('SUBJECT_TYPE_USER');",
                   "  pm.expect(subs[0] && subs[0].id, JSON.stringify(subs)).to.eql(want);",
                   "});"
@@ -939,9 +1495,140 @@
       ]
     },
     {
-      "name": "RBACSUBJ-LISTBYROLE-OK — E-33: ListByRole(roleId) → lists the bindings carrying the role (incl. the one just created)",
+      "name": "RBACSUBJ-LISTBYROLE-OK — ListByRole(roleId) → lists the bindings carrying the role (incl. the one just created)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:LISTBYROLE | class:AUDIT | class:HAPPY | priority:P0",
       "item": [
+        {
+          "name": "RBACSUBJ-LISTBYROLE-OK :: mint-e33UserId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"email\": \"usr-e33-{{runId}}@kacho.local\", \"displayName\": \"rbac-subjects usr-e33 {{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e33UserIdMintOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('e33UserId', String(v));",
+                  "} catch (e) {}",
+                  "pm.test('minted e33UserId has usr prefix', () => pm.expect(pm.environment.get('e33UserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-LISTBYROLE-OK :: mint-poll-e33UserId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{e33UserIdMintOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{e33UserIdMintOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('minted e33UserId committed (operation done, no error)', () => {",
+                  "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                  "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "RBACSUBJ-LISTBYROLE-OK :: create-binding-for-role",
           "request": {
@@ -965,7 +1652,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"usr-e33-{{runId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e33UserId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1105,6 +1792,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_listbyrole_includes_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_listbyrole_includes_binding', '0');",
+                  "  pm.environment.set('_poll200_started_listbyrole_includes_binding', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -1114,16 +1807,27 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_listbyrole_includes_binding') || '0', 10);",
+                  "const _p200retryCode = [403,404].includes(pm.response.code);",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { const j = pm.response.json(); const id = pm.environment.get('e33AcbId'); return id && !((j.accessBindings)||[]).some(b => b.id === id); })());",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_listbyrole_includes_binding', String(_p200c + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_listbyrole_includes_binding');",
+                  "pm.environment.unset('_poll200_started_listbyrole_includes_binding');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('E-33 response carries accessBindings[]', () => {",
+                  "pm.test('response carries accessBindings[]', () => {",
                   "  const arr = pm.response.json().accessBindings;",
                   "  pm.expect(arr, JSON.stringify(pm.response.json())).to.be.an('array');",
                   "});",
-                  "pm.test('E-33 every listed binding carries the queried roleId', () => {",
+                  "pm.test('every listed binding carries the queried roleId', () => {",
                   "  const arr = pm.response.json().accessBindings || [];",
                   "  pm.expect(arr.every(b => b.roleId === 'rolfe4e91e8c9f6542a6'), JSON.stringify(arr)).to.be.true;",
                   "});",
-                  "pm.test('E-33 the created binding is present', () => {",
+                  "pm.test('the created binding is present', () => {",
                   "  const arr = pm.response.json().accessBindings || [];",
                   "  const want = pm.environment.get('e33AcbId');",
                   "  pm.expect(arr.some(b => b.id === want), JSON.stringify(arr.map(b => b.id))).to.be.true;",
@@ -1186,7 +1890,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-LISTBYROLE-VAL-MALFORMED — E-33 NEG: ListByRole with malformed roleId → 400 INVALID_ARGUMENT",
+      "name": "RBACSUBJ-LISTBYROLE-VAL-MALFORMED — ListByRole with malformed roleId → 400 INVALID_ARGUMENT",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:LISTBYROLE | class:VAL | class:NEGATIVE | priority:P1",
       "item": [
         {
@@ -1233,8 +1937,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('E-33 malformed roleId → 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
-                  "pm.test('E-33 error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));"
+                  "pm.test('malformed roleId → 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
+                  "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));"
                 ]
               }
             }
@@ -1243,7 +1947,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-LISTBYROLE-UNAUTH — E-33 NEG: ListByRole unauthenticated → 401/403 (viewer-tier, anonymous fail-closed)",
+      "name": "RBACSUBJ-LISTBYROLE-UNAUTH — ListByRole unauthenticated → 401/403 (viewer-tier, anonymous fail-closed)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:LISTBYROLE | class:AUTHZ | class:NEGATIVE | priority:P1",
       "item": [
         {
@@ -1284,7 +1988,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('E-33 unauthenticated ListByRole → 401/403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([401, 403]));"
+                  "pm.test('unauthenticated ListByRole → 401/403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([401, 403]));"
                 ]
               }
             }
@@ -1293,7 +1997,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-EXPAND-GROUP-OK — E-31: ExpandAccess on a group-subject grant → response.principals lists the concrete group members (userset→principals)",
+      "name": "RBACSUBJ-EXPAND-GROUP-OK — ExpandAccess on a group-subject grant → response.principals lists the concrete group members (userset→principals)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:EXPAND | class:AUDIT | class:HAPPY | priority:P0",
       "item": [
         {
@@ -1319,7 +2023,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rbac-e31-grp-{{runId}}\", \"description\": \"newman E-31 ExpandAccess probe group\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rbac-e31-grp-{{runId}}\", \"description\": \"newman ExpandAccess probe group\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1882,16 +2586,16 @@
                   "pm.environment.unset('_expCount');",
                   "pm.environment.unset('_expStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('E-31 response carries principals[]', () => pm.expect(j.principals, JSON.stringify(j)).to.be.an('array'));",
-                  "pm.test('E-31 concrete member userAAAId resolved (not just the group)', () => {",
+                  "pm.test('response carries principals[]', () => pm.expect(j.principals, JSON.stringify(j)).to.be.an('array'));",
+                  "pm.test('concrete member userAAAId resolved (not just the group)', () => {",
                   "  const ids = (j.principals || []).map(p => p.id);",
                   "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('userAAAId'));",
                   "});",
-                  "pm.test('E-31 concrete member userAABId resolved', () => {",
+                  "pm.test('concrete member userAABId resolved', () => {",
                   "  const ids = (j.principals || []).map(p => p.id);",
                   "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('userAABId'));",
                   "});",
-                  "pm.test('E-31 principals are concrete (no GROUP type in the result)', () => {",
+                  "pm.test('principals are concrete (no GROUP type in the result)', () => {",
                   "  const types = (j.principals || []).map(p => p.type);",
                   "  pm.expect(types, JSON.stringify(j.principals)).to.not.include('SUBJECT_TYPE_GROUP');",
                   "});"
@@ -2403,7 +3107,14 @@
                   "}",
                   "if (pm.environment.get('_gmChkStarted') !== pm.info.requestName) { pm.environment.set('_gmChkCount', '0'); pm.environment.set('_gmChkStarted', pm.info.requestName); }",
                   "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('userAABId'));",
-                  "pm.environment.set('_gmChkObj', 'account:' + pm.environment.get('accountAId'));"
+                  "pm.environment.set('_gmChkObj', 'account:' + pm.environment.get('accountAId'));",
+                  "// InternalIAMService.Check (/iam/v1/internal/iam:check) is an Internal* RPC —",
+                  "// it lives ONLY on the api-gateway cluster-internal REST listener, NOT the",
+                  "// public cmux. Reach it via internalBaseUrl (:18081 in CI); the public baseUrl",
+                  "// 404s /iam/v1/internal/* by design (ban #6). If internalBaseUrl is unset",
+                  "// (local dev without the internal-rest port-forward) the URL is left on baseUrl.",
+                  "const _intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (_intBase) { pm.request.url = _intBase + '/iam/v1/internal/iam:check'; }"
                 ]
               }
             },
@@ -2485,7 +3196,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-EXPAND-UNAUTH — E-31 NEG: ExpandAccess unauthenticated → 401/403 (viewer-tier, anonymous fail-closed)",
+      "name": "RBACSUBJ-EXPAND-UNAUTH — ExpandAccess unauthenticated → 401/403 (viewer-tier, anonymous fail-closed)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:EXPAND | class:AUTHZ | class:NEGATIVE | priority:P1",
       "item": [
         {
@@ -2526,7 +3237,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('E-31 unauthenticated ExpandAccess → 401/403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([401, 403]));"
+                  "pm.test('unauthenticated ExpandAccess → 401/403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([401, 403]));"
                 ]
               }
             }
@@ -2535,7 +3246,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-EXPAND-FOREIGN-DENIED — В3: ExpandAccess on a FOREIGN object (caller lacks grant-authority on the scope) → 403 PERMISSION_DENIED (no effective-principal leak)",
+      "name": "RBACSUBJ-EXPAND-FOREIGN-DENIED — ExpandAccess on a FOREIGN object (caller lacks grant-authority on the scope) → 403 PERMISSION_DENIED (no effective-principal leak)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:EXPAND | class:AUTHZ | class:SECURITY | class:NEGATIVE | priority:P0",
       "item": [
         {
@@ -2582,9 +3293,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('В3 ExpandAccess on a foreign object → 403', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(403));",
-                  "pm.test('В3 error code PERMISSION_DENIED (7)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(7));",
-                  "pm.test('В3 no effective principals leaked on denial', () => {",
+                  "pm.test('ExpandAccess on a foreign object → 403', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(403));",
+                  "pm.test('error code PERMISSION_DENIED (7)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(7));",
+                  "pm.test('no effective principals leaked on denial', () => {",
                   "  pm.expect(j.principals === undefined || (Array.isArray(j.principals) && j.principals.length === 0), JSON.stringify(j)).to.be.true;",
                   "});"
                 ]
@@ -2595,7 +3306,7 @@
       ]
     },
     {
-      "name": "RBACSUBJ-EXPAND-VAL-RELATION — В2: ExpandAccess with an unknown relation → 400 INVALID_ARGUMENT (closed known-relation set, no arbitrary FGA probe)",
+      "name": "RBACSUBJ-EXPAND-VAL-RELATION — ExpandAccess with an unknown relation → 400 INVALID_ARGUMENT (closed known-relation set, no arbitrary FGA probe)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:EXPAND | class:VAL | class:SECURITY | class:NEGATIVE | priority:P1",
       "item": [
         {
@@ -2642,8 +3353,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('В2 unknown relation → 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
-                  "pm.test('В2 error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));"
+                  "pm.test('unknown relation → 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
+                  "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));"
                 ]
               }
             }

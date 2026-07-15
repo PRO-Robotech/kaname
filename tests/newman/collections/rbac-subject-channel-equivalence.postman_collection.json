@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "IAM-CH-USER-EQUIV-OK — INV-9 user-direct: ROLE_VIEW@ACCOUNT bound to user:userINVId → jwtInvitee reads account-A (v_get) + sees project (visible-set); revoke → access gone",
+      "name": "IAM-CH-USER-EQUIV-OK — user-direct: ROLE_VIEW@ACCOUNT bound to user:userINVId → jwtInvitee reads account-A (v_get) + sees project (visible-set); revoke → access gone",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:HAPPY | priority:P0",
       "item": [
         {
@@ -620,7 +620,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-EQUIV-OK — INV-9 group-member: ROLE_VIEW@ACCOUNT bound to group:G (userINVId∈G) → member jwtInvitee reads account-A + sees project, identical to user-direct; revoke → gone",
+      "name": "IAM-CH-GRP-EQUIV-OK — group-member: ROLE_VIEW@ACCOUNT bound to group:G (userINVId∈G) → member jwtInvitee reads account-A + sees project, identical to user-direct; revoke → gone",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:GROUP | class:HAPPY | priority:P0",
       "item": [
         {
@@ -1311,7 +1311,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK — INV-9/INV-7 group membership flip: addMember(userINVId)→jwtInvitee gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
+      "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK — group membership flip: addMember(userINVId)→jwtInvitee gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV7 | class:GROUP | class:STATE | priority:P0",
       "item": [
         {
@@ -2014,7 +2014,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-NONMEMBER-DENY — INV-3/INV-9 group grant scoped to members: member jwtInvitee reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
+      "name": "IAM-CH-GRP-NONMEMBER-DENY — group grant scoped to members: member jwtInvitee reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV3 | class:GROUP | class:NEG | priority:P0",
       "item": [
         {
@@ -2700,7 +2700,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-REVOKE-BINDING-OK — INV-7 revoke group binding: member jwtInvitee has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
+      "name": "IAM-CH-GRP-REVOKE-BINDING-OK — revoke group binding: member jwtInvitee has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV7 | class:GROUP | class:STATE | priority:P0",
       "item": [
         {
@@ -3334,7 +3334,7 @@
       ]
     },
     {
-      "name": "IAM-CH-SA-EQUIV-OK — INV-9 SA-token: ROLE_VIEW@ACCOUNT bound to service_account:svaAId → jwtSAA reads account-A + sees project, identical to user-direct; revoke → access gone",
+      "name": "IAM-CH-SA-EQUIV-OK — SA-token: ROLE_VIEW@ACCOUNT bound to service_account:svaAId → jwtSAA reads account-A + sees project, identical to user-direct; revoke → access gone",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:SA | class:HAPPY | priority:P0",
       "item": [
         {
@@ -3930,7 +3930,7 @@
       ]
     },
     {
-      "name": "IAM-CH-SA-USER-ISOLATION-DENY — INV-3/INV-9 SA principal isolation: an SA-subject grant gives jwtSAA access (200) but does NOT leak to a user principal jwtNoBindings (404) — per-principal materialization",
+      "name": "IAM-CH-SA-USER-ISOLATION-DENY — SA principal isolation: an SA-subject grant gives jwtSAA access (200) but does NOT leak to a user principal jwtNoBindings (404) — per-principal materialization",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV3 | class:SA | class:NEG | priority:P0",
       "item": [
         {
@@ -4521,7 +4521,7 @@
       ]
     },
     {
-      "name": "IAM-CH-USER-SA-ISOLATION-DENY — INV-3/INV-9 reverse principal isolation: a user-subject grant gives jwtInvitee access (200) but does NOT leak to an SA principal jwtSANoGrant (404)",
+      "name": "IAM-CH-USER-SA-ISOLATION-DENY — reverse principal isolation: a user-subject grant gives jwtInvitee access (200) but does NOT leak to an SA principal jwtSANoGrant (404)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV3 | class:SA | class:NEG | priority:P0",
       "item": [
         {

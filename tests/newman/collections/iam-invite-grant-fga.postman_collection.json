@@ -1656,7 +1656,7 @@
       ]
     },
     {
-      "name": "INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1 — RC-1 project-anchor: iam.project [get,list] @ project → Check(viewer, project)=True (RED — kacho-iam#212: no project-scoped role via public API)",
+      "name": "INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1 — RC-1 project-anchor: iam.project [get,list] @ project → Check(viewer, project)=True (RED — no project-scoped role via public API)",
       "description": "class:FGA | class:AUTHZ | class:GRANT-CHAIN | class:RC1 | class:KNOWN-RED | priority:P0",
       "item": [
         {

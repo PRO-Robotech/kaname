@@ -801,7 +801,7 @@
                   "pm.test('member without user-viewer grant does NOT see accountB users (membership-over-show removed)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.users, 'users field').to.be.an('array');",
-                  "  // T3.3 D-5: a plain member no longer sees the account's users via membership.",
+                  "  // A plain member no longer sees the account's users via membership.",
                   "  // The invitee holds no iam_user viewer/v_list grant on accountB → empty scope-list.",
                   "  pm.expect((j.users || []).length, 'no membership-over-show: list is empty for a no-grant member').to.eql(0);",
                   "});",
@@ -984,7 +984,7 @@
       ]
     },
     {
-      "name": "IAM-USR-LS-BVA-PAGESIZE-OVER — List users pageSize=1001 (over-max) → 400 INVALID_ARGUMENT (#184, no silent clamp)",
+      "name": "IAM-USR-LS-BVA-PAGESIZE-OVER — List users pageSize=1001 (over-max) → 400 INVALID_ARGUMENT (no silent clamp)",
       "description": "class:BVA | class:VAL | class:NEG | priority:P1",
       "item": [
         {
@@ -1758,10 +1758,7 @@
                   "pm.test('users list non-empty after invite (binding created)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect((j.users || []).length, 'at least one user (owner + invitee)').to.be.greaterThan(0);",
-                  "});",
-                  "// TODO authz-matrix: IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS —",
-                  "// need JWT for invitee-{{runId}}@kacho.local to verify their own access.",
-                  "// Reference: IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS in coverage list §1.3."
+                  "});"
                 ]
               }
             }

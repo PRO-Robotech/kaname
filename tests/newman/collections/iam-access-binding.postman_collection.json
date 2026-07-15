@@ -3106,7 +3106,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-CR-GLOBAL-ALL-NONADMIN-REJECT — Create GLOBAL (cluster) AccessBinding with non-cluster-admin selector=all role → 400 INVALID_ARGUMENT (A-05)",
+      "name": "IAM-ACB-CR-GLOBAL-ALL-NONADMIN-REJECT — Create GLOBAL (cluster) AccessBinding with non-cluster-admin selector=all role → 400 INVALID_ARGUMENT",
       "description": "class:NEG | class:VAL | class:CLUSTER | priority:P0",
       "item": [
         {
@@ -3166,7 +3166,7 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});",
-                  "pm.test('A-05: GLOBAL+all non-cluster-admin message', () => {",
+                  "pm.test('GLOBAL+all non-cluster-admin message', () => {",
                   "  let j; try { j = pm.response.json(); } catch(e) { j = null; }",
                   "  pm.expect(j && j.message, JSON.stringify(j)).to.include('GLOBAL scope requires names or labels selector');",
                   "});"
@@ -3178,7 +3178,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-LSP-GROUP-CRUD-OK — ListSubjectPrivileges (group subject) → 200, group's direct binding present with resolved role_name (1.3b)",
+      "name": "IAM-ACB-LSP-GROUP-CRUD-OK — ListSubjectPrivileges (group subject) → 200, group's direct binding present with resolved role_name",
       "description": "class:CRUD | class:AUTHZ | priority:P0",
       "item": [
         {
@@ -3766,7 +3766,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-LAR-NEG-MALFORMED — ListAssignableRoles with malformed account resource_id → 400 InvalidArgument or 403 (authz pre-empt) (1.5-06)",
+      "name": "IAM-ACB-LAR-NEG-MALFORMED — ListAssignableRoles with malformed account resource_id → 400 InvalidArgument or 403 (authz pre-empt)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -4201,7 +4201,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-F50-ROUTES-REMOVED — F-50: removed verbs (:add/removeTargetResources, :replaceTargetSelector, :listGrantableResources) + legacy :listByResource → 403 catalog-miss (fail-closed, not callable); :listByScope → 200",
+      "name": "IAM-ACB-F50-ROUTES-REMOVED — removed verbs (:add/removeTargetResources, :replaceTargetSelector, :listGrantableResources) + legacy :listByResource → 403 catalog-miss (fail-closed, not callable); :listByScope → 200",
       "description": "class:NEG | class:CONF | class:CLEANCUT | priority:P0",
       "item": [
         {
@@ -4570,9 +4570,140 @@
       ]
     },
     {
-      "name": "IAM-ACB-F51-TARGET-IGNORED — F-51: Create with unknown target/selector keys → created from subjects/roleId/scope only; Get has no target/selector/targetRef",
+      "name": "IAM-ACB-F51-TARGET-IGNORED — Create with unknown target/selector keys → created from subjects/roleId/scope only; Get has no target/selector/targetRef",
       "description": "class:CRUD | class:CONF | class:CLEANCUT | priority:P0",
       "item": [
+        {
+          "name": "IAM-ACB-F51-TARGET-IGNORED :: mint-f51UserId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"email\": \"usr-f51-{{runId}}@kacho.local\", \"displayName\": \"acb usr-f51 {{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('f51UserIdMintOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('f51UserId', String(v));",
+                  "} catch (e) {}",
+                  "pm.test('minted f51UserId has usr prefix', () => pm.expect(pm.environment.get('f51UserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACB-F51-TARGET-IGNORED :: mint-poll-f51UserId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{f51UserIdMintOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{f51UserIdMintOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mint poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('minted f51UserId committed (operation done, no error)', () => {",
+                  "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                  "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "IAM-ACB-F51-TARGET-IGNORED :: create-with-unknown-target-keys",
           "request": {
@@ -4596,7 +4727,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"usr-f51-{{runId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\", \"target\": {\"resources\": {\"resources\": [{\"type\": \"compute.instance\", \"id\": \"inst-f51-{{runId}}\"}]}}, \"selector\": {\"types\": [\"compute.instance\"], \"matchLabels\": {\"env\": \"prod\"}}, \"targetRef\": {\"byName\": {\"resources\": [{\"type\": \"compute.instance\", \"id\": \"inst-f51-{{runId}}\"}]}}}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{f51UserId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\", \"target\": {\"resources\": {\"resources\": [{\"type\": \"compute.instance\", \"id\": \"inst-f51-{{runId}}\"}]}}, \"selector\": {\"types\": [\"compute.instance\"], \"matchLabels\": {\"env\": \"prod\"}}, \"targetRef\": {\"byName\": {\"resources\": [{\"type\": \"compute.instance\", \"id\": \"inst-f51-{{runId}}\"}]}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4699,8 +4830,8 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
-                  "pm.test('F-51 Create with unknown target/selector keys: operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('F-51 Create succeeded (no error — unknown fields ignored)', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
+                  "pm.test('Create with unknown target/selector keys: operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('Create succeeded (no error — unknown fields ignored)', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
                   "if (j.response && j.response.id && !pm.environment.get('f51AcbId')) {",
                   "  pm.environment.set('f51AcbId', j.response.id);",
                   "}"
@@ -4771,20 +4902,20 @@
                   "pm.environment.unset('_poll200_get_f51_no_target');",
                   "pm.environment.unset('_poll200_started_get_f51_no_target');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('F-51 binding created from subjects/roleId/scope', () => {",
+                  "pm.test('binding created from subjects/roleId/scope', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.subjectType).to.eql('user');",
                   "  pm.expect(j.roleId).to.eql('rol1bda80f2be4d3658e');",
                   "  pm.expect(j.resourceType).to.eql('account');",
                   "  pm.expect(j.resourceId).to.eql(pm.environment.get('accountAId'));",
                   "});",
-                  "pm.test('F-51 response has NO target field (removed surface)', () => {",
+                  "pm.test('response has NO target field (removed surface)', () => {",
                   "  pm.expect(pm.response.json().target, JSON.stringify(pm.response.json())).to.be.undefined;",
                   "});",
-                  "pm.test('F-51 response has NO selector field (removed surface)', () => {",
+                  "pm.test('response has NO selector field (removed surface)', () => {",
                   "  pm.expect(pm.response.json().selector, JSON.stringify(pm.response.json())).to.be.undefined;",
                   "});",
-                  "pm.test('F-51 response has NO targetRef field (removed surface)', () => {",
+                  "pm.test('response has NO targetRef field (removed surface)', () => {",
                   "  pm.expect(pm.response.json().targetRef, JSON.stringify(pm.response.json())).to.be.undefined;",
                   "});"
                 ]
@@ -4845,7 +4976,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-DP-NEG-DELETE-PROTECTED — Delete a deletion_protection=true binding → FAILED_PRECONDITION (C-02)",
+      "name": "IAM-ACB-DP-NEG-DELETE-PROTECTED — Delete a deletion_protection=true binding → FAILED_PRECONDITION",
       "description": "class:NEG | priority:P0",
       "item": [
         {
@@ -5221,7 +5352,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-DP-CRUD-CLEAR-THEN-DELETE — Update clears deletion_protection → Delete then succeeds (C-03)",
+      "name": "IAM-ACB-DP-CRUD-CLEAR-THEN-DELETE — Update clears deletion_protection → Delete then succeeds",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -5727,7 +5858,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-OWNER-P8-NOACCESS-LOSS — owner-binding present + deletion-protected on an account (P8 no-access-loss / D-8/D-10)",
+      "name": "IAM-ACB-OWNER-P8-NOACCESS-LOSS — owner-binding present + deletion-protected on an account (no-access-loss)",
       "description": "class:CONF | class:IDM | class:NEG | priority:P1",
       "item": [
         {
@@ -5774,7 +5905,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('an owner-role binding on accountAId is present and deletion-protected (P8 no-access-loss)', () => {",
+                  "pm.test('an owner-role binding on accountAId is present and deletion-protected (no-access-loss)', () => {",
                   "  const j = pm.response.json();",
                   "  const list = j.accessBindings || j.bindings || [];",
                   "  const owner = list.find(b =>",
@@ -5782,7 +5913,7 @@
                   "    b.resourceType === 'account' &&",
                   "    b.resourceId === pm.environment.get('accountAId'));",
                   "  pm.expect(owner, 'owner-binding present on accountAId').to.not.be.undefined;",
-                  "  pm.expect(owner.deletionProtection, 'owner-binding deletion_protected (D-10)').to.eql(true);",
+                  "  pm.expect(owner.deletionProtection, 'owner-binding deletion_protected').to.eql(true);",
                   "  pm.environment.set('ownerAcbId', owner.id);",
                   "});"
                 ]
@@ -5886,7 +6017,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('owner-binding survives the refused Delete (deletion_protection, C-02)', () => {",
+                  "pm.test('owner-binding survives the refused Delete (deletion_protection)', () => {",
                   "  pm.expect(pm.response.json().deletionProtection).to.eql(true);",
                   "});"
                 ]
@@ -5897,7 +6028,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-T33-LABELS-OK — T3.3 Create AccessBinding with labels + Update labels (updateMask=labels) → Operation done, Get confirms",
+      "name": "IAM-ACB-T33-LABELS-OK — Create AccessBinding with labels + Update labels (updateMask=labels) → Operation done, Get confirms",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -6477,7 +6608,7 @@
                   "pm.environment.unset('_poll200_t33_get_confirms_labels');",
                   "pm.environment.unset('_poll200_started_t33_get_confirms_labels');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('AccessBinding.labels updated (own-resource, T3.3-IMM-01)', () => {",
+                  "pm.test('AccessBinding.labels updated (own-resource)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.labels, JSON.stringify(j)).to.be.an('object');",
                   "  pm.expect(j.labels.stage).to.eql('staging');",
@@ -6542,7 +6673,7 @@
       ]
     },
     {
-      "name": "IAM-ACB-UP-T33-NEG-ROLEID-IMMUTABLE — T3.3-IMM-01 Update AccessBinding with roleId in update_mask → 400 INVALID_ARGUMENT (immutable set not weakened)",
+      "name": "IAM-ACB-UP-T33-NEG-ROLEID-IMMUTABLE — Update AccessBinding with roleId in update_mask → 400 INVALID_ARGUMENT (immutable set not weakened)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {

@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-n1-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-n1-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -369,7 +369,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_n1_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_n1_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -591,7 +591,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-n1: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-n1: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-n1: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-n1: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -985,7 +985,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('network still exists after label removed (G-3 upsert-not-unregister)', () => {",
+                  "pm.test('network still exists after label removed (upsert-not-unregister)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('_t31NetN1'));",
                   "});",
@@ -1027,7 +1027,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-sg-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-sg-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1474,7 +1474,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_sg_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"securityGroup\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"sg\": \"okun\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_sg_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"securityGroup\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"sg\": \"okun\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1696,7 +1696,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-sg: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-sg: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-sg: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-sg: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -2002,7 +2002,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-add-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-add-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2258,7 +2258,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_add_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_add_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2480,7 +2480,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-add: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-add: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-add: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-add: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -2858,7 +2858,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-both-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-both-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2986,7 +2986,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-tre-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-tre-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3242,7 +3242,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_rolet_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_rolet_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3370,7 +3370,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_roleo_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"okun\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_roleo_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"okun\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3592,7 +3592,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-tboth: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-tboth: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-tboth: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-tboth: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -3718,7 +3718,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-oboth: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-oboth: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-oboth: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-oboth: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -3844,7 +3844,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-ttre: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-ttre: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-ttre: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-ttre: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -4366,7 +4366,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-idm-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-idm-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4685,7 +4685,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_idm_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_idm_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4907,7 +4907,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-idm: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-idm: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-idm: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-idm: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -5285,7 +5285,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-fp-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-fp-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5604,7 +5604,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_fp_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_fp_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5826,7 +5826,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-fp: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-fp: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-fp: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-fp: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"
@@ -7030,7 +7030,7 @@
       ]
     },
     {
-      "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE — invite_grant_label_revoke: invite user + account-scope ARM_LABELS grant by matchLabels → sees network → label removed → does not see (#113 fe3455 regression)",
+      "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE — invite_grant_label_revoke: invite user + account-scope ARM_LABELS grant by matchLabels → sees network → label removed → does not see (regression)",
       "description": "class:T31 | class:LABELS | class:REVOKE | class:INVITE | class:FGA | class:AUTHZ | class:USE-CASE | priority:P0",
       "item": [
         {
@@ -7179,7 +7179,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-inv-{{runId}}\", \"description\": \"newman T3.1 label-revoke clean subject\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-sa-inv-{{runId}}\", \"description\": \"newman label-revoke clean subject\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7498,7 +7498,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_inv_{{runId}}\", \"description\": \"newman T3.1 ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31_inv_{{runId}}\", \"description\": \"newman ARM_LABELS probe role\", \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"network\": \"treska\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7720,7 +7720,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('bind-inv: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('bind-inv: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-inv: bind NOT FailedPrecondition (assignable, G-8)', () => {",
+                  "pm.test('bind-inv: bind NOT FailedPrecondition (assignable)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
                   "});"

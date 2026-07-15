@@ -34,7 +34,16 @@ grant), so these ALLOW cases pass (200).
   - DENY        → 403 + grpc 7 (PERMISSION_DENIED) + "permission denied"
   - ALLOW       → != 403 и != 16 (не PermissionDenied и не Unauthenticated)
   - UNAUTH      → 401 + grpc 16 (UNAUTHENTICATED) — revoked / expired / malformed
-  - EMPTY       → 200 + list.length === 0 (scope-filter default-deny)
+  - EMPTY       → 200 + list.length === 0 (membership-scoped scope-filter List,
+                  e.g. IAM ServiceAccount.List for a non-member account)
+
+  NOTE — List authz is NOT uniform across services. IAM membership-scoped Lists
+  (ServiceAccount/User/Project/Group.List ?accountId=…) return 200-empty for a
+  non-member (EMPTY). vpc.NetworkService.List ?projectId=… is a project-viewer-
+  GATED List: a caller with no `viewer` on the queried project is hard-denied 403
+  (anti-cross-project-enumeration, CWE-862, owned by kacho-vpc) — NOT 200-empty.
+  So the no-project-grant NET-LS probes below are DENY (403), while the no-grant
+  IAM SA-LS probe stays EMPTY (200).
 
 Pre-conditions: `tests/authz-fixtures/setup.sh` (шаги 9-10: issue SA-key
 через SAKeyService + Hydra OAuth client; mint SA-JWT; issue/revoke
@@ -193,9 +202,19 @@ def emit(case_id, title, decision, method, path, body, subject, list_key="networ
 #   resource в project-A2 / project-B1  → DENY   (нет binding; per-resource Get/Create)
 #   account-A / account-B уровень       → DENY   (project-scoped grant ≠ account)
 #   list ?projectId=A1                  → ALLOW
-#   list ?projectId=A2 / ?projectId=B1  → EMPTY  (Network.List is a
-#                                          scope-filter RPC — 200 + empty when the
-#                                          caller has no grant in that project, never 403)
+#   list ?projectId=A2 / ?projectId=B1  → DENY   (vpc.NetworkService.List is a
+#                                          project-viewer-GATED List RPC: the caller
+#                                          must hold `viewer` on `project:<projectId>`
+#                                          to enumerate its networks; no grant on the
+#                                          queried project → 403 PermissionDenied, NOT a
+#                                          200-empty scope-filter. This is a deliberate
+#                                          anti-cross-project-enumeration gate owned by
+#                                          kacho-vpc (permission_map.go NetworkService/List
+#                                          required_relation=viewer@project; locked by the
+#                                          CWE-862 regression test
+#                                          permission_map_networklist_test.go). Only a
+#                                          caller WITH project-viewer but no per-network
+#                                          grant sees 200-empty — that is not this case.)
 #   self-modify / escalate              → DENY   (SA не может grant'ить себе роли)
 # ---------------------------------------------------------------------------
 
@@ -214,12 +233,13 @@ emit("AUTHZ-SA-NET-CR-A1", "Create network in project-A1 (own project)",
      {"projectId": "{{projectA1Id}}", "name": "authz-sa-net-{{runId}}"}, SA_GRANTED)
 
 # SA-A-4: SA-A list networks в cross-project того же account (A2, без binding).
-# Network.List is a scope-filter RPC — the handler resolves the
-# FGA-allowed Network id set via ListObjects and returns 200 + empty when the
-# caller has no grant in project-A2 (never 403). Same semantics as B1 below.
-emit("AUTHZ-SA-NET-LS-A2-EMPTY", "List networks ?projectId=A2 (cross-project, no grant) → scope-filter empty",
-     "EMPTY", "GET", "/vpc/v1/networks?projectId={{projectA2Id}}", None, SA_GRANTED,
-     list_key="networks")
+# vpc.NetworkService.List is project-viewer-GATED: the caller must hold `viewer`
+# on `project:A2` to enumerate its networks. SA-A has viewer only on project-A1,
+# so listing project-A2 → 403 PermissionDenied (anti-cross-project-enumeration,
+# CWE-862; owned by kacho-vpc permission_map, not a 200-empty scope-filter). Same
+# semantics as B1 below.
+emit("AUTHZ-SA-NET-LS-A2-DENY", "List networks ?projectId=A2 (cross-project, no project-viewer) → 403 gated List",
+     "DENY", "GET", "/vpc/v1/networks?projectId={{projectA2Id}}", None, SA_GRANTED)
 
 # SA-A-5: SA-A без grant на ДРУГОЙ Project (B1, cross-account) → DENY.
 emit("AUTHZ-SA-NET-GT-B1", "Get seed-network in project-B1 (cross-account, no grant)",
@@ -229,12 +249,11 @@ emit("AUTHZ-SA-NET-CR-B1", "Create network in project-B1 (cross-account, no gran
      "DENY", "POST", "/vpc/v1/networks",
      {"projectId": "{{projectB1Id}}", "name": "authz-sa-net-{{runId}}"}, SA_GRANTED)
 
-# SA-A-6: SA-A list-filtering — видит только SA-accessible ресурсы.
-#         ?projectId=B1 → 200 + пустой список (scope-filter default-deny),
-#         НЕ список чужих networks.
-emit("AUTHZ-SA-NET-LS-B1-EMPTY", "List networks ?projectId=B1 → scope-filter empty",
-     "EMPTY", "GET", "/vpc/v1/networks?projectId={{projectB1Id}}", None, SA_GRANTED,
-     list_key="networks")
+# SA-A-6: SA-A list networks в cross-account project (B1) — no project-viewer on B1
+#         → 403 PermissionDenied (project-viewer-gated List, anti-enumeration),
+#         НЕ список чужих networks и НЕ distinguishing 200-empty.
+emit("AUTHZ-SA-NET-LS-B1-DENY", "List networks ?projectId=B1 (cross-account, no project-viewer) → 403 gated List",
+     "DENY", "GET", "/vpc/v1/networks?projectId={{projectB1Id}}", None, SA_GRANTED)
 
 # SA-A-7: project-scoped grant не дает account-уровневых прав → Get account-A DENY.
 emit("AUTHZ-SA-ACCT-GT-A", "Get account-A (project-scoped grant ≠ account-level)",
@@ -294,10 +313,10 @@ emit("AUTHZ-SA-ESC-CUSTOM-ROLE", "Create custom Role with broad iam/vpc rules (e
 emit("AUTHZ-SANG-NET-GT-A1", "Get seed-network in project-A1 (no grants at all)",
      "DENY", "GET", "/vpc/v1/networks/{{seedNetworkA1Id}}", None, SA_NOGRANT)
 
-# SA-NG-2: SA без grant'ов — list своего account → EMPTY (scope-filter).
-emit("AUTHZ-SANG-NET-LS-A1-EMPTY", "List networks ?projectId=A1 (no grants) → scope-filter empty",
-     "EMPTY", "GET", "/vpc/v1/networks?projectId={{projectA1Id}}", None, SA_NOGRANT,
-     list_key="networks")
+# SA-NG-2: SA без grant'ов — list networks project-A1: no project-viewer → 403
+#          (project-viewer-gated List; a no-grant SA cannot even enumerate the project).
+emit("AUTHZ-SANG-NET-LS-A1-DENY", "List networks ?projectId=A1 (no grants, no project-viewer) → 403 gated List",
+     "DENY", "GET", "/vpc/v1/networks?projectId={{projectA1Id}}", None, SA_NOGRANT)
 
 # SA-NG-3: SA без grant'ов — create network → DENY.
 emit("AUTHZ-SANG-NET-CR-A1", "Create network in project-A1 (no grants)",
@@ -339,10 +358,11 @@ emit("AUTHZ-APITOK-NET-GT-B1", "Get seed-network in project-B1 (valid token, out
 emit("AUTHZ-APITOK-ACCT-GT-A", "Get account-A (valid token, scope=vpc.* only)",
      "DENY", "GET", "/iam/v1/accounts/{{accountAId}}", None, API_VALID)
 
-# API-5: API-token valid out-of-scope — list ?projectId=B1 → EMPTY (scope-filter).
-emit("AUTHZ-APITOK-NET-LS-B1-EMPTY", "List networks ?projectId=B1 (out-of-scope) → scope-filter empty",
-     "EMPTY", "GET", "/vpc/v1/networks?projectId={{projectB1Id}}", None, API_VALID,
-     list_key="networks")
+# API-5: API-token valid but out-of-scope — list ?projectId=B1: token scope is
+#        vpc.* on project-A1, no viewer on project-B1 → 403 PermissionDenied
+#        (project-viewer-gated List, anti-cross-project-enumeration).
+emit("AUTHZ-APITOK-NET-LS-B1-DENY", "List networks ?projectId=B1 (out-of-scope, no project-viewer) → 403 gated List",
+     "DENY", "GET", "/vpc/v1/networks?projectId={{projectB1Id}}", None, API_VALID)
 
 # API-6: API-token revoked → 401 UNAUTHENTICATED (на in-scope ресурсе — revoke
 #        бьет authn-слой раньше authz).

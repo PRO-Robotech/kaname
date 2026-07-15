@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "IAM-SET-PRJ-LABEL-EXACT-OK — INV-2 exact-set: 3 projects {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.project get,list matchLabels foo} → subject's project List == exactly the M+ set",
+      "name": "IAM-SET-PRJ-LABEL-EXACT-OK — exact-set: 3 projects {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.project get,list matchLabels foo} → subject's project List == exactly the M+ set",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV2 | class:LABELS | class:EXACT-SET | priority:P0",
       "item": [
         {
@@ -1549,15 +1549,15 @@
                   "pm.environment.unset('_poll200_started_read_exact_set');",
                   "const j = pm.response.json();",
                   "const ids = (j.projects || []).map(p => p.id);",
-                  "pm.test('INV-2: all three M+ (foo=runId) projects are visible', () => {",
+                  "pm.test('all three M+ (foo=runId) projects are visible', () => {",
                   "  const want = ['visPP1','visPP2','visPP3'].map(v => pm.environment.get(v));",
                   "  pm.expect(want.every(w => ids.indexOf(w) !== -1), 'visible ids: ' + JSON.stringify(ids)).to.be.true;",
                   "});",
-                  "pm.test('INV-2: no M− (no-label) project is visible (non-matching hidden)', () => {",
+                  "pm.test('no M− (no-label) project is visible (non-matching hidden)', () => {",
                   "  const mneg = ['visPM1','visPM2','visPM3'].map(v => pm.environment.get(v));",
                   "  pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'visible ids: ' + JSON.stringify(ids)).to.be.false;",
                   "});",
-                  "pm.test('INV-2: no other-label (baz=runId) project is visible (label-scoped, not blanket)', () => {",
+                  "pm.test('no other-label (baz=runId) project is visible (label-scoped, not blanket)', () => {",
                   "  const bq = ['visBQ1','visBQ2'].map(v => pm.environment.get(v));",
                   "  pm.expect(bq.some(w => ids.indexOf(w) !== -1), 'visible ids: ' + JSON.stringify(ids)).to.be.false;",
                   "});"
@@ -2073,7 +2073,7 @@
       ]
     },
     {
-      "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 — INV-1 v_list-only: by-label grant {iam.project list ONLY matchLabels foo} → project visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+      "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 — v_list-only: by-label grant {iam.project list ONLY matchLabels foo} → project visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV1 | class:LABELS | class:NEG | priority:P0",
       "item": [
         {
@@ -2694,7 +2694,7 @@
                   "pm.environment.unset('_poll200_read_list_visible');",
                   "pm.environment.unset('_poll200_started_read_list_visible');",
                   "const j = pm.response.json();",
-                  "pm.test('INV-1: v_list-only project IS visible in the List (v_list materialized)', () => {",
+                  "pm.test('v_list-only project IS visible in the List (v_list materialized)', () => {",
                   "  const ids = (j.projects || []).map(p => p.id);",
                   "  pm.expect(ids.indexOf(pm.environment.get('visVlProj')) !== -1, 'visible ids: ' + JSON.stringify(ids)).to.be.true;",
                   "});"
@@ -2747,9 +2747,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('INV-1: detail Get on a v_list-only project → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "pm.test('detail Get on a v_list-only project → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('INV-1: grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
                 ]
               }
             }
@@ -2912,7 +2912,7 @@
       ]
     },
     {
-      "name": "IAM-SET-SVA-LABEL-EXACT-OK — INV-2 exact-set (serviceAccount): 3 {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.serviceAccount get,list matchLabels foo} → subject's List contains exactly the M+ set",
+      "name": "IAM-SET-SVA-LABEL-EXACT-OK — exact-set (serviceAccount): 3 {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.serviceAccount get,list matchLabels foo} → subject's List contains exactly the M+ set",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV2 | class:LABELS | class:EXACT-SET | priority:P0",
       "item": [
         {
@@ -4437,9 +4437,9 @@
                   "pm.environment.unset('_poll200_started_read_exact_set');",
                   "const j = pm.response.json();",
                   "const ids = (j.serviceAccounts || []).map(o => o.id);",
-                  "pm.test('INV-2 serviceAccount: all three M+ (foo=runId) visible', () => { const want = ['setSvaPP1','setSvaPP2','setSvaPP3'].map(v => pm.environment.get(v)); pm.expect(want.every(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.true; });",
-                  "pm.test('INV-2 serviceAccount: no M− (no-label) visible (non-matching hidden)', () => { const mneg = ['setSvaPM1','setSvaPM2','setSvaPM3'].map(v => pm.environment.get(v)); pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
-                  "pm.test('INV-2 serviceAccount: no other-label (baz=runId) visible (label-scoped, not blanket)', () => { const bz = ['setSvaBQ1','setSvaBQ2'].map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });"
+                  "pm.test('serviceAccount: all three M+ (foo=runId) visible', () => { const want = ['setSvaPP1','setSvaPP2','setSvaPP3'].map(v => pm.environment.get(v)); pm.expect(want.every(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.true; });",
+                  "pm.test('serviceAccount: no M− (no-label) visible (non-matching hidden)', () => { const mneg = ['setSvaPM1','setSvaPM2','setSvaPM3'].map(v => pm.environment.get(v)); pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
+                  "pm.test('serviceAccount: no other-label (baz=runId) visible (label-scoped, not blanket)', () => { const bz = ['setSvaBQ1','setSvaBQ2'].map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });"
                 ]
               }
             }
@@ -4952,7 +4952,7 @@
       ]
     },
     {
-      "name": "IAM-SET-ROL-LABEL-EXACT-OK — INV-2 exact-set (role): 3 {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.role get,list matchLabels foo} → subject's List contains exactly the M+ set",
+      "name": "IAM-SET-ROL-LABEL-EXACT-OK — exact-set (role): 3 {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.role get,list matchLabels foo} → subject's List contains exactly the M+ set",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV2 | class:LABELS | class:EXACT-SET | priority:P0",
       "item": [
         {
@@ -6477,9 +6477,9 @@
                   "pm.environment.unset('_poll200_started_read_exact_set');",
                   "const j = pm.response.json();",
                   "const ids = (j.roles || []).map(o => o.id);",
-                  "pm.test('INV-2 role: all three M+ (foo=runId) visible', () => { const want = ['setRolPP1','setRolPP2','setRolPP3'].map(v => pm.environment.get(v)); pm.expect(want.every(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.true; });",
-                  "pm.test('INV-2 role: no M− (no-label) visible (non-matching hidden)', () => { const mneg = ['setRolPM1','setRolPM2','setRolPM3'].map(v => pm.environment.get(v)); pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
-                  "pm.test('INV-2 role: no other-label (baz=runId) visible (label-scoped, not blanket)', () => { const bz = ['setRolBQ1','setRolBQ2'].map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });"
+                  "pm.test('role: all three M+ (foo=runId) visible', () => { const want = ['setRolPP1','setRolPP2','setRolPP3'].map(v => pm.environment.get(v)); pm.expect(want.every(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.true; });",
+                  "pm.test('role: no M− (no-label) visible (non-matching hidden)', () => { const mneg = ['setRolPM1','setRolPM2','setRolPM3'].map(v => pm.environment.get(v)); pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
+                  "pm.test('role: no other-label (baz=runId) visible (label-scoped, not blanket)', () => { const bz = ['setRolBQ1','setRolBQ2'].map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });"
                 ]
               }
             }
@@ -6992,7 +6992,7 @@
       ]
     },
     {
-      "name": "IAM-SET-GRP-LABEL-EXACT-OK — INV-2 exact-set (group): 3 {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.group get,list matchLabels foo} → subject's List contains exactly the M+ set",
+      "name": "IAM-SET-GRP-LABEL-EXACT-OK — exact-set (group): 3 {foo=runId} (M+), 3 no-label (M−), 2 {baz=runId}; by-label grant {iam.group get,list matchLabels foo} → subject's List contains exactly the M+ set",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV2 | class:LABELS | class:EXACT-SET | priority:P0",
       "item": [
         {
@@ -8517,9 +8517,9 @@
                   "pm.environment.unset('_poll200_started_read_exact_set');",
                   "const j = pm.response.json();",
                   "const ids = (j.groups || []).map(o => o.id);",
-                  "pm.test('INV-2 group: all three M+ (foo=runId) visible', () => { const want = ['setGrpPP1','setGrpPP2','setGrpPP3'].map(v => pm.environment.get(v)); pm.expect(want.every(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.true; });",
-                  "pm.test('INV-2 group: no M− (no-label) visible (non-matching hidden)', () => { const mneg = ['setGrpPM1','setGrpPM2','setGrpPM3'].map(v => pm.environment.get(v)); pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
-                  "pm.test('INV-2 group: no other-label (baz=runId) visible (label-scoped, not blanket)', () => { const bz = ['setGrpBQ1','setGrpBQ2'].map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });"
+                  "pm.test('group: all three M+ (foo=runId) visible', () => { const want = ['setGrpPP1','setGrpPP2','setGrpPP3'].map(v => pm.environment.get(v)); pm.expect(want.every(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.true; });",
+                  "pm.test('group: no M− (no-label) visible (non-matching hidden)', () => { const mneg = ['setGrpPM1','setGrpPM2','setGrpPM3'].map(v => pm.environment.get(v)); pm.expect(mneg.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
+                  "pm.test('group: no other-label (baz=runId) visible (label-scoped, not blanket)', () => { const bz = ['setGrpBQ1','setGrpBQ2'].map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });"
                 ]
               }
             }
@@ -9032,7 +9032,7 @@
       ]
     },
     {
-      "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 — INV-1 v_list-only (serviceAccount): by-label grant {iam.serviceAccount list ONLY matchLabels foo} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+      "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 — v_list-only (serviceAccount): by-label grant {iam.serviceAccount list ONLY matchLabels foo} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV1 | class:LABELS | class:NEG | priority:P0",
       "item": [
         {
@@ -9653,7 +9653,7 @@
                   "pm.environment.unset('_poll200_read_list_visible');",
                   "pm.environment.unset('_poll200_started_read_list_visible');",
                   "const j = pm.response.json();",
-                  "pm.test('INV-1 serviceAccount: v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j.serviceAccounts || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('setSvaVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });"
+                  "pm.test('serviceAccount: v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j.serviceAccounts || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('setSvaVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });"
                 ]
               }
             }
@@ -9703,9 +9703,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('INV-1 serviceAccount: detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "pm.test('serviceAccount: detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('INV-1: grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
                 ]
               }
             }
@@ -9868,7 +9868,7 @@
       ]
     },
     {
-      "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 — INV-1 v_list-only (group): by-label grant {iam.group list ONLY matchLabels foo} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+      "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 — v_list-only (group): by-label grant {iam.group list ONLY matchLabels foo} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV1 | class:LABELS | class:NEG | priority:P0",
       "item": [
         {
@@ -10489,7 +10489,7 @@
                   "pm.environment.unset('_poll200_read_list_visible');",
                   "pm.environment.unset('_poll200_started_read_list_visible');",
                   "const j = pm.response.json();",
-                  "pm.test('INV-1 group: v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j.groups || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('setGrpVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });"
+                  "pm.test('group: v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j.groups || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('setGrpVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });"
                 ]
               }
             }
@@ -10539,9 +10539,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('INV-1 group: detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "pm.test('group: detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('INV-1: grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
                 ]
               }
             }

@@ -11844,7 +11844,7 @@
       ]
     },
     {
-      "name": "AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY — [ULG-04] non-member (jwtNoBindings) → Project & Group List → 200 + empty (was 403 pre-#255 call-gate)",
+      "name": "AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY — non-member (jwtNoBindings) → Project & Group List → 200 + empty (was 403 pre-unify call-gate)",
       "description": "class:AUTHZ | class:SCOPE | class:NEG | class:RBAC | priority:P1",
       "item": [
         {

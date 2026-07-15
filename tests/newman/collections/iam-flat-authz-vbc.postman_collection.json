@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE — AccessBinding.Create with lowercase subject type (`user`) + usr-prefixed id → derive → Operation(iop) done (VBC-16)",
+      "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE — AccessBinding.Create with lowercase subject type (`user`) + usr-prefixed id → derive → Operation(iop) done",
       "description": "class:VAL | class:CRUD | priority:P1",
       "item": [
         {
@@ -255,7 +255,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('VBC-16: lowercase subject derive accepted (200)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                  "pm.test('lowercase subject derive accepted (200)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope returned', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
@@ -386,8 +386,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('VBC-16: derive-create Operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('VBC-16: subject derived (no INVALID_ARGUMENT — lowercase type resolved)', () => {",
+                  "pm.test('derive-create Operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('subject derived (no INVALID_ARGUMENT — lowercase type resolved)', () => {",
                   "  const code = j.error && j.error.code;",
                   "  pm.expect(code, 'derive must NOT be rejected as INVALID_ARGUMENT: ' + JSON.stringify(j.error)).to.not.eql(3);",
                   "});"
@@ -449,7 +449,7 @@
       ]
     },
     {
-      "name": "IAM-VBC-ACB-BAD-PREFIX-SUBJECT — AccessBinding.Create with empty type + unrecognized id prefix (`rol-bad`) → sync 400 INVALID_ARGUMENT (validation not weakened, VBC-16 negative)",
+      "name": "IAM-VBC-ACB-BAD-PREFIX-SUBJECT — AccessBinding.Create with empty type + unrecognized id prefix (`rol-bad`) → sync 400 INVALID_ARGUMENT (validation not weakened)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -505,8 +505,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('VBC-16 negative: unrecognized prefix rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
-                  "pm.test('VBC-16 negative: error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));"
+                  "pm.test('unrecognized prefix rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
+                  "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));"
                 ]
               }
             }

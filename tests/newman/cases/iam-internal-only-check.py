@@ -8,9 +8,11 @@
 
   InternalIAMService / InternalUserService / InternalAuthorizeService /
   InternalBreakGlassService
-  должны быть доступны ТОЛЬКО на cluster-internal listener (port 9091;
-  в local port-forward — {{baseUrl}} = http://localhost:18080 — это
-  уже internal mux), и должны отдавать 404 на advertised external TLS
+  должны быть доступны ТОЛЬКО на cluster-internal listener — на api-gateway это
+  выделенный `internal-rest` listener (:8081), в local/CI port-forward
+  {{internalBaseUrl}} = http://localhost:18081. ПУБЛИЧНЫЙ cmux
+  ({{baseUrl}} = http://localhost:18080) НЕ отдаёт /iam/v1/internal/* — 404 by
+  design (ban #6). Те же пути должны отдавать 404 и на advertised external TLS
   endpoint (`{{externalBaseUrl}}` = https://api.kacho.local:443).
 
 Coverage:
@@ -53,8 +55,15 @@ IAM-INT-NEG-EXT-OPA-GETBUNDLE) are deleted because the underlying RPCs no longer
 exist anywhere.
 
 Environment requirements:
-  {{baseUrl}}          — internal listener (http://localhost:18080 in port-forward).
-                         Internal RPCs use this directly (already internal mux).
+  {{baseUrl}}          — PUBLIC api-gateway cmux (http://localhost:18080 in port-forward).
+                         Used for the operations poll (public OpsProxy). Does NOT serve
+                         /iam/v1/internal/* (404 by design).
+  {{internalBaseUrl}}  — api-gateway dedicated cluster-internal REST listener
+                         (`internal-rest` :8081; http://localhost:18081 in the CI
+                         port-forward). The POSITIVE controls redirect here via
+                         _internal_url_override — Internal* RPCs are served ONLY here. If
+                         unset (local dev without the internal-rest port-forward) the
+                         positive controls are skipped with a warning (local-dev fallback).
   {{externalBaseUrl}}  — advertised TLS endpoint (https://api.kacho.local:443 on stend).
                          Must NOT expose Internal* paths. If not set in env, external
                          checks are skipped with a warning (local-dev fallback).
@@ -94,6 +103,32 @@ def _external_url_override(path: str):
         "}",
         "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
         "pm.environment.set('_extIsolationStep', 'true');",
+    ]
+
+
+def _internal_url_override(path: str):
+    """Return a pre_script list that overrides the request URL to internalBaseUrl+path.
+
+    The POSITIVE controls exercise Internal* RPCs (UpsertFromIdentity,
+    InternalIAMService.LookupSubject/Check). These paths (/iam/v1/internal/*) are
+    served ONLY by the api-gateway dedicated cluster-internal REST listener
+    (`internal-rest` Service port, :8081) — NEVER by the public cmux (:8080), which
+    404s them by design (ban #6). The premise `{{baseUrl}} is already the internal
+    mux` is FALSE for the public port-forward: {{baseUrl}} (:18080) reaches the PUBLIC
+    listener. So point these controls at {{internalBaseUrl}} (the internal-rest
+    port-forward, http://localhost:18081 in CI). Mirrors _external_url_override; if
+    internalBaseUrl is unset (local dev without the internal-rest port-forward) the
+    step is skipped rather than failing on a spurious public 404."""
+    return [
+        "// internal-only POSITIVE control: send this request to the api-gateway",
+        "// cluster-internal REST listener (Internal* paths live ONLY there).",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
+        "  postman.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
     ]
 
 
@@ -390,7 +425,17 @@ CASES.append(Case(
                 "email": "positive-{{runId}}@kacho.local",
                 "displayName": "Positive Control {{runId}}",
             },
-            # No auth override — internal mux does not require external JWT.
+            # Reach the Internal* RPC on the api-gateway cluster-internal REST
+            # listener ({{internalBaseUrl}} = :18081 in CI) — NOT the public cmux
+            # ({{baseUrl}} = :18080), which 404s /iam/v1/internal/* by design (ban #6).
+            pre_script=_internal_url_override("/iam/v1/internal/users:upsertFromIdentity"),
+            # The internal-rest listener enforces authN on every request
+            # (authn-everywhere invariant, security.md) — an unauthenticated call
+            # is rejected 401 before reaching the <exempt> service. A valid JWT is
+            # required; jwtAccountAdminA is deterministically seeded (not the flaky
+            # bootstrap admin). UpsertFromIdentity is <exempt> at the gateway and
+            # ungated for the end-user at the iam service, so the tier is irrelevant.
+            auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
                 "pm.test('INT-UPSERT: user id has usr prefix', () => {",
@@ -400,7 +445,37 @@ CASES.append(Case(
                 "  const uid = (j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id;",
                 "  pm.expect(uid, 'user id must start with usr').to.match(/^usr[a-z0-9]+$/);",
                 "});",
+                *save_from_response("j.id", "createdInternalUserOpId"),
                 *save_from_response("(j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id", "createdInternalUserId"),
+            ],
+        ),
+        # UpsertFromIdentity is async (operations.Run → LRO worker commits the user
+        # row in a dispatcher goroutine). Poll the returned Operation to done so the
+        # user is COMMITTED before the -IDEM re-upsert (same id) and the LOOKUPSUBJECT
+        # cases run — otherwise resolveUserID on the re-upsert would not yet see the
+        # ACTIVE row and could mint a second id (idempotency flake). Deterministic wait,
+        # not time.Sleep.
+        Step(
+            name="upsert-poll-done",
+            method="GET",
+            path="/operations/{{createdInternalUserOpId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                "pm.test('upsert poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                "const j = pm.response.json();",
+                "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                "if (!j.done && pc < 30) {",
+                "  pm.environment.set('_pollCount', String(pc + 1));",
+                "  postman.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_pollCount');",
+                "pm.environment.unset('_pollStarted');",
+                "pm.test('INT-UPSERT: user committed (operation done, no error)', () => {",
+                "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
+                "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
+                "});",
             ],
         ),
     ],
@@ -428,6 +503,10 @@ CASES.append(Case(
                 "email": "positive-{{runId}}@kacho.local",
                 "displayName": "Positive Control {{runId}} (re-upsert)",
             },
+            # Internal* → internal-rest listener ({{internalBaseUrl}}, see UPSERT above).
+            pre_script=_internal_url_override("/iam/v1/internal/users:upsertFromIdentity"),
+            # internal-rest listener enforces authN — send a valid JWT (see UPSERT above).
+            auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
                 "pm.test('INT-UPSERT-IDEM: same user id returned', () => {",
@@ -463,6 +542,10 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/internal/iam:lookupSubject",
             body={"externalId": "zit-positive-{{runId}}"},
+            # Internal* → internal-rest listener ({{internalBaseUrl}}, see UPSERT above).
+            pre_script=_internal_url_override("/iam/v1/internal/iam:lookupSubject"),
+            # internal-rest listener enforces authN — send a valid JWT (see UPSERT above).
+            auth="jwtAccountAdminA",
             test_script=[
                 # 200 if upserted user exists, 404 if not (both are valid internal-service responses).
                 "pm.test('INT-LOOKUPSUBJ: status 200 or 404 (valid internal response, NOT mux-404)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([200, 404]));",
@@ -502,6 +585,10 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/internal/iam:lookupSubject",
             body={"externalId": "zit-nonexistent-{{runId}}"},
+            # Internal* → internal-rest listener ({{internalBaseUrl}}, see UPSERT above).
+            pre_script=_internal_url_override("/iam/v1/internal/iam:lookupSubject"),
+            # internal-rest listener enforces authN — send a valid JWT (see UPSERT above).
+            auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('INT-LOOKUPSUBJ-UNK: status 404', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                 "const j = pm.response.json();",
@@ -532,6 +619,10 @@ CASES.append(Case(
                 "relation": "viewer",
                 "objectId": "{{accountAId}}",
             },
+            # Internal* → internal-rest listener ({{internalBaseUrl}}, see UPSERT above).
+            pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
+            # internal-rest listener enforces authN — send a valid JWT (see UPSERT above).
+            auth="jwtAccountAdminA",
             test_script=[
                 "// 200 with allowed=true|false is the expected success response.",
                 "// 403/404 from service (not mux) is also acceptable if FGA is not seeded.",
