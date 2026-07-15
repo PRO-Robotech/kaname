@@ -18,11 +18,11 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 )
 
 // kind — семантика операции для разрешения orphan'а по существованию ресурса.

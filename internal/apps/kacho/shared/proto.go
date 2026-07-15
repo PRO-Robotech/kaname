@@ -21,8 +21,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
 // TimestampProto конвертирует time.Time в *timestamppb.Timestamp с truncate'ом

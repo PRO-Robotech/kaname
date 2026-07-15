@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 	apigatewayv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/apigateway/v1"
+	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 )
 
 // SubjectChangeEvent — decoded payload of one subject_change_outbox row.
