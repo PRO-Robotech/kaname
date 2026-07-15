@@ -30,11 +30,21 @@ import (
 // ---- Mocks ----
 
 type stubUserClientRepo struct {
-	inserted domain.UserOAuthClient
-	getRow   domain.UserOAuthClient
-	getErr   error
-	listRows []domain.UserOAuthClient
-	deleted  bool
+	inserted  domain.UserOAuthClient
+	getRow    domain.UserOAuthClient
+	getErr    error
+	listRows  []domain.UserOAuthClient
+	deleted   bool
+	accountID domain.AccountID
+}
+
+// AccountForUser — резолвер account'а User (порт UserClientRepo). Дефолт —
+// фиксированный account; тесты account_id-стемпинга подставляют свой.
+func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error) {
+	if s.accountID != "" {
+		return s.accountID, nil
+	}
+	return "acc00000000000000001", nil
 }
 
 func (s *stubUserClientRepo) Get(ctx context.Context, id domain.UserOAuthClientID) (domain.UserOAuthClient, error) {
@@ -153,7 +163,7 @@ func (e errRedactor) RedactResponseField(context.Context, string, []string) erro
 // ---- Tests ----
 
 // TestIssue_HappyPath (USR-01): Execute → Operation; response несёт одноразовый
-// private_key_pem + client_id + key_id + algorithm=ES256 + token{uoc_…}. Hydra
+// private_key_pem + client_id + key_id + algorithm=ES256 + token{uoc…}. Hydra
 // зарегистрирован private_key_jwt с owner=user_id.
 func TestIssue_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
@@ -192,8 +202,8 @@ func TestIssue_HappyPath(t *testing.T) {
 		t.Errorf("algorithm = %q, want ES256", resp.GetAlgorithm())
 	}
 	tok := resp.GetToken()
-	if tok == nil || tok.GetId() == "" || tok.GetId()[:4] != "uoc_" {
-		t.Errorf("token.id = %q, want uoc_ prefix", tok.GetId())
+	if tok == nil || tok.GetId() == "" || tok.GetId()[:3] != "uoc" {
+		t.Errorf("token.id = %q, want uoc prefix", tok.GetId())
 	}
 	if tok.GetUserId() != "usr00000000000000001" {
 		t.Errorf("token.user_id = %q", tok.GetUserId())

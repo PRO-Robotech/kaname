@@ -54,6 +54,10 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (
 		Description:     req.GetDescription(),
 		TTLSeconds:      req.GetTtlSeconds(),
 		CreatedByUserID: principal,
+		// Create-only метаданные: name + labels выставляются на Issue и immutable
+		// (ресурс несёт только Issue/List/Revoke — нет Update).
+		Name:   req.GetName(),
+		Labels: labelsFromProto(req.GetLabels()),
 	})
 	if err != nil {
 		return nil, err

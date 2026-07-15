@@ -37,6 +37,13 @@ type UserOAuthClient struct {
 	// KeyAlgorithm — JOSE alg зарегистрированного ключа. Всегда "ES256" для новых
 	// токенов.
 	KeyAlgorithm string
+
+	// Name — человекочитаемое имя токена, выставляется на Issue (create-only,
+	// immutable — ресурс несёт только Issue/List/Revoke). Пусто для legacy-строк.
+	Name OAuthClientName
+	// Labels — произвольные метки токена, выставляются на Issue (create-only,
+	// immutable). Пусто для legacy-строк.
+	Labels Labels
 }
 
 // Validate — self-validating инвариант доменной сущности.
@@ -61,17 +68,21 @@ func (c UserOAuthClient) Validate() error {
 		errs = multierr.Append(errs,
 			fmt.Errorf("Illegal argument key_algorithm: must be one of {ES256,RS256,EdDSA}"))
 	}
+	errs = multierr.Append(errs, c.Name.Validate())
+	errs = multierr.Append(errs, c.Labels.Validate())
 	return errs
 }
 
-// UserOAuthClientID — формат `uoc_<17-crockford>`.
+// UserOAuthClientID — новый формат `uoc<17-crockford>` (corelib `ids.NewID`, без
+// подчёркивания). id существующих строк immutable, поэтому валидатор принимает и
+// legacy `uoc_<17-crockford>`.
 type UserOAuthClientID string
 
-var uocIDRe = regexp.MustCompile(`^uoc_[0-9a-hjkmnp-tv-z]{17}$`)
+var uocIDRe = regexp.MustCompile(`^uoc_?[0-9a-hjkmnp-tv-z]{17}$`)
 
 func (id UserOAuthClientID) Validate() error {
 	if !uocIDRe.MatchString(string(id)) {
-		return fmt.Errorf("Illegal argument id: must match ^uoc_[0-9a-hjkmnp-tv-z]{17}$")
+		return fmt.Errorf("Illegal argument id: must match ^uoc_?[0-9a-hjkmnp-tv-z]{17}$")
 	}
 	return nil
 }

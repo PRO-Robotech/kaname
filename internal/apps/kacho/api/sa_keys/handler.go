@@ -71,7 +71,11 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		TTLSeconds:       req.GetTtlSeconds(),
 		CreatedByUserID:  principal,
 		TrustedSubjects:  ts,
-		// Phase 3c Federation OUT — caller-supplied external audience(s).
+		// Create-only metadata: name + labels are set on Issue and immutable
+		// (the resource carries only Issue/List/Revoke — no Update).
+		Name:   req.GetName(),
+		Labels: labelsFromProto(req.GetLabels()),
+		// Federation OUT — caller-supplied external audience(s).
 		// Empty → use-case falls back to AudiencePrefix (kacho-internal).
 		Audience: req.GetAudience(),
 	})

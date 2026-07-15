@@ -39,6 +39,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/PRO-Robotech/kacho-corelib/ids"
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
@@ -61,6 +62,10 @@ type UserClientRepo interface {
 	Insert(ctx context.Context, tx service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error)
 	DeleteByID(ctx context.Context, tx service.Tx, id domain.UserOAuthClientID) error
 	List(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.UserOAuthClient, string, error)
+	// AccountForUser резолвит account владельца-User, чтобы Issue/Revoke стемпили
+	// `account_id` на Operation-метаданных (account-scoped /iam/operations feed).
+	// Нет User → ErrNotFound.
+	AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error)
 }
 
 // OAuthClientAdmin абстрагирует hydra-admin операции, нужные Issue/Revoke.
@@ -149,6 +154,11 @@ type IssueInput struct {
 	Description     string
 	TTLSeconds      int64
 	CreatedByUserID string
+
+	// Name — человекочитаемое имя токена (create-only, immutable). Пусто → "".
+	Name string
+	// Labels — произвольные метки токена (create-only, immutable). Пусто → {}.
+	Labels domain.Labels
 }
 
 // Execute возвращает стартованную Operation.
@@ -168,14 +178,28 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	if len(in.Description) > 256 {
 		return nil, status.Error(codes.InvalidArgument, "description too long (max 256)")
 	}
+	if err := domain.OAuthClientName(in.Name).Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if err := in.Labels.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 
-	tokenID := domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient))
+	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
+	// иначе account-scoped /iam/operations исключает token-операции.
+	accountID, err := u.repo.AccountForUser(ctx, in.UserID)
+	if err != nil {
+		return nil, mapPGErr(err)
+	}
+
+	tokenID := domain.UserOAuthClientID(ids.NewID(domain.PrefixUserOAuthClient))
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Issue user token for %s", in.UserID),
 		&iamv1.IssueUserTokenMetadata{
-			UserId: string(in.UserID),
-			KeyId:  string(tokenID),
+			UserId:    string(in.UserID),
+			KeyId:     string(tokenID),
+			AccountId: string(accountID),
 		},
 	)
 	if err != nil {
@@ -325,6 +349,8 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		CreatedByUserID: domain.UserID(in.CreatedByUserID),
 		PublicKeyPEM:    key.PublicPEM,
 		KeyAlgorithm:    key.Algorithm,
+		Name:            domain.OAuthClientName(in.Name),
+		Labels:          in.Labels,
 	}
 	if in.TTLSeconds > 0 {
 		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
@@ -452,12 +478,19 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 	if in.TokenID == "" {
 		return nil, status.Error(codes.InvalidArgument, "token_id required")
 	}
+	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
+	// иначе account-scoped /iam/operations исключает token-операции.
+	accountID, err := u.repo.AccountForUser(ctx, in.UserID)
+	if err != nil {
+		return nil, mapPGErr(err)
+	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Revoke user token %s", in.TokenID),
 		&iamv1.RevokeUserTokenMetadata{
-			UserId:  string(in.UserID),
-			TokenId: string(in.TokenID),
+			UserId:    string(in.UserID),
+			TokenId:   string(in.TokenID),
+			AccountId: string(accountID),
 		},
 	)
 	if err != nil {
@@ -563,6 +596,31 @@ func (u *ListUserTokensUseCase) Execute(ctx context.Context, in ListInput) ([]do
 
 // ───────────────── helpers ─────────────────
 
+// labelsFromProto конвертит protobuf-map меток в domain.Labels. nil/empty →
+// пустая (non-nil) map (паритет с account/project/group).
+func labelsFromProto(m map[string]string) domain.Labels {
+	if len(m) == 0 {
+		return domain.Labels{}
+	}
+	out := make(domain.Labels, len(m))
+	for k, v := range m {
+		out[domain.LabelKey(k)] = domain.LabelVal(v)
+	}
+	return out
+}
+
+// labelsToProto конвертит domain.Labels в protobuf-map меток. nil/empty → nil.
+func labelsToProto(l domain.Labels) map[string]string {
+	if len(l) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(l))
+	for k, v := range l {
+		out[string(k)] = string(v)
+	}
+	return out
+}
+
 func userTokenToProto(c domain.UserOAuthClient) (*iamv1.UserOAuthClient, error) {
 	pb := &iamv1.UserOAuthClient{
 		Id:              string(c.ID),
@@ -573,6 +631,8 @@ func userTokenToProto(c domain.UserOAuthClient) (*iamv1.UserOAuthClient, error) 
 		PublicKeyPem:    c.PublicKeyPEM,
 		KeyAlgorithm:    c.KeyAlgorithm,
 		CreatedAt:       shared.TimestampProto(c.CreatedAt),
+		Name:            string(c.Name),
+		Labels:          labelsToProto(c.Labels),
 	}
 	if c.ExpiresAt != nil {
 		pb.ExpiresAt = shared.TimestampProto(*c.ExpiresAt)

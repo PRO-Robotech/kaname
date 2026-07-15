@@ -40,7 +40,7 @@ func NewSAOAuthClientRepo(pool *pgxpool.Pool) *SAOAuthClientRepo {
 
 const socCols = `id, sva_id, hydra_client_id, description, created_by_user_id,
                  created_at, expires_at, last_used_at,
-                 public_key_pem, key_algorithm, trusted_subjects`
+                 public_key_pem, key_algorithm, trusted_subjects, name, labels`
 
 func (r *SAOAuthClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	row := r.pool.QueryRow(ctx,
@@ -82,10 +82,14 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		INSERT INTO service_account_oauth_clients (
 		    id, sva_id, hydra_client_id, description, created_by_user_id,
 		    created_at, expires_at, last_used_at,
-		    public_key_pem, key_algorithm, trusted_subjects
-		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11::jsonb)
+		    public_key_pem, key_algorithm, trusted_subjects, name, labels
+		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb)
 		RETURNING ` + socCols
 	tsJSON, err := marshalTrustedSubjects(c.TrustedSubjects)
+	if err != nil {
+		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(c.ID))
+	}
+	labelsJSON, err := marshalLabels(c.Labels)
 	if err != nil {
 		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
@@ -93,13 +97,30 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		string(c.ID), string(c.SvaID), string(c.OAuthClientID),
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
-		c.PublicKeyPEM, c.KeyAlgorithm, tsJSON,
+		c.PublicKeyPEM, c.KeyAlgorithm, tsJSON, string(c.Name), labelsJSON,
 	)
 	out, err := scanSAOAuthClient(row)
 	if err != nil {
 		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
 	return out, nil
+}
+
+// AccountForServiceAccount — resolves the owning account of a ServiceAccount by
+// its id. Used to stamp `account_id` on Issue/Revoke SA-key Operation metadata so
+// the account-scoped /iam/operations feed includes token operations. Missing SA →
+// ErrNotFound (well-formed id, no such SA).
+func (r *SAOAuthClientRepo) AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, error) {
+	var accountID string
+	err := r.pool.QueryRow(ctx,
+		`SELECT account_id FROM service_accounts WHERE id = $1`, string(id)).Scan(&accountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
+	}
+	if err != nil {
+		return "", mapErr(err, "SAOAuthClient.AccountForServiceAccount", string(id))
+	}
+	return domain.AccountID(accountID), nil
 }
 
 // FindByExternalSubject — reverse lookup for federation IN: given an
@@ -241,12 +262,13 @@ func scanSAOAuthClient(row pgx.Row) (domain.ServiceAccountOAuthClient, error) {
 		expiresAt  sql.NullTime
 		lastUsedAt sql.NullTime
 		tsBody     []byte
+		labelsBody []byte
 	)
 	if err := row.Scan(
 		(*string)(&c.ID), (*string)(&c.SvaID), (*string)(&c.OAuthClientID),
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
-		&c.PublicKeyPEM, &c.KeyAlgorithm, &tsBody,
+		&c.PublicKeyPEM, &c.KeyAlgorithm, &tsBody, (*string)(&c.Name), &labelsBody,
 	); err != nil {
 		return domain.ServiceAccountOAuthClient{}, err
 	}
@@ -263,6 +285,11 @@ func scanSAOAuthClient(row pgx.Row) (domain.ServiceAccountOAuthClient, error) {
 		return domain.ServiceAccountOAuthClient{}, err
 	}
 	c.TrustedSubjects = ts
+	labels, err := unmarshalLabels(labelsBody)
+	if err != nil {
+		return domain.ServiceAccountOAuthClient{}, err
+	}
+	c.Labels = labels
 	return c, nil
 }
 

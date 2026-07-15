@@ -39,6 +39,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/PRO-Robotech/kacho-corelib/ids"
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
@@ -60,6 +61,10 @@ type SAClientRepo interface {
 	Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error)
 	DeleteByID(ctx context.Context, tx service.Tx, id domain.SAOAuthClientID) error
 	List(ctx context.Context, svaID domain.ServiceAccountID, pageToken string, pageSize int32) ([]domain.ServiceAccountOAuthClient, string, error)
+	// AccountForServiceAccount resolves the owning account of a ServiceAccount so
+	// Issue/Revoke can stamp `account_id` on the Operation metadata (account-scoped
+	// /iam/operations feed). Missing SA → ErrNotFound.
+	AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, error)
 }
 
 // OAuthClientAdmin abstracts hydra-admin operations needed by Issue/Revoke.
@@ -195,6 +200,11 @@ type IssueInput struct {
 	TTLSeconds       int64
 	CreatedByUserID  string
 
+	// Name — человекочитаемое имя ключа (create-only, immutable). Пусто → "".
+	Name string
+	// Labels — произвольные метки ключа (create-only, immutable). Пусто → {}.
+	Labels domain.Labels
+
 	// TrustedSubjects — Federation IN. When non-empty, the use-case
 	// switches to FEDERATED mode: no keypair is generated, the Hydra OAuth2
 	// client is registered with `grant_types=[urn:ietf:params:oauth:grant-
@@ -242,14 +252,28 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 			return nil, status.Errorf(codes.InvalidArgument, "trusted_subjects[%d]: %v", i, err)
 		}
 	}
+	if err := domain.OAuthClientName(in.Name).Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if err := in.Labels.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 
-	keyID := domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient))
+	// Resolve the owning account so the Operation metadata carries account_id —
+	// the account-scoped /iam/operations feed otherwise excludes token operations.
+	accountID, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
+	if err != nil {
+		return nil, mapPGErr(err)
+	}
+
+	keyID := domain.SAOAuthClientID(ids.NewID(domain.PrefixSAOAuthClient))
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Issue SA key for %s", in.ServiceAccountID),
 		&iamv1.IssueSAKeyMetadata{
 			ServiceAccountId: string(in.ServiceAccountID),
 			KeyId:            string(keyID),
+			AccountId:        string(accountID),
 		},
 	)
 	if err != nil {
@@ -459,6 +483,8 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		CreatedByUserID: domain.UserID(in.CreatedByUserID),
 		PublicKeyPEM:    key.PublicPEM,
 		KeyAlgorithm:    key.Algorithm,
+		Name:            domain.OAuthClientName(in.Name),
+		Labels:          in.Labels,
 	}
 	if in.TTLSeconds > 0 {
 		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
@@ -592,6 +618,8 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		// PublicKeyPEM + KeyAlgorithm intentionally empty — no key
 		// material in kacho-iam for federated rows.
 		TrustedSubjects: append([]domain.TrustedSubject(nil), in.TrustedSubjects...),
+		Name:            domain.OAuthClientName(in.Name),
+		Labels:          in.Labels,
 	}
 	if in.TTLSeconds > 0 {
 		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
@@ -763,12 +791,19 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 	if in.KeyID == "" {
 		return nil, status.Error(codes.InvalidArgument, "key_id required")
 	}
+	// Resolve the owning account so the Operation metadata carries account_id —
+	// the account-scoped /iam/operations feed otherwise excludes token operations.
+	accountID, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
+	if err != nil {
+		return nil, mapPGErr(err)
+	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Revoke SA key %s", in.KeyID),
 		&iamv1.RevokeSAKeyMetadata{
 			ServiceAccountId: string(in.ServiceAccountID),
 			KeyId:            string(in.KeyID),
+			AccountId:        string(accountID),
 		},
 	)
 	if err != nil {
@@ -875,6 +910,31 @@ func (u *ListSAKeysUseCase) Execute(ctx context.Context, in ListInput) ([]domain
 
 // ───────────────── helpers ─────────────────
 
+// labelsFromProto converts a protobuf label map into domain.Labels. nil/empty →
+// empty (non-nil) map (parity with account/project/group handlers).
+func labelsFromProto(m map[string]string) domain.Labels {
+	if len(m) == 0 {
+		return domain.Labels{}
+	}
+	out := make(domain.Labels, len(m))
+	for k, v := range m {
+		out[domain.LabelKey(k)] = domain.LabelVal(v)
+	}
+	return out
+}
+
+// labelsToProto converts domain.Labels into the protobuf label map. nil/empty → nil.
+func labelsToProto(l domain.Labels) map[string]string {
+	if len(l) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(l))
+	for k, v := range l {
+		out[string(k)] = string(v)
+	}
+	return out
+}
+
 func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountOAuthClient, error) {
 	pb := &iamv1.ServiceAccountOAuthClient{
 		Id:              string(c.ID),
@@ -883,6 +943,8 @@ func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountO
 		Description:     string(c.Description),
 		CreatedByUserId: string(c.CreatedByUserID),
 		CreatedAt:       shared.TimestampProto(c.CreatedAt),
+		Name:            string(c.Name),
+		Labels:          labelsToProto(c.Labels),
 	}
 	if c.ExpiresAt != nil {
 		pb.ExpiresAt = shared.TimestampProto(*c.ExpiresAt)

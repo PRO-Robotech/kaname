@@ -55,6 +55,13 @@ type ServiceAccountOAuthClient struct {
 	// Each entry restricts which external `(iss, sub)` tuples may assert
 	// this client. Empty slice = private_key_jwt mode.
 	TrustedSubjects []TrustedSubject
+
+	// Name — человекочитаемое имя ключа, выставляется на Issue (create-only,
+	// immutable — ресурс несёт только Issue/List/Revoke). Пусто для legacy-строк.
+	Name OAuthClientName
+	// Labels — произвольные метки ключа, выставляются на Issue (create-only,
+	// immutable). Пусто для legacy-строк.
+	Labels Labels
 }
 
 // TrustedSubject — one (issuer, subject) tuple permitted to assert a federated
@@ -160,6 +167,8 @@ func (c ServiceAccountOAuthClient) Validate() error {
 		errs = multierr.Append(errs,
 			fmt.Errorf("Illegal argument key_algorithm: must be one of {ES256,RS256,EdDSA}"))
 	}
+	errs = multierr.Append(errs, c.Name.Validate())
+	errs = multierr.Append(errs, c.Labels.Validate())
 	for i, ts := range c.TrustedSubjects {
 		if err := ts.Validate(); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("trusted_subjects[%d]: %w", i, err))
@@ -176,14 +185,16 @@ func (c ServiceAccountOAuthClient) Validate() error {
 	return errs
 }
 
-// SAOAuthClientID — format `soc_<17-crockford>`.
+// SAOAuthClientID — новый формат `soc<17-crockford>` (corelib `ids.NewID`, без
+// подчёркивания). id существующих строк immutable (id = Hydra client id + JWK
+// kid), поэтому валидатор принимает и legacy `soc_<17-crockford>`.
 type SAOAuthClientID string
 
-var socIDRe = regexp.MustCompile(`^soc_[0-9a-hjkmnp-tv-z]{17}$`)
+var socIDRe = regexp.MustCompile(`^soc_?[0-9a-hjkmnp-tv-z]{17}$`)
 
 func (id SAOAuthClientID) Validate() error {
 	if !socIDRe.MatchString(string(id)) {
-		return fmt.Errorf("Illegal argument id: must match ^soc_[0-9a-hjkmnp-tv-z]{17}$")
+		return fmt.Errorf("Illegal argument id: must match ^soc_?[0-9a-hjkmnp-tv-z]{17}$")
 	}
 	return nil
 }

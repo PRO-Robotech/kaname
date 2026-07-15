@@ -33,11 +33,17 @@ import (
 // ---- Mocks ----
 
 type stubSAClientRepo struct {
-	inserted domain.ServiceAccountOAuthClient
-	insertOK bool
+	inserted  domain.ServiceAccountOAuthClient
+	insertOK  bool
+	accountID domain.AccountID
+	getRow    domain.ServiceAccountOAuthClient
+	getErr    error
 }
 
 func (s *stubSAClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	if s.getRow.ID != "" || s.getErr != nil {
+		return s.getRow, s.getErr
+	}
 	return domain.ServiceAccountOAuthClient{}, errors.New("not implemented")
 }
 func (s *stubSAClientRepo) Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error) {
@@ -82,6 +88,7 @@ type stubOpsRepo struct {
 	created  bool
 	done     bool
 	lastResp *anypb.Any
+	lastErr  *status.Status
 }
 
 func (s *stubOpsRepo) Create(ctx context.Context, op operations.Operation) error {
@@ -115,6 +122,7 @@ func (s *stubOpsRepo) MarkError(ctx context.Context, id string, st *status.Statu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.done = true
+	s.lastErr = st
 	return nil
 }
 func (s *stubOpsRepo) Cancel(ctx context.Context, id string) error { return nil }

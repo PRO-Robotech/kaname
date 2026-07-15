@@ -37,7 +37,7 @@ func NewUserOAuthClientRepo(pool *pgxpool.Pool) *UserOAuthClientRepo {
 
 const uocCols = `id, user_id, hydra_client_id, description, created_by_user_id,
                  created_at, expires_at, last_used_at,
-                 public_key_pem, key_algorithm`
+                 public_key_pem, key_algorithm, name, labels`
 
 func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClientID) (domain.UserOAuthClient, error) {
 	row := r.pool.QueryRow(ctx,
@@ -79,20 +79,40 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 		INSERT INTO user_oauth_clients (
 		    id, user_id, hydra_client_id, description, created_by_user_id,
 		    created_at, expires_at, last_used_at,
-		    public_key_pem, key_algorithm
-		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10)
+		    public_key_pem, key_algorithm, name, labels
+		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11, $12::jsonb)
 		RETURNING ` + uocCols
+	labelsJSON, err := marshalLabels(c.Labels)
+	if err != nil {
+		return domain.UserOAuthClient{}, mapErr(err, "", string(c.ID))
+	}
 	row := tx.QueryRow(ctx, q,
 		string(c.ID), string(c.UserID), string(c.OAuthClientID),
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
-		c.PublicKeyPEM, c.KeyAlgorithm,
+		c.PublicKeyPEM, c.KeyAlgorithm, string(c.Name), labelsJSON,
 	)
 	out, err := scanUserOAuthClient(row)
 	if err != nil {
 		return domain.UserOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
 	return out, nil
+}
+
+// AccountForUser — резолвит account владельца-User по его id. Используется для
+// стемпинга `account_id` на Issue/Revoke user-token Operation-метаданных, чтобы
+// account-scoped /iam/operations включал token-операции. Нет User → ErrNotFound.
+func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error) {
+	var accountID string
+	err := r.pool.QueryRow(ctx,
+		`SELECT account_id FROM users WHERE id = $1`, string(id)).Scan(&accountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+	}
+	if err != nil {
+		return "", mapErr(err, "UserOAuthClient.AccountForUser", string(id))
+	}
+	return domain.AccountID(accountID), nil
 }
 
 // List возвращает токены владельца-User, страница по id ASC (cursor-based).
@@ -163,12 +183,13 @@ func scanUserOAuthClient(row pgx.Row) (domain.UserOAuthClient, error) {
 		c          domain.UserOAuthClient
 		expiresAt  sql.NullTime
 		lastUsedAt sql.NullTime
+		labelsBody []byte
 	)
 	if err := row.Scan(
 		(*string)(&c.ID), (*string)(&c.UserID), (*string)(&c.OAuthClientID),
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
-		&c.PublicKeyPEM, &c.KeyAlgorithm,
+		&c.PublicKeyPEM, &c.KeyAlgorithm, (*string)(&c.Name), &labelsBody,
 	); err != nil {
 		return domain.UserOAuthClient{}, err
 	}
@@ -180,5 +201,10 @@ func scanUserOAuthClient(row pgx.Row) (domain.UserOAuthClient, error) {
 		t := lastUsedAt.Time
 		c.LastUsedAt = &t
 	}
+	labels, err := unmarshalLabels(labelsBody)
+	if err != nil {
+		return domain.UserOAuthClient{}, err
+	}
+	c.Labels = labels
 	return c, nil
 }

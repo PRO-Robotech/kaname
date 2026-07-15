@@ -38,6 +38,12 @@ type (
 	RoleName       string
 	SvcAccountName string
 
+	// OAuthClientName — человекочитаемое имя токена (SA-key / user-token).
+	// Опционально: пустое допустимо (токен может нести только description).
+	// Непустое обязано следовать той же kebab-конвенции, что и остальные
+	// iam-имена (`^[a-z][-a-z0-9]{2,62}$`).
+	OAuthClientName string
+
 	DisplayName     string
 	Email           string
 	ExternalSubject string // OIDC sub
@@ -114,6 +120,15 @@ func (n AccountName) Validate() error    { return validateKebabName("name", stri
 func (n ProjectName) Validate() error    { return validateKebabName("name", string(n)) }
 func (n GroupName) Validate() error      { return validateKebabName("name", string(n)) }
 func (n SvcAccountName) Validate() error { return validateKebabName("name", string(n)) }
+
+// Validate — OAuthClientName: пустое имя допустимо (токен может нести только
+// description); непустое обязано соответствовать kebab-конвенции.
+func (n OAuthClientName) Validate() error {
+	if n == "" {
+		return nil
+	}
+	return validateKebabName("name", string(n))
+}
 
 // RoleName — two forms: custom (without `roles/` prefix) or system
 // (`roles/<module>.<role>`). Both are accepted here; the use-case layer
