@@ -19,9 +19,9 @@ RUN go mod download
 #                   init-container'ом перед стартом основного pod'а.
 # jwks-rotator    — отдельный standalone binary для JWKS-ротации (once|daemon|
 #                   dpop-cleanup); собирается в образ для прямого запуска.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-iam ./cmd/kacho-iam \
- && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-migrator ./cmd/migrator \
- && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /jwks-rotator ./cmd/jwks-rotator
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-iam ./services/iam/cmd/kacho-iam \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-migrator ./services/iam/cmd/migrator \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /jwks-rotator ./services/iam/cmd/jwks-rotator
 
 FROM mirror.gcr.io/library/alpine:3.20
 RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
