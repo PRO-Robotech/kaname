@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 )
@@ -44,6 +45,21 @@ func (f *fakeIssuer) ExecuteAnonymous(_ context.Context, service string) (regist
 
 func basic(u, p string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(u+":"+p))
+}
+
+// rawJSONField returns the raw (un-decoded) JSON bytes of a top-level field, so a
+// test can assert its wire shape (e.g. a quoted string vs a bare number).
+func rawJSONField(t *testing.T, body []byte, field string) string {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("body not json: %v", err)
+	}
+	v, ok := raw[field]
+	if !ok {
+		t.Fatalf("field %q absent from body %s", field, body)
+	}
+	return string(v)
 }
 
 func newTokenHandler(iss TokenIssuer) *TokenHandler {
@@ -93,6 +109,36 @@ func TestToken_ValidBasic_200DockerBody(t *testing.T) {
 	}
 	if body["expires_in"].(float64) != 300 {
 		t.Fatalf("expires_in = %v; want 300", body["expires_in"])
+	}
+	// issued_at MUST be an RFC3339 STRING (Docker Registry v2 token spec: the
+	// docker client parses it via `time.Time.UnmarshalJSON`, which accepts ONLY a
+	// JSON string). Serializing it as a bare Unix-epoch NUMBER breaks `docker
+	// login` with «Time.UnmarshalJSON: input is not a JSON string» → no bearer is
+	// minted → all pull/push 401. Assert both: (1) generic-JSON value is a string,
+	// (2) the raw bytes for the field start with a quote, (3) it round-trips into
+	// the SAME struct shape the docker client uses (IssuedAt time.Time).
+	ia, ok := body["issued_at"].(string)
+	if !ok {
+		t.Fatalf("issued_at = %v (%T); want RFC3339 string", body["issued_at"], body["issued_at"])
+	}
+	if _, err := time.Parse(time.RFC3339, ia); err != nil {
+		t.Fatalf("issued_at %q not RFC3339: %v", ia, err)
+	}
+	if want := time.Unix(1700000000, 0).UTC().Format(time.RFC3339); ia != want {
+		t.Fatalf("issued_at = %q; want %q", ia, want)
+	}
+	// Raw JSON value must be a quoted string (a bare number has no leading quote).
+	if raw := rawJSONField(t, rec.Body.Bytes(), "issued_at"); !strings.HasPrefix(raw, `"`) {
+		t.Fatalf("issued_at raw JSON = %s; want a quoted string", raw)
+	}
+	// Docker-client fidelity: unmarshalling into `struct{ IssuedAt time.Time }`
+	// (exactly what the docker client does) must SUCCEED — this is the failure
+	// mode the fix guards against.
+	var dockerView struct {
+		IssuedAt time.Time `json:"issued_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &dockerView); err != nil {
+		t.Fatalf("docker-client unmarshal (time.Time) failed: %v", err)
 	}
 	if iss.gotUser != "cid-ci" || iss.gotPass != "sa-key-private-pem" || iss.gotSvc != "registry.kacho.local" {
 		t.Fatalf("use-case input = %q/%q/%q", iss.gotUser, iss.gotPass, iss.gotSvc)

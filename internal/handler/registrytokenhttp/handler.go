@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 )
@@ -80,12 +81,16 @@ func NewTokenHandler(cfg Config, issuer TokenIssuer) *TokenHandler {
 }
 
 // tokenResponse — the Docker Registry v2 token-endpoint body. `access_token`
-// mirrors `token` for OAuth2-flow client compatibility.
+// mirrors `token` for OAuth2-flow client compatibility. `issued_at` is an RFC3339
+// UTC *string* per the Docker Registry v2 token spec: the docker client parses it
+// via `time.Time.UnmarshalJSON`, which accepts ONLY a JSON string — serializing it
+// as a bare Unix-epoch number breaks `docker login` with «Time.UnmarshalJSON:
+// input is not a JSON string», so no bearer is minted and all pull/push 401.
 type tokenResponse struct {
 	Token       string `json:"token"`
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
-	IssuedAt    int64  `json:"issued_at,omitempty"`
+	IssuedAt    string `json:"issued_at,omitempty"`
 }
 
 func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -147,12 +152,16 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 func (h *TokenHandler) writeToken(w http.ResponseWriter, out registrytokenuc.IssueOutput) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	issuedAt := ""
+	if out.IssuedAt > 0 {
+		issuedAt = time.Unix(out.IssuedAt, 0).UTC().Format(time.RFC3339)
+	}
 	// #nosec G117 -- registry token endpoint intentionally returns the minted bearer token to the client (Docker registry v2 auth flow); serializing it is the contract, not a leak
 	_ = json.NewEncoder(w).Encode(tokenResponse{
 		Token:       out.Token,
 		AccessToken: out.Token,
 		ExpiresIn:   out.ExpiresIn,
-		IssuedAt:    out.IssuedAt,
+		IssuedAt:    issuedAt,
 	})
 }
 
