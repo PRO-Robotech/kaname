@@ -41,7 +41,10 @@ type BuildConfig struct {
 //
 // Composition root only — this is the single wire-up call for serve.go. Unlike
 // the deprecated RS256 signer, the shim needs NO JWKS encryption key: it does not
-// mint tokens (Hydra does) and does not decrypt any at-rest signing key.
+// mint tokens (Hydra does) and does not decrypt any at-rest signing key. The
+// data-plane's verification keys are Hydra's, served via the separate
+// cluster-internal jwks-proxy mirror (internal/handler/jwksproxyhttp) — not by this
+// `/iam/token` shim.
 func Build(pool *pgxpool.Pool, cfg BuildConfig) http.Handler {
 	saRepo := kachopg.NewSAOAuthClientRepo(pool)
 

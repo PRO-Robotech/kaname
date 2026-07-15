@@ -93,6 +93,26 @@ type MTLSConfig struct {
 	// (unset) при enabled-edge → безопасный per-edge дефолт server-tls-only.
 	// Неизвестный режим → fail-closed.
 	MetricsClientAuthMode string `envconfig:"METRICS_SERVER_MTLS_CLIENTAUTHMODE"`
+
+	// JWKSProxyServerMTLS — server-creds для HTTP Hydra-JWKS proxy listener
+	// (:9097, cluster-internal `GET /.well-known/jwks.json`). Data-plane
+	// verification keys (public OIDC material), served internal-only over
+	// ONE-WAY server-TLS (internal-CA leaf; NOT mutual — see JWKSProxyClientAuthMode
+	// default server-tls-only). The route is unauthenticated-by-design (public keys,
+	// standard OIDC well-known) — a conscious, documented exception to the
+	// authN-on-every-listener invariant (security.md), justified by internal-only
+	// surface + server-TLS + only-public-material. Default-off (Enable=false) →
+	// plaintext (dev/newman стенд byte-identical). Env:
+	// KACHO_IAM_JWKSPROXY_SERVER_MTLS_{ENABLE,CERTFILE,KEYFILE,CLIENTCAFILES}.
+	JWKSProxyServerMTLS grpcsrv.TLSServer `envconfig:"JWKSPROXY_SERVER_MTLS"`
+
+	// JWKSProxyClientAuthMode — per-edge TLS ClientAuth-режим для jwks-proxy
+	// listener'а (:9097). Env: KACHO_IAM_JWKSPROXY_SERVER_MTLS_CLIENTAUTHMODE.
+	// Пустая строка (unset) при enabled-edge → безопасный per-edge дефолт
+	// server-tls-only (ONE-WAY: registry-verifier предъявляет только server-trust,
+	// не client-cert — mutual сломал бы «verifier untouched»). Неизвестный режим →
+	// fail-closed.
+	JWKSProxyClientAuthMode string `envconfig:"JWKSPROXY_SERVER_MTLS_CLIENTAUTHMODE"`
 }
 
 // clientAuthMode — TLS ClientAuth-режим per-edge для HTTP-listener'ов.
@@ -173,6 +193,15 @@ func (m MTLSConfig) MetricsServerTLSConfig() (*tls.Config, error) {
 	return serverTLSConfig(m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode))
 }
 
+// JWKSProxyServerTLSConfig возвращает *tls.Config для HTTP jwks-proxy listener
+// (:9097). Тот же контракт, что HooksServerTLSConfig, но дефолт — ONE-WAY
+// server-tls-only (registry-verifier предъявляет только server-trust, не
+// client-cert; mutual сломал бы «verifier untouched»). Default-off → (nil, nil) →
+// listener остаётся PLAINTEXT (dev/newman byte-identical).
+func (m MTLSConfig) JWKSProxyServerTLSConfig() (*tls.Config, error) {
+	return serverTLSConfig(m.JWKSProxyServerMTLS, resolveClientAuthMode(m.JWKSProxyClientAuthMode))
+}
+
 // Validate проверяет, что каждое включенное ребро несет корректный cert-set под
 // свой ClientAuth-режим. Включенное-но-некорректное ребро → fail-closed error на
 // старте (aggregated через multierr для всех четырех ребер сразу). Disabled-ребра
@@ -205,8 +234,9 @@ func (m MTLSConfig) Validate() error {
 		edge grpcsrv.TLSServer
 		mode string
 	}{
-		"hooks-server":   {m.HooksServerMTLS, resolveClientAuthMode(m.HooksClientAuthMode)},
-		"metrics-server": {m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode)},
+		"hooks-server":      {m.HooksServerMTLS, resolveClientAuthMode(m.HooksClientAuthMode)},
+		"metrics-server":    {m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode)},
+		"jwks-proxy-server": {m.JWKSProxyServerMTLS, resolveClientAuthMode(m.JWKSProxyClientAuthMode)},
 	} {
 		if !e.edge.Enable {
 			continue

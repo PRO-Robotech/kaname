@@ -35,6 +35,13 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("api-server.registry-token.issuer", "https://api.kacho.local/iam/token")
 	v.SetDefault("api-server.registry-token.service", "registry.kacho.local")
 	v.SetDefault("api-server.registry-token.ttl", 5*time.Minute)
+	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (`GET /.well-known/jwks.json`)
+	// — a SEPARATE cluster-internal port (default `tcp://0.0.0.0:9097`), served ONLY
+	// on the kacho-iam-internal Service (never external, ban #6) over one-way
+	// server-TLS. Short-TTL caching reverse-proxy of Hydra's PUBLIC JWKS so the
+	// data-plane fetches verification keys from iam (Hydra stays the signer).
+	// Override via KACHO_IAM_API_SERVER__JWKS_PROXY__ENDPOINT.
+	v.SetDefault("api-server.jwks-proxy.endpoint", "tcp://0.0.0.0:9097")
 
 	// repository
 	v.SetDefault("repository.postgres.url", "postgres://iam@localhost:5432/kacho_iam")
@@ -53,6 +60,7 @@ func RegisterDefaults(v *viper.Viper) {
 	// resolved from env so they don't sit in YAML/ConfigMap.
 	v.SetDefault("authn.domain", "api.kacho.cloud")
 	v.SetDefault("authn.hydra-issuer", "")       // resolved via ResolveHydraIssuer() when empty
+	v.SetDefault("authn.hydra-jwks-url", "")     // resolved via ResolveHydraJWKSURL() (env KACHO_IAM_HYDRA_JWKS_URL)
 	v.SetDefault("authn.hook-shared-secret", "") // no default — security-sensitive
 	v.SetDefault("authn.hook-shared-secret-env", "KACHO_IAM_HOOK_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")

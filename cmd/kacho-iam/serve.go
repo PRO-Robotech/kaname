@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 	"github.com/PRO-Robotech/kacho-iam/internal/grpcmw"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho-iam/internal/registrytokenwire"
 	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
@@ -217,6 +218,14 @@ func runServe(cfg config.Config) error {
 	metricsTLSConfig, err := mtlsCfg.MetricsServerTLSConfig()
 	if err != nil {
 		return fmt.Errorf("metrics listener mTLS config: %w", err)
+	}
+	// jwks-proxy listener server-TLS: ONE-WAY (server-tls-only by default —
+	// registry-verifier presents only server-trust, never a client-cert; mutual
+	// would break the verifier's "untouched" property). Default-off → nil → the
+	// listener stays plaintext (dev byte-identical).
+	jwksProxyTLSConfig, err := mtlsCfg.JWKSProxyServerTLSConfig()
+	if err != nil {
+		return fmt.Errorf("jwks-proxy listener mTLS config: %w", err)
 	}
 
 	// M1 — startup invariant: production mode MUST run the cluster-internal
@@ -401,7 +410,8 @@ func runServe(cfg config.Config) error {
 		"public_mtls", mtlsCfg.PublicServerMTLS.Enable,
 		"internal_mtls", mtlsCfg.InternalServerMTLS.Enable,
 		"hooks_mtls", mtlsCfg.HooksServerMTLS.Enable,
-		"metrics_mtls", mtlsCfg.MetricsServerMTLS.Enable)
+		"metrics_mtls", mtlsCfg.MetricsServerMTLS.Enable,
+		"jwks_proxy_mtls", mtlsCfg.JWKSProxyServerMTLS.Enable)
 	registerPublicServices(grpcSrv, svcs, opsRepo)
 	registerInternalServices(internalSrv, svcs, pool, cfg.MigrateDSN(), logger)
 
@@ -466,10 +476,12 @@ func runServe(cfg config.Config) error {
 	// EXTERNAL-reachable port (default :9096; TLS terminated at the ingress, like
 	// hooks/metrics). Docker clients hit `/iam/token` through the edge; the shim
 	// verifies the SA-key and BROKERS a token from Ory Hydra (the issuer). The
-	// data-plane verifies the returned token against Hydra's JWKS. Distinct from
-	// the cluster-internal hooks (:9092) and metrics (:9095) listeners. Disabled
-	// (WARN-skip, never a boot block) only when the endpoint is empty — the shim
-	// needs no JWKS encryption key (it mints nothing).
+	// data-plane verifies the returned token against Hydra's JWKS — which it now
+	// fetches from the cluster-internal jwks-proxy mirror below (:9097), NOT from
+	// this `/iam/token` listener (which carries no JWKS endpoint). Distinct from the
+	// cluster-internal hooks (:9092) / metrics (:9095) / jwks-proxy (:9097)
+	// listeners. Disabled (WARN-skip, never a boot block) only when the endpoint is
+	// empty — the shim needs no JWKS encryption key (it mints nothing).
 	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
 	var registryTokenListener net.Listener
 	var registryTokenHTTPServer *http.Server
@@ -501,12 +513,64 @@ func runServe(cfg config.Config) error {
 		}
 	}
 
+	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (default :9097) — a SEPARATE
+	// cluster-internal port serving GET /.well-known/jwks.json as a short-TTL
+	// caching reverse-proxy of Hydra's PUBLIC JWKS. The data-plane (kacho-registry)
+	// fetches its verification keys from iam here instead of dialing Hydra directly;
+	// Hydra stays the token issuer/signer (iam mints NOTHING — the served kids are
+	// Hydra's actual signing kids, never iam's own oidc_jwks_keys kacho-* kids).
+	// Served ONLY on the kacho-iam-internal Service (never external, ban #6; the
+	// Service wiring lives in kacho-deploy) over ONE-WAY server-TLS. The route is
+	// UNAUTHENTICATED-BY-DESIGN (public OIDC verification keys) — a conscious,
+	// documented exception to authN-on-every-listener (security.md), justified by
+	// internal-only surface + server-TLS + only-public-material. Empty endpoint
+	// disables it (WARN-skip, never a boot block).
+	jwksProxyAddr := cfg.APIServer.JWKSProxy.ListenAddress()
+	var jwksProxyListener net.Listener
+	var jwksProxyHTTPServer *http.Server
+	if jwksProxyAddr != "" {
+		jwksProxyListener, err = net.Listen("tcp", jwksProxyAddr)
+		if err != nil {
+			_ = listener.Close()
+			_ = internalListener.Close()
+			if hooksListener != nil {
+				_ = hooksListener.Close()
+			}
+			if metricsListener != nil {
+				_ = metricsListener.Close()
+			}
+			if registryTokenListener != nil {
+				_ = registryTokenListener.Close()
+			}
+			return fmt.Errorf("jwks-proxy http listener: %w", err)
+		}
+		// Default-off: jwksProxyTLSConfig is nil → plaintext (dev). When enabled the
+		// listener is wrapped so /.well-known/jwks.json is served over one-way
+		// server-TLS (internal-CA leaf; the leaf serverHosts already covers
+		// kacho-iam-internal).
+		if jwksProxyTLSConfig != nil {
+			jwksProxyListener = tls.NewListener(jwksProxyListener, jwksProxyTLSConfig)
+		}
+		jwksProxyHandler := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
+			UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
+			Logger:      logger.With(slog.String("component", "jwks_proxy")),
+		})
+		jwksProxyHTTPServer = &http.Server{
+			Handler:           jwksproxyhttp.NewMux(jwksProxyHandler),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       90 * time.Second,
+		}
+	}
+
 	logger.Info("kacho-iam listening",
 		"public_endpoint", publicAddr,
 		"internal_endpoint", internalAddr,
 		"hooks_http_endpoint", hooksAddr,
 		"metrics_http_endpoint", metricsAddr,
-		"registry_token_http_endpoint", registryTokenAddr)
+		"registry_token_http_endpoint", registryTokenAddr,
+		"jwks_proxy_http_endpoint", jwksProxyAddr)
 
 	gracefulTimeout := cfg.APIServer.GracefulShutdown
 	if gracefulTimeout <= 0 {
@@ -569,6 +633,11 @@ func runServe(cfg config.Config) error {
 				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancelShutdown()
 				_ = registryTokenHTTPServer.Shutdown(shutdownCtx)
+			}
+			if jwksProxyHTTPServer != nil {
+				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelShutdown()
+				_ = jwksProxyHTTPServer.Shutdown(shutdownCtx)
 			}
 		})
 	}
@@ -645,6 +714,19 @@ func runServe(cfg config.Config) error {
 			return nil
 		})
 	}
+
+	// Cluster-internal Hydra-JWKS proxy HTTP listener (separate internal port :9097).
+	if jwksProxyHTTPServer != nil && jwksProxyListener != nil {
+		tasks = append(tasks, func() error {
+			logger.Info("kacho-iam jwks-proxy listener serving", "addr", jwksProxyListener.Addr().String())
+			err := jwksProxyHTTPServer.Serve(jwksProxyListener)
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				triggerShutdown()
+				return fmt.Errorf("jwks-proxy http server: %w", err)
+			}
+			return nil
+		})
+	}
 	// Enterprise SSO (SCIM + SAML) is not served by this listener set.
 
 	// fga_outbox drainer. Watches kacho_iam.fga_outbox via LISTEN/NOTIFY
@@ -678,6 +760,9 @@ func runServe(cfg config.Config) error {
 		}
 		if registryTokenListener != nil {
 			_ = registryTokenListener.Close()
+		}
+		if jwksProxyListener != nil {
+			_ = jwksProxyListener.Close()
 		}
 		return fmt.Errorf("fga_outbox drainer init: %w", derr)
 	}
@@ -719,6 +804,9 @@ func runServe(cfg config.Config) error {
 		}
 		if registryTokenListener != nil {
 			_ = registryTokenListener.Close()
+		}
+		if jwksProxyListener != nil {
+			_ = jwksProxyListener.Close()
 		}
 		return fmt.Errorf("subject_change drainer wiring: %w", err)
 	}

@@ -8,9 +8,14 @@
 // registry_token use-case (which verifies the SA-key and brokers a token from
 // Ory Hydra), format the Docker-compatible JSON. No business logic.
 //
-// The data-plane verifies the returned token against HYDRA's JWKS (not an IAM
-// JWKS) — kacho-iam no longer mints or serves registry verification keys, so
-// there is no `/iam/token/jwks` endpoint here.
+// Hydra remains the token issuer/signer; kacho-iam mints NOTHING. The data-plane
+// verifies the returned token against HYDRA's JWKS — which it now fetches from a
+// cluster-INTERNAL Hydra-JWKS mirror served by kacho-iam (a short-TTL caching
+// reverse-proxy of Hydra's public JWKS at GET /.well-known/jwks.json on the :9097
+// jwks-proxy listener, package internal/handler/jwksproxyhttp), NOT from this
+// external `/iam/token` listener. The mirror keeps the served kids equal to Hydra's
+// real signing kids; iam never serves its own oidc_jwks_keys kacho-* kids. This
+// `/iam/token` mux therefore carries no JWKS endpoint of its own.
 //
 // Endpoint:
 //

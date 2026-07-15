@@ -80,6 +80,13 @@ type APIServerConfig struct {
 	// cluster-internal hooks (:9092) and metrics (:9095) listeners. Empty
 	// endpoint disables it.
 	RegistryToken RegistryTokenConfig `mapstructure:"registry-token"`
+	// JWKSProxy — the cluster-INTERNAL Hydra-JWKS proxy HTTP listener
+	// (`GET /.well-known/jwks.json`; default `tcp://0.0.0.0:9097`). A short-TTL
+	// caching reverse-proxy of Hydra's PUBLIC JWKS: the data-plane fetches its
+	// verification keys from iam (never dialing Hydra directly) while Hydra stays
+	// the issuer/signer. Served ONLY on the cluster-internal `kacho-iam-internal`
+	// Service (never external, ban #6) over one-way server-TLS. Empty disables it.
+	JWKSProxy JWKSProxyConfig `mapstructure:"jwks-proxy"`
 }
 
 // RepositoryConfig — repository section. Postgres-only (the repository type
@@ -136,6 +143,7 @@ type AuthNConfig struct {
 	HydraIssuer              string        `mapstructure:"hydra-issuer"`
 	HydraAdminURL            string        `mapstructure:"hydra-admin-url"`
 	HydraTokenURL            string        `mapstructure:"hydra-token-url"`
+	HydraJWKSURL             string        `mapstructure:"hydra-jwks-url"`
 	HookSharedSecret         string        `mapstructure:"hook-shared-secret"`
 	HookSharedSecretEnv      string        `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex     string        `mapstructure:"jwks-encryption-key-hex"`

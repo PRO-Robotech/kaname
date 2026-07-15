@@ -149,6 +149,25 @@ func (c AuthNConfig) ResolveHydraTokenURL() string {
 	return c.ResolveHydraTokenEndpoint()
 }
 
+// ResolveHydraJWKSURL — the upstream Hydra PUBLIC JWKS URL the cluster-internal
+// jwks-proxy listener mirrors (`GET /.well-known/jwks.json`). Precedence mirrors
+// ResolveHydraTokenURL: the explicit `authn.hydra-jwks-url` / ENV
+// KACHO_IAM_HYDRA_JWKS_URL override (a cluster-internal Service, e.g.
+// http://kacho-umbrella-hydra-public.<ns>.svc:4444/.well-known/jwks.json), then the
+// derived `<issuer>/.well-known/jwks.json` (back-compat). Hydra remains the signer;
+// iam serves a byte-identical mirror so the served kids are Hydra's real signing
+// kids (never iam's own kacho-* oidc_jwks_keys kids). Only the network target
+// differs — the `iss` of a verified token stays the external Hydra issuer.
+func (c AuthNConfig) ResolveHydraJWKSURL() string {
+	if v := strings.TrimSpace(c.HydraJWKSURL); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_JWKS_URL")); v != "" {
+		return v
+	}
+	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/.well-known/jwks.json"
+}
+
 // SessionRevocationsCacheTTL returns the TTL for the memo-cache over
 // session_revocations. Default 5 seconds (SLA — ≤1s after force-logout;
 // cache TTL must be shorter).

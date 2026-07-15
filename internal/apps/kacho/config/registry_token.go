@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // registry_token.go — config for the Docker Registry v2 `/iam/token`
-// auth-server HTTP listener (`/iam/token` + `/iam/token/jwks`).
+// auth-server HTTP listener (the `/iam/token` endpoint only). There is NO JWKS
+// endpoint on this listener: the data-plane's Hydra-JWKS verification keys are
+// served separately by the cluster-INTERNAL jwks-proxy listener (a caching mirror
+// of Hydra's public JWKS — see jwks_proxy.go / internal/handler/jwksproxyhttp).
+// Hydra stays the issuer/signer; iam mints nothing here.
 //
 // The listener is EXTERNAL-reachable (docker clients hit `/iam/token` through
 // the edge); TLS is terminated at the ingress, so the process binds plaintext —
