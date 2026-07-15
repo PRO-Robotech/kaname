@@ -49,8 +49,13 @@ func NewMux(token http.Handler) *http.ServeMux {
 }
 
 // TokenIssuer — the registry_token use-case port the handler delegates to.
+// Execute brokers the SA-key (Basic-creds) path; ExecuteAnonymous brokers the
+// public `user:*` anonymous-pull path (no Basic creds); AnonymousEnabled reports
+// whether that path is configured (else the handler fails closed to a challenge).
 type TokenIssuer interface {
 	Execute(ctx context.Context, in registrytokenuc.IssueInput) (registrytokenuc.IssueOutput, error)
+	ExecuteAnonymous(ctx context.Context, service string) (registrytokenuc.IssueOutput, error)
+	AnonymousEnabled() bool
 }
 
 // Config — handler config (the WWW-Authenticate realm + default service name).
@@ -96,8 +101,19 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, pass, ok := r.BasicAuth()
 	if !ok {
-		// Anonymous / non-Basic → 401 challenge (secure-by-default, no anon pull).
-		h.challenge(w, service)
+		// No Basic creds → the docker anonymous-pull flow. When anonymous pull is
+		// enabled, issue the read-only public `user:*` bearer; otherwise fail
+		// closed to the 401 Bearer challenge (secure-by-default, anon is opt-in).
+		if !h.issuer.AnonymousEnabled() {
+			h.challenge(w, service)
+			return
+		}
+		out, err := h.issuer.ExecuteAnonymous(r.Context(), service)
+		if err != nil {
+			h.writeError(w, service, err)
+			return
+		}
+		h.writeToken(w, out)
 		return
 	}
 
@@ -107,20 +123,28 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Service:  service,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, registrytokenuc.ErrUnauthenticated):
-			h.challenge(w, service)
-		case errors.Is(err, registrytokenuc.ErrIssuerUnavailable):
-			// The issuer (Hydra) is a hard dependency of the mint path — its
-			// unavailability is fail-closed 503, never a token; the raw
-			// Hydra/network error never leaks (fixed text).
-			http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
-		default:
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-		}
+		h.writeError(w, service, err)
 		return
 	}
+	h.writeToken(w, out)
+}
 
+// writeError maps a use-case failure to the fail-closed HTTP response: an
+// unreachable issuer (Hydra) → 503 (no token); any auth failure → 401 challenge;
+// anything else → 500. No raw Hydra/network error ever leaks (fixed text).
+func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err error) {
+	switch {
+	case errors.Is(err, registrytokenuc.ErrIssuerUnavailable):
+		http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
+	case errors.Is(err, registrytokenuc.ErrUnauthenticated):
+		h.challenge(w, service)
+	default:
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+	}
+}
+
+// writeToken writes the 200 Docker Registry v2 token body.
+func (h *TokenHandler) writeToken(w http.ResponseWriter, out registrytokenuc.IssueOutput) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	// #nosec G117 -- registry token endpoint intentionally returns the minted bearer token to the client (Docker registry v2 auth flow); serializing it is the contract, not a leak

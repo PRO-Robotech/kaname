@@ -32,6 +32,14 @@ type BuildConfig struct {
 	AssertionAudience string
 	// Scope — optional scope requested from Hydra.
 	Scope string
+	// AnonymousClientID / AnonymousKeyID / AnonymousPrivateKeyPEM — the configured
+	// public-principal identity the shim authenticates as for anonymous pull (RG-1
+	// D-7). The data-plane resolves this client_id's token to the FGA wildcard
+	// `user:*`. Empty (the default) leaves anonymous pull DISABLED — no-Basic-creds
+	// then fails closed to a 401 challenge (secure-by-default; anon is opt-in).
+	AnonymousClientID      string
+	AnonymousKeyID         string
+	AnonymousPrivateKeyPEM string
 }
 
 // Build assembles the registry `/iam/token` shim from a pgx pool: the SA-key
@@ -56,6 +64,13 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) http.Handler {
 		AssertionAudience: cfg.AssertionAudience,
 		DefaultService:    cfg.Service,
 		Scope:             cfg.Scope,
+		// Anonymous-pull identity (RG-1 D-7). Empty → anonymous pull disabled; the
+		// shim then serves the SA-key path only (no-Basic-creds → 401 challenge).
+		Anonymous: registrytokenuc.AnonymousIdentity{
+			ClientID:      cfg.AnonymousClientID,
+			KeyID:         cfg.AnonymousKeyID,
+			PrivateKeyPEM: cfg.AnonymousPrivateKeyPEM,
+		},
 	}, validator, signer, exchanger)
 
 	tokenHandler := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{

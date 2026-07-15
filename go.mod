@@ -11,7 +11,7 @@ go 1.26.5
 require (
 	github.com/H-BF/corlib v1.2.31-dev
 	github.com/PRO-Robotech/kacho-corelib v1.0.3-0.20260705005204-a60a829f8607
-	github.com/PRO-Robotech/kacho-proto v0.0.0-20260713072659-fd1fac096876
+	github.com/PRO-Robotech/kacho-proto v0.0.0-20260715140307-0e3e56ac3496
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.1

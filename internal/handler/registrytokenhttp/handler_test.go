@@ -15,18 +15,31 @@ import (
 	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 )
 
-// fakeIssuer — scripted TokenIssuer.
+// fakeIssuer — scripted TokenIssuer (SA-key path + anonymous path).
 type fakeIssuer struct {
 	out     registrytokenuc.IssueOutput
 	err     error
 	gotUser string
 	gotPass string
 	gotSvc  string
+
+	// Anonymous-pull path.
+	anonEnabled bool
+	anonOut     registrytokenuc.IssueOutput
+	anonErr     error
+	gotAnonSvc  string
 }
 
 func (f *fakeIssuer) Execute(_ context.Context, in registrytokenuc.IssueInput) (registrytokenuc.IssueOutput, error) {
 	f.gotUser, f.gotPass, f.gotSvc = in.Username, in.Password, in.Service
 	return f.out, f.err
+}
+
+func (f *fakeIssuer) AnonymousEnabled() bool { return f.anonEnabled }
+
+func (f *fakeIssuer) ExecuteAnonymous(_ context.Context, service string) (registrytokenuc.IssueOutput, error) {
+	f.gotAnonSvc = service
+	return f.anonOut, f.anonErr
 }
 
 func basic(u, p string) string {

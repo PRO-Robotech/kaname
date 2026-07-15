@@ -110,11 +110,47 @@ type Config struct {
 	AssertionTTL time.Duration
 	// Scope — optional scope requested from Hydra (empty → not requested).
 	Scope string
+	// Anonymous — the configured public-principal identity the shim authenticates
+	// as for anonymous pull (RG-1 D-7 / B13). A zero ClientID/PrivateKeyPEM leaves
+	// anonymous pull DISABLED (no-Basic-creds → 401 challenge, secure-by-default).
+	Anonymous AnonymousIdentity
+}
+
+// AnonymousIdentity — the configured public-principal the shim authenticates as
+// for anonymous pull. Its Hydra client_id is one the registry data-plane resolves
+// to the FGA wildcard AnonymousSubject (`user:*`); the shim holds its signing key
+// — NO user/SA credential is presented for the anonymous flow. Because `user:*`
+// carries only the per-repo `v_get` wildcard grant emitted for PUBLIC repos, an
+// anonymous token can pull a PUBLIC repo but can never write (B13/B14).
+type AnonymousIdentity struct {
+	// ClientID — the Hydra OAuth2 client_id the shim authenticates as; the
+	// data-plane resolves its token to AnonymousSubject.
+	ClientID string
+	// KeyID — the anon client's registered JWK kid (assertion protected-header).
+	KeyID string
+	// PrivateKeyPEM — the EC private key the shim signs the anon client_assertion
+	// with (IAM-held; never a presented credential).
+	PrivateKeyPEM string
 }
 
 // MaxAssertionTTL — hard ceiling on the client_assertion lifetime (a short-lived
 // bearer proving possession of the SA-key private half).
 const MaxAssertionTTL = 60 * time.Second
+
+const (
+	// AnonymousSubject — the FGA principal an anonymous (no-credential) docker
+	// pull resolves to on the registry data-plane. The anon Hydra client's token
+	// is mapped to this wildcard subject; `user:*` holds ONLY the per-repo `v_get`
+	// wildcard grant emitted for PUBLIC repositories, so it can pull a PUBLIC repo
+	// but can never write (D-7). PRIVATE/absent repos deny uniformly (404).
+	AnonymousSubject = "user:*"
+	// AnonymousReadScope — the ONLY scope an anonymous token requests: a read
+	// (pull) verb. The shim NEVER requests a write/push verb for `user:*` — the
+	// read-only floor is enforced HERE (IAM half) AND by the data-plane FGA Check
+	// on `user:*` (which carries no write relation). A push with an anon token is
+	// therefore denied (403 DENIED) even in a pull-able PUBLIC repo (B14).
+	AnonymousReadScope = "registry:pull"
+)
 
 // IssueInput — the parsed docker token request.
 type IssueInput struct {
@@ -218,6 +254,74 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 			return IssueOutput{}, ErrIssuerUnavailable
 		}
 		// Hydra rejected the exchange (bad/expired/revoked key) — fail-closed 401.
+		return IssueOutput{}, ErrUnauthenticated
+	}
+	return IssueOutput{
+		Token:     out.AccessToken,
+		ExpiresIn: out.ExpiresIn,
+		IssuedAt:  now.Unix(),
+	}, nil
+}
+
+// AnonymousEnabled reports whether anonymous-pull issuance is configured. When
+// false the shim MUST fall back to the 401 Bearer challenge (secure-by-default:
+// anonymous pull is opt-in and requires a configured anon identity + its key).
+func (u *IssueRegistryTokenUseCase) AnonymousEnabled() bool {
+	return u.cfg.Anonymous.ClientID != "" && u.cfg.Anonymous.PrivateKeyPEM != ""
+}
+
+// ExecuteAnonymous brokers a short-lived, read-only Bearer for the public
+// AnonymousSubject principal — the docker anonymous-pull flow (no Basic creds,
+// RG-1 B13). It signs a client_assertion AS the configured anonymous identity
+// (whose token the data-plane resolves to `user:*`) and exchanges it with Hydra
+// requesting the registry data-plane audience and the read-only AnonymousReadScope
+// — NEVER a write verb (B14). No user/SA credential is validated: an anonymous
+// caller is the wildcard principal, not a specific subject. Bounded TTL is
+// inherited from the assertion clamp + the anon Hydra client's configured token
+// lifespan (RG-1 introduces no new expiry mechanism).
+//
+// A missing/rejected exchange yields ErrUnauthenticated (→ 401 challenge); an
+// unreachable issuer yields ErrIssuerUnavailable (→ 503, no token). Anonymous
+// pull being unconfigured also fails closed (ErrUnauthenticated → 401).
+func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, service string) (IssueOutput, error) {
+	if !u.AnonymousEnabled() {
+		// Anonymous pull not configured → fail-closed (handler issues 401).
+		return IssueOutput{}, ErrUnauthenticated
+	}
+
+	jti, err := u.jti()
+	if err != nil {
+		return IssueOutput{}, err
+	}
+	now := u.now()
+	assertion, err := u.signer.Sign(AssertionInput{
+		KeyID:         u.cfg.Anonymous.KeyID,
+		ClientID:      u.cfg.Anonymous.ClientID,
+		Audience:      u.cfg.AssertionAudience,
+		PrivateKeyPEM: u.cfg.Anonymous.PrivateKeyPEM,
+		IssuedAt:      now.Unix(),
+		ExpiresAt:     now.Add(u.cfg.AssertionTTL).Unix(),
+		JTI:           jti,
+	})
+	if err != nil {
+		// The anon key could not sign — fail-closed 401, never leaking the detail.
+		return IssueOutput{}, ErrUnauthenticated
+	}
+
+	if service == "" {
+		service = u.cfg.DefaultService
+	}
+	out, err := u.exchanger.Exchange(ctx, ExchangeInput{
+		ClientAssertion: assertion,
+		Audience:        service,
+		// Read-only floor — the anon token NEVER requests a write/push verb (B14).
+		Scope: AnonymousReadScope,
+	})
+	if err != nil {
+		if errors.Is(err, ErrIssuerUnavailable) {
+			return IssueOutput{}, ErrIssuerUnavailable
+		}
+		// Hydra rejected the anon exchange — fail-closed 401.
 		return IssueOutput{}, ErrUnauthenticated
 	}
 	return IssueOutput{
