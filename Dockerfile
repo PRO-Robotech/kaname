@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-iam .
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-migrator ./services/iam/cmd/migrator \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /jwks-rotator ./services/iam/cmd/jwks-rotator
 
-FROM mirror.gcr.io/library/alpine:3.20
+FROM mirror.gcr.io/library/alpine:3.24
 RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
 COPY --from=builder /kacho-iam /usr/local/bin/kacho-iam
 COPY --from=builder /kacho-migrator /usr/local/bin/kacho-migrator
