@@ -283,6 +283,12 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 		Subject:  req.GetSubjectId(),
 		Relation: req.GetRelation(),
 		Object:   req.GetObject(),
+		// Forward the read-consistency preference. Only HIGHER_CONSISTENCY is
+		// promoted to a strong read; UNSPECIFIED/MINIMIZE_LATENCY keep OpenFGA's
+		// cache-eligible default (hot enforcement gate). The owner-tuple confirm-gate
+		// sets HIGHER_CONSISTENCY so its read-after-own-write is never served a
+		// stale-replica negative.
+		HigherConsistency: req.GetConsistency() == iamv1.CheckRequest_HIGHER_CONSISTENCY,
 	})
 	if err != nil {
 		switch {

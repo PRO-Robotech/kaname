@@ -84,6 +84,15 @@ type MirrorObject struct {
 //
 // A cluster-scoped binding contains every registered object. The cluster id is
 // not compared (there is a single cluster root in the FGA model).
+//
+// This predicate is PURE (no DB): it trusts ParentAccountID to already carry the
+// object's FULL account. For a mirror-fed object registered with only its owning
+// PROJECT, the reader adapter resolves the account through the project→account
+// hierarchy same-DB (resource_mirror reader COALESCE) BEFORE filling ParentAccountID,
+// so an account-scoped binding transitively contains an object nested in a project of
+// its account even when the stored parent_account_id column was empty. The resolution
+// is account-bounded (one project → one account), so this predicate never leaks across
+// the account boundary.
 func (m MirrorObject) IsContainedIn(scope ScopeAnchor) bool {
 	switch scope.Type {
 	case "project":

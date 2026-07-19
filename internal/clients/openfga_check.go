@@ -21,14 +21,32 @@ type fgaWireCheckRequest struct {
 	ContextualTuples     *struct {
 		TupleKeys []fgaWireTupleKey `json:"tuple_keys"`
 	} `json:"contextual_tuples,omitempty"`
+	// Consistency — optional OpenFGA read-consistency preference (see
+	// openfgaCheckRequest.Consistency). Empty ⇒ omitted ⇒ default MINIMIZE_LATENCY.
+	Consistency string `json:"consistency,omitempty"`
 }
 
 type fgaWireCheckResponse struct {
 	Allowed bool `json:"allowed"`
 }
 
-// CheckWithContext — see RelationQueries.
+// CheckWithContext — see RelationQueries. Default (MINIMIZE_LATENCY) consistency.
 func (c *OpenFGAHTTPClient) CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
+	return c.checkWithContext(ctx, subject, relation, object, condCtx, "")
+}
+
+// CheckWithContextConsistent — CheckWithContext forcing HIGHER_CONSISTENCY (strong
+// read-after-write). AuthorizeService.CheckRelation routes the owner-tuple
+// confirm-gate probe here when the caller set CheckRequest.consistency =
+// HIGHER_CONSISTENCY, so the probe never reads a stale-replica negative for a tuple
+// just written to the same store.
+func (c *OpenFGAHTTPClient) CheckWithContextConsistent(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
+	return c.checkWithContext(ctx, subject, relation, object, condCtx, consistencyHigherConsistency)
+}
+
+// checkWithContext is the shared CheckWithContext transport; consistency is the
+// OpenFGA `consistency` wire value ("" ⇒ omitted ⇒ default MINIMIZE_LATENCY).
+func (c *OpenFGAHTTPClient) checkWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any, consistency string) (bool, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return false, ErrNotConfigured
 	}
@@ -36,6 +54,7 @@ func (c *OpenFGAHTTPClient) CheckWithContext(ctx context.Context, subject, relat
 		AuthorizationModelID: c.AuthorizationModel,
 		TupleKey:             fgaWireTupleKey{User: subject, Relation: relation, Object: object},
 		Context:              condCtx,
+		Consistency:          consistency,
 	})
 	cctx, cancel := context.WithTimeout(ctx, c.checkTimeout())
 	defer cancel()

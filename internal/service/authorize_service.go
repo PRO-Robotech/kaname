@@ -371,6 +371,21 @@ type CheckRelationRequest struct {
 	Subject  string // "user:usr_xxx" / "service_account:sva_xxx" / "group:grp_xxx#member"
 	Relation string // pre-resolved FGA relation
 	Object   string // FGA object string "<type>:<id>"
+	// HigherConsistency forces a strong read-after-write (OpenFGA
+	// HIGHER_CONSISTENCY, cache/replica-lag bypass) for THIS check. Set ONLY by the
+	// owner-tuple confirm-gate (read-after-OWN-write), which must observe a tuple
+	// just written to the same store; the hot per-RPC enforcement gate leaves it
+	// false and keeps OpenFGA's default MINIMIZE_LATENCY read.
+	HigherConsistency bool
+}
+
+// consistentAuthorizer — OPTIONAL capability of the Authorizer: a CheckWithContext
+// that forces OpenFGA HIGHER_CONSISTENCY. Implemented by *clients.OpenFGAHTTPClient.
+// CheckRelation type-asserts to it only when HigherConsistency is requested, so a
+// test stub that implements only CheckWithContext still works (falls back to the
+// default read).
+type consistentAuthorizer interface {
+	CheckWithContextConsistent(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error)
 }
 
 // CheckRelation — relation-native authorization check (FGA Check + OPA
@@ -401,7 +416,7 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	if s.relations == nil {
 		return result, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
-	allowed, err := s.relations.CheckWithContext(ctx, req.Subject, req.Relation, req.Object, condCtx)
+	allowed, err := s.checkRelationWire(ctx, req, condCtx)
 	if err != nil {
 		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
 	}
@@ -422,6 +437,20 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	// public Check (no `action` available here, so the action segment is omitted).
 	result.DenyReasons = []string{s.formatDenyReason(ctx, req.Subject, req.Relation, req.Object, "")}
 	return result, nil
+}
+
+// checkRelationWire issues the underlying FGA Check for CheckRelation, routing to
+// the HIGHER_CONSISTENCY variant when the caller requested a strong read-after-write
+// (owner-tuple confirm-gate). When the Authorizer does not implement the optional
+// consistentAuthorizer (a test stub), it falls back to the default read — correct,
+// just not consistency-forced.
+func (s *AuthorizeService) checkRelationWire(ctx context.Context, req CheckRelationRequest, condCtx map[string]any) (bool, error) {
+	if req.HigherConsistency {
+		if cc, ok := s.relations.(consistentAuthorizer); ok {
+			return cc.CheckWithContextConsistent(ctx, req.Subject, req.Relation, req.Object, condCtx)
+		}
+	}
+	return s.relations.CheckWithContext(ctx, req.Subject, req.Relation, req.Object, condCtx)
 }
 
 // BatchCheck — fan-out, results in request-order.

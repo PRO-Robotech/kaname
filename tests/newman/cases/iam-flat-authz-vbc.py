@@ -86,7 +86,7 @@ CASES.append(Case(
                 "       && b.resourceId === pm.environment.get('accountAId'));",
                 "  if (dup && dup.id) pm.environment.set('vbcDupAcbId', dup.id);",
                 "}",
-                "if (!pm.environment.get('vbcDupAcbId')) { postman.setNextRequest('create-derive'); }",
+                "if (!pm.environment.get('vbcDupAcbId')) { pm.execution.setNextRequest('create-derive'); }",
             ],
         ),
         Step(
@@ -106,7 +106,7 @@ CASES.append(Case(
                 "  const dj = pm.response.json() || {};",
                 "  if (dj.id) pm.environment.set('vbcDelOpId', dj.id);",
                 "}",
-                "if (!pm.environment.get('vbcDelOpId')) { postman.setNextRequest('create-derive'); }",
+                "if (!pm.environment.get('vbcDelOpId')) { pm.execution.setNextRequest('create-derive'); }",
             ],
         ),
         Step(
@@ -126,7 +126,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_vbcDelCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_vbcDelCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_vbcDelCount');",

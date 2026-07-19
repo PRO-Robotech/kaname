@@ -35,9 +35,11 @@ package seed
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -169,8 +171,8 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := tx.Exec(ctx, backfillOwnerHierarchyTuplesSQL); err != nil {
 		return fmt.Errorf("backfill owner-bindings: emit hierarchy tuples: %w", err)
 	}
-	if err := syncOwnerRoleSelectorsTx(ctx, tx); err != nil {
-		return fmt.Errorf("backfill owner-bindings: sync owner role selectors: %w", err)
+	if err := syncAllSystemRoleSelectorsTx(ctx, tx); err != nil {
+		return fmt.Errorf("backfill owner-bindings: sync system role selectors: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("backfill owner-bindings: commit: %w", err)
@@ -179,47 +181,178 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// syncOwnerRoleSelectorsTx UPSERTs the owner system-role's UNIFIED materializing
-// selector into role_rule_selectors (forward fast-path). The owner role is seeded
-// by raw SQL (migration 0035), so — unlike a custom role written via Role.Create —
-// its role_rule_selectors row is NOT populated by ReplaceRuleSelectors.
-// Without this row the forward path (SelectorBindingsMatchingObject, driven by
-// RegisterResource → ReconcileObject) never matches an owner binding for a brand-new
-// object, so owner-content-forward would only converge on the periodic sweep.
-// This seeds the anchor selector — the wildcard `*.*` rule expanded to the full
-// materializable type set (domain.MaterializingSelectors) — so a freshly-registered
-// object materializes the owner's content tuple on its change event (≤2s). Idempotent:
-// ON CONFLICT (role_id, rule_fp) re-applies the same row.
-func syncOwnerRoleSelectorsTx(ctx context.Context, tx pgxExecer) error {
-	for _, sel := range domain.OwnerRoleRules().MaterializingSelectors() {
-		if len(sel.ObjectTypes) == 0 {
-			// Defensive: a GLOBAL-only projection would be empty; the owner is bounded,
-			// so MaterializingSelectors (role-level, wildcard-expanding) yields the full
-			// type set. Skip an empty selector — role_rule_selectors_types_nonempty
-			// CHECK forbids a 0-type row.
-			continue
+// SyncAllSystemRoleSelectors projects EVERY materializing system-role's rules[] into
+// kacho_iam.role_rule_selectors (forward fast-path JOIN index) in one short tx. It is
+// the idempotent self-healing seeder: a system role written by raw SQL (migrations
+// 0031/0035) never has its selectors populated by ReplaceRuleSelectors (that runs only
+// for custom roles via Role.Create/Update), so WITHOUT this seed the generic system
+// roles (`admin`/`edit`/`view`, per-domain `vpc.network.admin`…) have `rules[]` but NO
+// selector rows → their bindings are invisible to discovery
+// (SelectorBindingsMatchingObject + the sweep's ListSelectorBindingIDs) → a
+// project-scoped grantee (`edit`@PROJECT) never materializes v_* on a freshly-created
+// object (403 forever on its own resource). This generalizes the former owner-only seed
+// (syncAllSystemRoleSelectorsTx) to all system roles. Safe to re-run (idempotent UPSERT +
+// stale-fp self-heal). Boot calls it via BackfillOwnerBindings; exposed standalone for
+// tests + operational re-seed.
+func SyncAllSystemRoleSelectors(ctx context.Context, pool *pgxpool.Pool) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("sync system role selectors: begin tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
 		}
-		armTextOwner := ownerArmText(sel.Arm)
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO kacho_iam.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, resource_names, match_labels, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, '{}'::text[], '{}'::jsonb, now(), now())
-			 ON CONFLICT (role_id, rule_fp) DO UPDATE
-			    SET arm            = EXCLUDED.arm,
-			        object_types   = EXCLUDED.object_types,
-			        resource_names = EXCLUDED.resource_names,
-			        match_labels   = EXCLUDED.match_labels,
-			        updated_at     = now()`,
-			domain.OwnerRoleID, sel.RuleFP, armTextOwner, sel.ObjectTypes); err != nil {
-			return fmt.Errorf("upsert owner role selector %s: %w", sel.RuleFP, err)
+	}()
+	if err := syncAllSystemRoleSelectorsTx(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("sync system role selectors: commit: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+// pgxExecer is the minimal Exec surface (pgx.Tx / pgxpool.Pool both satisfy it).
+type pgxExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// pgxQuerierExecer is the Exec+Query surface the all-system-role selector sync needs
+// (it reads roles.rules then UPSERTs selectors). pgx.Tx satisfies it.
+type pgxQuerierExecer interface {
+	pgxExecer
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// systemRoleRules is one system role's authored policy read from the roles table.
+type systemRoleRules struct {
+	id    string
+	rules domain.Rules
+}
+
+// syncAllSystemRoleSelectorsTx projects EVERY materializing system-role's rules[] into
+// role_rule_selectors (the forward fast-path JOIN index) inside the caller tx. For each
+// system role it reads roles.rules, projects the UNIFIED materializing selectors
+// (domain.Rules.MaterializingSelectors — arm-aware anchor/names/labels; the wildcard
+// `*.*` rule of admin/edit/view/owner expanded to the full materializable type set),
+// then, keyed by role_id:
+//   - DELETEs stale selector rows whose rule_fp no current rule produces (self-heal when
+//     a rules[] edit moved the fingerprint), and
+//   - UPSERTs the current selectors ON CONFLICT (role_id, rule_fp).
+//
+// Idempotent + commutative with the migration seed (identical (role_id, rule_fp) rows).
+// It SUBSUMES the former owner-only path: owner is a system role, and its `*.*.*`
+// projection reproduces the migration-0038/0039/0043-seeded row byte-for-byte (stable
+// fp), so the owner selector is always in currentFPs → never pruned (owner path
+// preserved). A selector with empty ObjectTypes (a GLOBAL-only wildcard projection) is
+// skipped — role_rule_selectors_types_nonempty forbids a 0-type row.
+func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) error {
+	// (1) Read every system role's authored rules. Fully drain the Rows BEFORE issuing
+	// any Exec on the same tx (pgx forbids interleaving a live Rows with another query
+	// on the same conn).
+	rows, err := tx.Query(ctx,
+		`SELECT id, rules FROM kacho_iam.roles
+		  WHERE is_system = true
+		    AND rules IS NOT NULL
+		    AND jsonb_typeof(rules) = 'array'
+		    AND jsonb_array_length(rules) > 0`)
+	if err != nil {
+		return fmt.Errorf("sync system role selectors: list system roles: %w", err)
+	}
+	var all []systemRoleRules
+	for rows.Next() {
+		var (
+			id  string
+			raw []byte
+		)
+		if serr := rows.Scan(&id, &raw); serr != nil {
+			rows.Close()
+			return fmt.Errorf("sync system role selectors: scan role: %w", serr)
+		}
+		parsed, derr := domain.DecodeRules(raw)
+		if derr != nil {
+			rows.Close()
+			return fmt.Errorf("sync system role selectors: decode rules of %s: %w", id, derr)
+		}
+		all = append(all, systemRoleRules{id: id, rules: parsed})
+	}
+	if rerr := rows.Err(); rerr != nil {
+		rows.Close()
+		return fmt.Errorf("sync system role selectors: iterate system roles: %w", rerr)
+	}
+	rows.Close()
+
+	// (2) Per role: self-heal stale fps, then UPSERT the current materializing selectors.
+	for _, rr := range all {
+		selectors := rr.rules.MaterializingSelectors()
+		currentFPs := make([]string, 0, len(selectors))
+		for _, sel := range selectors {
+			if len(sel.ObjectTypes) == 0 {
+				continue // GLOBAL-only wildcard projection → nothing to materialize
+			}
+			currentFPs = append(currentFPs, sel.RuleFP)
+		}
+		// Self-heal: drop selector rows whose fingerprint no current rule produces (a
+		// rules[] edit moved the fp). currentFPs empty → deletes every row (role with no
+		// materializing selector). The owner's stable `*.*.*` fp is always present, so
+		// its migration-seeded row survives.
+		if _, derr := tx.Exec(ctx,
+			`DELETE FROM kacho_iam.role_rule_selectors
+			  WHERE role_id = $1 AND NOT (rule_fp = ANY($2))`,
+			rr.id, currentFPs); derr != nil {
+			return fmt.Errorf("sync system role selectors: prune stale selectors for %s: %w", rr.id, derr)
+		}
+		for _, sel := range selectors {
+			if len(sel.ObjectTypes) == 0 {
+				continue
+			}
+			if uerr := upsertRoleSelectorTx(ctx, tx, rr.id, sel); uerr != nil {
+				return uerr
+			}
 		}
 	}
 	return nil
 }
 
-// ownerArmText maps the owner selector arm to the role_rule_selectors.arm enum text.
-// The owner `*.*` rule is ARM_ANCHOR; the names/labels cases are defensive parity.
-func ownerArmText(a domain.Arm) string {
+// upsertRoleSelectorTx UPSERTs one materializing selector into role_rule_selectors,
+// arm-aware (anchor/names/labels), keyed by (role_id, rule_fp). Mirrors the pg
+// roleWriter.ReplaceRuleSelectors row shape (pgx encodes a nil []string as SQL NULL,
+// which violates NOT NULL — normalize to '{}'; a nil match_labels marshals to "null" —
+// normalize to '{}') so the seed and the custom-role path agree byte-for-byte.
+func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel domain.RuleSelector) error {
+	labelsJSON, err := json.Marshal(sel.MatchLabels)
+	if err != nil {
+		return fmt.Errorf("sync system role selectors: marshal match_labels for %s: %w", roleID, err)
+	}
+	if string(labelsJSON) == "null" {
+		labelsJSON = []byte("{}")
+	}
+	resourceNames := sel.ResourceNames
+	if resourceNames == nil {
+		resourceNames = []string{}
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kacho_iam.role_rule_selectors
+		   (role_id, rule_fp, arm, object_types, resource_names, match_labels, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, now(), now())
+		 ON CONFLICT (role_id, rule_fp) DO UPDATE
+		    SET arm            = EXCLUDED.arm,
+		        object_types   = EXCLUDED.object_types,
+		        resource_names = EXCLUDED.resource_names,
+		        match_labels   = EXCLUDED.match_labels,
+		        updated_at     = now()`,
+		roleID, sel.RuleFP, selectorArmText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
+	); err != nil {
+		return fmt.Errorf("sync system role selectors: upsert selector %s/%s: %w", roleID, sel.RuleFP, err)
+	}
+	return nil
+}
+
+// selectorArmText maps a domain Arm to the role_rule_selectors.arm enum text.
+func selectorArmText(a domain.Arm) string {
 	switch a {
 	case domain.ArmNames:
 		return "names"
@@ -228,12 +361,6 @@ func ownerArmText(a domain.Arm) string {
 	default:
 		return "anchor"
 	}
-}
-
-// pgxExecer is the minimal Exec surface (pgx.Tx / pgxpool.Pool both satisfy it) the
-// owner-selector sync needs — keeps the helper tx/pool-agnostic.
-type pgxExecer interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 // BackfillReconcileEngine — the reconcile surface the sweep drives (one binding at

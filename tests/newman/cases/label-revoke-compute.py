@@ -40,9 +40,16 @@ suite-local env var {{_t31cZoneId}}, used as zoneId. typeId is OMITTED — compu
 defaults it to network-ssd (disk.py DISK-CR-CRUD-OK pins the default), so no
 diskType fixture is needed either.
 
-Fixtures: jwtBootstrap, jwtAccountAdminA, accountAId, projectA1Id. The zone is
-DISCOVERED at runtime (see above), not read from env. Test-design: same as vpc
-file (state-transition, ECP, error-guessing). One thought per pm.test().
+Fixtures: jwtBootstrap, jwtAccountAdminA, accountAId. The zone is DISCOVERED at
+runtime (see above), and — mirroring that same discipline — the PROJECT is now
+self-seeded per case (create_suite_project → {{_t31cProj}}) instead of read from the
+shared {{projectA1Id}} fixture. That fixture var could resolve to a PHANTOM project
+(an id whose IAM row never committed — ensure_project extracts metadata.projectId even
+from a Create Operation that finished WITH an error), so the cross-service peer-check
+compute DiskService.Create → iam project-resolve returned `Folder with id <id> not
+found` and every case cascaded RED. A freshly-created, op-poll-confirmed project is
+guaranteed to exist for the peer-check. Test-design: same as vpc file (state-transition,
+ECP, error-guessing). One thought per pm.test().
 """
 
 CASES = []
@@ -66,7 +73,7 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -74,6 +81,26 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
         capture,
         "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
         "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
+    ]
+
+
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
+    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
+    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
+    probe hits the public port → 404 page-not-found → JSONError on the first
+    pm.response.json(). Mirrors iam-internal-only-check.py::_internal_url_override.
+    internalBaseUrl is injected at runtime by deploy/scripts/newman-e2e.sh."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
     ]
 
 
@@ -85,7 +112,13 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
             "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
             f"if (!(pm.response.code === 200 && j.allowed === {str(expect_allowed).lower()}) && cc < {POLL_CAP}) {{",
             "  pm.environment.set('_ckCount', String(cc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms): newman fires setNextRequest before any
+            # setTimeout, so a busy-wait is the ONLY way to actually space out the polls.
+            # POLL_CAP*0.5s (~15s) then covers the grant/revoke FGA-materialization window
+            # under PARALLEL load instead of hammering ~30 back-to-back Checks in <2s (which
+            # never waits for the tuple to (dis)appear → the revoke-deny / grant-allow flake).
+            "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_ckCount');",
@@ -107,6 +140,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
         ]
     return Step(name=name, method="POST", path="/iam/v1/internal/iam:check",
                 auth=auth, body={"subjectId": subject, "relation": relation, "object": obj},
+                pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
                 test_script=["const j = pm.response.json();", *retry, *verdict])
 
 
@@ -147,7 +181,7 @@ def assert_bind_succeeded(name):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -194,18 +228,52 @@ def discover_zone(suffix):
         ])
 
 
+def create_suite_project(suffix):
+    """Self-contained project seed — create a FRESH project under account-A at
+    runtime and stash its id into {{_t31cProj}} (replacing the shared {{projectA1Id}}
+    fixture dependency; same rationale as the runtime zone-discovery above). Prepended
+    to every case so each owns a project GUARANTEED to exist for the cross-service
+    peer-check (compute → iam project-resolve). The op-poll asserts done + NO error, so
+    a project that ever fails to materialise fails LOUDLY here (not as an opaque
+    downstream 'Folder with id <id> not found'). accountAId stays the shared-tenant
+    anchor: the ARM_LABELS role is account-scoped on account:accountAId and containment
+    matches resources whose parent_account_id == accountAId — a project under account-A
+    satisfies it. Project.Create is authz-gated by editor@account:accountAId, which
+    jwtAccountAdminA (account owner ⊇ editor) holds stably; the fresh-project OWNER-tuple
+    lag is absorbed by create_base_disk's retry_until_authorized on the first disk Create."""
+    return [
+        Step(name=f"create-proj-{suffix}", method="POST", path="/iam/v1/projects",
+             body={"accountId": "{{accountAId}}",
+                   "name": f"t31c-prj-{suffix}-{{{{runId}}}}",
+                   "description": "newman compute label-revoke self-contained project seed"},
+             auth="jwtAccountAdminA",
+             test_script=[*assert_status(200),
+                          *save_from_response("j.metadata && j.metadata.projectId", "_t31cProj"),
+                          *save_from_response("j.id", f"_op_proj_{suffix}")]),
+        Step(name=f"poll-proj-{suffix}", method="GET", path=f"/operations/{{{{_op_proj_{suffix}}}}}",
+             auth="jwtAccountAdminA", test_script=poll_op_done(f"_op_proj_{suffix}")),
+    ]
+
+
 def create_base_disk(disk_var, suffix, labels):
     # typeId is OMITTED — compute defaults to network-ssd (no diskType fixture
     # needed). zoneId comes from the runtime-discovered {{_t31cZoneId}}.
     return [
         discover_zone(suffix),
-        Step(name=f"create-disk-{suffix}", method="POST", path=DISKS,
-             body={"projectId": "{{projectA1Id}}", "name": f"t31c-disk-{suffix}-{{{{runId}}}}",
-                   "zoneId": "{{_t31cZoneId}}", "size": _DISK_SIZE, "labels": labels},
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200),
-                          *save_from_response("j.metadata && j.metadata.diskId", disk_var),
-                          *save_from_response("j.id", f"_op_{disk_var}")]),
+        # Bounded read-your-writes retry over AAA's create-authz materialization window:
+        # DiskService.Create needs the caller's editor/creator on project:projectA1 (fixture
+        # grant), whose cross-service FGA-cascade tuple can still be draining at umbrella
+        # cold-start → the first Create 403s at the gateway authz gate. Retry SELF on 403
+        # (403-create materialized nothing) until authorized; fail-closed at the budget.
+        retry_until_authorized(
+            Step(name=f"create-disk-{suffix}", method="POST", path=DISKS,
+                 body={"projectId": "{{_t31cProj}}", "name": f"t31c-disk-{suffix}-{{{{runId}}}}",
+                       "zoneId": "{{_t31cZoneId}}", "size": _DISK_SIZE, "labels": labels},
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              *save_from_response("j.metadata && j.metadata.diskId", disk_var),
+                              *save_from_response("j.id", f"_op_{disk_var}")]),
+            budget=30, interval_ms=500, retry_on=(403,)),
         Step(name=f"poll-disk-{suffix}", method="GET", path=f"/operations/{{{{_op_{disk_var}}}}}",
              auth="jwtAccountAdminA", test_script=poll_op_done(f"_op_{disk_var}", out_id_var=disk_var)),
     ]
@@ -227,6 +295,7 @@ def revoke_case(case_id, title, fga_type, resource_kind, base_path,
         classes=["T31", "LABELS", "REVOKE", "FGA", "AUTHZ", "STATE", "COMPUTE"],
         priority="P0",
         steps=[
+            *create_suite_project(sfx),
             *create_fresh_sa(f"_t31cSa{sfx}", sfx),
             *create_steps,
             check_step(f"{sfx}-pre-grant-deny", f"service_account:{{{{_t31cSa{sfx}}}}}", "v_list",
@@ -273,13 +342,17 @@ CASES.append(revoke_case(
     create_steps=[
         # source disk (unlabeled — its labels are irrelevant to the snapshot grant).
         *create_base_disk("_t31cSnapSrcDisk", "snapsrc", {}),
-        Step(name="create-snapshot", method="POST", path=SNAPSHOTS,
-             body={"projectId": "{{projectA1Id}}", "diskId": "{{_t31cSnapSrcDisk}}",
-                   "name": "t31c-snap-{{runId}}", "labels": {"tier": "treska"}},
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200),
-                          *save_from_response("j.metadata && j.metadata.snapshotId", "_t31cSnap"),
-                          *save_from_response("j.id", "_op_t31cSnap")]),
+        # Bounded read-your-writes retry over AAA's create-authz materialization window
+        # (same cold-start FGA-cascade lag as create-disk); retry SELF on 403 until authorized.
+        retry_until_authorized(
+            Step(name="create-snapshot", method="POST", path=SNAPSHOTS,
+                 body={"projectId": "{{_t31cProj}}", "diskId": "{{_t31cSnapSrcDisk}}",
+                       "name": "t31c-snap-{{runId}}", "labels": {"tier": "treska"}},
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              *save_from_response("j.metadata && j.metadata.snapshotId", "_t31cSnap"),
+                              *save_from_response("j.id", "_op_t31cSnap")]),
+            budget=30, interval_ms=500, retry_on=(403,)),
         Step(name="poll-snapshot", method="GET", path="/operations/{{_op_t31cSnap}}",
              auth="jwtAccountAdminA", test_script=poll_op_done("_op_t31cSnap", out_id_var="_t31cSnap")),
     ],
@@ -297,13 +370,17 @@ CASES.append(revoke_case(
     fga_type="compute_image", resource_kind="image", base_path=IMAGES,
     create_steps=[
         *create_base_disk("_t31cImgSrcDisk", "imgsrc", {}),
-        Step(name="create-image", method="POST", path=IMAGES,
-             body={"projectId": "{{projectA1Id}}", "name": "t31c-img-{{runId}}",
-                   "diskId": "{{_t31cImgSrcDisk}}", "labels": {"tier": "treska"}},
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200),
-                          *save_from_response("j.metadata && j.metadata.imageId", "_t31cImg"),
-                          *save_from_response("j.id", "_op_t31cImg")]),
+        # Bounded read-your-writes retry over AAA's create-authz materialization window
+        # (same cold-start FGA-cascade lag as create-disk); retry SELF on 403 until authorized.
+        retry_until_authorized(
+            Step(name="create-image", method="POST", path=IMAGES,
+                 body={"projectId": "{{_t31cProj}}", "name": "t31c-img-{{runId}}",
+                       "diskId": "{{_t31cImgSrcDisk}}", "labels": {"tier": "treska"}},
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              *save_from_response("j.metadata && j.metadata.imageId", "_t31cImg"),
+                              *save_from_response("j.id", "_op_t31cImg")]),
+            budget=30, interval_ms=500, retry_on=(403,)),
         Step(name="poll-image", method="GET", path="/operations/{{_op_t31cImg}}",
              auth="jwtAccountAdminA", test_script=poll_op_done("_op_t31cImg", out_id_var="_t31cImg")),
     ],

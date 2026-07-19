@@ -32,6 +32,13 @@ while [[ $# -gt 0 ]]; do
     --service) SERVICE="$2"; shift 2 ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
+    # --jobs: принят для паритета с vpc/nlb/compute run.sh + newman-parallel.sh
+    # (директива #1). iam-суиты гоняются СЕРИЙНО намеренно (jit-pending reseed +
+    # порядковые зависимости между матрицами) — флаг consume-and-ignore, а НЕ
+    # пробрасывается в `newman run` (иначе `unknown option '--jobs'` → 0 отчётов
+    # → ложный no-report RED всей iam-суиты). Cross-service параллелизм (4 суиты
+    # разом) даёт основной выигрыш; internal-iam-serial — приемлемо.
+    --jobs)    shift 2 ;;
     *)         EXTRA+=("$1"); shift ;;
   esac
 done

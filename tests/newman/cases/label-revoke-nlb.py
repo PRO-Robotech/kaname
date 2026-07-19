@@ -62,7 +62,7 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -70,6 +70,25 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
         capture,
         "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
         "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
+    ]
+
+
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are served
+    ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design (ban #6).
+    gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
+    public port → "404 page not found" → JSONError on the first pm.response.json().
+    Mirrors label-revoke-vpc.py::_internal_url_override / iam-internal-only-check.py."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
     ]
 
 
@@ -81,7 +100,13 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
             "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
             f"if (!(pm.response.code === 200 && j.allowed === {str(expect_allowed).lower()}) && cc < {POLL_CAP}) {{",
             "  pm.environment.set('_ckCount', String(cc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms): newman fires setNextRequest before any
+            # setTimeout, so a busy-wait is the ONLY way to actually space out the polls.
+            # POLL_CAP*0.5s (~15s) then covers the grant/revoke FGA-materialization window
+            # under PARALLEL load instead of hammering ~30 back-to-back Checks in <2s (which
+            # never waits for the tuple to (dis)appear → the revoke-deny / grant-allow flake).
+            "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_ckCount');",
@@ -103,6 +128,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
         ]
     return Step(name=name, method="POST", path="/iam/v1/internal/iam:check",
                 auth=auth, body={"subjectId": subject, "relation": relation, "object": obj},
+                pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
                 test_script=["const j = pm.response.json();", *retry, *verdict])
 
 
@@ -143,7 +169,7 @@ def assert_bind_succeeded(name):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -194,10 +220,15 @@ CASES.append(Case(
                  "});",
                  "if (j.regions && j.regions.length > 0) { pm.environment.set('_t31nRegionId', j.regions[0].id); }",
              ]),
-        # parent EXTERNAL load balancer (VIP auto-allocates, no subnet needed).
+        # parent EXTERNAL load balancer (VIP auto-allocates, no subnet needed). An EXTERNAL
+        # LB MUST declare a vip source for at least one ip family (nlb contract) — v4Source
+        # {public:{}} auto-allocates a public IPv4 VIP. Without it the Create is a sync 400
+        # "load balancer must declare a vip source for at least one ip family" (see the
+        # load-balancer.py EXTERNAL bodies: type EXTERNAL + v4Source {public:{}}).
         Step(name="create-lb", method="POST", path=NLB,
              body={"projectId": "{{projectA1Id}}", "name": "t31n-lb-{{runId}}",
-                   "regionId": "{{_t31nRegionId}}", "type": "EXTERNAL"},
+                   "regionId": "{{_t31nRegionId}}", "type": "EXTERNAL",
+                   "v4Source": {"public": {}}},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),
                           *save_from_response("j.metadata && j.metadata.networkLoadBalancerId", "_t31nLb"),

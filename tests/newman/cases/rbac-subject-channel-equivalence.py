@@ -89,6 +89,26 @@ ROLE_VIEW = "rol1bda80f2be4d3658e"  # md5('view')[:17]
 # Helpers (local — mirror the idioms in iam-read-authz-vget.py / iam-rbac-subjects.py).
 # ---------------------------------------------------------------------------
 
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
+    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
+    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
+    probe hits the public port → 404 page-not-found → JSONError. Mirrors
+    iam-internal-only-check.py::_internal_url_override. internalBaseUrl is injected
+    at runtime by deploy/scripts/newman-e2e.sh."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
+    ]
+
+
 def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exists=False):
     """GET /operations/{op_var} until done; assert done; capture response.id.
 
@@ -119,7 +139,7 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exis
             "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
             f"if (!j.done && pc < {POLL_CAP}) {{",
             "  pm.environment.set('_pollCount', String(pc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_pollCount');",
@@ -153,7 +173,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId'));",
                 f"  if (dup && dup.id) pm.environment.set('{dup_var}', dup.id);",
                 "}",
-                f"if (!pm.environment.get('{dup_var}')) {{ postman.setNextRequest('{grant_step_name}'); }}",
+                f"if (!pm.environment.get('{dup_var}')) {{ pm.execution.setNextRequest('{grant_step_name}'); }}",
             ],
         ),
         Step(
@@ -165,7 +185,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                 f"pm.environment.unset('{del_op_var}');",
                 "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('" + del_op_var + "', dj.id); }",
-                f"if (!pm.environment.get('{del_op_var}')) {{ postman.setNextRequest('{grant_step_name}'); }}",
+                f"if (!pm.environment.get('{del_op_var}')) {{ pm.execution.setNextRequest('{grant_step_name}'); }}",
             ],
         ),
         Step(
@@ -180,7 +200,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 "pm.test('await-del 200', () => pm.expect(pm.response.code).to.eql(200));",
                 "const j = pm.response.json();",
                 f"const pc = parseInt(pm.environment.get('_{tag}DelCount') || '0', 10);",
-                f"if (!j.done && pc < {POLL_CAP}) {{ pm.environment.set('_{tag}DelCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }}",
+                f"if (!j.done && pc < {POLL_CAP}) {{ pm.environment.set('_{tag}DelCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 f"pm.environment.unset('_{tag}DelCount'); pm.environment.unset('_{tag}DelStarted');",
                 "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
             ],
@@ -230,7 +250,7 @@ def poll_until_status(name, method, path, test_script, auth="jwtAccountAdminA",
             f"const _retryCode = [{retry_set}].includes(pm.response.code);",
             (f"const _retryPred = (pm.response.code === {expect_code}) && ({retry_predicate});"
              if retry_predicate is not None else "const _retryPred = false;"),
-            f"if ((_retryCode || _retryPred) && _pc < {POLL_CAP}) {{ pm.environment.set('{counter_var}', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }}",
+            f"if ((_retryCode || _retryPred) && _pc < {POLL_CAP}) {{ pm.environment.set('{counter_var}', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }}",
             f"pm.environment.unset('{counter_var}'); pm.environment.unset('{started_var}');",
             *test_script,
         ],
@@ -302,13 +322,14 @@ def check_until_deny(name, fga_subject, relation, obj, claim):
         path="/iam/v1/internal/iam:check",
         auth="jwtBootstrap",
         body={"subjectId": fga_subject, "relation": relation, "object": obj},
+        pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
         test_script=[
             "const j = pm.response.json();",
             "if (pm.environment.get('_ckStarted') !== pm.info.requestName) { pm.environment.set('_ckCount', '0'); pm.environment.set('_ckStarted', pm.info.requestName); }",
             "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
             f"if (!(pm.response.code === 200 && j.allowed !== true) && cc < {POLL_CAP}) {{",
             "  pm.environment.set('_ckCount', String(cc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -344,7 +365,7 @@ def revoke_await(name_prefix, acb_var, rev_op_var):
             test_script=[
                 "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                 f"const _dc = parseInt(pm.environment.get('_{rev_op_var}DelCount') || '0', 10);",
-                f"if (pm.response.code === 403 && _dc < {POLL_CAP}) {{ pm.environment.set('_{rev_op_var}DelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }}",
+                f"if (pm.response.code === 403 && _dc < {POLL_CAP}) {{ pm.environment.set('_{rev_op_var}DelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 f"pm.environment.unset('_{rev_op_var}DelCount'); pm.environment.unset('_{rev_op_var}DelStarted');",
                 "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                 f"pm.environment.unset('{rev_op_var}');",
@@ -364,7 +385,7 @@ def revoke_await(name_prefix, acb_var, rev_op_var):
                 f"if (!pm.environment.get('{rev_op_var}')) {{ return; }}",
                 "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                 f"const c = parseInt(pm.environment.get('_{rev_op_var}Count') || '0', 10);",
-                f"if (j && !j.done && c < {POLL_CAP}) {{ pm.environment.set('_{rev_op_var}Count', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }}",
+                f"if (j && !j.done && c < {POLL_CAP}) {{ pm.environment.set('_{rev_op_var}Count', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 f"pm.environment.unset('_{rev_op_var}Count'); pm.environment.unset('_{rev_op_var}Started');",
             ],
         ),
@@ -434,7 +455,7 @@ def member_op(name, verb, group_var, member_id_tmpl, op_var):
             ],
             test_script=[
                 f"const _mc = parseInt(pm.environment.get('_{op_var}MCount') || '0', 10);",
-                f"if (pm.response.code === 403 && _mc < {POLL_CAP}) {{ pm.environment.set('_{op_var}MCount', String(_mc + 1)); postman.setNextRequest(pm.info.requestName); return; }}",
+                f"if (pm.response.code === 403 && _mc < {POLL_CAP}) {{ pm.environment.set('_{op_var}MCount', String(_mc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 f"pm.environment.unset('_{op_var}MCount'); pm.environment.unset('_{op_var}MStarted');",
                 *assert_status(200),
                 *save_from_response("j.id", op_var),

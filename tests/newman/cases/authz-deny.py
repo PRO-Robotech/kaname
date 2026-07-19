@@ -503,7 +503,7 @@ for _case in CASES:
         auth=_auth,
         pre_script=[
             # Skip the poll entirely if THIS case saved no op id (jump to delete).
-            f"if (!pm.environment.get('{_opvar}')) {{ postman.setNextRequest('{_delName}'); }}",
+            f"if (!pm.environment.get('{_opvar}')) {{ pm.execution.setNextRequest('{_delName}'); }}",
         ],
         test_script=[
             # First-entry reset (request-name-scoped flag) — keeps the iteration
@@ -515,7 +515,8 @@ for _case in CASES:
             # 404 (foreign/never-persisted op) falls through and resolves no id.
             f"if ((pm.response.code === 404 || !_j.done) && _pc < {POLL_CAP}) {{",
             "  pm.environment.set('_abPollCount', String(_pc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_abPollCount');",
@@ -558,7 +559,7 @@ for _case in CASES:
         path="/operations/{{" + _delopvar + "}}",
         auth=_auth,
         pre_script=[
-            f"if (!pm.environment.get('{_delopvar}')) {{ postman.setNextRequest(null); }}",
+            f"if (!pm.environment.get('{_delopvar}')) {{ pm.execution.setNextRequest(null); }}",
         ],
         test_script=[
             # First-entry reset (request-name-scoped flag).
@@ -567,7 +568,8 @@ for _case in CASES:
             "let _dj; try { _dj = pm.response.json(); } catch(e) { _dj = {}; }",
             f"if (!_dj.done && _dp < {POLL_CAP}) {{",
             "  pm.environment.set('_abDelPollCount', String(_dp + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_abDelPollCount');",
@@ -790,7 +792,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -822,7 +825,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_w12WarmPoll') || '0', 10);",
                 f"if (pm.response.code !== 200 && pc < {POLL_CAP}) {{",
                 "  pm.environment.set('_w12WarmPoll', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_w12WarmPoll');",
@@ -860,7 +863,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -884,7 +888,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_w12Poll') || '0', 10);",
                 f"if (pm.response.code === 200 && pc < {POLL_CAP}) {{",
                 "  pm.environment.set('_w12Poll', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_w12Poll');",

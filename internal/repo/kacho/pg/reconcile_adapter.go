@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -91,8 +92,35 @@ type reconcileStore struct {
 // duplicate fga_outbox tuples. The expiry path (ExpireBinding) keeps its CAS
 // guard (RevokeExpiredBinding) and ALSO benefits from the lock taken here.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
+	return s.loadBinding(ctx, bindingID, true /* forUpdate — full path serializes the delete-stale diff */)
+}
+
+// LoadBindingUnlocked loads the same BindingScope as LoadBinding but WITHOUT the
+// `FOR UPDATE` row-lock — the read the ADDITIVE forward fast-path
+// (reconcile.ReconcileObjectForward) uses. Forward only WRITES the freshly-registered
+// object's tuples (never a delete-stale diff), so it needs no serialization against a
+// concurrent pass of the same binding; taking the row-lock here would re-serialize all
+// registrations sharing one editor/owner binding — the exact bottleneck the fast-path
+// removes. Correctness is preserved by the async FULL ReconcileObject backstop.
+func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
+	return s.loadBinding(ctx, bindingID, false /* no row-lock — additive forward path */)
+}
+
+// loadBinding is the shared reader for LoadBinding (forUpdate=true) and
+// LoadBindingUnlocked (forUpdate=false). The BindingScope projection is IDENTICAL in
+// both modes — only the row-lock differs — so the full and forward paths derive the
+// same scope/selector/subject facts.
+func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, forUpdate bool) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
-	b, err := r.GetForUpdate(ctx, bindingID)
+	var (
+		b   domain.AccessBinding
+		err error
+	)
+	if forUpdate {
+		b, err = r.GetForUpdate(ctx, bindingID)
+	} else {
+		b, err = r.Get(ctx, bindingID)
+	}
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
 			return reconcile.BindingScope{}, false, nil
@@ -150,15 +178,29 @@ func (s *reconcileStore) AcquireBindingLock(ctx context.Context, bindingID domai
 	return nil
 }
 
-// MatchAllInScope returns EVERY mirror object of the given types (ARM_ANCHOR/`all`,
-// P4) — no label filter. Containment to the binding's scope is re-asserted by the
-// use-case (IsContainedIn), so the query may over-return cluster-wide and the scope
-// narrows it.
-func (s *reconcileStore) MatchAllInScope(ctx context.Context, types []string) ([]domain.MirrorObject, error) {
+// AcquireBindingLockShared takes pg_advisory_xact_lock_shared(hashtext(binding_id)) —
+// the SHARE-mode advisory lock the ADDITIVE forward fast-path holds. SHARE ∥ SHARE do not
+// conflict (concurrent forwards of the same binding coexist → throughput), while SHARE
+// conflicts with the EXCLUSIVE AcquireBindingLock the FULL path takes (forward and full
+// take turns on the binding → their FK-child INSERT `FOR KEY SHARE` never crosses the
+// full path's `SELECT … FOR UPDATE` on the parent row → no 40P01 deadlock). xact-scoped.
+func (s *reconcileStore) AcquireBindingLockShared(ctx context.Context, bindingID domain.AccessBindingID) error {
+	if _, err := s.tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext($1))`, string(bindingID)); err != nil {
+		return fmt.Errorf("reconcile: shared advisory-lock binding %s: %w", bindingID, err)
+	}
+	return nil
+}
+
+// MatchAllInScope returns the mirror objects of the given types NARROWED to the binding's
+// containment scope (ARM_ANCHOR/`all`, P4) — no label filter. The scope is pushed into the
+// SQL (resource_mirror.AllByTypes) as a PROVEN SUPERSET of the use-case's IsContainedIn
+// re-verify, so the reconciler receives O(scope) rows instead of O(cluster mirror). The Go
+// IsContainedIn re-verify STAYS authoritative — this only PRE-filters (over-broad is safe).
+func (s *reconcileStore) MatchAllInScope(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	if len(types) == 0 {
 		return nil, nil
 	}
-	rows, err := resource_mirror.AllByTypes(ctx, s.tx, types)
+	rows, err := resource_mirror.AllByTypes(ctx, s.tx, types, scope.Type, scope.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,20 +229,24 @@ func (s *reconcileStore) MatchByIDs(ctx context.Context, types, ids []string) ([
 	return out, nil
 }
 
-// MatchAllInScopeIAMDirect returns EVERY IAM-OWN object of the given iam-direct
-// types (iam.project / iam.account) read SAME-DB (ARM_ANCHOR/`all`, P4). Containment
-// is re-asserted by the use-case.
-func (s *reconcileStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string) ([]domain.MirrorObject, error) {
-	return s.iamDirectQuery(ctx, types, "", nil)
+// MatchAllInScopeIAMDirect returns the IAM-OWN objects of the given iam-direct types
+// (iam.project/iam.account + content) read SAME-DB, NARROWED to the binding's containment
+// scope (ARM_ANCHOR/`all`, P4). Like MatchAllInScope it pushes the scope into the per-type
+// SQL as a PROVEN SUPERSET of the IsContainedIn re-verify (which still runs), so the anchor
+// arm no longer scans EVERY iam-native row of the type cluster-wide.
+func (s *reconcileStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
+	return s.iamDirectQuery(ctx, types, "", nil, scope)
 }
 
 // MatchByIDsIAMDirect returns the IAM-OWN objects of the given iam-direct types
-// whose id ∈ ids (ARM_NAMES, P4).
+// whose id ∈ ids (ARM_NAMES, P4). The names arm is already narrow (specific ids) AND a
+// foreign-scope match is a WANTED REJECTED-containment signal (cross-scope injection audit),
+// so it is LEFT UNSCOPED — the reconciler still re-verifies + audits it.
 func (s *reconcileStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string) ([]domain.MirrorObject, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return s.iamDirectQuery(ctx, types, "ids", ids)
+	return s.iamDirectQuery(ctx, types, "ids", ids, domain.ScopeAnchor{})
 }
 
 // iamDirectScanSpec describes how to read ONE iam-direct (D6) native table for the
@@ -272,14 +318,43 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 	},
 }
 
+// iamDirectScopePredicate builds the ANCHOR-arm scope narrowing for one iam-direct type as a
+// PROVEN SUPERSET of the domain IsContainedIn re-verify. It reuses the SAME per-type
+// parent-scope expressions the SELECT projects into ParentAccountID/ParentProjectID, so the
+// WHERE selects EXACTLY the rows IsContainedIn(scope) accepts — never fewer (no under-grant):
+//
+//   - project scope → parentProjectExpr = $1   (IsContainedIn: ParentProjectID == scope.ID)
+//   - account scope → parentAccountExpr = $1   (IsContainedIn: ParentAccountID == scope.ID)
+//   - cluster / unknown → "" (no narrowing; IsContainedIn cluster=true, unknown handled by
+//     the Go re-verify — over-broad is safe, under-broad is not).
+//
+// The expressions are fixed literals from the closed spec map (never user input) → the single
+// bound $1 carries the caller-supplied scope id, so the interpolation is injection-safe.
+func iamDirectScopePredicate(spec iamDirectScanSpec, scope domain.ScopeAnchor) (clause string, arg any) {
+	switch scope.Type {
+	case "project":
+		return spec.parentProjectExpr + " = $1", scope.ID
+	case "account":
+		return spec.parentAccountExpr + " = $1", scope.ID
+	default:
+		return "", nil
+	}
+}
+
 // iamDirectQuery is the shared iam-direct (D6) read for the ARM_ANCHOR/ARM_NAMES
 // arms: it scans each requested iam-native table (per iamDirectScanSpecs) filtered by
-// `mode` ("" → all, "ids" → id = ANY(ids)), stamping the containment parents so the
+// `mode` ("" → all-in-scope, "ids" → id = ANY(ids)), stamping the containment parents so the
 // SAME IsContainedIn predicate decides containment. No peer-call (same-DB) — the
 // graph stays acyclic. Extended from iam.project/iam.account to
 // the full iam content set (role/group/serviceAccount/user/accessBinding) so a bounded
 // owner `*.*` rule forward-materializes per-object admin on iam-native content.
-func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mode string, ids []string) ([]domain.MirrorObject, error) {
+//
+// The ANCHOR mode ("") pushes the binding's containment `scope` into the SQL WHERE as a
+// PROVEN SUPERSET of the IsContainedIn re-verify (SAME parent-scope expressions the SELECT
+// projects), so the anchor arm receives O(scope) iam rows, not every row of the type. The
+// NAMES mode ("ids") is LEFT UNSCOPED: it is already narrow (specific ids) and a foreign-scope
+// id-match is a WANTED REJECTED-containment audit signal, so the reconciler must still see it.
+func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mode string, ids []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	if len(types) == 0 {
 		return nil, nil
 	}
@@ -303,7 +378,15 @@ func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mod
 		if mode == "ids" {
 			rows, err = s.tx.Query(ctx, q+" WHERE o.id = ANY($1) ORDER BY o.id ASC", ids)
 		} else {
-			rows, err = s.tx.Query(ctx, q+" ORDER BY o.id ASC")
+			// ANCHOR: narrow to scope via the SAME parent-scope expression IsContainedIn is
+			// fed (project → parentProjectExpr; account → parentAccountExpr; cluster/unknown →
+			// no narrowing, Go re-verify stays authoritative). Guaranteed superset.
+			scopeClause, scopeArg := iamDirectScopePredicate(spec, scope)
+			if scopeClause != "" {
+				rows, err = s.tx.Query(ctx, q+" WHERE "+scopeClause+" ORDER BY o.id ASC", scopeArg)
+			} else {
+				rows, err = s.tx.Query(ctx, q+" ORDER BY o.id ASC")
+			}
 		}
 		if err != nil {
 			return nil, fmt.Errorf("reconcile: iam-direct %s %s: %w", spec.objectType, mode, err)
@@ -468,15 +551,43 @@ func (s *reconcileStore) SelectorBindingsMatchingObject(ctx context.Context, obj
 	// match_labels. This lets a freshly-registered object materialize membership for
 	// anchor/names bindings on its mirror-change event (forward-mat, D-4), not only on
 	// the periodic sweep.
+	// SCOPE-NARROWING (bound fan-out): the ANCHOR arm matches every object of the type,
+	// so a wildcard `*.*` anchor role (owner/admin/edit/view) bound at N account/project
+	// scopes would fan out to ALL N bindings on every object-change event — then each
+	// reconcileBinding re-verifies IsContainedIn and materializes only the contained
+	// objects (correctness safe, but O(all bindings of the type) candidates). Push the
+	// SAME IsContainedIn predicate into the JOIN for the anchor arm so only bindings whose
+	// scope CONTAINS this object are candidates (O(containing bindings) — typically the
+	// object's owner + its project-admin). cluster-scoped anchor bindings contain
+	// everything (IsContainedIn cluster=true) and are kept. The names/labels arms are
+	// already narrow (specific ids / labels) and their foreign-scope match is a wanted
+	// REJECTED-containment signal, so they are LEFT UNFILTERED — the reconciler still
+	// audits them.
+	//
+	// TRANSITIVE account containment: a mirror-fed object is registered with its owning
+	// PROJECT (parent_project_id); an ACCOUNT-scoped binding contains it because the
+	// project belongs to the account. The direct parent_account_id column may be empty
+	// (legacy/unresolved register), so the account arm resolves the account through the
+	// project→account hierarchy same-DB — COALESCE(NULLIF(m.parent_account_id,''),
+	// pj.account_id) — mirroring the resource_mirror reader's projection so this fast-path
+	// JOIN and the reconciler's IsContainedIn re-verify agree byte-for-byte. Bounded by
+	// the account: the object's project resolves to exactly ONE account, so an owner of a
+	// DIFFERENT account never matches (no cross-account over-grant). A cluster-scoped
+	// anchor binding still matches everything.
 	rows, err := s.tx.Query(ctx,
 		`SELECT b.id
 		   FROM kacho_iam.role_rule_selectors rrs
 		   JOIN kacho_iam.access_bindings b ON b.role_id = rrs.role_id
 		   JOIN kacho_iam.resource_mirror m
 		     ON m.object_type = $1 AND m.object_id = $2
+		   LEFT JOIN kacho_iam.projects pj ON pj.id = m.parent_project_id
 		  WHERE b.status = 'ACTIVE'
 		    AND $1 = ANY(rrs.object_types)
-		    AND ( (rrs.arm = 'anchor')
+		    AND ( (rrs.arm = 'anchor' AND (
+		                b.resource_type = 'cluster'
+		             OR (b.resource_type = 'account'
+		                 AND b.resource_id = COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id))
+		             OR (b.resource_type = 'project' AND m.parent_project_id = b.resource_id)))
 		       OR (rrs.arm = 'names'  AND $2 = ANY(rrs.resource_names))
 		       OR (rrs.arm = 'labels' AND m.labels @> rrs.match_labels) )
 		  ORDER BY b.id ASC`,
@@ -662,9 +773,11 @@ func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.Me
 
 // RecordEmittedTuples co-commits the per-member FGA tuples into the persisted
 // emitted-tuple ledger (kacho_iam.access_binding_emitted_tuples — F3/#178) on the
-// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10). It mirrors
-// abWriter.InsertEmittedTuples (`INSERT … ON CONFLICT DO NOTHING`) so a repeated
-// reconcile of the same ACTIVE member is an idempotent no-op. len==0 is a no-op.
+// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10). The INSERT is
+// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'` (the
+// DO UPDATE only re-tags a pre-0032 source='binding' row; the object-spaces are disjoint,
+// so no real binding↔member collision), so a repeated reconcile of the same ACTIVE member
+// — or a forward + async-full overlap — is an idempotent no-op. len==0 is a no-op.
 func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error {
 	for _, t := range tuples {
 		if t.User == "" || t.Relation == "" || t.Object == "" {
@@ -896,78 +1009,312 @@ func (a *ReconcileAdapter) ListSelectorBindingIDs(ctx context.Context) ([]domain
 // writer-tx commits, the per-object tuples it also enqueued to fga_outbox — closing the
 // create-path read-after-write race under the Contract-A flat model. The reconcile use-
 // case stays clients-free (Clean Architecture): the mapping lives here, in the pg
-// adapter that already depends on both clients and reconcile. WriteTuples is idempotent
-// (OpenFGAHTTPClient treats already_exists as success), so the later async drain of the
-// SAME fga_outbox rows is a safe no-op.
+// adapter that already depends on both clients and reconcile.
+//
+// WriteTuples is IDEMPOTENT via read-then-write-delta (owner-403 root cause): OpenFGA's
+// Write is transactional and NON-idempotent — it rejects the WHOLE batch when ANY tuple
+// pre-exists ("cannot write a tuple which already exists"). Under at-least-once register
+// / re-register the owner tuples frequently pre-exist, so a plain atomic write fails
+// wholesale and would defer the FULL owner-set, breaking op-done ⟹ full grant. On such a
+// conflict the writer reads the object's existing tuples and writes ONLY the missing
+// delta (which does not exist → no conflict), so the full grant is present (existing ∪
+// written). The later async drain of the SAME fga_outbox rows stays a safe no-op.
 type syncFGAWriter struct {
 	relations clients.RelationStore
-	// logger — surfaces per-tuple failures in the resilient fallback pass. nil →
+	// reader — OPTIONAL read capability used by the idempotent read-delta path
+	// (type-asserted from relations in NewSyncFGAWriter). nil for a store without a
+	// ReadTuples method (bare test stub) → pre-existing conflicts fall back to the
+	// durable async drainer.
+	reader fgaTupleReader
+	// logger — surfaces per-object failures in the resilient fallback pass. nil →
 	// warnings are skipped (the async drainer remains the durable retry path).
 	logger *slog.Logger
+}
+
+// fgaTupleReader — the OPTIONAL read capability the idempotent read-delta path needs.
+// Implemented by *clients.OpenFGAHTTPClient (the production RelationStore). A store that
+// does not provide it (a bare test stub) skips read-delta and defers a pre-existing
+// conflict to the durable async drainer.
+type fgaTupleReader interface {
+	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error)
 }
 
 // NewSyncFGAWriter builds the reconcile.SyncFGAWriter over a RelationStore. nil-safe:
 // a nil RelationStore yields a nil writer, so reconcile.WithSyncFGA(nil) leaves the
 // reconciler async-only (existing behaviour) — the composition root can pass an
-// unconfigured store without a special case. logger may be nil (per-tuple warnings
-// skipped).
+// unconfigured store without a special case. logger may be nil (per-object warnings
+// skipped). The read-delta idempotency is enabled when the store also implements
+// fgaTupleReader (the production OpenFGAHTTPClient always does).
 func NewSyncFGAWriter(relations clients.RelationStore, logger *slog.Logger) reconcile.SyncFGAWriter {
 	if relations == nil {
 		return nil
 	}
-	return &syncFGAWriter{relations: relations, logger: logger}
+	w := &syncFGAWriter{relations: relations, logger: logger}
+	if r, ok := relations.(fgaTupleReader); ok {
+		w.reader = r
+	}
+	return w
 }
 
-// WriteTuples applies the create-path read-after-write tuple set to OpenFGA. It is the
-// SYNC closer for one ReconcileObject/ReconcileBinding pass, so it must be as resilient
-// as the async fga_outbox drainer (which applies row-by-row): a fan-out over multiple
-// bounded `*.*` ARM_ANCHOR bindings on a populated account can collect a set that (a)
-// exceeds OpenFGA's per-request maxTuplesPerWrite (handled by OpenFGAHTTPClient.WriteTuples
-// chunking) AND (b) contains a tuple OpenFGA rejects for a sibling object whose tier is
-// computed-only (e.g. `iam_role#viewer` accepts no direct user) — which would otherwise
-// fail the WHOLE batched write and drop the owner's valid `iam_access_binding#viewer`
-// tuple, leaving GET-after-create at 403 (#232). On a batch error we therefore RETRY
-// per-tuple so one invalid/over-limit tuple only drops itself; the durable fga_outbox
-// enqueue + async drainer remain the at-least-once backstop for any per-tuple failure
-// (which the drainer poisons individually). Best-effort: the per-tuple pass returns nil
-// even if some tuples fail (logged by the reconciler's applyAfterCommit caller via the
-// batch error) — the goal is to land every APPLICABLE tuple synchronously.
+// maxObjectPackTuples bounds one packed sync Write to OpenFGA's per-request
+// maxTuplesPerWrite (default 100). The fast path packs WHOLE objects up to this
+// many tuples and NEVER splits an object across requests — so every object's
+// tuple-set lands in ONE transactional OpenFGA Write (all-or-nothing), even on
+// the packed happy path. An object's grant is ~6 relations (v_* + tier), so it
+// always fits well under the cap; the packing only bounds the multi-object
+// fan-out (boot backfill / sweep), keeping it a few large requests rather than
+// N tiny ones (low write-contention under HIGHER_CONSISTENCY).
+const maxObjectPackTuples = 100
+
+// objectTupleGroup — one FGA object with its full sync tuple-set. The set is
+// applied in ONE transactional OpenFGA Write, so the object materializes
+// ATOMICALLY (all its relations or none) — the create-path op-done ⟹ full-grant
+// invariant.
+type objectTupleGroup struct {
+	object string
+	tuples []clients.RelationTuple
+}
+
+// groupTuplesByObject buckets the pass tuples by their FGA object, preserving
+// first-seen order (stable → deterministic packing + logging).
+func groupTuplesByObject(tuples []reconcile.SyncFGATuple) []objectTupleGroup {
+	idx := make(map[string]int, len(tuples))
+	groups := make([]objectTupleGroup, 0, len(tuples))
+	for _, t := range tuples {
+		rt := clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object}
+		if i, ok := idx[t.Object]; ok {
+			groups[i].tuples = append(groups[i].tuples, rt)
+			continue
+		}
+		idx[t.Object] = len(groups)
+		groups = append(groups, objectTupleGroup{object: t.Object, tuples: []clients.RelationTuple{rt}})
+	}
+	return groups
+}
+
+// WriteTuples applies the create-path read-after-write tuple set to OpenFGA
+// ATOMICALLY PER OBJECT. It is the SYNC closer for one ReconcileObject/
+// ReconcileBinding pass. Owner-tuple materialization is eventually-consistent (it
+// does not gate Operation.done), but it MUST land all-or-nothing PER OBJECT: the
+// creator's per-object grant is the set {v_get,v_list,v_create,v_update,v_delete,
+// tier}. If it landed per-tuple, a transient write-contention on ONE tuple (e.g.
+// v_delete) would leave the object PARTIAL — a creator doing a bounded-retry
+// immediate mutate could see v_update (PATCH) but not the still-undrained v_delete
+// (DELETE → 403 "lacks v_delete"). All-or-nothing guarantees v_update-visible ⟹
+// v_delete-visible, so the grant is never observed half-materialized.
+//
+// Design (all-or-nothing per object, never partial):
+//
+//   - Group the pass tuples by object. Each object's whole set is applied in ONE
+//     transactional OpenFGA Write (all-or-nothing).
+//   - Fast path — pack WHOLE objects into ≤maxObjectPackTuples requests (an object
+//     is NEVER split, so it stays atomic even packed) and write each. A clean pass
+//     lands everything in a few large requests (low HIGHER_CONSISTENCY contention).
+//   - Resilient path — on any packed-request error, re-apply each object as its OWN
+//     atomic Write. This isolates a sibling object OpenFGA rejects (a computed-only
+//     tier such as `iam_role#viewer`, #232) so it never strips the owner's valid
+//     object, AND guarantees an object is never left partial. On a per-object error:
+//     · already-exists (a pre-existing tuple — OpenFGA rejects the WHOLE batch,
+//     the owner-403 root cause under at-least-once re-register): reconcile the
+//     object IDEMPOTENTLY (reconcileObjectDelta) — read its existing tuples and
+//     write ONLY the missing delta, so the full grant is present (existing ∪
+//     written) instead of the whole set being deferred;
+//     · any other error (transient write-contention / computed-only reject #232):
+//     defer the object's FULL tuple-set to the async fga_outbox drainer.
+//     OpenFGA's Write is transactional, so a failed request applies NONE of its
+//     tuples — the object is fully deferred, not half-written.
+//
+// Best-effort: per-object failures are non-fatal (the durable fga_outbox enqueue +
+// async drainer are the at-least-once backstop) but no longer silent (CWE-778) —
+// a persistently failing object is logged so an authz gap is diagnosable.
 func (w *syncFGAWriter) WriteTuples(ctx context.Context, tuples []reconcile.SyncFGATuple) error {
 	if len(tuples) == 0 {
 		return nil
 	}
-	out := make([]clients.RelationTuple, len(tuples))
-	for i, t := range tuples {
-		out[i] = clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object}
-	}
-	// Fast path — the whole (chunked) batch applies cleanly.
-	if err := w.relations.WriteTuples(ctx, out); err == nil {
+	groups := groupTuplesByObject(tuples)
+
+	// Fast path: pack whole objects into ≤cap requests and try them. Success ⇒ the
+	// whole pass landed (every object atomic within its packed request).
+	if w.writePacked(ctx, groups) {
 		return nil
-	} else if len(out) == 1 {
-		// A single-tuple batch already failed per-tuple — nothing to isolate; surface it.
-		return err
 	}
-	// Resilient path — a tuple in the batch was rejected (computed-only tier on a
-	// sibling object, or an over-limit chunk that still tripped). Apply each tuple on
-	// its own so a single bad tuple does not strip the rest (notably the owner's valid
-	// iam_access_binding viewer/admin tuple). Per-tuple failures are non-fatal here —
-	// the async drainer poisons them individually; the create-path closer's job is to
-	// land every applicable tuple now.
-	for i := range out {
-		if err := w.relations.WriteTuples(ctx, out[i:i+1]); err != nil && w.logger != nil {
-			// Non-fatal here (the async fga_outbox drainer re-poisons the row and
-			// retries durably), but no longer silent (CWE-778): a persistently
-			// failing authorization tuple must be observable so an authz gap is
-			// diagnosable even if the drainer also lags.
-			w.logger.WarnContext(ctx, "sync FGA per-tuple write failed — deferred to the async drainer",
-				slog.String("user", out[i].User),
-				slog.String("relation", out[i].Relation),
-				slog.String("object", out[i].Object),
-				slog.String("err", err.Error()),
-			)
+	// Resilient path: a packed request failed. Apply each object atomically so one
+	// rejected object never strips a valid sibling AND no object is left partial.
+	for _, g := range groups {
+		err := w.relations.WriteTuples(ctx, g.tuples)
+		if err == nil {
+			continue // clean per-object write landed (e.g. a sibling caused the packed failure).
 		}
+		// IDEMPOTENCY (owner-403 root cause): OpenFGA's transactional Write rejects
+		// the WHOLE batch when ANY tuple pre-exists. Under at-least-once register /
+		// re-register the owner tuples frequently pre-exist, so the atomic write above
+		// fails wholesale and — without this — the FULL owner-set is deferred, breaking
+		// op-done ⟹ full grant. Reconcile the object idempotently: read its existing
+		// tuples and write ONLY the missing delta (which does not exist → no conflict),
+		// so the full grant is present (existing ∪ written). A store without a read
+		// capability falls back to the durable async drainer.
+		if isAlreadyExistsErr(err) && w.reader != nil {
+			if derr := w.reconcileObjectDelta(ctx, g); derr != nil {
+				w.logDefer(ctx, g, derr)
+			}
+			continue
+		}
+		// Genuine failure (transient write-contention / computed-only reject #232):
+		// defer the object's FULL set to the async drainer (atomic — never partial),
+		// non-silent (CWE-778).
+		w.logDefer(ctx, g, err)
 	}
 	return nil
+}
+
+// maxDeltaRounds bounds the read-then-write-delta retry when a concurrent writer
+// (e.g. the async drainer applying the SAME fga_outbox rows row-by-row) lands part
+// of the missing set between our Read and our Write. Each round the missing set
+// strictly shrinks (the racer made progress) or the write applies cleanly, so a
+// small bound converges; on exhaustion the object is deferred to the durable drainer.
+const maxDeltaRounds = 4
+
+// fgaDeltaReadPageSize / maxDeltaReadPages bound one delta read. The owner grant is
+// ~6 tuples for one subject on one object, so a single small page suffices; the page
+// cap is a defensive bound for a heavily-shared object.
+const (
+	fgaDeltaReadPageSize = 50
+	maxDeltaReadPages    = 20
+)
+
+// reconcileObjectDelta idempotently completes one object's grant after a pre-existing-
+// tuple conflict. It reads the object's existing tuples for each subject in the group,
+// computes missing = desired − existing, and writes ONLY the missing tuples (which do
+// not exist → no conflict, atomic apply). missing == ∅ ⇒ the full grant is already
+// present (idempotent no-op success). A benign race (a concurrent writer landing part
+// of the missing set between our Read and Write) surfaces as an already-exists on the
+// missing-write → re-read and retry the residual (bounded). Returns nil once the full
+// desired set is present; a non-conflict read/write error (or non-convergence) is
+// returned so the caller defers the object to the async drainer.
+func (w *syncFGAWriter) reconcileObjectDelta(ctx context.Context, g objectTupleGroup) error {
+	subjects := distinctSubjects(g.tuples)
+	for round := 0; round < maxDeltaRounds; round++ {
+		have, err := w.readExisting(ctx, subjects, g.object)
+		if err != nil {
+			return err
+		}
+		missing := make([]clients.RelationTuple, 0, len(g.tuples))
+		for _, t := range g.tuples {
+			if _, ok := have[t]; !ok {
+				missing = append(missing, t)
+			}
+		}
+		if len(missing) == 0 {
+			return nil // full grant already present — idempotent no-op success.
+		}
+		werr := w.relations.WriteTuples(ctx, missing)
+		if werr == nil {
+			return nil // delta applied — full grant present (existing ∪ written).
+		}
+		if !isAlreadyExistsErr(werr) {
+			return werr // genuine failure — defer to the async drainer.
+		}
+		// Benign race: a concurrent writer landed part of `missing` between our Read
+		// and Write, so OpenFGA rejected the batch. Re-read and retry the residual.
+	}
+	return fmt.Errorf("sync FGA delta did not converge for %s after %d rounds", g.object, maxDeltaRounds)
+}
+
+// readExisting reads the tuples already present on `object` for the given subjects,
+// filtered server-side by (subject, object) so the response stays small (the owner
+// grant is ~6 tuples) even for a heavily-shared object. Pagination is followed to a
+// bound. The returned set is keyed by the exact (User, Relation, Object) triple.
+func (w *syncFGAWriter) readExisting(ctx context.Context, subjects []string, object string) (map[clients.RelationTuple]struct{}, error) {
+	have := make(map[clients.RelationTuple]struct{})
+	for _, subj := range subjects {
+		token := ""
+		for page := 0; page < maxDeltaReadPages; page++ {
+			tuples, next, err := w.reader.ReadTuples(ctx, subj, "", object, fgaDeltaReadPageSize, token)
+			if err != nil {
+				return nil, fmt.Errorf("sync FGA read existing tuples for %s: %w", object, err)
+			}
+			for _, t := range tuples {
+				have[clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object}] = struct{}{}
+			}
+			if next == "" {
+				break
+			}
+			token = next
+		}
+	}
+	return have, nil
+}
+
+// logDefer surfaces a per-object deferral to the async drainer (CWE-778: observable,
+// not silent). nil logger → skipped.
+func (w *syncFGAWriter) logDefer(ctx context.Context, g objectTupleGroup, err error) {
+	if w.logger == nil {
+		return
+	}
+	w.logger.WarnContext(ctx, "sync FGA per-object write failed — full tuple-set deferred to the async drainer",
+		slog.String("object", g.object),
+		slog.Int("tuple_count", len(g.tuples)),
+		slog.String("err", err.Error()),
+	)
+}
+
+// distinctSubjects returns the unique subjects (FGA users) in a group, preserving
+// first-seen order. Almost always a single subject (the creator's per-object grant).
+func distinctSubjects(tuples []clients.RelationTuple) []string {
+	seen := make(map[string]struct{}, len(tuples))
+	out := make([]string, 0, 1)
+	for _, t := range tuples {
+		if _, ok := seen[t.User]; ok {
+			continue
+		}
+		seen[t.User] = struct{}{}
+		out = append(out, t.User)
+	}
+	return out
+}
+
+// isAlreadyExistsErr detects OpenFGA's transactional write-conflict reply (writing a
+// tuple that already exists). It matches BOTH surfaced forms — the spaced message
+// "cannot write a tuple which already exists" (GATE-RUN #2 production) and the
+// "errorCode: already_exists" marker — so the read-delta path triggers regardless of
+// OpenFGA's error-string format. Mirrors clients.classifyFGAWriteErr's vocabulary.
+func isAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already_exists") || strings.Contains(msg, "already exists")
+}
+
+// writePacked greedily packs whole object-groups into ≤maxObjectPackTuples-tuple
+// requests (an object is NEVER split across requests, so each object stays atomic)
+// and writes each packed request. It returns true iff EVERY request applied
+// cleanly. false ⇒ some request failed and the caller must run the per-object
+// resilient path (re-applying cleanly-landed objects there is an idempotent no-op).
+func (w *syncFGAWriter) writePacked(ctx context.Context, groups []objectTupleGroup) bool {
+	var chunk []clients.RelationTuple
+	flush := func() bool {
+		if len(chunk) == 0 {
+			return true
+		}
+		err := w.relations.WriteTuples(ctx, chunk)
+		chunk = chunk[:0]
+		return err == nil
+	}
+	for _, g := range groups {
+		// Start a new request before an object would overflow the cap (keeps every
+		// object whole within ONE request). A lone object larger than the cap
+		// (never in practice — a grant is ~6 tuples) is still its own request; the
+		// underlying client would chunk it, but the resilient path re-applies it
+		// atomically as one Write, so partial cannot leak.
+		if len(chunk) > 0 && len(chunk)+len(g.tuples) > maxObjectPackTuples {
+			if !flush() {
+				return false
+			}
+		}
+		chunk = append(chunk, g.tuples...)
+	}
+	return flush()
 }
 
 var _ reconcile.SyncFGAWriter = (*syncFGAWriter)(nil)

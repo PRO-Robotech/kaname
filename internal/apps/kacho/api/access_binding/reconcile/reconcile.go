@@ -103,10 +103,49 @@ type ReconcileStore interface {
 	// materialization under N replicas.
 	AcquireBindingLock(ctx context.Context, bindingID domain.AccessBindingID) error
 
+	// AcquireBindingLockShared takes pg_advisory_xact_lock_shared(hashtext(binding_id))
+	// — the SHARE-mode sibling of AcquireBindingLock — on the forward writer-tx. It is
+	// the FIRST statement of the ADDITIVE forward path (forwardObjectForBinding). SHARE
+	// mode is chosen deliberately:
+	//
+	//   - SHARE ∥ SHARE do NOT conflict → N concurrent forward passes for DIFFERENT
+	//     objects of the SAME binding all hold it simultaneously and proceed CONCURRENTLY
+	//     (the throughput property — forwards never serialize on each other).
+	//   - SHARE conflicts with EXCLUSIVE (AcquireBindingLock) → a forward pass and a
+	//     concurrent FULL ReconcileObject of the SAME binding are MUTUALLY EXCLUSIVE. This
+	//     is REQUIRED for correctness: the full path holds `SELECT … FOR UPDATE` on the
+	//     access_bindings row, and the forward path's INSERT into the FK-child tables
+	//     (target_members / emitted_tuples) needs a FOR KEY SHARE lock on that same parent
+	//     row — FOR UPDATE conflicts with FOR KEY SHARE, so interleaving them deadlocks
+	//     (40P01, empirically). The SHARE advisory gate makes forward and full take turns
+	//     on the binding, so their row-locks never cross → no deadlock, and full never
+	//     revokes a just-forwarded in-mirror object as "stale".
+	//
+	// It is acquired in ASCENDING binding-id order (ReconcileObjectForward sorts the
+	// fan-out) — the SAME order the full path's dedupSortBindingIDs uses — so a forward
+	// and a full pass acquiring locks across multiple shared bindings cannot form an ABBA
+	// cycle (ordered locking). xact-scoped → auto-released on commit/rollback.
+	AcquireBindingLockShared(ctx context.Context, bindingID domain.AccessBindingID) error
+
 	// LoadBinding loads the minimal scope/selector/role facts for a binding.
 	// ok=false when the binding no longer exists (deleted — the reconciler then
 	// does nothing; the CASCADE already dropped its members).
+	//
+	// The implementation takes a `SELECT … FOR UPDATE` row-lock on the binding row so
+	// two concurrent FULL reconcile passes of the same binding serialize (the delete-
+	// stale diff must not race). The forward fast-path does NOT use this — see
+	// LoadBindingUnlocked.
 	LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
+
+	// LoadBindingUnlocked loads the SAME BindingScope facts as LoadBinding but WITHOUT
+	// the `FOR UPDATE` row-lock (and the forward fast-path additionally skips the
+	// advisory lock). It is the read the ADDITIVE forward path (ReconcileObjectForward)
+	// uses: because that path only ADDS the freshly-registered object's tuples (never a
+	// delete-stale diff), it needs no serialization against a concurrent pass of the
+	// same binding, so it must not take the binding row-lock that would re-serialize all
+	// registrations sharing one editor/owner binding (the throughput bottleneck this
+	// fast-path removes). ok=false when the binding no longer exists.
+	LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
 	// MatchSelector returns the MIRROR objects matching a selector's
 	// types+matchLabels (labels @> matchLabels) — the consumer-owned feed
@@ -114,13 +153,14 @@ type ReconcileStore interface {
 	// ReconcileBinding pass.
 	MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error)
 
-	// MatchAllInScope returns EVERY mirror object of the given types (ARM_ANCHOR /
-	// `all` — no label filter). Containment to
-	// the binding's scope is re-asserted by the reconciler (IsContainedIn) so the
-	// query may over-return; the scope filter narrows it. The consumer-owned feed
-	// (FeedMirror). `types` contains ONLY mirror-fed types (the reconciler partitions
-	// by feed-source before calling).
-	MatchAllInScope(ctx context.Context, types []string) ([]domain.MirrorObject, error)
+	// MatchAllInScope returns the mirror objects of the given types (ARM_ANCHOR /
+	// `all` — no label filter) NARROWED to the binding's containment `scope`. The scope
+	// is pushed into the SQL as a PROVEN SUPERSET of the reconciler's IsContainedIn
+	// re-verify (which STILL runs — the SQL only PRE-filters), so the reconciler receives
+	// O(scope) rows instead of O(cluster mirror). The consumer-owned feed (FeedMirror).
+	// `types` contains ONLY mirror-fed types (the reconciler partitions by feed-source
+	// before calling).
+	MatchAllInScope(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error)
 
 	// MatchByIDs returns the mirror objects of the given types whose object_id is in
 	// `ids` (ARM_NAMES — exact-id selector). An id not
@@ -129,9 +169,12 @@ type ReconcileStore interface {
 	MatchByIDs(ctx context.Context, types []string, ids []string) ([]domain.MirrorObject, error)
 
 	// MatchAllInScopeIAMDirect / MatchByIDsIAMDirect are the iam-direct
-	// analogues for IAM's OWN objects (iam.project / iam.account) read SAME-DB from
-	// the native tables. `types` contains ONLY iam-direct types.
-	MatchAllInScopeIAMDirect(ctx context.Context, types []string) ([]domain.MirrorObject, error)
+	// analogues for IAM's OWN objects (iam.project / iam.account + content) read SAME-DB
+	// from the native tables. `types` contains ONLY iam-direct types. MatchAllInScopeIAMDirect
+	// pushes the binding's containment `scope` into the SQL as a PROVEN SUPERSET of the
+	// IsContainedIn re-verify (same as MatchAllInScope); MatchByIDsIAMDirect (names arm) stays
+	// unscoped — a foreign-scope id-match is a wanted REJECTED-containment audit signal.
+	MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error)
 	MatchByIDsIAMDirect(ctx context.Context, types []string, ids []string) ([]domain.MirrorObject, error)
 
 	// MatchIAMDirect returns IAM's OWN objects matching a selector's
@@ -216,7 +259,7 @@ type ReconcileStore interface {
 	// all_in_scope / resources[] arms' tuples already in the ledger. Without this the
 	// selector member-tuples were emitted to fga_outbox but never recorded, so the
 	// revoke orphaned them and a role tier change never reconciled them.
-	// RecordEmittedTuples is INSERT … ON CONFLICT DO NOTHING (idempotent re-emit);
+	// RecordEmittedTuples is INSERT … ON CONFLICT DO UPDATE SET source='member' (idempotent re-emit);
 	// ForgetEmittedTuples removes exactly the supplied member rows (eager-revoke /
 	// fell-out). A deleted binding's rows are dropped by the FK ON DELETE CASCADE.
 	RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error
@@ -621,19 +664,22 @@ func (r *Reconciler) desiredMembers(ctx context.Context, s ReconcileStore, bs Bi
 // matchSelectorObjects resolves the candidate objects for ONE selector per its arm,
 // across both feeds (mirror-fed + iam-direct, partitioned): ARM_ANCHOR(all) →
 // MatchAllInScope; ARM_NAMES → MatchByIDs; ARM_LABELS → MatchSelector(labels @>).
-// Containment is re-asserted by the caller; this only resolves the candidate set.
-func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore, sel domain.RuleSelector) ([]domain.MirrorObject, error) {
+// Containment is re-asserted by the caller (IsContainedIn); this only resolves the
+// candidate set. The binding's `scope` is passed to the ANCHOR arm so the candidate set
+// is pushed-down to O(scope) in SQL rather than scanned cluster-wide + narrowed in Go —
+// the Go re-verify remains authoritative (the SQL predicate is a proven superset).
+func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore, sel domain.RuleSelector, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	mirrorTypes, iamTypes := partitionByFeed(sel.ObjectTypes)
 	var matched []domain.MirrorObject
 	if len(mirrorTypes) > 0 {
-		objs, err := r.matchByArm(ctx, sel, mirrorTypes, false, s)
+		objs, err := r.matchByArm(ctx, sel, mirrorTypes, false, s, scope)
 		if err != nil {
 			return nil, fmt.Errorf("match rule selector %s (mirror): %w", sel.RuleFP, err)
 		}
 		matched = append(matched, objs...)
 	}
 	if len(iamTypes) > 0 {
-		objs, err := r.matchByArm(ctx, sel, iamTypes, true, s)
+		objs, err := r.matchByArm(ctx, sel, iamTypes, true, s, scope)
 		if err != nil {
 			return nil, fmt.Errorf("match rule selector %s (iam-direct): %w", sel.RuleFP, err)
 		}
@@ -642,8 +688,11 @@ func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore,
 	return matched, nil
 }
 
-// matchByArm dispatches the per-arm match to the right feed (mirror vs iam-direct).
-func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, types []string, iamDirect bool, s ReconcileStore) ([]domain.MirrorObject, error) {
+// matchByArm dispatches the per-arm match to the right feed (mirror vs iam-direct). The
+// ANCHOR arm passes the binding's `scope` for the SQL scope push-down; the NAMES/LABELS arms
+// are already narrow (specific ids / labels) AND a foreign-scope match is a wanted
+// REJECTED-containment audit signal, so they are LEFT UNSCOPED (the reconciler re-verifies).
+func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, types []string, iamDirect bool, s ReconcileStore, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	switch sel.Arm {
 	case domain.ArmNames:
 		if iamDirect {
@@ -657,9 +706,9 @@ func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, ty
 		return s.MatchSelector(ctx, types, sel.MatchLabels)
 	default: // ArmAnchor (all)
 		if iamDirect {
-			return s.MatchAllInScopeIAMDirect(ctx, types)
+			return s.MatchAllInScopeIAMDirect(ctx, types, scope)
 		}
-		return s.MatchAllInScope(ctx, types)
+		return s.MatchAllInScope(ctx, types, scope)
 	}
 }
 
@@ -690,37 +739,58 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	}
 
 	for _, sel := range bs.Selectors {
-		matched, err := r.matchSelectorObjects(ctx, s, sel)
+		// Pass the binding's scope so the ANCHOR arm pushes containment into SQL
+		// (O(scope) candidate set); IsContainedIn below stays the authoritative re-verify.
+		matched, err := r.matchSelectorObjects(ctx, s, sel, bs.Scope)
 		if err != nil {
 			return nil, err
 		}
 		for _, o := range matched {
-			// Containment re-verify per object: a label-matched object NOT
-			// under the binding's scope (cross-scope injection via label-tampering)
-			// → REJECTED, never a tuple.
-			if !o.IsContainedIn(bs.Scope) {
-				out = append(out, DesiredMember{
-					RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
-					Status: domain.VerificationRejected,
-				})
-				continue
-			}
-			// ACTIVE: precompute the per-object tuples from the RULE's verbs (the
-			// ARM_LABELS rule is excluded from CompileRules, so RolePerms cannot
-			// supply the tier). ruleObjectTuples reuses the per-verb/tier
-			// semantics. A type the model has no FGA object for → no tuple → skip the
-			// object (fail-closed: a typo'd type never grants).
-			tuples, ok := ruleObjectTuples(subject, sel.Verbs, o.ObjectType, o.ObjectID)
+			// Per-object verdict — SHARED with the forward fast-path
+			// (desiredMemberForObject), so the full recompute and the forward path
+			// derive BYTE-IDENTICAL tuples (idempotency: forward + async full both
+			// emit the same set, and the read-delta FGA writer skips duplicates).
+			dm, ok := desiredMemberForObject(subject, sel, o, bs.Scope)
 			if !ok {
+				// A type the model has no FGA object for → no tuple → skip the object
+				// (fail-closed: a typo'd type never grants).
 				continue
 			}
-			out = append(out, DesiredMember{
-				RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
-				Status: domain.VerificationActive, Tuples: tuples,
-			})
+			out = append(out, dm)
 		}
 	}
 	return out, nil
+}
+
+// desiredMemberForObject computes the DesiredMember a materializing selector produces
+// for ONE candidate object. It is the single per-object decision point SHARED by the
+// full recompute (desiredRuleMembers) and the ADDITIVE forward fast-path
+// (forwardObjectForBinding), so the two paths can never drift in what tuples an object
+// grants (idempotency across forward + async-backstop).
+//
+//   - not contained in the binding's scope (cross-scope label-tampering / foreign parent)
+//     → a REJECTED member (ok=true, no tuples). The full path records it + audits; the
+//     forward path skips it (additive-only never writes a non-ACTIVE member).
+//   - contained → an ACTIVE member with the per-object tuples derived from the RULE's
+//     verbs (v_* + back-compat tier via ruleObjectTuples). ARM_LABELS/ANCHOR rules are
+//     excluded from CompileRules, so the tuples come from the rule verbs, not RolePerms.
+//   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
+//     grants, fail-closed).
+func desiredMemberForObject(subject string, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+	if !o.IsContainedIn(scope) {
+		return DesiredMember{
+			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
+			Status: domain.VerificationRejected,
+		}, true
+	}
+	tuples, ok := ruleObjectTuples(subject, sel.Verbs, o.ObjectType, o.ObjectID)
+	if !ok {
+		return DesiredMember{}, false
+	}
+	return DesiredMember{
+		RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
+		Status: domain.VerificationActive, Tuples: tuples,
+	}, true
 }
 
 // applyDiff reconciles the desired set against the current materialized set: it

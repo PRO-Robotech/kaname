@@ -84,13 +84,33 @@ type openfgaTupleKey struct {
 type openfgaCheckRequest struct {
 	AuthorizationModelID string          `json:"authorization_model_id,omitempty"`
 	TupleKey             openfgaTupleKey `json:"tuple_key"`
+	// Consistency — optional OpenFGA read-consistency preference. Empty ⇒ field
+	// omitted ⇒ OpenFGA default (MINIMIZE_LATENCY). Set to
+	// consistencyHigherConsistency only for the read-after-own-write confirm probe.
+	Consistency string `json:"consistency,omitempty"`
 }
 
 type openfgaCheckResponse struct {
 	Allowed bool `json:"allowed"`
 }
 
+// Check — per-RPC authz Check at OpenFGA's default (MINIMIZE_LATENCY) consistency:
+// the hot enforcement gate stays cache/replica-eligible (low latency).
 func (c *OpenFGAHTTPClient) Check(ctx context.Context, subject, relation, object string) (bool, error) {
+	return c.check(ctx, subject, relation, object, "")
+}
+
+// CheckConsistent — Check forcing HIGHER_CONSISTENCY (strong read-after-write). Used
+// by the owner-tuple confirm-gate (in-process iam probe): the tuple was written to
+// the SAME store on this create path, so the probe must not be served a stale
+// negative from a lagging replica. Idempotent / read-only, same contract as Check.
+func (c *OpenFGAHTTPClient) CheckConsistent(ctx context.Context, subject, relation, object string) (bool, error) {
+	return c.check(ctx, subject, relation, object, consistencyHigherConsistency)
+}
+
+// check is the shared Check transport; consistency is the OpenFGA `consistency`
+// wire value ("" ⇒ omitted ⇒ default MINIMIZE_LATENCY).
+func (c *OpenFGAHTTPClient) check(ctx context.Context, subject, relation, object, consistency string) (bool, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return false, ErrNotConfigured
 	}
@@ -105,6 +125,7 @@ func (c *OpenFGAHTTPClient) Check(ctx context.Context, subject, relation, object
 	body, _ := json.Marshal(openfgaCheckRequest{
 		AuthorizationModelID: c.AuthorizationModel,
 		TupleKey:             openfgaTupleKey{User: subject, Relation: relation, Object: object},
+		Consistency:          consistency,
 	})
 	req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
 		fmt.Sprintf("http://%s/stores/%s/check", c.Endpoint, c.StoreID),

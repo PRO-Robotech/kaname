@@ -78,71 +78,6 @@ def assert_iam_operation_envelope():
     ]
 
 
-def nob_preclean_account_a(next_step):
-    """Bounded list→delete→await loop removing EVERY active account-A binding for userNOBId so
-    the non-member scope-filter assertion is self-isolating (cross-suite order-independent).
-
-    Without this, a prior suite (e.g. the access-binding CRUD case grants (userNOBId, ROLE_VIEW,
-    account:accountAId)) can leave NOB with a residual account-A viewer grant → NOB legitimately
-    sees account-A users under viewer∪v_list → the "empty for non-member" assertion flips. The
-    loop's terminal (clean-slate) branch jumps FORWARD to `next_step` (never falling into the
-    delete machinery — the visibility-set hang lesson), so the iteration cap holds."""
-    CAP = 12
-    return [
-        Step(
-            name="nob-preclean-list",
-            method="GET",
-            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                "if (pm.environment.get('_nobStarted') !== pm.info.requestName) { pm.environment.set('_nobCount', '0'); pm.environment.set('_nobStarted', pm.info.requestName); }",
-            ],
-            test_script=[
-                "pm.test('nob pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
-                "const c = parseInt(pm.environment.get('_nobCount') || '0', 10);",
-                "let arr = [];",
-                "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
-                f"if (arr.length > 0 && c < {CAP}) {{",
-                "  pm.environment.set('nobDup', arr[0].id);",
-                "  pm.environment.set('_nobCount', String(c + 1));",
-                "  postman.setNextRequest('nob-preclean-del');",
-                "  return;",
-                "}",
-                "pm.environment.unset('_nobCount'); pm.environment.unset('_nobStarted'); pm.environment.unset('nobDup');",
-                f"postman.setNextRequest('{next_step}');",
-            ],
-        ),
-        Step(
-            name="nob-preclean-del",
-            method="DELETE",
-            path="/iam/v1/accessBindings/{{nobDup}}",
-            auth="jwtAccountAdminA",
-            test_script=[
-                "pm.test('nob pre-clean delete acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
-                "pm.environment.unset('nobDelOp');",
-                "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('nobDelOp', dj.id); }",
-                "if (!pm.environment.get('nobDelOp')) { postman.setNextRequest('nob-preclean-list'); }",
-            ],
-        ),
-        Step(
-            name="nob-preclean-await",
-            method="GET",
-            path="/operations/{{nobDelOp}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                "if (pm.environment.get('_nobAwaitStarted') !== pm.info.requestName) { pm.environment.set('_nobAwaitCount', '0'); pm.environment.set('_nobAwaitStarted', pm.info.requestName); }",
-            ],
-            test_script=[
-                "const j = pm.response.json();",
-                "const c = parseInt(pm.environment.get('_nobAwaitCount') || '0', 10);",
-                f"if (!j.done && c < {POLL_CAP}) {{ pm.environment.set('_nobAwaitCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }}",
-                "pm.environment.unset('_nobAwaitCount'); pm.environment.unset('_nobAwaitStarted');",
-                "postman.setNextRequest('nob-preclean-list');",
-            ],
-        ),
-    ]
-
-
 # ---------------------------------------------------------------------------
 # IAM-USR-GT-CRUD-OK — Get userNOBId as NOB (self — only self can get own record)
 # ---------------------------------------------------------------------------
@@ -322,28 +257,31 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY — non-member gets 200 + empty list (scope-filter)
-# jwtNoBindings is not a member of accountAId → scope-filter returns 200 + empty, not 403.
+# jwtPureNoBindings is not a member of accountAId → scope-filter returns 200 + empty, not 403.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY",
-    title="List users ?accountId=accountAId as jwtNoBindings (non-member) → 200 + empty list (scope-filter)",
+    title="List users ?accountId=accountAId as jwtPureNoBindings (non-member) → 200 + empty list (scope-filter)",
     classes=["AUTHZ", "SCOPE"],
     priority="P1",
     steps=[
-        # Self-isolation: strip any residual account-A grant on userNOBId left by another suite
-        # (e.g. access-binding CRUD grants NOB a ROLE_VIEW@account) so "non-member sees empty"
-        # holds regardless of cross-suite run order. Clean slate → jumps to list-nonmember.
-        *nob_preclean_account_a("list-nonmember"),
+        # kacho-iam#276 root-cause fix — this reads jwtPureNoBindings, a DEDICATED subject that
+        # NO suite EVER grants (setup.sh). Previously it read jwtNoBindings, which the iam
+        # access-binding CRUD suites grant `ROLE_VIEW@account-A`; under the parallel fan-out that
+        # account-scoped viewer transiently made account-A users visible to NOB via containment →
+        # this "must be empty" canary flipped, which had forced a preclean loop + retry_until_absent
+        # band-aid. A guaranteed binding-free principal makes this a STRICT single-shot leak-guard:
+        # a GENUINE user-list over-show still FAILS the "zero users" assertion honestly.
         Step(
             name="list-nonmember",
             method="GET",
             path="/iam/v1/users?accountId={{accountAId}}",
-            auth="jwtNoBindings",
+            auth="jwtPureNoBindings",
             test_script=[
-                # Per authz-deny.py: user-list-account-A → NOB → EMPTY (200 + zero users).
+                # Per authz-deny.py: user-list-account-A → non-member → EMPTY (200 + zero users).
                 *assert_status(200),
-                "pm.test('NOB: users empty (scope-filter default-deny)', () => {",
+                "pm.test('non-member: users empty (scope-filter default-deny)', () => {",
                 "  const j = pm.response.json();",
                 "  pm.expect((j.users || []).length, 'zero users for non-member').to.equal(0);",
                 "});",
@@ -570,7 +508,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -590,7 +528,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('invitedUserId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[
@@ -673,7 +611,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('badRoleInvOpId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[

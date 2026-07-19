@@ -82,6 +82,12 @@ const (
 // error+log line.
 const maxErrBodyBytes = 4096
 
+// consistencyHigherConsistency is the OpenFGA `consistency` wire literal that
+// forces a strong read-after-write (cache/replica-lag bypass). Sent ONLY on the
+// owner-tuple confirm-gate probe (read-after-OWN-write); the hot per-RPC
+// enforcement gate omits the field and keeps OpenFGA's default MINIMIZE_LATENCY.
+const consistencyHigherConsistency = "HIGHER_CONSISTENCY"
+
 // checkTimeout / listTimeout / writeTimeout — resolve the effective per-op
 // deadline, falling back to the package default when the field is zero.
 func (c *OpenFGAHTTPClient) checkTimeout() time.Duration {

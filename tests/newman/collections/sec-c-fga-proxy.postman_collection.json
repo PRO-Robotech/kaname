@@ -406,7 +406,7 @@
                   "const extBase = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (!extBase) {",
                   "  console.warn('externalBaseUrl not set — skipping external isolation check.');",
-                  "  postman.setNextRequest(null);",
+                  "  pm.execution.setNextRequest(null);",
                   "} else {",
                   "  pm.request.url = extBase + '/iam/v1/internal:registerResource';",
                   "}"

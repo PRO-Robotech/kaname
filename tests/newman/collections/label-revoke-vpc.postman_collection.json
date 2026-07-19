@@ -28,6 +28,134 @@
       "description": "class:T31 | class:LABELS | class:REVOKE | class:FGA | class:AUTHZ | class:STATE | priority:P0",
       "item": [
         {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: create-proj-n1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-n1-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_n1', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: poll-proj-n1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_n1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_n1}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: create-sa-n1",
           "request": {
             "method": "POST",
@@ -142,7 +270,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -156,7 +284,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: create-net-n1",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: create-net-n1-rya12",
           "request": {
             "method": "POST",
             "header": [
@@ -178,7 +306,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-n1-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-n1-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -207,6 +335,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -270,7 +413,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -327,6 +470,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -461,7 +612,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -584,7 +735,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -644,6 +795,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -658,7 +817,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -716,6 +875,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -730,7 +897,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -855,7 +1022,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -912,6 +1079,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -926,7 +1101,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -1004,6 +1179,134 @@
       "name": "T31-LBLREVOKE-VPC-SECGROUP-02 — revoke02_securitygroup: vpc.securityGroup Create emits labels + Update label-change revokes (double-bug)",
       "description": "class:T31 | class:LABELS | class:REVOKE | class:FGA | class:AUTHZ | class:STATE | priority:P0",
       "item": [
+        {
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-proj-sg",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-sg-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_sg', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: poll-proj-sg",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_sg}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_sg}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-sa-sg",
           "request": {
@@ -1119,7 +1422,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1133,7 +1436,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-net-sg",
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-net-sg-rya13",
           "request": {
             "method": "POST",
             "header": [
@@ -1155,7 +1458,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-sg-{{runId}}\", \"labels\": {\"network\": \"sgparent\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-sg-{{runId}}\", \"labels\": {\"network\": \"sgparent\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1184,6 +1487,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -1247,7 +1565,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1261,7 +1579,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-sg",
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-sg-rya14",
           "request": {
             "method": "POST",
             "header": [
@@ -1283,7 +1601,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-sg-{{runId}}\", \"networkId\": \"{{_t31NetSg}}\", \"labels\": {\"sg\": \"okun\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-sg-{{runId}}\", \"networkId\": \"{{_t31NetSg}}\", \"labels\": {\"sg\": \"okun\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1312,6 +1630,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -1375,7 +1708,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1432,6 +1765,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1566,7 +1907,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1689,7 +2030,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1749,6 +2090,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1763,7 +2112,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -1888,7 +2237,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1945,6 +2294,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1959,7 +2316,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -1979,6 +2336,134 @@
       "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 — add01_network: vpc.network label-add on Update materializes ARM_LABELS grant (Check v_list False→True)",
       "description": "class:T31 | class:LABELS | class:ADD | class:FGA | class:AUTHZ | class:STATE | priority:P1",
       "item": [
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: create-proj-add",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-add-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_add', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: poll-proj-add",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_add}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_add}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: create-sa-add",
           "request": {
@@ -2094,7 +2579,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2108,7 +2593,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: create-net-add",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: create-net-add-rya15",
           "request": {
             "method": "POST",
             "header": [
@@ -2130,7 +2615,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-add-{{runId}}\", \"labels\": {\"network\": \"plain\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-add-{{runId}}\", \"labels\": {\"network\": \"plain\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2159,6 +2644,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -2222,7 +2722,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2350,7 +2850,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2473,7 +2973,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2533,6 +3033,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -2547,7 +3055,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -2605,6 +3113,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -2619,7 +3135,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -2744,7 +3260,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2801,6 +3317,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -2815,7 +3339,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -2835,6 +3359,134 @@
       "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 — change01_network: vpc.network label swap treska→okun migrates ARM_LABELS grant (decision-table)",
       "description": "class:T31 | class:LABELS | class:CHANGE | class:FGA | class:AUTHZ | class:DECISION | priority:P1",
       "item": [
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: create-proj-chg",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-chg-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_chg', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: poll-proj-chg",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_chg}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_chg}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: create-sa-both",
           "request": {
@@ -2950,7 +3602,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3078,7 +3730,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3092,7 +3744,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: create-net-chg",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: create-net-chg-rya16",
           "request": {
             "method": "POST",
             "header": [
@@ -3114,7 +3766,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-chg-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-chg-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3143,6 +3795,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -3206,7 +3873,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3334,7 +4001,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3462,7 +4129,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3585,7 +4252,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3711,7 +4378,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3837,7 +4504,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3897,6 +4564,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -3911,7 +4586,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -3969,6 +4644,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -3983,7 +4666,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -4041,6 +4724,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -4055,7 +4746,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -4180,7 +4871,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4237,6 +4928,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -4251,7 +4950,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -4309,6 +5008,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -4323,7 +5030,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -4343,6 +5050,134 @@
       "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 — idm01_no_emit: vpc.network non-label Update (description only) leaves ARM_LABELS visibility unchanged",
       "description": "class:T31 | class:LABELS | class:IDM | class:FGA | class:AUTHZ | priority:P1",
       "item": [
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: create-proj-idm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-idm-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_idm', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: poll-proj-idm",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_idm}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_idm}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: create-sa-idm",
           "request": {
@@ -4458,7 +5293,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4472,7 +5307,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: create-net-idm",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: create-net-idm-rya17",
           "request": {
             "method": "POST",
             "header": [
@@ -4494,7 +5329,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-idm-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-idm-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4523,6 +5358,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -4586,7 +5436,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4643,6 +5493,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -4777,7 +5635,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4900,7 +5758,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4960,6 +5818,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -4974,7 +5840,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -5032,6 +5898,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -5046,7 +5920,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -5171,7 +6045,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5228,6 +6102,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -5242,7 +6124,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -5262,6 +6144,134 @@
       "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 — fullpatch01_empty_mask: vpc.network empty-mask full-PATCH zeroing labels revokes (+ symmetry add)",
       "description": "class:T31 | class:LABELS | class:REVOKE | class:FULLPATCH | class:FGA | class:AUTHZ | priority:P1",
       "item": [
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-proj-fp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-fp-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_fp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: poll-proj-fp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_fp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_fp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-sa-fp",
           "request": {
@@ -5377,7 +6387,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5391,7 +6401,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpa",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpa-rya18",
           "request": {
             "method": "POST",
             "header": [
@@ -5413,7 +6423,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-fpa-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-fpa-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5442,6 +6452,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -5505,7 +6530,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5562,6 +6587,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -5696,7 +6729,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5819,7 +6852,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5879,6 +6912,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -5893,7 +6934,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -5951,6 +6992,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -5965,7 +7014,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -6090,7 +7139,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6147,6 +7196,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -6161,7 +7218,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -6176,7 +7233,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpb",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpb-rya19",
           "request": {
             "method": "POST",
             "header": [
@@ -6198,7 +7255,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-fpb-{{runId}}\", \"labels\": {}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-fpb-{{runId}}\", \"labels\": {}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6227,6 +7284,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -6290,7 +7362,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6347,6 +7419,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -6361,7 +7441,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -6419,6 +7499,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -6433,7 +7521,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -6558,7 +7646,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6615,6 +7703,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -6629,7 +7725,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -6650,7 +7746,7 @@
       "description": "class:T31 | class:LABELS | class:UNAVAIL | class:ASYNC | class:STATE | priority:P2",
       "item": [
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: create-net-un",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: create-proj-un",
           "request": {
             "method": "POST",
             "header": [
@@ -6660,19 +7756,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/vpc/v1/networks",
+              "raw": "{{baseUrl}}/iam/v1/projects",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "vpc",
+                "iam",
                 "v1",
-                "networks"
+                "projects"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-un-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-un-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6701,6 +7797,149 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_un', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: poll-proj-un",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_un}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_un}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: create-net-un-rya20",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-un-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -6764,7 +8003,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6821,6 +8060,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -6835,7 +8082,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -6960,7 +8207,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7033,6 +8280,134 @@
       "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE — invite_grant_label_revoke: invite user + account-scope ARM_LABELS grant by matchLabels → sees network → label removed → does not see (regression)",
       "description": "class:T31 | class:LABELS | class:REVOKE | class:INVITE | class:FGA | class:AUTHZ | class:USE-CASE | priority:P0",
       "item": [
+        {
+          "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: create-proj-inv",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t31-prj-inv-{{runId}}\", \"description\": \"newman label-revoke self-contained project seed\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_t31Proj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_op_proj_inv', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: poll-proj-inv",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_op_proj_inv}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_op_proj_inv}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: invite-user",
           "request": {
@@ -7143,7 +8518,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7271,7 +8646,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7285,7 +8660,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: create-net-inv",
+          "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: create-net-inv-rya21",
           "request": {
             "method": "POST",
             "header": [
@@ -7307,7 +8682,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31-net-inv-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
+              "raw": "{\"projectId\": \"{{_t31Proj}}\", \"name\": \"t31-net-inv-{{runId}}\", \"labels\": {\"network\": \"treska\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7336,6 +8711,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 30) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -7399,7 +8789,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7456,6 +8846,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -7590,7 +8988,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7713,7 +9111,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7773,6 +9171,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -7787,7 +9193,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -7845,6 +9251,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -7859,7 +9273,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",
@@ -7984,7 +9398,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -8041,6 +9455,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -8055,7 +9477,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount');",

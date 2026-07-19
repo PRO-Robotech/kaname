@@ -63,9 +63,16 @@ ECP (label match vs no-match), error-guessing (full-PATCH empty-mask zeroing
 labels; non-label Update no-op; IAM-down intent durability), use-case (invite →
 grant → revoke end-to-end). One thought per pm.test().
 
-Fixtures (tests/authz-fixtures/setup.sh): jwtBootstrap,
-jwtAccountAdminA, accountAId, projectA1Id. Resources are self-seeded per case
-with {{runId}}-suffixed names (self-contained, no cross-case collision).
+Fixtures (tests/authz-fixtures/setup.sh): jwtBootstrap, jwtAccountAdminA,
+accountAId. The PROJECT is self-seeded per case (create_suite_project → {{_t31Proj}})
+rather than read from the shared {{projectA1Id}} fixture: that fixture var could
+resolve to a PHANTOM project (an id whose IAM row never committed — the fixture's
+ensure_project extracts metadata.projectId even from a Create Operation that finished
+WITH an error), so the cross-service peer-check vpc NetworkService.Create →
+iam ProjectService.Get(projectA1Id) returned NOT_FOUND and every case cascaded RED.
+A freshly-created, op-poll-confirmed project is guaranteed to exist for the peer-check.
+All resources (project, SA, network, SG, role, binding) are self-seeded per case with
+{{runId}}-suffixed names (self-contained, no cross-case / cross-suite collision).
 """
 
 CASES = []
@@ -94,7 +101,7 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -105,11 +112,36 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
     ]
 
 
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
+    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
+    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
+    probe hits the public port → 404 page-not-found → JSONError on the first
+    pm.response.json(). Mirrors iam-internal-only-check.py::_internal_url_override.
+    internalBaseUrl is injected at runtime by deploy/scripts/newman-e2e.sh
+    (--env-var); if unset (local dev without the internal-rest port-forward) the
+    step is skipped rather than hitting a spurious public 404."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
+    ]
+
+
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):
     """InternalIAMService.Check probe (POST /iam/v1/internal/iam:check) — exempt
-    from the per-RPC authz gate, FGA-native passthrough. expect_allowed=True
-    asserts allowed===true (optionally polling the reconcile/fga-drain window for
-    eventual consistency); False asserts allowed !== true. One thought / pm.test."""
+    from the per-RPC authz gate, FGA-native passthrough. Served ONLY on the
+    cluster-internal REST listener ({{internalBaseUrl}}, :18081) — the pre_script
+    redirects there (the public :18080 404s /iam/v1/internal/* by design, ban #6).
+    expect_allowed=True asserts allowed===true (optionally polling the reconcile/
+    fga-drain window for eventual consistency); False asserts allowed !== true.
+    One thought / pm.test."""
     retry = []
     if poll:
         retry = [
@@ -117,7 +149,13 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
             "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
             f"if (!(pm.response.code === 200 && j.allowed === {str(expect_allowed).lower()}) && cc < {POLL_CAP}) {{",
             "  pm.environment.set('_ckCount', String(cc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms): newman fires setNextRequest before any
+            # setTimeout, so a busy-wait is the ONLY way to actually space out the polls.
+            # POLL_CAP*0.5s (~15s) then covers the grant/revoke FGA-materialization window
+            # under PARALLEL load instead of hammering ~30 back-to-back Checks in <2s (which
+            # never waits for the tuple to (dis)appear → the revoke-deny / grant-allow flake).
+            "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_ckCount');",
@@ -140,6 +178,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
     return Step(
         name=name, method="POST", path="/iam/v1/internal/iam:check",
         auth=auth, body={"subjectId": subject, "relation": relation, "object": obj},
+        pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
         test_script=["const j = pm.response.json();", *retry, *verdict],
     )
 
@@ -189,7 +228,7 @@ def assert_bind_succeeded(name):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -219,17 +258,54 @@ def bind_role_on_account(role_var, bind_op_var, subject_var, name_suffix,
     ]
 
 
-def create_network(net_var, suffix, labels):
-    """NetworkService.Create in projectA1 with the given labels + op-poll. On
-    Create the vpc→iam RegisterResource edge feeds resource_mirror with labels."""
+def create_suite_project(suffix):
+    """Self-contained project seed — create a FRESH project under account-A at
+    runtime and stash its id into {{_t31Proj}} (replacing the shared {{projectA1Id}}
+    fixture dependency). Prepended to every case, so each case owns a project that is
+    GUARANTEED to exist for the cross-service peer-check (vpc/compute → iam
+    ProjectService.Get). The op-poll asserts done + NO error, so a project that ever
+    fails to materialise fails LOUDLY here (not as an opaque downstream
+    'Project <id> not found'). accountAId stays the shared-tenant anchor: the
+    ARM_LABELS role is account-scoped on account:accountAId and containment matches
+    resources whose parent_account_id == accountAId — a project under account-A
+    satisfies it. Mirrors the runtime zone-discovery pattern in label-revoke-compute.py.
+    Project.Create is authz-gated by editor@account:accountAId, which jwtAccountAdminA
+    (account owner ⊇ editor) holds stably — no read-your-writes retry needed here; the
+    fresh-project OWNER-tuple lag is absorbed by create_network's retry_until_authorized."""
     return [
-        Step(name=f"create-net-{suffix}", method="POST", path=VPC_NET,
-             body={"projectId": "{{projectA1Id}}", "name": f"t31-net-{suffix}-{{{{runId}}}}",
-                   "labels": labels},
+        Step(name=f"create-proj-{suffix}", method="POST", path="/iam/v1/projects",
+             body={"accountId": "{{accountAId}}",
+                   "name": f"t31-prj-{suffix}-{{{{runId}}}}",
+                   "description": "newman label-revoke self-contained project seed"},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),
-                          *save_from_response("j.metadata && j.metadata.networkId", net_var),
-                          *save_from_response("j.id", f"_op_{net_var}")]),
+                          *save_from_response("j.metadata && j.metadata.projectId", "_t31Proj"),
+                          *save_from_response("j.id", f"_op_proj_{suffix}")]),
+        Step(name=f"poll-proj-{suffix}", method="GET", path=f"/operations/{{{{_op_proj_{suffix}}}}}",
+             auth="jwtAccountAdminA", test_script=poll_op_done(f"_op_proj_{suffix}")),
+    ]
+
+
+def create_network(net_var, suffix, labels):
+    """NetworkService.Create in the self-seeded {{_t31Proj}} with the given labels +
+    op-poll. On Create the vpc→iam RegisterResource edge feeds resource_mirror with
+    labels."""
+    return [
+        # Bounded read-your-writes retry over AAA's create-authz materialization window:
+        # NetworkService.Create needs the caller's editor/creator on project:projectA1
+        # (fixture grant), whose FGA cascade tuple can still be draining at umbrella
+        # cold-start → the first cross-service Create 403s at the gateway authz gate before
+        # the tuple is visible. Retry SELF on 403 (a 403-create materialized nothing, so
+        # re-firing is safe) until authorized; fail-closed at the budget.
+        retry_until_authorized(
+            Step(name=f"create-net-{suffix}", method="POST", path=VPC_NET,
+                 body={"projectId": "{{_t31Proj}}", "name": f"t31-net-{suffix}-{{{{runId}}}}",
+                       "labels": labels},
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              *save_from_response("j.metadata && j.metadata.networkId", net_var),
+                              *save_from_response("j.id", f"_op_{net_var}")]),
+            budget=30, interval_ms=500, retry_on=(403,)),
         Step(name=f"poll-net-{suffix}", method="GET", path=f"/operations/{{{{_op_{net_var}}}}}",
              auth="jwtAccountAdminA", test_script=poll_op_done(f"_op_{net_var}", out_id_var=net_var)),
     ]
@@ -283,6 +359,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "REVOKE", "FGA", "AUTHZ", "STATE"],
     priority="P0",
     steps=[
+        *create_suite_project("n1"),
         *create_fresh_sa("_t31SaN1", "n1"),
         *create_network("_t31NetN1", "n1", {"network": "treska"}),
         # clean subject: not yet a v_list-er of the network.
@@ -330,16 +407,21 @@ CASES.append(Case(
     classes=["T31", "LABELS", "REVOKE", "FGA", "AUTHZ", "STATE"],
     priority="P0",
     steps=[
+        *create_suite_project("sg"),
         *create_fresh_sa("_t31SaSg", "sg"),
         # SG needs a parent network (immutable network_id at Create).
         *create_network("_t31NetSg", "sg", {"network": "sgparent"}),
-        Step(name="create-sg", method="POST", path=VPC_SG,
-             body={"projectId": "{{projectA1Id}}", "name": "t31-sg-{{runId}}",
-                   "networkId": "{{_t31NetSg}}", "labels": {"sg": "okun"}},
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200),
-                          *save_from_response("j.metadata && j.metadata.securityGroupId", "_t31Sg"),
-                          *save_from_response("j.id", "_opSg")]),
+        # Bounded read-your-writes retry over AAA's create-authz materialization window
+        # (same cold-start FGA-cascade lag as create-net); retry SELF on 403 until authorized.
+        retry_until_authorized(
+            Step(name="create-sg", method="POST", path=VPC_SG,
+                 body={"projectId": "{{_t31Proj}}", "name": "t31-sg-{{runId}}",
+                       "networkId": "{{_t31NetSg}}", "labels": {"sg": "okun"}},
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              *save_from_response("j.metadata && j.metadata.securityGroupId", "_t31Sg"),
+                              *save_from_response("j.id", "_opSg")]),
+            budget=30, interval_ms=500, retry_on=(403,)),
         Step(name="poll-sg", method="GET", path="/operations/{{_opSg}}",
              auth="jwtAccountAdminA", test_script=poll_op_done("_opSg", out_id_var="_t31Sg")),
         check_step("sg-pre-grant-deny", "service_account:{{_t31SaSg}}", "v_list",
@@ -353,11 +435,16 @@ CASES.append(Case(
         # Create-emit fix: a fresh SG with labels matches the selector.
         check_step("sg-post-grant-allow", "service_account:{{_t31SaSg}}", "v_list",
                    "vpc_security_group:{{_t31Sg}}", expect_allowed=True, poll=True),
-        # change the label → selector {sg:okun} stops matching → revoke.
-        Step(name="update-sg-labels", method="PATCH", path=f"{VPC_SG}/{{{{_t31Sg}}}}",
-             body={"updateMask": "labels", "labels": {"sg": "sudak"}},
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200), *save_from_response("j.id", "_opuSg")]),
+        # change the label → selector {sg:okun} stops matching → revoke. This PATCH is the
+        # FIRST mutate of the caller's OWN fresh SG's editor tuple (vpc→iam RegisterResource
+        # → owner/editor tuple → reconcile → async drain), so under PARALLEL load it races the
+        # materialization and 403s single-shot. Bounded read-your-writes retry SELF on 403.
+        retry_until_authorized(
+            Step(name="update-sg-labels", method="PATCH", path=f"{VPC_SG}/{{{{_t31Sg}}}}",
+                 body={"updateMask": "labels", "labels": {"sg": "sudak"}},
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200), *save_from_response("j.id", "_opuSg")]),
+            budget=25, interval_ms=500, retry_on=(403,)),
         Step(name="poll-update-sg", method="GET", path="/operations/{{_opuSg}}",
              auth="jwtAccountAdminA", test_script=poll_op_done("_opuSg")),
         check_step("sg-post-revoke-deny", "service_account:{{_t31SaSg}}", "v_list",
@@ -379,6 +466,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "ADD", "FGA", "AUTHZ", "STATE"],
     priority="P1",
     steps=[
+        *create_suite_project("add"),
         *create_fresh_sa("_t31SaAdd", "add"),
         *create_network("_t31NetAdd", "add", {"network": "plain"}),
         *create_label_role("_t31RoleAdd", VPC_NET_RULE, "add"),
@@ -413,6 +501,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "CHANGE", "FGA", "AUTHZ", "DECISION"],
     priority="P1",
     steps=[
+        *create_suite_project("chg"),
         *create_fresh_sa("_t31SaBoth", "both"),
         *create_fresh_sa("_t31SaTreska", "tre"),
         *create_network("_t31NetChg", "chg", {"network": "treska"}),
@@ -458,6 +547,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "IDM", "FGA", "AUTHZ"],
     priority="P1",
     steps=[
+        *create_suite_project("idm"),
         *create_fresh_sa("_t31SaIdm", "idm"),
         *create_network("_t31NetIdm", "idm", {"network": "treska"}),
         check_step("idm-pre-grant-deny", "service_account:{{_t31SaIdm}}", "v_list",
@@ -490,6 +580,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "REVOKE", "FULLPATCH", "FGA", "AUTHZ"],
     priority="P1",
     steps=[
+        *create_suite_project("fp"),
         # --- Case A: full-PATCH zeroing labels → revoke ---
         *create_fresh_sa("_t31SaFp", "fp"),
         *create_network("_t31NetFpA", "fpa", {"network": "treska"}),
@@ -542,6 +633,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "UNAVAIL", "ASYNC", "STATE"],
     priority="P2",
     steps=[
+        *create_suite_project("un"),
         *create_network("_t31NetUn", "un", {"network": "treska"}),
         # the label Update itself does NOT make a sync IAM call — the mirror-emit
         # is an outbox intent in the same writer-tx, drained out-of-band. So the
@@ -549,13 +641,19 @@ CASES.append(Case(
         # the resource reflects labels={} immediately.
         *update_network("_t31NetUn", "un",
                         {"updateMask": "labels", "labels": {}}),
-        Step(name="un-update-not-unavailable", method="GET", path=f"{VPC_NET}/{{{{_t31NetUn}}}}",
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200),
-                          "pm.test('label Update applied (mutation not blocked by async mirror-emit)', () => {",
-                          "  const j = pm.response.json();",
-                          "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
-                          "});"]),
+        # GET of the caller's OWN fresh network — first read after create/update, so the
+        # v_get/owner tuple can still be draining under parallel load → transient 403/404 at
+        # the gateway authz gate (403 hidden as 404 on hide-existence). Bounded read-your-
+        # writes retry SELF until authorized; fail-closed at the budget.
+        retry_until_authorized(
+            Step(name="un-update-not-unavailable", method="GET", path=f"{VPC_NET}/{{{{_t31NetUn}}}}",
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              "pm.test('label Update applied (mutation not blocked by async mirror-emit)', () => {",
+                              "  const j = pm.response.json();",
+                              "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
+                              "});"]),
+            budget=25, interval_ms=500, retry_on=(403, 404)),
     ],
 ))
 
@@ -586,6 +684,7 @@ CASES.append(Case(
     classes=["T31", "LABELS", "REVOKE", "INVITE", "FGA", "AUTHZ", "USE-CASE"],
     priority="P0",
     steps=[
+        *create_suite_project("inv"),
         # invite a brand-new user into account A (part of the documented flow).
         Step(name="invite-user", method="POST", path="/iam/v1/users:invite",
              body={"accountId": "{{accountAId}}",

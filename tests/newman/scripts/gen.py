@@ -25,7 +25,7 @@ import sys
 import uuid
 import importlib.util
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Dict, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -173,6 +173,116 @@ def assert_created_at_seconds(jsonpath="pm.response.json().createdAt") -> List[s
     ]
 
 
+_RYA_SEQ = [0]
+
+
+def retry_until_authorized(step: Step, budget: int = 15, interval_ms: int = 400,
+                           retry_on=(403, 404)) -> Step:
+    """Wrap the FIRST access of the caller's OWN just-created resource in a bounded
+    read-your-writes retry over the owner-tuple materialization window.
+
+    opgate (the create confirm-gate) was removed by design-review: Operation.done now
+    means the resource is DURABLE, but its owner/creator FGA tuple materializes
+    eventually-consistent (at-least-once drainer + reconciler + sync-registrar
+    optimisation). Under load the first post-create Get/Update/Delete of the fresh
+    resource can briefly return 403 (PERMISSION_DENIED) or 404 at the authz gate
+    before the tuple is visible. This is a textbook read-your-writes lag -> the CLIENT
+    retries; it is NOT a server barrier.
+
+    Retries the SAME request (setNextRequest -> self) while the response code is in
+    `retry_on` (default 403/404), spacing attempts by ~interval_ms (busy-wait -- newman
+    fires setNextRequest before any setTimeout). budget*interval_ms bounds the wait
+    (default 15*400ms = ~6s) -- fail-closed: on any other code the wrapped step's real
+    test_script runs exactly once, and once the budget is spent it ALSO runs on the
+    terminal 403/404 (a genuine, non-converging deny still FAILS the real assertions --
+    never masked, never infinite).
+
+    Use ONLY on the first access of the caller's OWN fresh resource. Do NOT wrap
+    negative / cross-account-deny / absent-id steps (a poll there would mask a real
+    deny). The counter/started env-vars are request-name-scoped (step names are
+    globally unique after serialization) so the loop never bleeds across cases or
+    steps -- same discipline as poll_operation_until_done.
+    """
+    retry_set = ",".join(str(c) for c in retry_on)
+    guard = [
+        "// bounded read-your-writes retry over the owner-tuple materialization window",
+        "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+        "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+        "  pm.environment.set('_authRetryCount', '0');",
+        "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+        "}",
+        "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+        f"if ([{retry_set}].includes(pm.response.code) && _arc < {budget}) {{",
+        "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+        f"  const _ard = Date.now(); while (Date.now() - _ard < {interval_ms}) {{ /* owner-tuple materialization wait */ }}",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
+        "  return;",
+        "}",
+        "pm.environment.unset('_authRetryCount');",
+        "pm.environment.unset('_authRetryStarted');",
+    ]
+    _RYA_SEQ[0] += 1
+    # Give the wrapped step a globally-unique name so its self-retry
+    # setNextRequest(pm.info.requestName) always resolves to ITSELF. Newman resolves a
+    # setNextRequest name to the FIRST item with that name in the collection; these
+    # suites mostly do NOT prefix step names by case-id, so a wrapped step whose bare
+    # name repeats would otherwise jump the retry to an earlier same-named step — the
+    # exact hazard poll_operation_until_done avoids via its unique poll-op-<n> name.
+    return replace(step, name=f"{step.name}-rya{_RYA_SEQ[0]}",
+                   test_script=guard + list(step.test_script))
+
+
+def retry_until_absent(step: Step, still_present_expr: str, budget: int = 25,
+                       interval_ms: int = 500) -> Step:
+    """Bounded retry a "must-be-ABSENT/empty" read over a read-your-writes-ON-REVOKE
+    window — the MIRROR of retry_until_authorized for the deny/revoke side.
+
+    A grant the suite just REVOKED (or a residual account-A grant it just STRIPPED via a
+    pre-clean) can still be visible for a beat: the FGA tuple removal / list-authz
+    negative-cache lags a few seconds after the revoke Operation is done (Kachō is
+    eventually-consistent — api-conventions.md). So a "non-member sees EMPTY" /
+    "not-granted subject does NOT see the id" leak-guard flakes on the pre-convergence
+    window under parallel load (the serial run's timing hid it).
+
+    `still_present_expr` is a JS boolean that is TRUE while the thing that MUST become
+    absent is STILL present (e.g. `((pm.response.json().users)||[]).length > 0`, or the
+    leaked id is still in the array). Retries SELF while it is truthy, spacing attempts by
+    ~interval_ms (busy-wait — newman fires setNextRequest before any setTimeout).
+
+    Fail-OPEN at the budget: once spent, the wrapped step's real assertions run exactly
+    once on the terminal response — so a GENUINE over-grant / real leak (the thing NEVER
+    becomes absent) still FAILS the assertion. It is impossible to mask a persistent leak;
+    only a transient revoke/pre-clean-materialization window is absorbed. Use ONLY on a
+    negative "must be absent/empty" read whose emptiness is GUARANTEED once the suite's own
+    revoke/pre-clean materializes — NEVER to paper over a cross-account deny or a real hole.
+
+    The step name is preserved (not suffixed): these leak-guard steps are often the target
+    of a pre-clean `setNextRequest('<name>')` jump, and the self-loop uses the dynamic
+    pm.info.requestName so it self-resolves without a rename."""
+    guard = [
+        "// bounded retry over the revoke/pre-clean materialization window (read-your-writes",
+        "// ON REVOKE): retry SELF while the must-be-absent thing is still present, spacing",
+        "// ~interval_ms. Fail-open at budget -> the real assertion below runs once and FAILS",
+        "// if it is STILL present (a GENUINE over-grant / leak never clears -> NEVER masked).",
+        "if (pm.environment.get('_absRetryStarted') !== pm.info.requestName) {",
+        "  pm.environment.set('_absRetryCount', '0');",
+        "  pm.environment.set('_absRetryStarted', pm.info.requestName);",
+        "}",
+        "const _absc = parseInt(pm.environment.get('_absRetryCount') || '0', 10);",
+        "let _stillPresent = false;",
+        f"try {{ _stillPresent = ({still_present_expr}); }} catch (e) {{ _stillPresent = false; }}",
+        f"if (pm.response.code === 200 && _stillPresent && _absc < {budget}) {{",
+        "  pm.environment.set('_absRetryCount', String(_absc + 1));",
+        f"  const _absd = Date.now(); while (Date.now() - _absd < {interval_ms}) {{ /* revoke-materialization wait */ }}",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
+        "  return;",
+        "}",
+        "pm.environment.unset('_absRetryCount');",
+        "pm.environment.unset('_absRetryStarted');",
+    ]
+    return replace(step, test_script=guard + list(step.test_script))
+
+
 def poll_operation_until_done(auth: str = "jwtAccountAdminA") -> Step:
     """Reusable poll step: до POLL_CAP попыток (через setNextRequest), потом fail если done остался false.
 
@@ -182,8 +292,10 @@ def poll_operation_until_done(auth: str = "jwtAccountAdminA") -> Step:
     unauthenticated callers with 401 UNAUTHENTICATED (code 16).
 
     The retry cap is POLL_CAP (single source of truth — see the constant above).
-    At ~100-200 ms per round-trip Newman polls ~3-6 seconds before giving up,
-    generous enough for the async worker to finish in dev/CI.
+    Between retries a ~500ms busy-wait spaces out the polls (see the test script),
+    so POLL_CAP polls cover ~POLL_CAP*0.5s of the async-op tail before giving up —
+    a real wait, not a back-to-back hammer, so a legitimately-slow worker finishes
+    in dev/CI instead of failing on premature exhaustion (Koren #1 latency).
 
     Per-case counter reset: `_pollCount` is reset to 0 on FIRST entry via
     the pre-request, guarded by a request-name-scoped `_pollStarted` flag so the
@@ -211,7 +323,13 @@ def poll_operation_until_done(auth: str = "jwtAccountAdminA") -> Step:
             "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
             f"if (!j.done && pc < {POLL_CAP}) {{",
             "  pm.environment.set('_pollCount', String(pc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms) between retries. newman runs test scripts
+            # synchronously and fires setNextRequest before any setTimeout callback, so a
+            # busy-wait is the only way to actually space out polls; POLL_CAP*0.5s then
+            # covers the async-op tail (p95 3s / max 10s) instead of hammering back-to-back
+            # (~15ms/poll via --delay-request 15) which never waits for the op (Koren #1).
+            "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_pollCount');",
@@ -261,7 +379,11 @@ def get_until_gone(path: str, label: str, auth: str = "jwtAccountAdminA") -> Ste
             f"if (pm.response.code === 200 && gc < {POLL_CAP}) {{",
             "  // resource not yet gone (async delete + FGA-tuple removal lag) — retry.",
             "  pm.environment.set('_goneCount', String(gc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms) between retries (Koren #1) — see
+            # poll_request_until_status: back-to-back re-fires exhaust the cap before the
+            # async delete + FGA-tuple removal settles, flaking the terminal "gone" RED.
+            "  const _gd = Date.now(); while (Date.now() - _gd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_goneCount');",
@@ -341,7 +463,14 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
             f"if ((_p200retryCode || _p200retryPred) && _p200c < {POLL_CAP}) {{",
             "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
             f"  pm.environment.set('{counter_var}', String(_p200c + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms) between retries (Koren #1). newman fires
+            # setNextRequest before any setTimeout, so a busy-wait is the only way to
+            # actually space out the retries; without it POLL_CAP retries fire
+            # back-to-back (~round-trip only) and exhaust the budget BEFORE the
+            # grant→FGA / owner-tuple materialization window closes → a converging
+            # access flakes RED at the cap. Same discipline as poll_operation_until_done.
+            "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             f"pm.environment.unset('{counter_var}');",
@@ -383,7 +512,7 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
         "const pc = parseInt(pm.environment.get('_opErrCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_opErrCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_opErrCount');",
@@ -828,6 +957,8 @@ def load_cases_module(path: Path):
     mod.assert_operation_envelope = assert_operation_envelope
     mod.assert_created_at_seconds = assert_created_at_seconds
     mod.poll_operation_until_done = poll_operation_until_done
+    mod.retry_until_authorized = retry_until_authorized
+    mod.retry_until_absent = retry_until_absent
     mod.get_until_gone = get_until_gone
     mod.poll_request_until_status = poll_request_until_status
     mod.POLL_CAP = POLL_CAP

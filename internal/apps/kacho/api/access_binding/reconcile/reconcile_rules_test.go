@@ -35,22 +35,24 @@ func memberKey(objectType, objectID string) string { return objectType + "\x00" 
 
 // fakeStore — an in-memory ReconcileStore for the role.rules reconcile slices.
 type fakeStore struct {
-	scope       domain.ScopeAnchor
-	subjectType string
-	subjectID   string
-	active      bool
-	selectors   []domain.RuleSelector
-	mirror      map[string][]domain.MirrorObject // dotted type → objects (MatchSelector source)
-	current     []domain.TargetMember
-	upserts     []domain.TargetMember
-	deletes     []string // memberKey of deleted members
-	writes      [][]domain.MembershipTuple
-	tdeletes    [][]domain.MembershipTuple
-	recorded    [][]domain.MembershipTuple
-	forgotten   [][]domain.MembershipTuple
-	audits      []string                 // objectID audited
-	ledger      []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
-	locks       int                      // AcquireBindingLock call count
+	scope         domain.ScopeAnchor
+	subjectType   string
+	subjectID     string
+	active        bool
+	selectors     []domain.RuleSelector
+	mirror        map[string][]domain.MirrorObject // dotted type → objects (MatchSelector source)
+	current       []domain.TargetMember
+	upserts       []domain.TargetMember
+	deletes       []string // memberKey of deleted members
+	writes        [][]domain.MembershipTuple
+	tdeletes      [][]domain.MembershipTuple
+	recorded      [][]domain.MembershipTuple
+	forgotten     [][]domain.MembershipTuple
+	audits        []string                 // objectID audited
+	ledger        []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
+	locks         int                      // AcquireBindingLock (EXCLUSIVE) call count
+	sharedLocks   int                      // AcquireBindingLockShared (SHARE) call count (forward path)
+	unlockedLoads int                      // LoadBindingUnlocked call count (forward path)
 
 	// ReconcileObject fan-out fixtures (deadlock-class lock-ordering test). When set,
 	// BindingsForObject / SelectorBindingsMatchingObject return these (possibly
@@ -68,7 +70,31 @@ func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBind
 	return nil
 }
 
+// AcquireBindingLockShared records the SHARE-mode advisory lock the forward fast-path
+// takes. It is counted SEPARATELY from the EXCLUSIVE `locks` so a forward unit test can
+// assert f.locks==0 (never the serializing EXCLUSIVE lock) while f.sharedLocks>=1.
+func (f *fakeStore) AcquireBindingLockShared(ctx context.Context, id domain.AccessBindingID) error {
+	f.sharedLocks++
+	return nil
+}
+
 func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
+	return BindingScope{
+		BindingID:   id,
+		Scope:       f.scope,
+		SubjectType: f.subjectType,
+		SubjectID:   f.subjectID,
+		Selectors:   f.selectors,
+		Active:      f.active,
+	}, true, nil
+}
+
+// LoadBindingUnlocked mirrors LoadBinding but records that the forward path took NO
+// advisory lock: the test asserts f.locks stays 0 across a forward pass (the throughput-
+// critical property). unlockedLoads counts the no-lock loads so a forward unit test can
+// prove it read the binding without AcquireBindingLock.
+func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
+	f.unlockedLoads++
 	return BindingScope{
 		BindingID:   id,
 		Scope:       f.scope,
@@ -95,7 +121,12 @@ func (f *fakeStore) MatchIAMDirect(ctx context.Context, types []string, ml map[s
 	return nil, nil
 }
 
-func (f *fakeStore) MatchAllInScope(ctx context.Context, types []string) ([]domain.MirrorObject, error) {
+// MatchAllInScope models the LOOSEST valid superset: it returns EVERY seeded object of the
+// types and ignores `scope`. This is deliberate — the production adapter pushes a proven
+// scope superset into SQL, but the reconciler's IsContainedIn re-verify is the authoritative
+// containment gate; the fake over-returns so the unit tests prove IsContainedIn rejects
+// foreign-scope objects even when the store hands back an over-broad candidate set.
+func (f *fakeStore) MatchAllInScope(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	var out []domain.MirrorObject
 	for _, t := range types {
 		out = append(out, f.mirror[t]...)
@@ -119,7 +150,7 @@ func (f *fakeStore) MatchByIDs(ctx context.Context, types, ids []string) ([]doma
 	return out, nil
 }
 
-func (f *fakeStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string) ([]domain.MirrorObject, error) {
+func (f *fakeStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	return nil, nil
 }
 
@@ -128,6 +159,12 @@ func (f *fakeStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string
 }
 
 func (f *fakeStore) GetMirrorObject(ctx context.Context, ot, oid string) (domain.MirrorObject, bool, error) {
+	// Search the seeded mirror for the single object (forward fast-path source).
+	for _, o := range f.mirror[ot] {
+		if o.ObjectID == oid {
+			return o, true, nil
+		}
+	}
 	return domain.MirrorObject{}, false, nil
 }
 

@@ -178,6 +178,15 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 		return nil, err
 	}
 	b.ID = domain.AccessBindingID(abID)
+
+	// Operation.done = durability of the binding (doCreate commits the row + the
+	// atomic fga_outbox / audit / reconcile events in one writer-tx). The binding's
+	// per-object access (iam_access_binding:<id> # v_update/v_delete) materializes
+	// eventually-consistent — synchronous post-commit ReconcileObject (window
+	// optimization) plus the co-committed reconcile event + periodic sweep as the
+	// at-least-once backstop. It does NOT gate op.done; an immediate mutate by the
+	// creator may briefly race the materialization and is handled by the client's
+	// bounded retry (design-review: eventual-consistency model).
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (res *anypb.Any, derr error) {
 		// The operations worker masks any non-gRPC-status error (including a
 		// panic) from the worker fn as `Internal "internal worker error"` and

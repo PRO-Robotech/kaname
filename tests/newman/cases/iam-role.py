@@ -126,7 +126,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -138,7 +138,7 @@ CASES.append(Case(
                 "}",
             ],
         ),
-        Step(
+        retry_until_authorized(Step(
             name="get-confirms",
             method="GET",
             path="/iam/v1/roles/{{crudRoleId}}",
@@ -180,7 +180,7 @@ CASES.append(Case(
                 "});",
                 *assert_created_at_seconds("pm.response.json().createdAt"),
             ],
-        ),
+        )),
     ],
 ))
 
@@ -886,7 +886,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('sysMutOpId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[
@@ -1018,7 +1018,7 @@ CASES.append(Case(
             pre_script=[
                 "// If sync returned 403, no operation was created — skip poll.",
                 "if (!pm.environment.get('opId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[
@@ -1114,7 +1114,7 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                "if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                "if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                 "pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
                 "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                 "pm.test('error FAILED_PRECONDITION (code 9)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
@@ -1168,7 +1168,7 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                "if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                "if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                 "pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
                 "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                 "pm.test('delete succeeded after revoke (no error)', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
@@ -1252,7 +1252,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -1454,7 +1454,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",

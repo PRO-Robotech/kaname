@@ -104,7 +104,7 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -115,10 +115,38 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
     ]
 
 
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
+    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
+    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
+    probe hits the public port → 404 page-not-found → JSONError on the first
+    pm.response.json(). Mirrors label-revoke-vpc.py / iam-internal-only-check.py
+    ::_internal_url_override. internalBaseUrl is injected at runtime by
+    deploy/scripts/newman-e2e.sh (--env-var); if unset (local dev without the
+    internal-rest port-forward) the step is skipped rather than hitting a spurious
+    public 404."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
+    ]
+
+
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):
     """InternalIAMService.Check probe. expect_allowed=True asserts allowed===true
     (optionally polling the fga_outbox drainer window); False asserts allowed !== true.
-    One thought per pm.test()."""
+    One thought per pm.test().
+
+    The probe hits the cluster-internal REST listener via _internal_url_override
+    (pre-request URL rewrite to {{internalBaseUrl}}): /iam/v1/internal/iam:check is
+    served ONLY on :18081, so without the redirect gen.py's {{baseUrl}} (:18080)
+    404s ("404 page not found" → JSONError). Matches label-revoke-vpc.py."""
     retry = []
     if poll:
         retry = [
@@ -126,7 +154,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
             "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
             f"if (!(pm.response.code === 200 && j.allowed === {str(expect_allowed).lower()}) && cc < {POLL_CAP}) {{",
             "  pm.environment.set('_ckCount', String(cc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_ckCount');",
@@ -152,6 +180,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
         path="/iam/v1/internal/iam:check",
         auth=auth,
         body={"subjectId": subject, "relation": relation, "object": obj},
+        pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
         test_script=[
             "const j = pm.response.json();",
             *retry,
@@ -235,7 +264,7 @@ def assert_bind_succeeded(name):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",

@@ -77,15 +77,24 @@ type accountResolver interface {
 	AccountForProjectTx(ctx context.Context, tx service.Tx, projectID string) (accountID string, ok bool, err error)
 }
 
-// objectReconciler — narrow port (instant-visibility): drive a
-// SYNCHRONOUS post-commit ReconcileObject so the freshly-registered object's owner
-// v_get materializes BEFORE the consumer's create-Operation reports done (a
-// create→immediate-GET resolves ALLOW without waiting for the async reconcile-outbox
-// drain). Implemented by reconcile.Reconciler. nil-safe + non-fatal: an unwired
-// reconciler (or a reconcile error) never fails Register — the reconcile-outbox drain
-// + periodic sweep are the at-least-once backstop.
+// objectReconciler — narrow port (instant-visibility): drive a SYNCHRONOUS post-commit
+// materialization so the freshly-registered object's owner v_get materializes BEFORE the
+// consumer's create-Operation reports done (a create→immediate-GET resolves ALLOW without
+// waiting for the async reconcile-outbox drain). Implemented by reconcile.Reconciler.
+//
+// The create-path uses the ADDITIVE forward fast-path (ReconcileObjectForward): it
+// materializes ONLY the just-registered object's per-object tuples for each matching
+// binding, WITHOUT the per-binding advisory lock / full O(scope) recompute — so N
+// concurrent registrations in the same project/account (all sharing one editor/owner
+// binding) do NOT serialize on that binding's lock (the throughput fix). The co-committed
+// resource_reconcile_outbox event still drives the async worker's FULL ReconcileObject as
+// the at-least-once backstop (delete-stale / audit / sweep), so a skipped or failed
+// forward pass is re-converged.
+//
+// nil-safe + non-fatal: an unwired reconciler (or a reconcile error) never fails Register
+// — the reconcile-outbox drain + periodic sweep are the backstop.
 type objectReconciler interface {
-	ReconcileObject(ctx context.Context, objectType, objectID string) error
+	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
 }
 
 // RegisterResourceRequest / UnregisterResourceRequest fields the use-case
@@ -178,25 +187,29 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	}, true); err != nil {
 		return err
 	}
-	// Instant-visibility: after the owner-tuple + mirror + reconcile
-	// event COMMIT, drive a SYNCHRONOUS ReconcileObject so the creator's per-object
-	// v_get materializes before the consumer's create-Operation reports done — a
-	// create→immediate-GET resolves ALLOW without waiting for the async
-	// reconcile-outbox drain. nil-safe + NON-fatal: the resource is already durably
-	// registered; the drain + periodic sweep are the at-least-once backstop, so a
-	// reconcile error here is logged, not propagated (Register stays successful).
+	// Instant-visibility: after the owner-tuple + mirror + reconcile event COMMIT, drive
+	// a SYNCHRONOUS ADDITIVE forward materialization so the creator's per-object v_get
+	// materializes before the consumer's create-Operation reports done — a
+	// create→immediate-GET resolves ALLOW without waiting for the async reconcile-outbox
+	// drain. The forward path takes NO per-binding advisory lock, so N concurrent
+	// registrations in the same scope do NOT serialize (throughput). nil-safe + NON-fatal:
+	// the resource is already durably registered; the async worker's FULL ReconcileObject
+	// (from the co-committed reconcile event) + the periodic sweep are the at-least-once
+	// backstop, so a forward error here is logged, not propagated (Register stays
+	// successful).
 	uc.syncReconcile(ctx, objType, objID)
 	return nil
 }
 
-// syncReconcile drives the optional post-commit ReconcileObject. nil-safe;
-// a reconcile error is non-fatal (logged when a logger is wired).
+// syncReconcile drives the optional post-commit ADDITIVE forward materialization
+// (ReconcileObjectForward). nil-safe; a reconcile error is non-fatal (logged when a
+// logger is wired) — the async full ReconcileObject backstop re-converges.
 func (uc *RegisterResourceUseCase) syncReconcile(ctx context.Context, objType, objID string) {
 	if uc.objRecon == nil {
 		return
 	}
-	if err := uc.objRecon.ReconcileObject(ctx, objType, objID); err != nil && uc.logger != nil {
-		uc.logger.WarnContext(ctx, "register resource: post-commit reconcile failed (drain/sweep will retry)",
+	if err := uc.objRecon.ReconcileObjectForward(ctx, objType, objID); err != nil && uc.logger != nil {
+		uc.logger.WarnContext(ctx, "register resource: post-commit forward reconcile failed (drain/sweep will retry)",
 			slog.String("object_type", objType), slog.String("object_id", objID), slog.Any("err", err))
 	}
 }

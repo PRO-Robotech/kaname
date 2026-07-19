@@ -105,7 +105,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -117,7 +117,19 @@ CASES.append(Case(
                 "}",
             ],
         ),
-        Step(
+        # budget=60 (24s @ 400ms): `iam.group` maps to the LEAF FGA object_type
+        # `iam_group` (authzmap fga_types), NOT a bare hierarchy ancestor like
+        # `iam.project`→`project`. Under the flat Contract-A model a leaf type has NO
+        # `<rel> from account` ACCESS cascade, so the account-admin's per-object v_get on
+        # a freshly-created group is MATERIALIZED per-object (sync post-commit reconciler
+        # + at-least-once event-drain fallback) — it is NOT resolved instantly by hierarchy
+        # cascade the way a project GET is. A denied read hides existence as 404
+        # ("iam_group not found"), so poll past BOTH the 403/404 window until the per-object
+        # v_get converges. The default 6s budget under-covers the cluster-materialization
+        # tail (cf. iam-acb poll budget 30→80 for the same reason); 24s is the observed
+        # ceiling. Guaranteed to converge (materialization is at-least-once) — never masked:
+        # on budget exhaustion the 200-assert still fails a genuine non-materialization.
+        retry_until_authorized(Step(
             name="get-confirms",
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}",
@@ -138,7 +150,7 @@ CASES.append(Case(
                 "});",
                 *assert_created_at_seconds("pm.response.json().createdAt"),
             ],
-        ),
+        ), budget=60),
     ],
 ))
 
@@ -207,7 +219,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('badAccGrpOpId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[
@@ -701,7 +713,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('dupAddMemberOpId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[
@@ -838,7 +850,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('rmNotMemberOpId')) {",
-                "  postman.setNextRequest(null);",
+                "  pm.execution.setNextRequest(null);",
                 "}",
             ],
             test_script=[
@@ -1071,7 +1083,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",

@@ -70,7 +70,7 @@ def poll_op_done(op_var, out_id_var=None):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -81,10 +81,34 @@ def poll_op_done(op_var, out_id_var=None):
     ]
 
 
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are served
+    ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design (ban #6).
+    gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
+    public port → "404 page not found" → JSONError on the first pm.response.json().
+    Mirrors label-revoke-vpc.py::_internal_url_override / iam-internal-only-check.py.
+    internalBaseUrl is injected at runtime by the newman harness (--env-var); if unset
+    (local dev without the internal-rest port-forward) the step is skipped rather than
+    hitting a spurious public 404."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
+    ]
+
+
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):
-    """InternalIAMService.Check probe (POST /iam/v1/internal/iam:check). expect_allowed
-    =True asserts allowed===true (optionally polling the reconcile/fga-drain window);
-    False asserts allowed !== true. One thought / pm.test."""
+    """InternalIAMService.Check probe (POST /iam/v1/internal/iam:check) — served ONLY on
+    the cluster-internal REST listener ({{internalBaseUrl}}, :18081); the pre_script
+    redirects there (the public :18080 404s /iam/v1/internal/* by design, ban #6).
+    expect_allowed=True asserts allowed===true (optionally polling the reconcile/fga-drain
+    window); False asserts allowed !== true. One thought / pm.test."""
     retry = []
     if poll:
         retry = [
@@ -92,7 +116,13 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
             "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
             f"if (!(pm.response.code === 200 && j.allowed === {str(expect_allowed).lower()}) && cc < {POLL_CAP}) {{",
             "  pm.environment.set('_ckCount', String(cc + 1));",
-            "  postman.setNextRequest(pm.info.requestName);",
+            # Real inter-poll delay (~500ms): newman fires setNextRequest before any
+            # setTimeout, so a busy-wait is the ONLY way to actually space out the polls.
+            # POLL_CAP*0.5s (~15s) then covers the grant/revoke FGA-materialization window
+            # under PARALLEL load instead of hammering ~30 back-to-back Checks in <2s (which
+            # never waits for the tuple to (dis)appear → the revoke-deny / grant-allow flake).
+            "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
             "pm.environment.unset('_ckCount');",
@@ -115,6 +145,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
     return Step(
         name=name, method="POST", path="/iam/v1/internal/iam:check",
         auth=auth, body={"subjectId": subject, "relation": relation, "object": obj},
+        pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
         test_script=["const j = pm.response.json();", *retry, *verdict],
     )
 
@@ -155,12 +186,20 @@ def update_project(proj_var, suffix, body):
     """ProjectService.Update(project) PATCH + op-poll. `body` is a FLAT update body:
     mutable fields + a STRING `updateMask` (protojson serializes FieldMask as a
     comma-separated string). The project id is bound from the PATCH path, so it MUST
-    NOT appear in the body. Single-shot 200 (owner-admin already has editor on its
-    own freshly-created project — same-DB owner tuple)."""
+    NOT appear in the body.
+
+    The PATCH needs the caller's v_update on the fresh project (owner/creator tuple).
+    That tuple materializes eventually-consistent (registrar + fga_outbox drain +
+    reconciler), so under PARALLEL load the PATCH right after Create races the drain and
+    403s single-shot ('lacks relation v_update on project'). Bounded read-your-writes
+    retry SELF on 403 until the tuple is visible; fail-closed at the budget (a genuine,
+    non-converging deny still surfaces)."""
     return [
-        Step(name=f"update-proj-{suffix}", method="PATCH", path=f"{IAM_PROJECTS}/{{{{{proj_var}}}}}",
-             body=body, auth="jwtAccountAdminA",
-             test_script=[*assert_status(200), *save_from_response("j.id", f"_opu_{proj_var}")]),
+        retry_until_authorized(
+            Step(name=f"update-proj-{suffix}", method="PATCH", path=f"{IAM_PROJECTS}/{{{{{proj_var}}}}}",
+                 body=body, auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200), *save_from_response("j.id", f"_opu_{proj_var}")]),
+            budget=25, interval_ms=500, retry_on=(403,)),
         Step(name=f"poll-update-proj-{suffix}", method="GET", path=f"/operations/{{{{_opu_{proj_var}}}}}",
              auth="jwtAccountAdminA", test_script=poll_op_done(f"_opu_{proj_var}")),
     ]
@@ -192,7 +231,7 @@ def assert_bind_succeeded(name):
         "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
         f"if (!j.done && pc < {POLL_CAP}) {{",
         "  pm.environment.set('_pollCount', String(pc + 1));",
-        "  postman.setNextRequest(pm.info.requestName);",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
         "  return;",
         "}",
         "pm.environment.unset('_pollCount');",
@@ -223,15 +262,19 @@ def bind_role_on_account(role_var, bind_op_var, subject_var, name_suffix):
 
 def assert_labels_empty(name, proj_var):
     """GET the project and assert its labels map is empty — the direct, black-box
-    reproduction: updateMask=labels + empty body MUST clear labels."""
-    return Step(
-        name=name, method="GET", path=f"{IAM_PROJECTS}/{{{{{proj_var}}}}}",
-        auth="jwtAccountAdminA",
-        test_script=[*assert_status(200),
-                     "pm.test('project labels now empty (clear is NOT a no-op)', () => {",
-                     "  const j = pm.response.json();",
-                     "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
-                     "});"])
+    reproduction: updateMask=labels + empty body MUST clear labels. This reads the
+    caller's OWN fresh project, whose v_get owner-tuple can still be draining under
+    parallel load → transient 403/404; bounded read-your-writes retry SELF until visible."""
+    return retry_until_authorized(
+        Step(
+            name=name, method="GET", path=f"{IAM_PROJECTS}/{{{{{proj_var}}}}}",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200),
+                         "pm.test('project labels now empty (clear is NOT a no-op)', () => {",
+                         "  const j = pm.response.json();",
+                         "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
+                         "});"]),
+        budget=25, interval_ms=500, retry_on=(403, 404))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -248,14 +291,18 @@ CASES.append(Case(
     priority="P0",
     steps=[
         *create_project("_lriamPrjC", "clr", {"labelrevoke": "treska"}),
-        # sanity: the project carries the label before the clear.
-        Step(name="clr-precheck-has-label", method="GET", path=f"{IAM_PROJECTS}/{{{{_lriamPrjC}}}}",
-             auth="jwtAccountAdminA",
-             test_script=[*assert_status(200),
-                          "pm.test('project has the label before clear', () => {",
-                          "  const j = pm.response.json();",
-                          "  pm.expect((j.labels || {}).labelrevoke, JSON.stringify(j)).to.eql('treska');",
-                          "});"]),
+        # sanity: the project carries the label before the clear. First read of the
+        # caller's OWN fresh project → v_get owner-tuple may still be draining under
+        # parallel load; bounded read-your-writes retry SELF on 403/404 until visible.
+        retry_until_authorized(
+            Step(name="clr-precheck-has-label", method="GET", path=f"{IAM_PROJECTS}/{{{{_lriamPrjC}}}}",
+                 auth="jwtAccountAdminA",
+                 test_script=[*assert_status(200),
+                              "pm.test('project has the label before clear', () => {",
+                              "  const j = pm.response.json();",
+                              "  pm.expect((j.labels || {}).labelrevoke, JSON.stringify(j)).to.eql('treska');",
+                              "});"]),
+            budget=25, interval_ms=500, retry_on=(403, 404)),
         # clear via updateMask=labels + empty body.
         *update_project("_lriamPrjC", "clr", {"updateMask": "labels", "labels": {}}),
         assert_labels_empty("clr-post-clear-empty", "_lriamPrjC"),

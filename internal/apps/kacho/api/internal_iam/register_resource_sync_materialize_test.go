@@ -75,14 +75,15 @@ func (r *regReq) GetLabels() map[string]string             { return nil }
 func (r *regReq) GetParentProjectId() string               { return "" }
 func (r *regReq) GetParentAccountId() string               { return "" }
 
-// smObjectReconciler records ReconcileObject calls.
+// smObjectReconciler records ReconcileObjectForward calls (the create-path additive
+// fast-path the register use-case now drives post-commit).
 type smObjectReconciler struct {
 	mu    sync.Mutex
 	calls [][2]string // (objectType, objectID)
 	err   error
 }
 
-func (r *smObjectReconciler) ReconcileObject(_ context.Context, objectType, objectID string) error {
+func (r *smObjectReconciler) ReconcileObjectForward(_ context.Context, objectType, objectID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, [2]string{objectType, objectID})
@@ -124,9 +125,9 @@ func TestRegisterResource_VBC15_SyncReconcileAfterCommit(t *testing.T) {
 	require.True(t, txb.tx.committed, "register must commit the writer-tx")
 
 	calls := rec.snapshot()
-	require.Len(t, calls, 1, "VBC-15: exactly one post-commit ReconcileObject on the registered object")
+	require.Len(t, calls, 1, "VBC-15: exactly one post-commit ReconcileObjectForward on the registered object")
 	assert.Equal(t, [2]string{"vpc.network", "vpcn_new"}, calls[0],
-		"VBC-15: post-commit ReconcileObject must target the registered object (dotted type)")
+		"VBC-15: post-commit ReconcileObjectForward must target the registered object (dotted type)")
 }
 
 // TestRegisterResource_VBC15_NilReconciler_NonFatal — an unwired reconciler does

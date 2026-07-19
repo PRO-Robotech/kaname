@@ -148,7 +148,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -164,7 +164,7 @@
           ]
         },
         {
-          "name": "IAM-GRP-CR-CRUD-OK :: get-confirms",
+          "name": "IAM-GRP-CR-CRUD-OK :: get-confirms-rya3",
           "request": {
             "method": "GET",
             "header": [
@@ -207,6 +207,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.test('Group.id prefix grp', () => {",
                   "  const j = pm.response.json();",
@@ -407,7 +422,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('badAccGrpOpId')) {",
-                  "  postman.setNextRequest(null);",
+                  "  pm.execution.setNextRequest(null);",
                   "}"
                 ]
               }
@@ -1278,7 +1293,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1608,7 +1624,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1729,7 +1746,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('dupAddMemberOpId')) {",
-                  "  postman.setNextRequest(null);",
+                  "  pm.execution.setNextRequest(null);",
                   "}"
                 ]
               }
@@ -1869,7 +1886,7 @@
                   "const pc = parseInt(pm.environment.get('_opErrCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_opErrCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_opErrCount');",
@@ -2077,7 +2094,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2197,7 +2215,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('rmNotMemberOpId')) {",
-                  "  postman.setNextRequest(null);",
+                  "  pm.execution.setNextRequest(null);",
                   "}"
                 ]
               }
@@ -2582,7 +2600,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2650,7 +2669,8 @@
                   "if (pm.response.code === 200 && gc < 50) {",
                   "  // resource not yet gone (async delete + FGA-tuple removal lag) — retry.",
                   "  pm.environment.set('_goneCount', String(gc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _gd = Date.now(); while (Date.now() - _gd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_goneCount');",
@@ -2898,7 +2918,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",

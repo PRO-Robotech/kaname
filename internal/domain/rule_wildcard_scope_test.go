@@ -131,6 +131,55 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 		"owner object_types drifted from migration 0039 constant — update the migration in lockstep")
 }
 
+// TestSystemWildcardRoleSelectors_MigrationLockstep — the wildcard catalog system roles
+// (admin/edit/view) are seeded into role_rule_selectors by migration 0053 with HARD-CODED
+// (rule_fp + object_types) constants (SQL cannot compute the Go sha256 fingerprint). They
+// MUST equal the Go projection of each role's authored rule; if a future change to a
+// wildcard role's verbs or to the materializable type set drifts from the SQL constant,
+// this guard fails — forcing migration 0053 to be updated in lockstep (same discipline as
+// TestOwnerRoleSelector_MigrationLockstep for owner).
+//
+//   - admin (`*.*.*`)               → rule_fp identical to owner (same rule shape).
+//   - edit  (`*.*` get/list/update) → distinct rule_fp (verbs differ).
+//   - view  (`*.*` read/list/get)   → distinct rule_fp.
+//
+// All three project the SAME anchor object_types (the full materializable set) — only
+// the verbs (and thus rule_fp) differ; verbs are not stored in role_rule_selectors.
+func TestSystemWildcardRoleSelectors_MigrationLockstep(t *testing.T) {
+	// The full materializable type set migration 0053 hard-codes (mirror of the owner
+	// selector list in TestOwnerRoleSelector_MigrationLockstep).
+	migrationObjectTypes := []string{
+		"compute.disk", "compute.image", "compute.instance", "compute.snapshot",
+		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
+		"iam.role", "iam.serviceAccount", "iam.user",
+		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
+		"registry.registries", "registry.repositories",
+		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
+		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
+	}
+	cases := []struct {
+		name string
+		rule Rule
+		fp   string // migration 0053 hard-coded rule_fp
+	}{
+		{"admin", Rule{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}},
+			"3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4"},
+		{"edit", Rule{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{"get", "list", "update"}},
+			"e4919459188e4b7b3786370b6c0899a79b4df159bd1988aef0b3ad23bb5aacfe"},
+		{"view", Rule{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{"read", "list", "get"}},
+			"fe68d56d542e8b599256b1a7eee6e31eed6db358e7254af4b5e25c7195dcf68e"},
+	}
+	for _, c := range cases {
+		sels := Rules{c.rule}.MaterializingSelectors()
+		require.Len(t, sels, 1, "%s projects exactly one selector", c.name)
+		assert.Equal(t, ArmAnchor, sels[0].Arm, "%s selector is ARM_ANCHOR (migration 0053 arm='anchor')", c.name)
+		assert.Equal(t, c.fp, sels[0].RuleFP,
+			"%s rule_fp drifted from the migration 0053 constant — update the migration in lockstep", c.name)
+		assert.Equal(t, migrationObjectTypes, sels[0].ObjectTypes,
+			"%s object_types drifted from the migration 0053 constant — update the migration in lockstep", c.name)
+	}
+}
+
 // TestMaterializingSelectorsInScope_NonWildcard_Unchanged — a concrete rule is
 // scope-independent (its dotted types are explicit), so the scope variant returns
 // the same as the role-level projection. Guards against regressing regular rules.

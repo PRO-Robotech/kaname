@@ -10653,7 +10653,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abTeardownOpId_AUTHZ_AB_CR_A_AAA')) { postman.setNextRequest('AUTHZ-AB-CR-A-AAA :: delete-ab-teardown'); }"
+                  "if (!pm.environment.get('_abTeardownOpId_AUTHZ_AB_CR_A_AAA')) { pm.execution.setNextRequest('AUTHZ-AB-CR-A-AAA :: delete-ab-teardown'); }"
                 ]
               }
             },
@@ -10667,7 +10667,8 @@
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = {}; }",
                   "if ((pm.response.code === 404 || !_j.done) && _pc < 50) {",
                   "  pm.environment.set('_abPollCount', String(_pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_abPollCount');",
@@ -10768,7 +10769,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_A_AAA')) { postman.setNextRequest(null); }"
+                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_A_AAA')) { pm.execution.setNextRequest(null); }"
                 ]
               }
             },
@@ -10782,7 +10783,8 @@
                   "let _dj; try { _dj = pm.response.json(); } catch(e) { _dj = {}; }",
                   "if (!_dj.done && _dp < 50) {",
                   "  pm.environment.set('_abDelPollCount', String(_dp + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_abDelPollCount');",
@@ -11150,7 +11152,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abTeardownOpId_AUTHZ_AB_CR_B_AAB')) { postman.setNextRequest('AUTHZ-AB-CR-B-AAB :: delete-ab-teardown'); }"
+                  "if (!pm.environment.get('_abTeardownOpId_AUTHZ_AB_CR_B_AAB')) { pm.execution.setNextRequest('AUTHZ-AB-CR-B-AAB :: delete-ab-teardown'); }"
                 ]
               }
             },
@@ -11164,7 +11166,8 @@
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = {}; }",
                   "if ((pm.response.code === 404 || !_j.done) && _pc < 50) {",
                   "  pm.environment.set('_abPollCount', String(_pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_abPollCount');",
@@ -11265,7 +11268,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_AAB')) { postman.setNextRequest(null); }"
+                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_AAB')) { pm.execution.setNextRequest(null); }"
                 ]
               }
             },
@@ -11279,7 +11282,8 @@
                   "let _dj; try { _dj = pm.response.json(); } catch(e) { _dj = {}; }",
                   "if (!_dj.done && _dp < 50) {",
                   "  pm.environment.set('_abDelPollCount', String(_dp + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_abDelPollCount');",
@@ -11580,7 +11584,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abTeardownOpId_AUTHZ_AB_CR_B_INV')) { postman.setNextRequest('AUTHZ-AB-CR-B-INV :: delete-ab-teardown'); }"
+                  "if (!pm.environment.get('_abTeardownOpId_AUTHZ_AB_CR_B_INV')) { pm.execution.setNextRequest('AUTHZ-AB-CR-B-INV :: delete-ab-teardown'); }"
                 ]
               }
             },
@@ -11594,7 +11598,8 @@
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = {}; }",
                   "if ((pm.response.code === 404 || !_j.done) && _pc < 50) {",
                   "  pm.environment.set('_abPollCount', String(_pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_abPollCount');",
@@ -11695,7 +11700,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_INV')) { postman.setNextRequest(null); }"
+                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_INV')) { pm.execution.setNextRequest(null); }"
                 ]
               }
             },
@@ -11709,7 +11714,8 @@
                   "let _dj; try { _dj = pm.response.json(); } catch(e) { _dj = {}; }",
                   "if (!_dj.done && _dp < 50) {",
                   "  pm.environment.set('_abDelPollCount', String(_dp + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_abDelPollCount');",
@@ -18309,7 +18315,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -18372,7 +18379,7 @@
                   "const pc = parseInt(pm.environment.get('_w12WarmPoll') || '0', 10);",
                   "if (pm.response.code !== 200 && pc < 50) {",
                   "  pm.environment.set('_w12WarmPoll', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_w12WarmPoll');",
@@ -18483,7 +18490,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -18543,7 +18551,7 @@
                   "const pc = parseInt(pm.environment.get('_w12Poll') || '0', 10);",
                   "if (pm.response.code === 200 && pc < 50) {",
                   "  pm.environment.set('_w12Poll', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_w12Poll');",

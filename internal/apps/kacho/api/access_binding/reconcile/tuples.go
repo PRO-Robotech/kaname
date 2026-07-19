@@ -49,17 +49,48 @@ func ruleObjectTuples(subject string, verbs []string, objectType, objectID strin
 		out = append(out, t)
 	}
 	if emitVerbs {
+		hasUpdate := false
 		for _, v := range expanded {
 			if !domain.IsClosedVerb(v) {
 				continue
 			}
+			if v == "update" {
+				hasUpdate = true
+			}
 			add("v_" + v)
+		}
+		// v_update ⟹ v_delete co-materialization (create.go:435 invariant): under the
+		// flat verb-bearing model a CRUD editor DELETES what it edits — an object-scoped
+		// grant that carries v_update must also carry v_delete, else the resource creator
+		// (edit@project → v_get/v_list/v_update but NOT v_delete) 403s "lacks v_delete" on
+		// every cleanup of its OWN resource. Migration 0040 gave the edit roles the read
+		// verbs but omitted delete; this closes the gap at the single materialization
+		// path WITHOUT escalating the back-compat tier (stays editor) or over-granting a
+		// stray delete verb into every role. It is fail-closed by construction: only a
+		// grant that already updates the object gains delete.
+		//
+		// EXCLUDED — the hierarchy scopes account/project: deleting a scope object is an
+		// owner/admin operation (ProjectService/AccountService.Delete gate v_delete on the
+		// scope), NOT an editor one. An edit-tier grant on account/project (scope-self OR
+		// as content of an account-owner binding) must NOT gain v_delete on the scope —
+		// only a role that explicitly authored `delete` (owner/admin `*.*`) keeps it (the
+		// loop above already emitted it, so this is purely additive for leaf types).
+		if hasUpdate && !isHierarchyScopeType(fgaType) {
+			add("v_delete")
 		}
 	}
 	// Back-compat tier tuple — carries domain-verb access + keeps tier-based Check
 	// call-sites working. Always emitted (parity with B emitNamesRule).
 	add(tier)
 	return out, true
+}
+
+// isHierarchyScopeType reports whether an FGA object_type is one of the tier-carrying
+// hierarchy scope ancestors (account / project). These are the two verb-bearing types
+// where a `delete` is a scope-destroying owner/admin operation, so the v_update⟹v_delete
+// leaf-editor co-materialization is deliberately NOT applied to them (anti over-grant).
+func isHierarchyScopeType(fgaType string) bool {
+	return fgaType == "account" || fgaType == "project"
 }
 
 // scopeSelfRuleFP — the sentinel rule_fp attributing the scope-self member (D-7).

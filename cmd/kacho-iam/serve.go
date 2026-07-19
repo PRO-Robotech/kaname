@@ -157,6 +157,10 @@ func runServe(cfg config.Config) error {
 	// остается false до первого Run, поэтому readiness не отражает worker.
 	// ConfigureDefault обязан предшествовать Start.
 	lroRec := metricsReg.NewLRORecorder()
+	// AccessBinding.Create dispatches on this default-registry. Operation.done means
+	// the binding is durably committed; the binding's per-object access materializes
+	// eventually-consistent (synchronous post-commit reconcile + co-committed event +
+	// periodic sweep backstop), not gated on op.done.
 	if err := operations.ConfigureDefault(
 		operations.WithRecorder(lroRec),
 		operations.WithLogger(logger),

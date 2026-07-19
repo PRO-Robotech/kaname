@@ -199,7 +199,8 @@ def mint_user(env_var, ext, auth="jwtAccountAdminA"):
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 f"if (!j.done && pc < {POLL_CAP}) {{",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -240,7 +241,15 @@ CASES.append(Case(
         Step(
             name="pre-clean-dup",
             method="GET",
-            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
+            # Discovery MUST use an AUTHORIZED read: :listByScope on account/accountAId
+            # (the account owner sees EVERY binding in the account scope). The prior
+            # :listBySubject?subjectId=userNOBId is a CROSS-user query (owner is not the
+            # subject) -> correctly denied 403, so it could never discover the stale dup
+            # and `create` then collided ALREADY_EXISTS (crudAcbId became a phantom).
+            # pageSize=1000: the account scope accumulates >50 bindings across re-runs, so
+            # the default page (50) can page-out the stale (userNOBId,view,account) dup.
+            # :listByScope returns ALL subjects -> the find filters by subjectId=userNOBId.
+            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('pre-clean list status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
@@ -249,12 +258,13 @@ CASES.append(Case(
                 "  const j = pm.response.json();",
                 "  const arr = (j && j.accessBindings) || [];",
                 f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}'",
+                "       && b.subjectId === pm.environment.get('userNOBId')",
                 "       && b.resourceType === 'account'",
                 "       && b.resourceId === pm.environment.get('accountAId'));",
                 "  if (dup && dup.id) { pm.environment.set('dupAcbId', dup.id); }",
                 "}",
                 # No pre-existing dup (clean DB, or NOB not visible) → skip revoke+poll.
-                "if (!pm.environment.get('dupAcbId')) { postman.setNextRequest('create'); }",
+                "if (!pm.environment.get('dupAcbId')) { pm.execution.setNextRequest('create'); }",
             ],
         ),
         Step(
@@ -264,12 +274,36 @@ CASES.append(Case(
             path="/iam/v1/accessBindings/{{dupAcbId}}",
             auth="jwtAccountAdminA",
             test_script=[
+                # The stale (userNOBId,view,accountA) binding is typically a LEFTOVER from
+                # the authz-deny AB-CR-ALLOW suite (it grants the SAME shared 5-tuple and its
+                # best-effort teardown accepts a transient 403), or from a prior run. AAA's
+                # `v_delete` on it (admin-from-account, resolved via the binding→account
+                # parent-tuple) is EVENTUALLY-consistent: an immediate DELETE 403s until that
+                # parent-tuple drains to OpenFGA — proven CONVERGENT by
+                # AUTHZGCP-BIND-DELETE-BY-ADMIN-ALLOW (poll-fga-readiness → delete → 200).
+                # A single-shot revoke that accepts the 403 leaves the binding ACTIVE, so it
+                # keeps the strict-create UNIQUE (WHERE revoked_at IS NULL) slot and EVERY
+                # downstream (userNOBId,view,accountA) create (CR-CRUD-OK, CR-NEG-DUP, DL-FLOW,
+                # DP-*) collides ALREADY_EXISTS → crudAcbId phantom → the whole ACB suite
+                # cascades (get/list/delete 404/403). So retry SELF on the 403 delete-authority
+                # window until the revoke succeeds (200 → poll it done below) or the binding is
+                # already gone (404). Bounded; on budget exhaustion the existing fall-through to
+                # `create` still surfaces the real collision (never masked, never infinite).
+                "if (pm.environment.get('_pcrStarted') !== pm.info.requestName) { pm.environment.set('_pcrCount', '0'); pm.environment.set('_pcrStarted', pm.info.requestName); }",
+                "const _pcrc = parseInt(pm.environment.get('_pcrCount') || '0', 10);",
+                "if (pm.response.code === 403 && _pcrc < 40) {",
+                "  pm.environment.set('_pcrCount', String(_pcrc + 1));",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* delete-authority (binding→account parent-tuple) materialization wait */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_pcrCount'); pm.environment.unset('_pcrStarted');",
                 "pm.test('pre-clean revoke status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                 "const j = pm.response.json();",
                 # A 200 returns the delete Operation → poll it done; a 404/403 means it is
                 # already gone → skip the poll and create directly.
                 "if (pm.response.code === 200 && j && j.id) { pm.environment.set('preCleanOpId', j.id); }",
-                "else { pm.environment.unset('preCleanOpId'); postman.setNextRequest('create'); }",
+                "else { pm.environment.unset('preCleanOpId'); pm.execution.setNextRequest('create'); }",
             ],
         ),
         Step(
@@ -288,7 +322,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -327,7 +362,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -433,7 +469,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -723,7 +760,7 @@ CASES.append(Case(
         poll_request_until_status(
             name="list-by-resource",
             method="GET",
-            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}",
+            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             retry_on=(403,),  # 403-only; the 200-but-absent window is handled by retry_predicate.
             retry_predicate=("(() => { const j = pm.response.json(); const aid = "
@@ -840,7 +877,7 @@ CASES.append(Case(
         poll_request_until_status(
             name="list-by-subject-self",
             method="GET",
-            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
+            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}&pageSize=1000",
             auth="jwtNoBindings",
             retry_on=(403,),  # 403-only; the 200-but-absent window is handled by retry_predicate.
             retry_predicate=("(() => { const j = pm.response.json(); const aid = "
@@ -941,7 +978,7 @@ CASES.append(Case(
         poll_request_until_status(
             name="list-by-account-owner",
             method="GET",
-            path="/iam/v1/accounts/{{accountAId}}/accessBindings",
+            path="/iam/v1/accounts/{{accountAId}}/accessBindings?pageSize=1000",
             auth="jwtAccountAdminA",
             retry_on=(403,),  # 403-only; the 200-but-absent window is handled by retry_predicate.
             retry_predicate=("(() => { const j = pm.response.json(); const aid = "
@@ -1132,7 +1169,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -1234,7 +1272,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -1339,9 +1378,19 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                "if (!j.done && pc < 30) {",
+                # poll-cluster-create budget 30→80 (GATE-RUN #3 root #3). Busy-wait уже
+                # был (c8ec4c2), НЕ пропущен — но budget 30*500ms=15s < confirm-deadline
+                # KACHO_IAM_OWNER_CONFIRM_DEADLINE=30s. Cluster-scope AccessBinding.Create
+                # делает broad cluster-materialization (owner-tuple confirm read-after-write
+                # под HIGHER_CONSISTENCY по singleton cluster_kacho_root); op-done лагал >15s
+                # → done:false на конце polla (binding при этом уже материализован:
+                # get-cluster-binding зелёный). Project-scope AB confirm'ится <15s (др. 35
+                # inline-polls ок при pc<30). 80*500ms=40s покрывает 30s confirm-deadline с
+                # запасом. Только этот P0 cluster-poll; fast-путь выходит рано (не крутит 80).
+                "if (!j.done && pc < 80) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -1796,7 +1845,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -1849,7 +1899,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -2058,7 +2109,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -2310,7 +2362,7 @@ CASES.append(Case(
         Step(
             name="listbysubject-finds-owner-binding",
             method="GET",
-            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}",
+            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -2389,7 +2441,7 @@ CASES.append(Case(
         Step(
             name="t33-pre-clean-list",
             method="GET",
-            path="/iam/v1/accounts/{{accountAId}}/accessBindings",
+            path="/iam/v1/accounts/{{accountAId}}/accessBindings?pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('pre-clean list status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
@@ -2397,11 +2449,11 @@ CASES.append(Case(
                 "if (pm.response.code === 200) {",
                 "  const j = pm.response.json();",
                 "  const rows = (j.accessBindings || j.bindings || []);",
-                "  const m = rows.find(b => b.roleId === '" + ROLE_ADMIN + "' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && (b.status === undefined || b.status === 'ACTIVE'));",
+                "  const m = rows.find(b => b.roleId === '" + ROLE_ADMIN + "' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
                 "  if (m && m.id) { pm.environment.set('t33StaleAcbId', m.id); }",
                 "}",
                 # No stale binding (clean DB) → skip the revoke and go straight to create.
-                "if (!pm.environment.get('t33StaleAcbId')) { postman.setNextRequest('t33-create-with-labels'); }",
+                "if (!pm.environment.get('t33StaleAcbId')) { pm.execution.setNextRequest('t33-create-with-labels'); }",
             ],
         ),
         Step(
@@ -2417,7 +2469,7 @@ CASES.append(Case(
                 # active-grant UNIQUE keys on revoked_at IS NULL, set in the worker); a
                 # 404 means it is already gone → skip the poll and create directly.
                 "if (pm.response.code === 200 && j && j.id) { pm.environment.set('t33PreCleanOpId', j.id); }",
-                "else { pm.environment.unset('t33PreCleanOpId'); postman.setNextRequest('t33-create-with-labels'); }",
+                "else { pm.environment.unset('t33PreCleanOpId'); pm.execution.setNextRequest('t33-create-with-labels'); }",
             ],
         ),
         Step(
@@ -2432,7 +2484,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -2519,7 +2572,7 @@ CASES.append(Case(
             path="/iam/v1/accessBindings/{{t33AcbId}}",
             auth="jwtAccountAdminA",
             pre_script=[
-                "if (!pm.environment.get('t33AcbId')) { postman.setNextRequest(null); }",
+                "if (!pm.environment.get('t33AcbId')) { pm.execution.setNextRequest(null); }",
             ],
             test_script=[
                 "pm.test('teardown delete accepted', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
@@ -2555,7 +2608,7 @@ CASES.append(Case(
         Step(
             name="t33imm-pre-clean-list",
             method="GET",
-            path="/iam/v1/accounts/{{accountAId}}/accessBindings",
+            path="/iam/v1/accounts/{{accountAId}}/accessBindings?pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('pre-clean list status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
@@ -2563,10 +2616,10 @@ CASES.append(Case(
                 "if (pm.response.code === 200) {",
                 "  const j = pm.response.json();",
                 "  const rows = (j.accessBindings || j.bindings || []);",
-                "  const m = rows.find(b => b.roleId === '" + ROLE_VIEW + "' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && b.subjectId === pm.environment.get('userINVId') && (b.status === undefined || b.status === 'ACTIVE'));",
+                "  const m = rows.find(b => b.roleId === '" + ROLE_VIEW + "' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && b.subjectId === pm.environment.get('userINVId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
                 "  if (m && m.id) { pm.environment.set('t33immStaleAcbId', m.id); }",
                 "}",
-                "if (!pm.environment.get('t33immStaleAcbId')) { postman.setNextRequest('t33imm-create'); }",
+                "if (!pm.environment.get('t33immStaleAcbId')) { pm.execution.setNextRequest('t33imm-create'); }",
             ],
         ),
         Step(
@@ -2578,7 +2631,7 @@ CASES.append(Case(
                 "pm.test('pre-clean delete accepted or already gone', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
                 "const j = pm.response.json();",
                 "if (pm.response.code === 200 && j && j.id) { pm.environment.set('t33immPreCleanOpId', j.id); }",
-                "else { pm.environment.unset('t33immPreCleanOpId'); postman.setNextRequest('t33imm-create'); }",
+                "else { pm.environment.unset('t33immPreCleanOpId'); pm.execution.setNextRequest('t33imm-create'); }",
             ],
         ),
         Step(
@@ -2593,7 +2646,8 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_pollCount', String(pc + 1));",
-                "  postman.setNextRequest(pm.info.requestName);",
+                "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
                 "pm.environment.unset('_pollCount');",
@@ -2660,7 +2714,7 @@ CASES.append(Case(
             path="/iam/v1/accessBindings/{{t33immAcbId}}",
             auth="jwtAccountAdminA",
             pre_script=[
-                "if (!pm.environment.get('t33immAcbId')) { postman.setNextRequest(null); }",
+                "if (!pm.environment.get('t33immAcbId')) { pm.execution.setNextRequest(null); }",
             ],
             test_script=[
                 "pm.test('teardown delete accepted', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",

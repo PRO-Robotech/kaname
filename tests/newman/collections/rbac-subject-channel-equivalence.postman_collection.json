@@ -77,7 +77,7 @@
                   "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) pm.environment.set('chUserDupAcb', dup.id);",
                   "}",
-                  "if (!pm.environment.get('chUserDupAcb')) { postman.setNextRequest('IAM-CH-USER-EQUIV-OK :: grant-user'); }"
+                  "if (!pm.environment.get('chUserDupAcb')) { pm.execution.setNextRequest('IAM-CH-USER-EQUIV-OK :: grant-user'); }"
                 ]
               }
             }
@@ -130,7 +130,7 @@
                   "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                   "pm.environment.unset('chUserDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('chUserDelOp', dj.id); }",
-                  "if (!pm.environment.get('chUserDelOp')) { postman.setNextRequest('IAM-CH-USER-EQUIV-OK :: grant-user'); }"
+                  "if (!pm.environment.get('chUserDelOp')) { pm.execution.setNextRequest('IAM-CH-USER-EQUIV-OK :: grant-user'); }"
                 ]
               }
             }
@@ -182,7 +182,7 @@
                   "pm.test('await-del 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
                   "const pc = parseInt(pm.environment.get('_chUserDelCount') || '0', 10);",
-                  "if (!j.done && pc < 300) { pm.environment.set('_chUserDelCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (!j.done && pc < 300) { pm.environment.set('_chUserDelCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUserDelCount'); pm.environment.unset('_chUserDelStarted');",
                   "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
                 ]
@@ -308,7 +308,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -369,7 +369,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_acct_user') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_acct_user', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_acct_user', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_acct_user'); pm.environment.unset('_chps_read_acct_user');",
                   "const j = pm.response.json();",
                   "pm.test('user-direct: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -426,7 +426,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_prj_user') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = (pm.response.code === 200) && ((() => { try { const j = pm.response.json(); const id = pm.environment.get('projectA1Id'); return !((j.projects || []).some(p => p.id === id)); } catch (e) { return true; } })());",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_prj_user', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_prj_user', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_prj_user'); pm.environment.unset('_chps_read_prj_user');",
                   "const j = pm.response.json();",
                   "pm.test('user-direct: projects List 200 (scope-filter)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -483,7 +483,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chUserRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chUserRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chUserRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUserRevOpDelCount'); pm.environment.unset('_chUserRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chUserRevOp');",
@@ -539,7 +539,7 @@
                   "if (!pm.environment.get('chUserRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chUserRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chUserRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chUserRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUserRevOpCount'); pm.environment.unset('_chUserRevOpStarted');"
                 ]
               }
@@ -590,6 +590,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -604,7 +612,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -739,7 +747,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -807,7 +815,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const _mc = parseInt(pm.environment.get('_chgEquivAddOpMCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgEquivAddOpMCount', String(_mc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgEquivAddOpMCount', String(_mc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgEquivAddOpMCount'); pm.environment.unset('_chgEquivAddOpMStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
@@ -868,7 +876,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -999,7 +1007,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1060,7 +1068,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_acct_grp') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_acct_grp', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_acct_grp', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_acct_grp'); pm.environment.unset('_chps_read_acct_grp');",
                   "const j = pm.response.json();",
                   "pm.test('group-member: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -1117,7 +1125,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_prj_grp') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = (pm.response.code === 200) && ((() => { try { const j = pm.response.json(); const id = pm.environment.get('projectA1Id'); return !((j.projects || []).some(p => p.id === id)); } catch (e) { return true; } })());",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_prj_grp', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_prj_grp', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_prj_grp'); pm.environment.unset('_chps_read_prj_grp');",
                   "const j = pm.response.json();",
                   "pm.test('group-member: projects List 200 (scope-filter)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -1174,7 +1182,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chgEquivRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgEquivRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgEquivRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgEquivRevOpDelCount'); pm.environment.unset('_chgEquivRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chgEquivRevOp');",
@@ -1230,7 +1238,7 @@
                   "if (!pm.environment.get('chgEquivRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chgEquivRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chgEquivRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chgEquivRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgEquivRevOpCount'); pm.environment.unset('_chgEquivRevOpStarted');"
                 ]
               }
@@ -1281,6 +1289,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1295,7 +1311,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -1430,7 +1446,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1561,7 +1577,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1629,7 +1645,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const _mc = parseInt(pm.environment.get('_chgFlipAddOpMCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgFlipAddOpMCount', String(_mc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgFlipAddOpMCount', String(_mc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgFlipAddOpMCount'); pm.environment.unset('_chgFlipAddOpMStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
@@ -1690,7 +1706,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1751,7 +1767,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_after_add') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_after_add', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_after_add', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_after_add'); pm.environment.unset('_chps_read_after_add');",
                   "const j = pm.response.json();",
                   "pm.test('group add-member: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -1816,7 +1832,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const _mc = parseInt(pm.environment.get('_chgFlipRmOpMCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgFlipRmOpMCount', String(_mc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgFlipRmOpMCount', String(_mc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgFlipRmOpMCount'); pm.environment.unset('_chgFlipRmOpMStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
@@ -1877,7 +1893,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1934,6 +1950,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1948,7 +1972,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -2133,7 +2157,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2201,7 +2225,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const _mc = parseInt(pm.environment.get('_chgNmAddOpMCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgNmAddOpMCount', String(_mc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgNmAddOpMCount', String(_mc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgNmAddOpMCount'); pm.environment.unset('_chgNmAddOpMStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
@@ -2262,7 +2286,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2393,7 +2417,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2454,7 +2478,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_member_reads') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_member_reads', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_member_reads', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_member_reads'); pm.environment.unset('_chps_member_reads');",
                   "const j = pm.response.json();",
                   "pm.test('group member: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -2563,7 +2587,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chgNmRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgNmRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgNmRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgNmRevOpDelCount'); pm.environment.unset('_chgNmRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chgNmRevOp');",
@@ -2619,7 +2643,7 @@
                   "if (!pm.environment.get('chgNmRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chgNmRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chgNmRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chgNmRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgNmRevOpCount'); pm.environment.unset('_chgNmRevOpStarted');"
                 ]
               }
@@ -2670,6 +2694,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -2684,7 +2716,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -2819,7 +2851,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2887,7 +2919,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const _mc = parseInt(pm.environment.get('_chgRvAddOpMCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgRvAddOpMCount', String(_mc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgRvAddOpMCount', String(_mc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgRvAddOpMCount'); pm.environment.unset('_chgRvAddOpMStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
@@ -2948,7 +2980,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3079,7 +3111,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3140,7 +3172,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_member_reads') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_member_reads', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_member_reads', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_member_reads'); pm.environment.unset('_chps_member_reads');",
                   "const j = pm.response.json();",
                   "pm.test('group member (pre-revoke): GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -3197,7 +3229,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chgRvRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgRvRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgRvRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgRvRevOpDelCount'); pm.environment.unset('_chgRvRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chgRvRevOp');",
@@ -3253,7 +3285,7 @@
                   "if (!pm.environment.get('chgRvRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chgRvRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chgRvRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chgRvRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgRvRevOpCount'); pm.environment.unset('_chgRvRevOpStarted');"
                 ]
               }
@@ -3304,6 +3336,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -3318,7 +3358,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -3387,7 +3427,7 @@
                   "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) pm.environment.set('chSaDupAcb', dup.id);",
                   "}",
-                  "if (!pm.environment.get('chSaDupAcb')) { postman.setNextRequest('IAM-CH-SA-EQUIV-OK :: grant-sa'); }"
+                  "if (!pm.environment.get('chSaDupAcb')) { pm.execution.setNextRequest('IAM-CH-SA-EQUIV-OK :: grant-sa'); }"
                 ]
               }
             }
@@ -3440,7 +3480,7 @@
                   "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                   "pm.environment.unset('chSaDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('chSaDelOp', dj.id); }",
-                  "if (!pm.environment.get('chSaDelOp')) { postman.setNextRequest('IAM-CH-SA-EQUIV-OK :: grant-sa'); }"
+                  "if (!pm.environment.get('chSaDelOp')) { pm.execution.setNextRequest('IAM-CH-SA-EQUIV-OK :: grant-sa'); }"
                 ]
               }
             }
@@ -3492,7 +3532,7 @@
                   "pm.test('await-del 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
                   "const pc = parseInt(pm.environment.get('_chSaDelCount') || '0', 10);",
-                  "if (!j.done && pc < 300) { pm.environment.set('_chSaDelCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (!j.done && pc < 300) { pm.environment.set('_chSaDelCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaDelCount'); pm.environment.unset('_chSaDelStarted');",
                   "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
                 ]
@@ -3618,7 +3658,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3679,7 +3719,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_acct_sa') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_acct_sa', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_acct_sa', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_acct_sa'); pm.environment.unset('_chps_read_acct_sa');",
                   "const j = pm.response.json();",
                   "pm.test('SA-token: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -3736,7 +3776,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_read_prj_sa') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = (pm.response.code === 200) && ((() => { try { const j = pm.response.json(); const id = pm.environment.get('projectA1Id'); return !((j.projects || []).some(p => p.id === id)); } catch (e) { return true; } })());",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_prj_sa', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_read_prj_sa', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_read_prj_sa'); pm.environment.unset('_chps_read_prj_sa');",
                   "const j = pm.response.json();",
                   "pm.test('SA-token: projects List 200 (scope-filter)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -3793,7 +3833,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chSaRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chSaRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chSaRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaRevOpDelCount'); pm.environment.unset('_chSaRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chSaRevOp');",
@@ -3849,7 +3889,7 @@
                   "if (!pm.environment.get('chSaRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chSaRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chSaRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chSaRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaRevOpCount'); pm.environment.unset('_chSaRevOpStarted');"
                 ]
               }
@@ -3900,6 +3940,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -3914,7 +3962,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -3983,7 +4031,7 @@
                   "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) pm.environment.set('chSaIsoDupAcb', dup.id);",
                   "}",
-                  "if (!pm.environment.get('chSaIsoDupAcb')) { postman.setNextRequest('IAM-CH-SA-USER-ISOLATION-DENY :: grant-sa'); }"
+                  "if (!pm.environment.get('chSaIsoDupAcb')) { pm.execution.setNextRequest('IAM-CH-SA-USER-ISOLATION-DENY :: grant-sa'); }"
                 ]
               }
             }
@@ -4036,7 +4084,7 @@
                   "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                   "pm.environment.unset('chSaIsoDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('chSaIsoDelOp', dj.id); }",
-                  "if (!pm.environment.get('chSaIsoDelOp')) { postman.setNextRequest('IAM-CH-SA-USER-ISOLATION-DENY :: grant-sa'); }"
+                  "if (!pm.environment.get('chSaIsoDelOp')) { pm.execution.setNextRequest('IAM-CH-SA-USER-ISOLATION-DENY :: grant-sa'); }"
                 ]
               }
             }
@@ -4088,7 +4136,7 @@
                   "pm.test('await-del 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
                   "const pc = parseInt(pm.environment.get('_chSaIsoDelCount') || '0', 10);",
-                  "if (!j.done && pc < 300) { pm.environment.set('_chSaIsoDelCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (!j.done && pc < 300) { pm.environment.set('_chSaIsoDelCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaIsoDelCount'); pm.environment.unset('_chSaIsoDelStarted');",
                   "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
                 ]
@@ -4214,7 +4262,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4275,7 +4323,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_sa_reads') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_sa_reads', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_sa_reads', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_sa_reads'); pm.environment.unset('_chps_sa_reads');",
                   "const j = pm.response.json();",
                   "pm.test('SA principal: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -4384,7 +4432,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chSaIsoRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chSaIsoRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chSaIsoRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaIsoRevOpDelCount'); pm.environment.unset('_chSaIsoRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chSaIsoRevOp');",
@@ -4440,7 +4488,7 @@
                   "if (!pm.environment.get('chSaIsoRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chSaIsoRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chSaIsoRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chSaIsoRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaIsoRevOpCount'); pm.environment.unset('_chSaIsoRevOpStarted');"
                 ]
               }
@@ -4491,6 +4539,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -4505,7 +4561,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
@@ -4574,7 +4630,7 @@
                   "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) pm.environment.set('chUsrIsoDupAcb', dup.id);",
                   "}",
-                  "if (!pm.environment.get('chUsrIsoDupAcb')) { postman.setNextRequest('IAM-CH-USER-SA-ISOLATION-DENY :: grant-user'); }"
+                  "if (!pm.environment.get('chUsrIsoDupAcb')) { pm.execution.setNextRequest('IAM-CH-USER-SA-ISOLATION-DENY :: grant-user'); }"
                 ]
               }
             }
@@ -4627,7 +4683,7 @@
                   "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                   "pm.environment.unset('chUsrIsoDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('chUsrIsoDelOp', dj.id); }",
-                  "if (!pm.environment.get('chUsrIsoDelOp')) { postman.setNextRequest('IAM-CH-USER-SA-ISOLATION-DENY :: grant-user'); }"
+                  "if (!pm.environment.get('chUsrIsoDelOp')) { pm.execution.setNextRequest('IAM-CH-USER-SA-ISOLATION-DENY :: grant-user'); }"
                 ]
               }
             }
@@ -4679,7 +4735,7 @@
                   "pm.test('await-del 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
                   "const pc = parseInt(pm.environment.get('_chUsrIsoDelCount') || '0', 10);",
-                  "if (!j.done && pc < 300) { pm.environment.set('_chUsrIsoDelCount', String(pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (!j.done && pc < 300) { pm.environment.set('_chUsrIsoDelCount', String(pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUsrIsoDelCount'); pm.environment.unset('_chUsrIsoDelStarted');",
                   "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
                 ]
@@ -4805,7 +4861,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 300) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4866,7 +4922,7 @@
                   "const _pc = parseInt(pm.environment.get('_chp_user_reads') || '0', 10);",
                   "const _retryCode = [403,404].includes(pm.response.code);",
                   "const _retryPred = false;",
-                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_user_reads', String(_pc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if ((_retryCode || _retryPred) && _pc < 300) { pm.environment.set('_chp_user_reads', String(_pc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chp_user_reads'); pm.environment.unset('_chps_user_reads');",
                   "const j = pm.response.json();",
                   "pm.test('user principal: GET account-A → 200 (v_get content via grant)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -4975,7 +5031,7 @@
                 "exec": [
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const _dc = parseInt(pm.environment.get('_chUsrIsoRevOpDelCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chUsrIsoRevOpDelCount', String(_dc + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chUsrIsoRevOpDelCount', String(_dc + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUsrIsoRevOpDelCount'); pm.environment.unset('_chUsrIsoRevOpDelStarted');",
                   "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('chUsrIsoRevOp');",
@@ -5031,7 +5087,7 @@
                   "if (!pm.environment.get('chUsrIsoRevOp')) { return; }",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chUsrIsoRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 300) { pm.environment.set('_chUsrIsoRevOpCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (j && !j.done && c < 300) { pm.environment.set('_chUsrIsoRevOpCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUsrIsoRevOpCount'); pm.environment.unset('_chUsrIsoRevOpStarted');"
                 ]
               }
@@ -5082,6 +5138,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -5096,7 +5160,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && cc < 300) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",

@@ -38,14 +38,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}"
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -76,11 +76,12 @@
                   "  const j = pm.response.json();",
                   "  const arr = (j && j.accessBindings) || [];",
                   "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e'",
+                  "       && b.subjectId === pm.environment.get('userNOBId')",
                   "       && b.resourceType === 'account'",
                   "       && b.resourceId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) { pm.environment.set('dupAcbId', dup.id); }",
                   "}",
-                  "if (!pm.environment.get('dupAcbId')) { postman.setNextRequest('IAM-ACB-CR-CRUD-OK :: create'); }"
+                  "if (!pm.environment.get('dupAcbId')) { pm.execution.setNextRequest('IAM-ACB-CR-CRUD-OK :: create'); }"
                 ]
               }
             }
@@ -133,7 +134,7 @@
                   "pm.test('pre-clean revoke status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                   "const j = pm.response.json();",
                   "if (pm.response.code === 200 && j && j.id) { pm.environment.set('preCleanOpId', j.id); }",
-                  "else { pm.environment.unset('preCleanOpId'); postman.setNextRequest('IAM-ACB-CR-CRUD-OK :: create'); }"
+                  "else { pm.environment.unset('preCleanOpId'); pm.execution.setNextRequest('IAM-ACB-CR-CRUD-OK :: create'); }"
                 ]
               }
             }
@@ -187,7 +188,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -319,7 +321,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -390,7 +393,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_get_confirms', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_get_confirms');",
@@ -550,7 +554,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -627,7 +632,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_verify_original_survives', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_verify_original_survives');",
@@ -759,7 +765,7 @@
                   "const pc = parseInt(pm.environment.get('_opErrCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_opErrCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_opErrCount');",
@@ -1029,7 +1035,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_get_ok', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_get_ok');",
@@ -1194,14 +1201,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}"
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -1238,7 +1245,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_list_by_resource', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_list_by_resource');",
@@ -1386,14 +1394,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}"
+                "accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}&pageSize=1000"
               ]
             }
           },
@@ -1430,7 +1438,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_list_by_subject_self', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_list_by_subject_self');",
@@ -1585,7 +1594,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}/accessBindings",
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}/accessBindings?pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1594,7 +1603,7 @@
                 "v1",
                 "accounts",
                 "{{accountAId}}",
-                "accessBindings"
+                "accessBindings?pageSize=1000"
               ]
             }
           },
@@ -1631,7 +1640,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_list_by_account_owner', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_list_by_account_owner');",
@@ -1828,7 +1838,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_delete', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_delete');",
@@ -1902,7 +1913,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1970,7 +1982,8 @@
                   "if (pm.response.code === 200 && gc < 50) {",
                   "  // resource not yet gone (async delete + FGA-tuple removal lag) — retry.",
                   "  pm.environment.set('_goneCount', String(gc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _gd = Date.now(); while (Date.now() - _gd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_goneCount');",
@@ -2165,7 +2178,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2234,7 +2248,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_delete_as_owner', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_delete_as_owner');",
@@ -2308,7 +2323,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2506,7 +2522,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2575,7 +2592,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_revoke_delete', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_revoke_delete');",
@@ -2649,7 +2667,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -2840,9 +2859,10 @@
                   "const j = pm.response.json();",
                   "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
+                  "if (!j.done && pc < 80) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3307,7 +3327,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -3495,7 +3516,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4000,7 +4022,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4182,7 +4205,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4690,7 +4714,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4825,7 +4850,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -4896,7 +4922,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_get_f51_no_target', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_get_f51_no_target');",
@@ -5105,7 +5132,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5175,7 +5203,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_get_shows_protected', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_get_shows_protected');",
@@ -5476,7 +5505,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5555,7 +5585,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_update_clear', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_update_clear');",
@@ -5629,7 +5660,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5699,7 +5731,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_get_shows_cleared', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_get_shows_cleared');",
@@ -5767,7 +5800,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_delete_ok', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_delete_ok');",
@@ -5841,7 +5875,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -5872,14 +5907,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}"
+                "accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}&pageSize=1000"
               ]
             }
           },
@@ -6042,7 +6077,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}/accessBindings",
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}/accessBindings?pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -6051,7 +6086,7 @@
                 "v1",
                 "accounts",
                 "{{accountAId}}",
-                "accessBindings"
+                "accessBindings?pageSize=1000"
               ]
             }
           },
@@ -6081,10 +6116,10 @@
                   "if (pm.response.code === 200) {",
                   "  const j = pm.response.json();",
                   "  const rows = (j.accessBindings || j.bindings || []);",
-                  "  const m = rows.find(b => b.roleId === 'rol21232f297a57a5a74' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && (b.status === undefined || b.status === 'ACTIVE'));",
+                  "  const m = rows.find(b => b.roleId === 'rol21232f297a57a5a74' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
                   "  if (m && m.id) { pm.environment.set('t33StaleAcbId', m.id); }",
                   "}",
-                  "if (!pm.environment.get('t33StaleAcbId')) { postman.setNextRequest('IAM-ACB-T33-LABELS-OK :: t33-create-with-labels'); }"
+                  "if (!pm.environment.get('t33StaleAcbId')) { pm.execution.setNextRequest('IAM-ACB-T33-LABELS-OK :: t33-create-with-labels'); }"
                 ]
               }
             }
@@ -6137,7 +6172,7 @@
                   "pm.test('pre-clean delete accepted or already gone', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
                   "const j = pm.response.json();",
                   "if (pm.response.code === 200 && j && j.id) { pm.environment.set('t33PreCleanOpId', j.id); }",
-                  "else { pm.environment.unset('t33PreCleanOpId'); postman.setNextRequest('IAM-ACB-T33-LABELS-OK :: t33-create-with-labels'); }"
+                  "else { pm.environment.unset('t33PreCleanOpId'); pm.execution.setNextRequest('IAM-ACB-T33-LABELS-OK :: t33-create-with-labels'); }"
                 ]
               }
             }
@@ -6191,7 +6226,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6328,7 +6364,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6458,7 +6495,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_t33_update_labels', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_t33_update_labels');",
@@ -6532,7 +6570,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6602,7 +6641,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_t33_get_confirms_labels', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_t33_get_confirms_labels');",
@@ -6655,7 +6695,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('t33AcbId')) { postman.setNextRequest(null); }"
+                  "if (!pm.environment.get('t33AcbId')) { pm.execution.setNextRequest(null); }"
                 ]
               }
             },
@@ -6687,7 +6727,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}/accessBindings",
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}/accessBindings?pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -6696,7 +6736,7 @@
                 "v1",
                 "accounts",
                 "{{accountAId}}",
-                "accessBindings"
+                "accessBindings?pageSize=1000"
               ]
             }
           },
@@ -6726,10 +6766,10 @@
                   "if (pm.response.code === 200) {",
                   "  const j = pm.response.json();",
                   "  const rows = (j.accessBindings || j.bindings || []);",
-                  "  const m = rows.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && b.subjectId === pm.environment.get('userINVId') && (b.status === undefined || b.status === 'ACTIVE'));",
+                  "  const m = rows.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && b.subjectId === pm.environment.get('userINVId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
                   "  if (m && m.id) { pm.environment.set('t33immStaleAcbId', m.id); }",
                   "}",
-                  "if (!pm.environment.get('t33immStaleAcbId')) { postman.setNextRequest('IAM-ACB-UP-T33-NEG-ROLEID-IMMUTABLE :: t33imm-create'); }"
+                  "if (!pm.environment.get('t33immStaleAcbId')) { pm.execution.setNextRequest('IAM-ACB-UP-T33-NEG-ROLEID-IMMUTABLE :: t33imm-create'); }"
                 ]
               }
             }
@@ -6782,7 +6822,7 @@
                   "pm.test('pre-clean delete accepted or already gone', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
                   "const j = pm.response.json();",
                   "if (pm.response.code === 200 && j && j.id) { pm.environment.set('t33immPreCleanOpId', j.id); }",
-                  "else { pm.environment.unset('t33immPreCleanOpId'); postman.setNextRequest('IAM-ACB-UP-T33-NEG-ROLEID-IMMUTABLE :: t33imm-create'); }"
+                  "else { pm.environment.unset('t33immPreCleanOpId'); pm.execution.setNextRequest('IAM-ACB-UP-T33-NEG-ROLEID-IMMUTABLE :: t33imm-create'); }"
                 ]
               }
             }
@@ -6836,7 +6876,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -6973,7 +7014,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -7103,7 +7145,8 @@
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_t33_update_immutable_field', String(_p200c + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_poll200_t33_update_immutable_field');",
@@ -7155,7 +7198,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('t33immAcbId')) { postman.setNextRequest(null); }"
+                  "if (!pm.environment.get('t33immAcbId')) { pm.execution.setNextRequest(null); }"
                 ]
               }
             },

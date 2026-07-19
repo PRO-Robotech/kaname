@@ -438,11 +438,11 @@
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('nobDup', arr[0].id);",
                   "  pm.environment.set('_nobCount', String(c + 1));",
-                  "  postman.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-del');",
+                  "  pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-del');",
                   "  return;",
                   "}",
                   "pm.environment.unset('_nobCount'); pm.environment.unset('_nobStarted'); pm.environment.unset('nobDup');",
-                  "postman.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: list-nonmember');"
+                  "pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: list-nonmember');"
                 ]
               }
             }
@@ -495,7 +495,7 @@
                   "pm.test('nob pre-clean delete acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
                   "pm.environment.unset('nobDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('nobDelOp', dj.id); }",
-                  "if (!pm.environment.get('nobDelOp')) { postman.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list'); }"
+                  "if (!pm.environment.get('nobDelOp')) { pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list'); }"
                 ]
               }
             }
@@ -546,9 +546,9 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "const c = parseInt(pm.environment.get('_nobAwaitCount') || '0', 10);",
-                  "if (!j.done && c < 50) { pm.environment.set('_nobAwaitCount', String(c + 1)); postman.setNextRequest(pm.info.requestName); return; }",
+                  "if (!j.done && c < 50) { pm.environment.set('_nobAwaitCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_nobAwaitCount'); pm.environment.unset('_nobAwaitStarted');",
-                  "postman.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list');"
+                  "pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list');"
                 ]
               }
             }
@@ -734,7 +734,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1163,7 +1164,7 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 30) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1215,7 +1216,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('invitedUserId')) {",
-                  "  postman.setNextRequest(null);",
+                  "  pm.execution.setNextRequest(null);",
                   "}"
                 ]
               }
@@ -1415,7 +1416,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('badRoleInvOpId')) {",
-                  "  postman.setNextRequest(null);",
+                  "  pm.execution.setNextRequest(null);",
                   "}"
                 ]
               }
@@ -1564,7 +1565,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1883,7 +1885,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
@@ -1951,7 +1954,8 @@
                   "if (pm.response.code === 200 && gc < 50) {",
                   "  // resource not yet gone (async delete + FGA-tuple removal lag) — retry.",
                   "  pm.environment.set('_goneCount', String(gc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _gd = Date.now(); while (Date.now() - _gd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_goneCount');",
@@ -2259,7 +2263,8 @@
                   "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
                   "if (!j.done && pc < 50) {",
                   "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",

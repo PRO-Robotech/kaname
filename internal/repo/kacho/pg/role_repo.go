@@ -43,53 +43,16 @@ type roleReader struct {
 // (domain.IsRoleAssignable / ScopeGroupOf) reads those fields.
 const roleCols = "id, cluster_id, account_id, project_id, name, description, permissions, rules, is_system, created_at, labels"
 
-// ruleJSON is the on-disk JSON shape of a domain.Rule in the roles.rules JSONB
-// column. The keys are snake_case to match the DB shape CHECK iam_rules_valid
-// (migration 0025 + scalar-module replace in 0033) and the authored proto form
-// (resource_names / match_labels). The module is a SCALAR
-// (`modules:[m]` array dropped; migration 0033 rewrites stored rows). omitempty
-// keeps anchor rules lean (no empty selector keys).
-type ruleJSON struct {
-	Module        string            `json:"module"`
-	Resources     []string          `json:"resources"`
-	Verbs         []string          `json:"verbs"`
-	ResourceNames []string          `json:"resource_names,omitempty"`
-	MatchLabels   map[string]string `json:"match_labels,omitempty"`
-}
-
+// rulesToJSON / rulesFromJSON delegate to the domain codec (domain.EncodeRules /
+// domain.DecodeRules) — the single source of truth for the roles.rules JSONB shape
+// (snake_case, scalar module — CHECK iam_rules_valid, migrations 0025/0033). The seed
+// layer (system-role selector projection) decodes the same shape via the same codec.
 func rulesToJSON(rules domain.Rules) ([]byte, error) {
-	out := make([]ruleJSON, 0, len(rules))
-	for _, r := range rules {
-		out = append(out, ruleJSON{
-			Module:        r.Module,
-			Resources:     r.Resources,
-			Verbs:         r.Verbs,
-			ResourceNames: r.ResourceNames,
-			MatchLabels:   r.MatchLabels,
-		})
-	}
-	return json.Marshal(out)
+	return domain.EncodeRules(rules)
 }
 
 func rulesFromJSON(raw []byte) (domain.Rules, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var in []ruleJSON
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return nil, fmt.Errorf("unmarshal rules: %w", err)
-	}
-	out := make(domain.Rules, 0, len(in))
-	for _, r := range in {
-		out = append(out, domain.Rule{
-			Module:        r.Module,
-			Resources:     r.Resources,
-			Verbs:         r.Verbs,
-			ResourceNames: r.ResourceNames,
-			MatchLabels:   r.MatchLabels,
-		})
-	}
-	return out, nil
+	return domain.DecodeRules(raw)
 }
 
 func (r *roleReader) Get(ctx context.Context, id domain.RoleID) (domain.Role, error) {

@@ -12,6 +12,23 @@ package resource_mirror
 // reconcile inside the writer-tx). Both surfaces are provided.
 //
 // labels @> matchLabels uses the GIN index created in migration 0019.
+//
+// TRANSITIVE parent_account resolution: a mirror-fed resource is registered with its
+// owning PROJECT (parent_project_id); the account is resolved same-DB by iam at
+// register time (register_resource.go account backfill). A row whose parent_account_id
+// is still empty (a legacy/unresolved register) would make an ACCOUNT-scoped binding
+// mis-miss the object — the object IS contained in the account (via its project), but
+// the direct parent_account_id column is blank. Every read here therefore resolves the
+// account through the project→account hierarchy same-DB:
+//
+//	COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '')
+//
+// so domain.MirrorObject.ParentAccountID always carries the FULL resolved account and
+// the pure-domain IsContainedIn predicate (the semantic source of truth) decides
+// account containment correctly WITHOUT reaching for the DB. The stored value wins when
+// present (COALESCE order); the LEFT JOIN falls back to projects.account_id; a dangling
+// project (deleted) degrades to '' (contained only in cluster) rather than erroring.
+// kacho_iam.projects is IAM-native (same DB, no peer call — the graph stays acyclic).
 
 import (
 	"context"
@@ -52,11 +69,14 @@ func MatchByLabels(ctx context.Context, q querier, types []string, matchLabels m
 		return nil, fmt.Errorf("resource_mirror: marshal matchLabels: %w", err)
 	}
 	rows, err := q.Query(ctx,
-		`SELECT object_type, object_id, parent_project_id, parent_account_id, labels
-		   FROM kacho_iam.resource_mirror
-		  WHERE object_type = ANY($1)
-		    AND labels @> $2::jsonb
-		  ORDER BY object_type ASC, object_id ASC`,
+		`SELECT m.object_type, m.object_id, m.parent_project_id,
+		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
+		        m.labels
+		   FROM kacho_iam.resource_mirror m
+		   LEFT JOIN kacho_iam.projects pj ON pj.id = m.parent_project_id
+		  WHERE m.object_type = ANY($1)
+		    AND m.labels @> $2::jsonb
+		  ORDER BY m.object_type ASC, m.object_id ASC`,
 		types, payload,
 	)
 	if err != nil {
@@ -66,20 +86,53 @@ func MatchByLabels(ctx context.Context, q querier, types []string, matchLabels m
 	return scanRows(rows)
 }
 
-// AllByTypes returns EVERY mirror row whose object_type ∈ types (no label filter)
-// — the ARM_ANCHOR(`all`) candidate set (RBAC explicit-model 2026). Containment
-// to the binding's scope is re-asserted in the use-case (IsContainedIn), so this may
-// over-return cluster-wide. Empty types → no rows.
-func AllByTypes(ctx context.Context, q querier, types []string) ([]MirrorRow, error) {
+// AllByTypes returns the mirror rows whose object_type ∈ types NARROWED to the binding's
+// containment scope — the ARM_ANCHOR(`all`) candidate set (RBAC explicit-model 2026).
+//
+// scopeType/scopeID push the binding's containment scope INTO the SQL as a PROVEN SUPERSET
+// of the pure-domain IsContainedIn re-verify (which the use-case still runs — this only
+// PRE-filters), so the caller receives O(scope) rows instead of O(cluster mirror). The
+// predicate MIRRORS the projected parent-scope columns byte-for-byte, so it can never DROP a
+// row IsContainedIn would accept (no under-grant); any residual over-return is narrowed by
+// the Go re-verify (over-broad is safe):
+//
+//   - "project" → parent_project_id = $2                                   (exactly IsContainedIn's project branch)
+//   - "account" → COALESCE(NULLIF(parent_account_id,”), pj.account_id,”) = $2
+//     (exactly IsContainedIn's account branch — the SAME resolution the SELECT projects, so
+//     an object registered with only its parent_project is still contained via project→account)
+//   - "cluster" / unknown → NO narrowing (cluster contains everything, IsContainedIn cluster=true;
+//     an unknown scope-type conservatively falls through to no-narrowing so the Go re-verify
+//     stays authoritative — over-broad, never under-broad)
+//
+// Empty types → no rows.
+func AllByTypes(ctx context.Context, q querier, types []string, scopeType, scopeID string) ([]MirrorRow, error) {
 	if len(types) == 0 {
 		return nil, nil
 	}
+	// The scope predicate is an EXACT mirror of the projected ParentProjectID/ParentAccountID,
+	// so the returned set is precisely {row | IsContainedIn(scope)} for project/account and the
+	// full type-set for cluster/unknown — a guaranteed superset of the Go re-verify.
+	args := []any{types}
+	var scopeClause string
+	switch scopeType {
+	case "project":
+		scopeClause = " AND m.parent_project_id = $2"
+		args = append(args, scopeID)
+	case "account":
+		scopeClause = " AND COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') = $2"
+		args = append(args, scopeID)
+	default:
+		// cluster / unknown → no narrowing (Go IsContainedIn stays authoritative).
+	}
 	rows, err := q.Query(ctx,
-		`SELECT object_type, object_id, parent_project_id, parent_account_id, labels
-		   FROM kacho_iam.resource_mirror
-		  WHERE object_type = ANY($1)
-		  ORDER BY object_type ASC, object_id ASC`,
-		types,
+		`SELECT m.object_type, m.object_id, m.parent_project_id,
+		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
+		        m.labels
+		   FROM kacho_iam.resource_mirror m
+		   LEFT JOIN kacho_iam.projects pj ON pj.id = m.parent_project_id
+		  WHERE m.object_type = ANY($1)`+scopeClause+`
+		  ORDER BY m.object_type ASC, m.object_id ASC`,
+		args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resource_mirror: all by types: %w", err)
@@ -96,10 +149,13 @@ func ByTypesAndIDs(ctx context.Context, q querier, types, ids []string) ([]Mirro
 		return nil, nil
 	}
 	rows, err := q.Query(ctx,
-		`SELECT object_type, object_id, parent_project_id, parent_account_id, labels
-		   FROM kacho_iam.resource_mirror
-		  WHERE object_type = ANY($1) AND object_id = ANY($2)
-		  ORDER BY object_type ASC, object_id ASC`,
+		`SELECT m.object_type, m.object_id, m.parent_project_id,
+		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
+		        m.labels
+		   FROM kacho_iam.resource_mirror m
+		   LEFT JOIN kacho_iam.projects pj ON pj.id = m.parent_project_id
+		  WHERE m.object_type = ANY($1) AND m.object_id = ANY($2)
+		  ORDER BY m.object_type ASC, m.object_id ASC`,
 		types, ids,
 	)
 	if err != nil {
@@ -118,9 +174,12 @@ func GetByObject(ctx context.Context, q querier, objectType, objectID string) (M
 		labelsJSON []byte
 	)
 	err := q.QueryRow(ctx,
-		`SELECT object_type, object_id, parent_project_id, parent_account_id, labels
-		   FROM kacho_iam.resource_mirror
-		  WHERE object_type = $1 AND object_id = $2`,
+		`SELECT m.object_type, m.object_id, m.parent_project_id,
+		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
+		        m.labels
+		   FROM kacho_iam.resource_mirror m
+		   LEFT JOIN kacho_iam.projects pj ON pj.id = m.parent_project_id
+		  WHERE m.object_type = $1 AND m.object_id = $2`,
 		objectType, objectID,
 	).Scan(&out.ObjectType, &out.ObjectID, &out.ParentProjectID, &out.ParentAccountID, &labelsJSON)
 	if err != nil {
