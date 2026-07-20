@@ -26,11 +26,13 @@ func TestAccountAudit_5_2_10_CreateEmits(t *testing.T) {
 	owner, _ := seedUserAccount(t, ctx, env.pool, "acc10")
 
 	uc := account.NewCreateAccountUseCase(env.repo, env.opsRepo)
+	// ownerUserId is derived-from-caller (IAM-1-01/02, redesign-2026 F1): the owner
+	// is the withPrincipal(owner) caller, NOT a Create-body field — supplying it in the
+	// body is a sync INVALID_ARGUMENT "Illegal argument ownerUserId (derived from caller)".
 	op, err := uc.Execute(withPrincipal(owner), domain.Account{
 		Name:        domain.AccountName("acme-acc10"),
 		Description: domain.Description("created in 5.2-10"),
 		Labels:      domain.Labels{},
-		OwnerUserID: owner,
 	})
 	require.NoError(t, err)
 	awaitWorkers(t)
@@ -80,10 +82,23 @@ func TestAccountAudit_5_2_12_DeleteEmits(t *testing.T) {
 	owner, _ := seedUserAccount(t, ctx, env.pool, "acc12")
 	accID := createAccount(t, env, owner, "acme-acc12", "to-delete")
 
+	// The F2 saga (IAM-1-04) co-commits a default Project; Account.Delete RESTRICTs on a
+	// non-empty account (IAM-1-06 "Account <id> contains projects"). Empty the account
+	// first (delete its default project) so the delete succeeds and emits its audit row —
+	// the subject of THIS test (the RESTRICT itself is exercised by account_integration).
+	_, perr := env.pool.Exec(ctx, `DELETE FROM kacho_iam.projects WHERE account_id = $1`, accID)
+	require.NoError(t, perr, "empty the account before delete (RESTRICT on projects, IAM-1-06)")
+
 	uc := account.NewDeleteAccountUseCase(env.repo, env.opsRepo)
-	_, err := uc.Execute(withPrincipal(owner), domain.AccountID(accID))
+	op, err := uc.Execute(withPrincipal(owner), domain.AccountID(accID))
 	require.NoError(t, err)
 	awaitWorkers(t)
+	// Assert the delete Operation succeeded before checking the audit row (else a 0-row
+	// audit result would mask a failed delete rather than a missing emit).
+	got, gerr := env.opsRepo.Get(ctx, op.ID)
+	require.NoError(t, gerr)
+	require.True(t, got.Done)
+	require.Nil(t, got.Error, "account delete must succeed after the account is emptied")
 
 	r := requireOneAuditRow(ctx, t, env.pool, "iam.account.deleted", accID)
 	require.Equal(t, accID, r.payload["resource_id"])
@@ -104,10 +119,10 @@ func TestAccountAudit_5_2_35_RollbackNoOrphan(t *testing.T) {
 
 	// Second create with the SAME name → 23505 inside the worker-tx → rollback.
 	uc := account.NewCreateAccountUseCase(env.repo, env.opsRepo)
+	// ownerUserId derived-from-caller (IAM-1-01/02, F1) — not in the Create body.
 	op, err := uc.Execute(withPrincipal(owner), domain.Account{
-		Name:        domain.AccountName("dup-acc35"),
-		Labels:      domain.Labels{},
-		OwnerUserID: owner,
+		Name:   domain.AccountName("dup-acc35"),
+		Labels: domain.Labels{},
 	})
 	require.NoError(t, err)
 	awaitWorkers(t)
@@ -165,11 +180,13 @@ func createAccount(t *testing.T, env *testEnv, owner domain.UserID, name, desc s
 	t.Helper()
 	ctx := context.Background()
 	uc := account.NewCreateAccountUseCase(env.repo, env.opsRepo)
+	// ownerUserId is derived-from-caller (IAM-1-01/02, redesign-2026 F1): the account
+	// owner is the withPrincipal(owner) caller, NOT a Create-body field (a body value →
+	// sync INVALID_ARGUMENT "Illegal argument ownerUserId (derived from caller)").
 	_, err := uc.Execute(withPrincipal(owner), domain.Account{
 		Name:        domain.AccountName(name),
 		Description: domain.Description(desc),
 		Labels:      domain.Labels{},
-		OwnerUserID: owner,
 	})
 	require.NoError(t, err)
 	awaitWorkers(t)
