@@ -83,7 +83,7 @@ func TestFGAModel_VBC02_OwnerVGetAllLeafTypes(t *testing.T) {
 		"vpc_network_interface:nic_vbc02_x",
 		"vpc_gateway:gtw_vbc02_x",
 		"compute_instance:inst_vbc02_x",
-		"lb_network_load_balancer:lbn_vbc02_x",
+		"nlb_network_load_balancer:lbn_vbc02_x",
 	}
 	tuples := make([]abrepo.RelationTuple, 0, len(objects))
 	for _, o := range objects {
