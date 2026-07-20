@@ -72,12 +72,16 @@ ON CONFLICT (id) DO NOTHING;
 -- IS NOT NULL). cluster_id='cluster_kacho_root' → is_system деривит в true.
 -- Вставка значения в generated-колонку = ERROR 428C9 (0057 идёт ПОСЛЕ 0056,
 -- в отличие от 0044/0045 registry-seed, применявшихся до 0056).
-INSERT INTO kacho_iam.roles (id, cluster_id, account_id, name, description, permissions) VALUES
+-- rules (RBAC-v2 4-сегментная грамматика) ОБЯЗАТЕЛЬНЫ для system-роли (F53
+-- tier-parity/SystemRolesReseededWithRules): зеркалит 0045_registry_sa_rules.
+-- permissions оставлен для legacy-совместимости; rules — авторитетный источник.
+INSERT INTO kacho_iam.roles (id, cluster_id, account_id, name, description, permissions, rules) VALUES
   ('rol' || substr(md5('module.storage_sa'), 1, 17),
    'cluster_kacho_root', NULL,
    'module.storage_sa',
    'Backing least-priv role for kacho-storage module SA (SEC-C)',
-   '["iam.projects.*.get"]'::jsonb)
+   '["iam.projects.*.get"]'::jsonb,
+   '[{"module":"iam","resources":["projects"],"verbs":["get"]}]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 -- ── 3. AccessBinding (SA → backing role → cluster scope) ─────────────────────

@@ -75,7 +75,7 @@ func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	var total int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.roles WHERE is_system`).Scan(&total))
-	assert.Equal(t, 65, total, "F-53: exactly 65 system roles expected after re-seed (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035 + registry module-SA mig 0044)")
+	assert.Equal(t, 66, total, "F-53: exactly 65 system roles expected after re-seed (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035 + registry mig 0044 + storage mig 0057)")
 
 	var withoutRules int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -145,7 +145,7 @@ func TestMigration_F53_AccessNotSevered(t *testing.T) {
 
 	rolesBefore := countSystemRoles()
 	bindingsBefore := countSystemBindings()
-	require.Equal(t, 65, rolesBefore)
+	require.Equal(t, 66, rolesBefore)
 	require.Greater(t, bindingsBefore, 0,
 		"F-53: at least the cluster-admin (0004) + module-SA (0009) bindings on system roles must exist")
 

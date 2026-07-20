@@ -145,8 +145,8 @@ func TestMigration0014_5_1_Idempotent_DownReverts(t *testing.T) {
 
 	require.Equal(t, 3, readerCount(), "baseline: 3 reader system_viewer tuples after up (api-gateway/vpc/compute)")
 	require.Equal(t, 1, operatorCount(), "baseline: 1 operator system_viewer tuple (SEC-L 0010)")
-	require.Equal(t, 4, fgaWriterCount(),
-		"at HEAD: 0009 seeds 3 fga_writer tuples (vpc/compute/nlb) + 0044 seeds the registry-SA tuple")
+	require.Equal(t, 5, fgaWriterCount(),
+		"at HEAD: 0009 seeds 3 fga_writer tuples (vpc/compute/nlb) + 0044 registry-SA + 0057 storage-SA tuples")
 
 	// Re-up the whole set: ON CONFLICT DO NOTHING keeps it stable (idempotent).
 	require.NoError(t, goose.Up(db, "."))

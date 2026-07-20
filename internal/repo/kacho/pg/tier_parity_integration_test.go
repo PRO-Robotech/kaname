@@ -139,7 +139,7 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 		roles = append(roles, roleRow{name: name, perms: perms, rules: dr})
 	}
 	require.NoError(t, rows.Err())
-	require.Len(t, roles, 65, "F-53: expected exactly 65 system roles (58 catalog + 5 SEC-C module-SA from mig 0009 + owner from mig 0035 + registry module-SA from mig 0044)")
+	require.Len(t, roles, 66, "F-53: expected exactly 65 system roles (58 catalog + 5 SEC-C module-SA from mig 0009 + owner from mig 0035 + registry mig 0044 + storage mig 0057)")
 
 	var mismatches []string
 	for _, r := range roles {
