@@ -778,6 +778,28 @@ func (w *fakeABWtr) DeleteGuarded(_ context.Context, id domain.AccessBindingID) 
 	return iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 
+func (w *fakeABWtr) RevokeGuarded(_ context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
+	w.repo.mu.Lock()
+	defer w.repo.mu.Unlock()
+	if w.repo.ab == nil || w.repo.ab.ID != id {
+		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
+	}
+	if w.repo.ab.DeletionProtection {
+		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"access binding %s has deletion_protection enabled; clear it via Update before revoke", id)
+	}
+	if w.repo.ab.Status != domain.AccessBindingStatusActive {
+		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"access binding %s is not active (status %s); cannot revoke", id, w.repo.ab.Status)
+	}
+	now := time.Now().UTC()
+	rb := revokedBy
+	w.repo.ab.Status = domain.AccessBindingStatusRevoked
+	w.repo.ab.RevokedAt = &now
+	w.repo.ab.RevokedByUserID = &rb
+	return *w.repo.ab, nil
+}
+
 func (w *fakeABWtr) SetDeletionProtection(_ context.Context, id domain.AccessBindingID, protected bool) (domain.AccessBinding, error) {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()

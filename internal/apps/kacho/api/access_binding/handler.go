@@ -46,6 +46,9 @@ type Handler struct {
 	// ListByRole audit + ExpandAccess effective-principal audit.
 	listByRole   *ListByRoleUseCase
 	expandAccess *ExpandAccessUseCase
+
+	// revoke — soft-revoke (F10 IAM-1-28), contrast with hard delete.
+	revoke *RevokeAccessBindingUseCase
 }
 
 func NewHandler(c *CreateAccessBindingUseCase, d *DeleteAccessBindingUseCase, g *GetAccessBindingUseCase,
@@ -86,6 +89,12 @@ func (h *Handler) WithListByRole(uc *ListByRoleUseCase) *Handler {
 // WithExpandAccess wires the effective-principal audit "who can do X".
 func (h *Handler) WithExpandAccess(uc *ExpandAccessUseCase) *Handler {
 	h.expandAccess = uc
+	return h
+}
+
+// WithRevoke wires the soft-revoke use-case (F10 IAM-1-28).
+func (h *Handler) WithRevoke(uc *RevokeAccessBindingUseCase) *Handler {
+	h.revoke = uc
 	return h
 }
 
@@ -151,6 +160,17 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequ
 
 func (h *Handler) Delete(ctx context.Context, req *iamv1.DeleteAccessBindingRequest) (*operationpb.Operation, error) {
 	op, err := h.delete.Execute(ctx, domain.AccessBindingID(req.GetAccessBindingId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// Revoke — soft-revoke of the binding (F10 IAM-1-28): the row is retained with
+// status ACTIVE→REVOKED (audit-retention), the emitted FGA-tuple set is removed.
+// Contrast with Delete (hard row-removal). Thin transport: parse → use-case → format.
+func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeAccessBindingRequest) (*operationpb.Operation, error) {
+	op, err := h.revoke.Execute(ctx, domain.AccessBindingID(req.GetAccessBindingId()))
 	if err != nil {
 		return nil, err
 	}

@@ -126,6 +126,11 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindUpdate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 	case *iamv1.DeleteAccessBindingMetadata:
 		return resolveExistence(ctx, kindDelete, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
+	case *iamv1.RevokeAccessBindingMetadata:
+		// Soft-revoke RETAINS the row (status→REVOKED), so it resolves like an
+		// Update (resource present after the op → response = the REVOKED binding),
+		// NOT like Delete (which resolves to absence).
+		return resolveExistence(ctx, kindUpdate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 
 	default:
 		// Condition / прочие типы метаданных — не разрешаются этим resolver'ом.

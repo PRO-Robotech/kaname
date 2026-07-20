@@ -242,6 +242,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	// drainer remain the at-least-once idempotent backstop.
 	abDelete := accessbindingapp.NewDeleteAccessBindingUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger)
+	// Revoke — F10 (IAM-1-28) SOFT-revoke (status ACTIVE→REVOKED, row retained for
+	// audit-retention), contrast with Delete=HARD. Same grant-authority +
+	// deletion_protection gate as Delete; same post-commit synchronous FGA
+	// tuple-removal so deny is observable at Operation-done.
+	abRevoke := accessbindingapp.NewRevokeAccessBindingUseCase(kachoRepo, opsRepo).
+		WithRelationStore(relationStore, logger)
 	// Update — P6 (C-03): clear deletion_protection so a protected binding can be
 	// deleted. Same grant-authority gate as Create/Delete.
 	abUpdate := accessbindingapp.NewUpdateAccessBindingUseCase(kachoRepo, opsRepo).
@@ -288,7 +294,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo)).
 		WithListAssignableRoles(abListAssignable).
 		WithListByRole(abListByRole).
-		WithExpandAccess(abExpandAccess)
+		WithExpandAccess(abExpandAccess).
+		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore, cfg.Conditions, cfg.AuthN.Mode.IsProduction(), logger)

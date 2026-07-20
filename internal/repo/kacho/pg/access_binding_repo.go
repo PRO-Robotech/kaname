@@ -508,6 +508,54 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 	return iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 
+// RevokeGuarded — atomic CAS soft-revoke (redesign-2026 F10 IAM-1-28). Mirror of
+// DeleteGuarded's protection-CAS + TransitionStatus's REVOKED move, but RETAINS the
+// row: single-statement `UPDATE … SET status='REVOKED', revoked_at=now(),
+// revoked_by_user_id=$2 WHERE id=$1 AND status='ACTIVE' AND deletion_protection=false
+// RETURNING …` takes a row-lock, so exactly one revoke wins under concurrency (the
+// loser waits the commit, its WHERE status='ACTIVE' no longer matches → 0 rows, ban
+// #10 — no software TOCTOU). 0 rows → re-read on this tx disambiguates: absent →
+// NotFound; protected → FailedPrecondition; non-ACTIVE (terminal REVOKED / PENDING or
+// a concurrent revoke that won) → FailedPrecondition. revoked_at is stamped so the
+// partial active-grant UNIQUE (WHERE revoked_at IS NULL) frees the slot for re-grant.
+func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
+	if revokedBy == "" {
+		// CHECK access_bindings_revoked_consistency_ck requires revoked_at to move
+		// with status='REVOKED'; a REVOKED row without a revoker is not allowed.
+		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg,
+			"revoked_by_user_id is required for REVOKED transition")
+	}
+	now := time.Now().UTC()
+	row := w.tx.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE access_bindings
+		   SET status             = 'REVOKED',
+		       revoked_at         = $2,
+		       revoked_by_user_id = $3
+		 WHERE id = $1
+		   AND status = 'ACTIVE'
+		   AND deletion_protection = false
+		RETURNING %s`, abCols), string(id), now, string(revokedBy))
+	out, err := scanAB(row)
+	if err == nil {
+		return out, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return domain.AccessBinding{}, mapErr(err, "AccessBinding.RevokeGuarded", string(id))
+	}
+	// 0 rows updated — re-read on this tx to disambiguate the CAS miss.
+	cur, gerr := w.Get(ctx, id)
+	if gerr != nil {
+		return domain.AccessBinding{}, gerr // ErrNotFound (or a transient fault)
+	}
+	if cur.DeletionProtection {
+		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"access binding %s has deletion_protection enabled; clear it via Update before revoke", id)
+	}
+	// Not-active (already REVOKED / PENDING, or a concurrent revoke won the row-lock).
+	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+		"access binding %s is not active (status %s); cannot revoke", id, cur.Status)
+}
+
 // SetDeletionProtection — atomic CAS UPDATE of the deletion_protection flag.
 // Single-statement
 // `UPDATE … WHERE id=$1 RETURNING …`; 0 rows → NotFound. Used by the

@@ -116,6 +116,25 @@ type WriterIface interface {
 	// protected → ErrFailedPrecondition, absent → ErrNotFound. No software TOCTOU.
 	DeleteGuarded(ctx context.Context, id domain.AccessBindingID) error
 
+	// RevokeGuarded — atomic CAS soft-revoke (redesign-2026 F10 IAM-1-28). Unlike
+	// DeleteGuarded (physical row-removal) this RETAINS the row and transitions
+	// status ACTIVE→REVOKED, stamping revoked_at=now() and revoked_by_user_id for
+	// audit-retention. Single-statement
+	// `UPDATE … SET status='REVOKED', revoked_at=now(), revoked_by_user_id=$2
+	//    WHERE id=$1 AND status='ACTIVE' AND deletion_protection=false RETURNING …`
+	// takes a row-lock — the concurrent writer waits the commit and sees the row
+	// already REVOKED (its CAS → 0 rows → ErrFailedPrecondition), so exactly one
+	// revoke wins under concurrency (ban #10, no software TOCTOU). 0 rows → re-read
+	// disambiguates: absent → ErrNotFound; deletion_protection=true →
+	// ErrFailedPrecondition (clear the flag via Update first, exactly like Delete);
+	// status≠ACTIVE (already REVOKED / PENDING) → ErrFailedPrecondition (terminal).
+	// Because REVOKED rows carry revoked_at, the partial active-grant UNIQUE
+	// (access_bindings_active_grant_uniq WHERE revoked_at IS NULL) frees the slot,
+	// so an identical re-grant Create afterwards is a NEW ACTIVE row (IAM-1-29).
+	// revokedBy MUST be non-empty (CHECK access_bindings_revoked_consistency_ck
+	// requires revoked_at + status='REVOKED' to move together).
+	RevokeGuarded(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error)
+
 	// SetDeletionProtection — atomic CAS UPDATE of the deletion_protection flag.
 	// 0 rows → ErrNotFound. Used by the
 	// Update(update_mask=["deletion_protection"]) clear path.

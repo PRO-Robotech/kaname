@@ -259,6 +259,9 @@ func (w *strictDupABWriter) Delete(ctx context.Context, id domain.AccessBindingI
 func (w *strictDupABWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID) error {
 	return stderrors.New("not stubbed")
 }
+func (w *strictDupABWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, _ domain.UserID) (domain.AccessBinding, error) {
+	return domain.AccessBinding{}, stderrors.New("not stubbed")
+}
 func (w *strictDupABWriter) SetDeletionProtection(ctx context.Context, id domain.AccessBindingID, protected bool) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, stderrors.New("not stubbed")
 }
