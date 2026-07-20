@@ -343,6 +343,18 @@ type fakeRepo struct {
 	// emittedTuples records the emitted-tuple LEDGER rows co-committed by
 	// Account.Create (symmetric revoke). Keyed by binding id.
 	emittedTuples []access_binding.RelationTuple
+	// projectInserts records the Project(s) co-committed by the Account.Create
+	// one-shot saga (F2 — the default "default" project).
+	projectInserts []domain.Project
+}
+
+// projectInsertsSnapshot — snapshot of Project rows co-committed by Account.Create.
+func (f *fakeRepo) projectInsertsSnapshot() []domain.Project {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := make([]domain.Project, len(f.projectInserts))
+	copy(cp, f.projectInserts)
+	return cp
 }
 
 func newFakeRepo() *fakeRepo { return &fakeRepo{} }
@@ -424,7 +436,7 @@ func (w *fakeWriter) EmitFGARelationDelete(context.Context, []service.RelationTu
 func (w *fakeWriter) AccountsW() account.WriterIface {
 	return &fakeAcctWriter{parent: w.repo}
 }
-func (w *fakeWriter) ProjectsW() project.WriterIface                { return nil }
+func (w *fakeWriter) ProjectsW() project.WriterIface                { return &fakeAcctProjWriter{parent: w.repo} }
 func (w *fakeWriter) UsersW() user.WriterIface                      { return nil }
 func (w *fakeWriter) ServiceAccountsW() service_account.WriterIface { return nil }
 func (w *fakeWriter) GroupsW() group.WriterIface                    { return nil }
@@ -511,6 +523,22 @@ func (w *fakeAccountABWriter) InsertEmittedTuples(_ context.Context, _ domain.Ac
 func (w *fakeAccountABWriter) EmitAuditEvent(context.Context, access_binding.AuditEvent) error {
 	return nil
 }
+
+// fakeAcctProjWriter — minimal project.WriterIface for the F2 one-shot saga:
+// records the default "default" Project co-committed by Account.Create.
+type fakeAcctProjWriter struct{ parent *fakeRepo }
+
+func (w *fakeAcctProjWriter) Insert(_ context.Context, p domain.Project) (domain.Project, error) {
+	w.parent.mu.Lock()
+	w.parent.projectInserts = append(w.parent.projectInserts, p)
+	w.parent.mu.Unlock()
+	p.CreatedAt = time.Now().UTC()
+	return p, nil
+}
+func (w *fakeAcctProjWriter) Update(_ context.Context, p domain.Project, _ []string) (domain.Project, error) {
+	return p, nil
+}
+func (w *fakeAcctProjWriter) Delete(context.Context, domain.ProjectID) error { return nil }
 
 // ── fake operations.Repo ────────────────────────────────────────────────────
 
