@@ -68,9 +68,13 @@ ON CONFLICT (id) DO NOTHING;
 -- 'module.storage_sa'. Permission set: only iam.projects.*.get (project existence
 -- check on Volume/Snapshot.Create); FGA owner-tuple writes are fga_writer-gated, not
 -- role-permission-gated.
-INSERT INTO kacho_iam.roles (id, cluster_id, account_id, is_system, name, description, permissions) VALUES
+-- is_system опущен: с 0056 это GENERATED ALWAYS колонка (derived из cluster_id
+-- IS NOT NULL). cluster_id='cluster_kacho_root' → is_system деривит в true.
+-- Вставка значения в generated-колонку = ERROR 428C9 (0057 идёт ПОСЛЕ 0056,
+-- в отличие от 0044/0045 registry-seed, применявшихся до 0056).
+INSERT INTO kacho_iam.roles (id, cluster_id, account_id, name, description, permissions) VALUES
   ('rol' || substr(md5('module.storage_sa'), 1, 17),
-   'cluster_kacho_root', NULL, true,
+   'cluster_kacho_root', NULL,
    'module.storage_sa',
    'Backing least-priv role for kacho-storage module SA (SEC-C)',
    '["iam.projects.*.get"]'::jsonb)
