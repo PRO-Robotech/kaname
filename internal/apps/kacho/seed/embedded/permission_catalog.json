@@ -1688,6 +1688,16 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kacho.cloud.geo.v1.InternalRegionService/GetInternal",
+    "permission": "geo.regions.getInternal",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kacho.cloud.geo.v1.InternalRegionService/Update",
     "permission": "geo.regions.update",
     "required_relation": "system_admin",
@@ -1718,6 +1728,16 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kacho.cloud.geo.v1.InternalZoneService/GetInternal",
+    "permission": "geo.zones.getInternal",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kacho.cloud.geo.v1.InternalZoneService/Update",
     "permission": "geo.zones.update",
     "required_relation": "system_admin",
@@ -1729,43 +1749,39 @@
   },
   {
     "fqn": "kacho.cloud.geo.v1.RegionService/Get",
-    "permission": "geo.regions.get",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.geo.v1.RegionService/List",
-    "permission": "geo.regions.list",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.geo.v1.ZoneService/Get",
-    "permission": "geo.zones.get",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.geo.v1.ZoneService/List",
-    "permission": "geo.zones.list",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/Create",
