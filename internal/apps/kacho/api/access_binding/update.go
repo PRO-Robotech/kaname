@@ -49,7 +49,10 @@ var abMutableFields = map[string]struct{}{
 }
 
 // abImmutableFields — per-field immutability messages for the historically-immutable
-// AccessBinding identity/grant fields (role_id, subjects, scope, resource_*).
+// AccessBinding identity/grant fields (role_id, subjects, scope-anchor). The
+// scope-anchor is the dotted scopeType/scopeId (redesign-2026 F7); the legacy
+// resource_type/resource_id/scope_ref names are kept mapped defensively so a stale
+// client still gets the immutable-switch text rather than a generic "unknown field".
 var abImmutableFields = map[string]string{
 	"role_id":       "role_id is immutable after AccessBinding.Create",
 	"roleId":        "role_id is immutable after AccessBinding.Create",
@@ -58,12 +61,16 @@ var abImmutableFields = map[string]string{
 	"subject_id":    "subject_id is immutable after AccessBinding.Create",
 	"subjectId":     "subject_id is immutable after AccessBinding.Create",
 	"subjects":      "subjects is immutable after AccessBinding.Create",
-	"resource_type": "resource_type is immutable after AccessBinding.Create",
-	"resourceType":  "resource_type is immutable after AccessBinding.Create",
-	"resource_id":   "resource_id is immutable after AccessBinding.Create",
-	"resourceId":    "resource_id is immutable after AccessBinding.Create",
-	"scope_ref":     "scope is immutable after AccessBinding.Create",
-	"scopeRef":      "scope is immutable after AccessBinding.Create",
+	"scope_type":    "scopeType is immutable after AccessBinding.Create",
+	"scopeType":     "scopeType is immutable after AccessBinding.Create",
+	"scope_id":      "scopeId is immutable after AccessBinding.Create",
+	"scopeId":       "scopeId is immutable after AccessBinding.Create",
+	"resource_type": "scopeType is immutable after AccessBinding.Create",
+	"resourceType":  "scopeType is immutable after AccessBinding.Create",
+	"resource_id":   "scopeId is immutable after AccessBinding.Create",
+	"resourceId":    "scopeId is immutable after AccessBinding.Create",
+	"scope_ref":     "scopeType is immutable after AccessBinding.Create",
+	"scopeRef":      "scopeType is immutable after AccessBinding.Create",
 	"id":            "id is immutable after AccessBinding.Create",
 }
 

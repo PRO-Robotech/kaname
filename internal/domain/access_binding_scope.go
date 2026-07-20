@@ -66,6 +66,51 @@ func (s Scope) ValidateAgainst(resourceType, resourceID string) error {
 	return nil
 }
 
+// Dotted scope-type API projection (redesign-2026 F7). The AccessBinding
+// scope-anchor is renamed resource_type/resource_id → scopeType/scopeId on the
+// wire, with the word "resource" freed for the reintroduced target. The wire
+// scopeType is dotted (`iam.{cluster,account,project}`) while the within-service
+// storage keeps the bare kind (`cluster`/`account`/`project`) — the two are mapped
+// at the API boundary (dto on output, handler on input). Only the three hierarchy
+// tiers can anchor a binding, so the mapping is total over them.
+const (
+	ScopeTypeClusterDotted = "iam.cluster"
+	ScopeTypeAccountDotted = "iam.account"
+	ScopeTypeProjectDotted = "iam.project"
+)
+
+// ScopeTypeToDotted maps the bare within-service anchor kind to the dotted wire
+// scopeType. An unrecognized kind is returned unchanged (defensive — a binding
+// anchor is always one of the three tiers).
+func ScopeTypeToDotted(bare string) string {
+	switch bare {
+	case "cluster":
+		return ScopeTypeClusterDotted
+	case "account":
+		return ScopeTypeAccountDotted
+	case "project":
+		return ScopeTypeProjectDotted
+	default:
+		return bare
+	}
+}
+
+// ScopeTypeFromDotted maps the dotted wire scopeType to the bare within-service
+// anchor kind. ok=false for any value outside the closed three-tier set (empty,
+// non-dotted bare, or unknown dotted) — the caller rejects it with InvalidArgument.
+func ScopeTypeFromDotted(dotted string) (bare string, ok bool) {
+	switch dotted {
+	case ScopeTypeClusterDotted:
+		return "cluster", true
+	case ScopeTypeAccountDotted:
+		return "account", true
+	case ScopeTypeProjectDotted:
+		return "project", true
+	default:
+		return "", false
+	}
+}
+
 // DeriveFromResourceType — best-effort fallback for code paths that have
 // resource_type but no explicit Scope (e.g. legacy callers that pre-date
 // the W4 scope plumbing). Mirrors the DB-side BEFORE INSERT trigger in

@@ -118,17 +118,16 @@ func (h *Handler) ListOperations(ctx context.Context, req *iamv1.ListAccessBindi
 }
 
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequest) (*operationpb.Operation, error) {
-	// Two-way input normalization of the scope dimension: the request may carry
-	// the legacy flat scope (resource_type/resource_id) OR the canonical
-	// scope_ref{tier,id}. The canonical form has priority only when the legacy
-	// form is absent; both-and-conflicting → sync INVALID_ARGUMENT before any
-	// Operation. The resource-scoped target dimension was removed entirely (the
-	// "what object" decision lives on role.rules now) — Create no longer accepts
-	// a target/target_ref.
-	rt, rid, err := normalizeScopeInput(req.GetResourceType(), req.GetResourceId(), req.GetScopeRef())
+	// redesign-2026 F7: the scope-anchor is the dotted scopeType (iam.cluster |
+	// iam.account | iam.project) + scopeId. Pre-Phase-0 the scopeType is REQUIRED
+	// (explicit — prefix-derivation is B3-gated). scopeTypeToBare rejects an empty /
+	// non-dotted / unknown value sync (INVALID_ARGUMENT, first statement) and maps
+	// the dotted wire form to the bare within-service anchor kind.
+	rt, err := scopeTypeToBare(req.GetScopeType())
 	if err != nil {
 		return nil, err
 	}
+	rid := req.GetScopeId()
 	b := domain.AccessBinding{
 		SubjectType: domain.SubjectType(req.GetSubjectType()),
 		SubjectID:   domain.SubjectID(req.GetSubjectId()),
@@ -139,7 +138,7 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequ
 		RoleID:       domain.RoleID(req.GetRoleId()),
 		ResourceType: domain.ResourceType(rt),
 		ResourceID:   rid,
-		// Derive Scope from resource_type. The migration 0005 BEFORE INSERT
+		// Derive Scope from the bare anchor kind. The migration 0005 BEFORE INSERT
 		// trigger applies the same mapping if Scope is SCOPE_UNSPECIFIED at the
 		// SQL layer; setting it here lets domain Validate() cross-check (rt, rid)
 		// consistency before the request reaches the writer.
