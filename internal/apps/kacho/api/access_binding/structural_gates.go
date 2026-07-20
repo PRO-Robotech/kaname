@@ -76,10 +76,27 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 			b.RoleID, tier, scope, b.ResourceID, scope, tier)
 	}
 
+	// Gate 3a — per-object target requires a RULES role (least-priv; sibling of the
+	// Finding-1 reconciler fix). A per-object target materializes per-object v_* tuples
+	// from role.rules via the reconciler. A rules-less LEGACY permissions-only role (not
+	// creatable in IAM-1 — RoleService.Create requires rules[] — but a pre-rules-model row
+	// may survive back-compat read) has NO per-object materialization path: its access is
+	// scope-level tier (buildBindingTuples → tuplesForBinding). Honouring a per-object
+	// target on it is impossible, so it would SILENTLY grant the WHOLE scope (over-grant,
+	// same class as Finding 1). Reject it fail-closed; an allInScope target on the same
+	// role stays valid (scope-level access is the legacy role's intended semantics).
+	if len(b.Target.Resources) > 0 && len(role.Rules) == 0 {
+		return status.Errorf(codes.FailedPrecondition,
+			"role %s has no rules; a per-object target requires a rules-role "+
+				"(a permissions-only role grants scope-level access — use target.allInScope)",
+			b.RoleID)
+	}
+
 	// Gate 3 — RoleCoversType: every per-object target type must be granted verbs by
 	// the role's authored rules. allInScope carries no specific type (coverage is
-	// checked at materialization); a permissions-only role (no authored rules) is not
-	// gated here (its coverage lives in the compiled permissions, out of F9 scope).
+	// checked at materialization); a permissions-only role (no authored rules) is
+	// rejected above when it carries a per-object target (Gate 3a) and needs no
+	// coverage check for an allInScope grant (its coverage lives in compiled permissions).
 	if len(role.Rules) > 0 {
 		for _, ref := range b.Target.Resources {
 			if !role.Rules.CoversType(ref.Type) {
