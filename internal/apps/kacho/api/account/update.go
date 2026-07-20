@@ -51,11 +51,14 @@ var accountMutableFields = map[string]struct{}{
 
 // accountImmutableFields — fields, которые если в update_mask → InvalidArgument.
 var accountImmutableFields = map[string]string{
-	"owner_user_id": "owner_user_id is immutable after Account.Create",
-	"ownerUserId":   "owner_user_id is immutable after Account.Create", // JSON form
+	// camelCase contract text (api-conventions.md JSON surface); both mask forms
+	// map to the same message. ownerUserId is output-only derived-from-caller (F1)
+	// — immutable after Create.
+	"owner_user_id": "ownerUserId is immutable after Account.Create",
+	"ownerUserId":   "ownerUserId is immutable after Account.Create",
 	"id":            "id is immutable after Account.Create",
-	"created_at":    "created_at is immutable after Account.Create",
-	"createdAt":     "created_at is immutable after Account.Create",
+	"created_at":    "createdAt is immutable after Account.Create",
+	"createdAt":     "createdAt is immutable after Account.Create",
 }
 
 // UpdateAccountUseCase.

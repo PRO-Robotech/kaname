@@ -158,17 +158,25 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
-	// Sync 1: required fields.
-	if a.OwnerUserID == "" {
-		return nil, shared.InvalidArg("owner_user_id", "owner_user_id required")
+	// F1 (redesign-2026): ownerUserId° is OUTPUT-ONLY, derived-from-caller. It is
+	// NOT accepted in the Create body — supplying ANY value (even the caller's own
+	// id) is a sync INVALID_ARGUMENT, first statement, before the Operation is
+	// minted. This removes BOTH the AS-IS required-branch AND the anti-hijack
+	// branch: the field is output-only by construction, so there is nothing to
+	// hijack and nothing to require.
+	if a.OwnerUserID != "" {
+		return nil, shared.InvalidArg("ownerUserId", "Illegal argument ownerUserId (derived from caller)")
 	}
-	// Anti-hijacking: principal must == owner_user_id.
-	// Authenticated user может создать Account ТОЛЬКО с самим собой как owner.
-	// Cluster-admin tooling должно ходить через internal listener (bypass guard).
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(a.OwnerUserID)); err != nil {
-		return nil, err
+	// Derive owner° from the authenticated caller (never a body field —
+	// anti-spoofing). The verified principal becomes the account owner and the
+	// subject of the owner AccessBinding co-committed by the saga.
+	principalID := authzguard.PrincipalUserID(ctx)
+	if principalID == "" {
+		return nil, shared.InvalidArg("ownerUserId", "Illegal argument ownerUserId (derived from caller)")
 	}
-	// Sync 2: full domain validation (name regex + description length + labels).
+	a.OwnerUserID = domain.UserID(principalID)
+	// Sync 2: full domain validation (name regex + description length + labels;
+	// owner° now populated from caller).
 	if err := a.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
