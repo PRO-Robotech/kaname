@@ -262,6 +262,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	abListByScope := accessbindingapp.NewListByScopeUseCase(kachoRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
+	// F11 (IAM-1-32): the unified List — viewer ∪ v_list push-down (same
+	// RelationQueries floor as the other AB reads).
+	abList := accessbindingapp.NewListUseCase(kachoRepo).
+		WithRelationQueries(relationStore)
 	abListBySub := accessbindingapp.NewListBySubjectUseCase(kachoRepo)
 	abListByAcc := accessbindingapp.NewListByAccountUseCase(kachoRepo).
 		WithRelationStore(relationStore, logger).
@@ -292,6 +296,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		abListSubjPriv).
 		WithUpdate(abUpdate).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo)).
+		WithList(abList).
 		WithListAssignableRoles(abListAssignable).
 		WithListByRole(abListByRole).
 		WithExpandAccess(abExpandAccess).

@@ -103,6 +103,89 @@ func (r *abReader) GetForUpdate(ctx context.Context, id domain.AccessBindingID) 
 	return out, nil
 }
 
+// List — the unified read (redesign-2026 F11). Builds the WHERE from whatever
+// optional predicates the filter carries (subject/role/scope-type/scope-id) plus
+// the FGA viewer∪v_list VisibleIDs push-down, then keyset-paginates by
+// (created_at, id) ASC. A non-nil VisibleIDs (incl. empty) constrains
+// `id = ANY($n)`; nil disables it. The page_token decode is the authoritative
+// format backstop (garbage → InvalidArgument), independent of the handler pre-check.
+func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
+	pageSize := int64(f.PageSize)
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	conditions := []string{}
+	args := []any{}
+	argIdx := 1
+	addEq := func(col, val string) {
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", col, argIdx))
+		args = append(args, val)
+		argIdx++
+	}
+	if f.SubjectID != "" {
+		addEq("subject_id", f.SubjectID)
+	}
+	if f.RoleID != "" {
+		addEq("role_id", f.RoleID)
+	}
+	if f.ScopeType != "" {
+		addEq("resource_type", f.ScopeType)
+	}
+	if f.ScopeID != "" {
+		addEq("resource_id", f.ScopeID)
+	}
+	if f.VisibleIDs != nil {
+		conditions = append(conditions, fmt.Sprintf("id = ANY($%d)", argIdx))
+		args = append(args, f.VisibleIDs)
+		argIdx++
+	}
+	if f.PageToken != "" {
+		ts, id, err := decodePageToken(f.PageToken)
+		if err != nil {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page_token")
+		}
+		conditions = append(conditions, fmt.Sprintf("(created_at, id) > ($%d, $%d)", argIdx, argIdx+1))
+		args = append(args, ts, id)
+		argIdx += 2
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+	q := fmt.Sprintf(`SELECT %s FROM access_bindings %s ORDER BY created_at ASC, id ASC LIMIT $%d`,
+		abCols, where, argIdx)
+	args = append(args, pageSize+1)
+
+	rows, err := r.tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, "", mapErr(err, "", "")
+	}
+	defer rows.Close()
+
+	var out []domain.AccessBinding
+	for rows.Next() {
+		ab, serr := scanAB(rows)
+		if serr != nil {
+			return nil, "", mapErr(serr, "", "")
+		}
+		out = append(out, ab)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", mapErr(err, "", "")
+	}
+	var nextToken string
+	if int64(len(out)) > pageSize {
+		last := out[pageSize-1]
+		nextToken = encodePageToken(last.CreatedAt, string(last.ID))
+		out = out[:pageSize]
+	}
+	return out, nextToken, nil
+}
+
 func (r *abReader) ListByScope(ctx context.Context, resourceType domain.ResourceType, resourceID string, f access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
 	return r.listWithConds(ctx, f,
 		[]string{"resource_type = $%d", "resource_id = $%d"},

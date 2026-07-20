@@ -12,6 +12,13 @@ import (
 
 type ReaderIface interface {
 	Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error)
+	// List — the unified read (redesign-2026 F11). Optional predicate fields
+	// (subject/role/scope-type/scope-id) plus an optional VisibleIDs push-down
+	// constrain the result; keyset paginated by (created_at, id) ASC. All fields
+	// empty (with a non-nil VisibleIDs) lists the caller's whole visible set. The
+	// use-case supplies VisibleIDs from the FGA `viewer ∪ v_list` set so keyset
+	// stays dense over the filtered rows (mirrors role.ListFilter.VisibleIDs).
+	List(ctx context.Context, filter ListFilter) ([]domain.AccessBinding, string, error)
 	ListByScope(ctx context.Context, resourceType domain.ResourceType, resourceID string, filter PageFilter) ([]domain.AccessBinding, string, error)
 	ListBySubject(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, filter PageFilter) ([]domain.AccessBinding, string, error)
 	// ListSubjectPrivileges returns the subject's direct AccessBindings JOINed
@@ -325,6 +332,25 @@ type SubjectChangeEvent struct {
 type PageFilter struct {
 	PageSize  int32
 	PageToken string
+}
+
+// ListFilter — params for the unified List (redesign-2026 F11). Every predicate
+// is optional; an empty predicate set (with VisibleIDs) lists the whole visible
+// set. ScopeType is the BARE within-service anchor kind (cluster/account/project),
+// mapped from the dotted `scope=` filter value by the use-case.
+type ListFilter struct {
+	PageSize  int32
+	PageToken string
+	SubjectID string // subject= (matches subject_id)
+	RoleID    string // role= (matches role_id)
+	ScopeType string // scope= (bare resource_type: cluster|account|project)
+	ScopeID   string // scopeId= (matches resource_id)
+	// VisibleIDs — per-object push-down of the caller's FGA viewer ∪ v_list set.
+	// Non-nil constrains the result to `id = ANY(VisibleIDs)` at the SQL layer so
+	// keyset (created_at,id) pagination is dense over the filtered set. A non-nil
+	// empty slice lists nothing. nil disables the constraint (admin/unfiltered
+	// paths do not use List).
+	VisibleIDs []string
 }
 
 // ListByRoleFilter — params for ListByRole. IncludeRevoked

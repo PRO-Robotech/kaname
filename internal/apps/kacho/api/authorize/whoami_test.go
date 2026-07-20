@@ -140,6 +140,9 @@ type fakeABRdr struct{ parent *fakeWhoAmIRepo }
 func (r *fakeABRdr) Get(context.Context, domain.AccessBindingID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "not used")
 }
+func (r *fakeABRdr) List(context.Context, access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
+	return nil, "", nil
+}
 func (r *fakeABRdr) ListByScope(context.Context, domain.ResourceType, string, access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }

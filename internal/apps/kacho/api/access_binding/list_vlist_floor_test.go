@@ -35,7 +35,12 @@ type abQueriesStub struct {
 	clients.RelationQueries
 	idsBy map[string]map[string][]string // [relation][subject] = ids
 	err   error
+	n     int // ListObjects call count (F11 format-before-authz assertion)
 }
+
+// calls reports how many times ListObjects was invoked (used to assert the
+// listauthz floor is NOT consulted before page-format validation).
+func (s *abQueriesStub) calls() int { return s.n }
 
 func newABQueriesStub() *abQueriesStub {
 	return &abQueriesStub{idsBy: map[string]map[string][]string{}}
@@ -50,6 +55,7 @@ func (s *abQueriesStub) set(relation, subject string, ids []string) {
 
 func (s *abQueriesStub) ListObjects(_ context.Context, subject, relation, objType string,
 	_ map[string]any, _ int) ([]string, error) {
+	s.n++
 	if objType != "iam_access_binding" {
 		return nil, nil
 	}

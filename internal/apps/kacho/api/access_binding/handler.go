@@ -21,7 +21,9 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	"github.com/PRO-Robotech/kacho/pkg/filter"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -36,6 +38,7 @@ type Handler struct {
 	update                *UpdateAccessBindingUseCase
 	delete                *DeleteAccessBindingUseCase
 	get                   *GetAccessBindingUseCase
+	list                  *ListUseCase
 	listByScope           *ListByScopeUseCase
 	listBySubject         *ListBySubjectUseCase
 	listByAccount         *ListByAccountUseCase
@@ -69,6 +72,12 @@ func (h *Handler) WithUpdate(uc *UpdateAccessBindingUseCase) *Handler {
 
 // WithListOperations wires the per-resource operation-listing use-case.
 // Mirrors the core resources.
+// WithList wires the unified List use-case (redesign-2026 F11).
+func (h *Handler) WithList(uc *ListUseCase) *Handler {
+	h.list = uc
+	return h
+}
+
 func (h *Handler) WithListOperations(uc *shared.ListOperationsUseCase) *Handler {
 	h.listOp = uc
 	return h
@@ -216,6 +225,68 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetAccessBindingRequest) (
 		return nil, status.Error(codes.Internal, "marshal access binding")
 	}
 	return pb, nil
+}
+
+// List — the unified read (redesign-2026 F11). Page format is validated FIRST
+// (page_size + page_token), BEFORE the use-case's listauthz visibility short-circuit,
+// so a garbage token / page_size>1000 is INVALID_ARGUMENT regardless of grant state.
+// Then the optional whitelist filter is parsed (unknown key → INVALID_ARGUMENT).
+func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest) (*iamv1.ListAccessBindingsResponse, error) {
+	// (1) page_size: >1000 → InvalidArgument (no silent clamp), as the FIRST check.
+	if _, err := corevalidate.PageSize("page_size", req.GetPageSize()); err != nil {
+		return nil, err
+	}
+	// (2) page_token format: garbage → InvalidArgument, BEFORE listauthz.
+	if err := shared.ValidatePageToken("page_token", req.GetPageToken()); err != nil {
+		return nil, err
+	}
+	// (3) whitelist filter: subject/role/scope/scopeId; unknown key → InvalidArgument.
+	f, err := parseABListFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
+	}
+	f.PageSize = safeconv.ClampNonNegInt32(req.GetPageSize())
+	f.PageToken = req.GetPageToken()
+
+	rows, next, err := h.list.Execute(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return listToProto(rows, next)
+}
+
+// abListFilterFields — the closed whitelist of List filter keys (F11).
+var abListFilterFields = []string{"subject", "role", "scope", "scopeId"}
+
+// parseABListFilter parses the optional single-predicate whitelist filter into the
+// repo ListFilter. An unknown key or malformed expression → INVALID_ARGUMENT. The
+// `scope` value is the dotted scope-type (iam.account|iam.project|iam.cluster),
+// mapped to the bare within-service anchor kind; an unknown dotted scope →
+// INVALID_ARGUMENT.
+func parseABListFilter(expr string) (repoab.ListFilter, error) {
+	ast, err := filter.Parse(expr, abListFilterFields)
+	if err != nil {
+		return repoab.ListFilter{}, shared.InvalidArg("filter", err.Error())
+	}
+	var f repoab.ListFilter
+	if ast == nil {
+		return f, nil // empty filter → no predicate
+	}
+	switch ast.Field {
+	case "subject":
+		f.SubjectID = ast.Value
+	case "role":
+		f.RoleID = ast.Value
+	case "scope":
+		bare, ok := domain.ScopeTypeFromDotted(ast.Value)
+		if !ok {
+			return repoab.ListFilter{}, shared.InvalidArg("filter", "Illegal argument scope")
+		}
+		f.ScopeType = bare
+	case "scopeId":
+		f.ScopeID = ast.Value
+	}
+	return f, nil
 }
 
 func (h *Handler) ListByScope(ctx context.Context, req *iamv1.ListAccessBindingsByScopeRequest) (*iamv1.ListAccessBindingsResponse, error) {

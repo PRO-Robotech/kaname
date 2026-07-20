@@ -183,6 +183,9 @@ func (delAcctReader) CountAccountsByOwner(context.Context, domain.UserID) (int, 
 
 type delABReader struct{ repo *delFakeRepo }
 
+func (r delABReader) List(_ context.Context, _ access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
+	return nil, "", nil
+}
 func (r delABReader) ListByScope(_ context.Context, rt domain.ResourceType, rid string, _ access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
 	if rt == "account" && rid == delTestAcct && r.repo.ownerBinding.ID != "" {
 		return []domain.AccessBinding{r.repo.ownerBinding}, "", nil

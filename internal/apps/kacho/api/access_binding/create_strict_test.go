@@ -211,6 +211,9 @@ type strictDupABReader struct{}
 func (r *strictDupABReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
+func (r *strictDupABReader) List(context.Context, repoab.ListFilter) ([]domain.AccessBinding, string, error) {
+	return nil, "", nil
+}
 func (r *strictDupABReader) ListByScope(context.Context, domain.ResourceType, string, repoab.PageFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
