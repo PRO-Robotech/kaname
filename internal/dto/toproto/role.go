@@ -61,6 +61,13 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		UpdatedAt:       updatedAt,
 		CreatedByUserId: string(r.CreatedByUserID),
 		Labels:          labelsToStringMap(r.Labels),
+		// redesign-2026 F6: honest effective-verb preview + catalog metadata
+		// (output-only derived; editor's effective set carries `delete*`).
+		AuthoredVerbs:  r.AuthoredVerbs(),
+		EffectiveVerbs: r.EffectiveVerbs(),
+		VerbNotes:      r.VerbNotes(),
+		DisplayName:    r.DisplayName(),
+		Purpose:        r.Purpose(),
 		// Permissions intentionally omitted (internal compiled; not on the public
 		// API surface — R-7/F5). Read compiled perms via InternalIAMService.GetRoleCompiled.
 	}, nil

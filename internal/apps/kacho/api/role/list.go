@@ -37,6 +37,7 @@ package role
 
 import (
 	"context"
+	"sort"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -95,7 +96,26 @@ func (u *ListRolesUseCase) Execute(ctx context.Context, f reporole.ListFilter) (
 	if err != nil {
 		return nil, "", shared.MapRepoErr(err)
 	}
+	// redesign-2026 F6: present the canonical system-role catalog first — system
+	// roles ahead of custom, and among system the canonical four in
+	// viewer→editor→admin→owner order (domain.CanonicalRank). Stable, so the repo's
+	// (created_at,id) keyset order is preserved within each rank group; this is a
+	// presentation refinement over the authoritative keyset page.
+	sortCatalogFirst(out)
 	return out, next, nil
+}
+
+// sortCatalogFirst stably orders a role page: system roles first, then by canonical
+// rank (viewer<editor<admin<owner<other), preserving the incoming (created_at,id)
+// order within equal keys.
+func sortCatalogFirst(roles []domain.Role) {
+	sort.SliceStable(roles, func(i, j int) bool {
+		si, sj := roles[i].IsSystemDerived(), roles[j].IsSystemDerived()
+		if si != sj {
+			return si // system roles first
+		}
+		return roles[i].CanonicalRank() < roles[j].CanonicalRank()
+	})
 }
 
 // resolveVisibleRoleIDs returns the custom-role id set the principal can read —

@@ -118,7 +118,10 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	}
 	if current.IsSystem {
 		_ = rd.Rollback(ctx)
-		return nil, shared.InvalidArg("id", "System role is read-only and cannot be updated")
+		// redesign-2026 F6 (IAM-1-16): a system (seed/cluster-tier) role is immutable
+		// — FAILED_PRECONDITION, parity with RoleService.Delete and the proto contract
+		// (the resource's state, not the request, forbids the mutation).
+		return nil, status.Error(codes.FailedPrecondition, "System role is read-only and cannot be updated")
 	}
 	// Custom role: проверяем ownership account.
 	acct, err := rd.Accounts().Get(ctx, current.AccountID)
