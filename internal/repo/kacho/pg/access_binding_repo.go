@@ -61,12 +61,13 @@ type abReader struct {
 	tx pgx.Tx
 }
 
-// abCols — 15 колонок access_bindings (RBAC v2 + scope + deletion_protection).
-// Order parity между SELECT (scanAB) и RETURNING (Insert/TransitionStatus/
-// SetDeletionProtection/DeleteGuarded).
+// abCols — access_bindings columns (RBAC v2 + scope + deletion_protection + F8
+// target). Order parity между SELECT (scanAB) и RETURNING (Insert/TransitionStatus/
+// SetDeletionProtection/DeleteGuarded). `target_digest` is write-only (index key,
+// computed on Insert) — NOT scanned, so it is deliberately absent here.
 const abCols = "id, subject_type, subject_id, role_id, resource_type, resource_id, " +
 	"status, condition_id, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
-	"deletion_protection, labels"
+	"deletion_protection, labels, target"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
@@ -425,16 +426,24 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
+	// F8: persist the object-selection (target) + its set-based digest. The digest
+	// is a key column of the active-grant partial UNIQUE (identical target →
+	// collision, distinct per-object targets coexist). Empty/whole-anchor → "all".
+	targetJSON, err := marshalTarget(b.Target)
+	if err != nil {
+		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())
+	}
+	targetDigest := b.Target.Digest()
 	q := fmt.Sprintf(`
 		INSERT INTO access_bindings (
 			id, subject_type, subject_id, role_id, resource_type, resource_id,
 			status, condition_id, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope,
-			deletion_protection, labels
+			deletion_protection, labels, target, target_digest
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16
+			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		)
 		RETURNING %s`, abCols)
 	var scopeArg any
@@ -456,6 +465,8 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		scopeArg,
 		b.DeletionProtection,
 		labelsJSON,
+		targetJSON,
+		targetDigest,
 	)
 	out, err := scanAB(row)
 	if err != nil {
@@ -464,6 +475,54 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		return domain.AccessBinding{}, mapErr(err, "", idHint)
 	}
 	return out, nil
+}
+
+// targetPersistJSON is the JSONB persistence shape of AccessBinding.target (F8).
+type targetPersistJSON struct {
+	AllInScope bool                    `json:"allInScope,omitempty"`
+	Resources  []targetResourceRefJSON `json:"resources,omitempty"`
+}
+
+type targetResourceRefJSON struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// marshalTarget serializes the domain target to its JSONB persistence shape. A
+// per-object set is written as {"resources":[…]}; AllInScope OR the empty
+// whole-anchor zero value is written as {"allInScope":true}.
+func marshalTarget(t domain.AccessTarget) ([]byte, error) {
+	tj := targetPersistJSON{}
+	if len(t.Resources) > 0 {
+		tj.Resources = make([]targetResourceRefJSON, 0, len(t.Resources))
+		for _, r := range t.Resources {
+			tj.Resources = append(tj.Resources, targetResourceRefJSON{Type: r.Type, ID: r.ID})
+		}
+	} else {
+		tj.AllInScope = true
+	}
+	return json.Marshal(tj)
+}
+
+// unmarshalTarget parses the JSONB persistence shape back to the domain target.
+// An empty/NULL column (defensive — every row is backfilled by migration 0055) →
+// the whole-anchor AllInScope grant.
+func unmarshalTarget(b []byte) (domain.AccessTarget, error) {
+	if len(b) == 0 {
+		return domain.AccessTarget{AllInScope: true}, nil
+	}
+	var tj targetPersistJSON
+	if err := json.Unmarshal(b, &tj); err != nil {
+		return domain.AccessTarget{}, err
+	}
+	if len(tj.Resources) > 0 {
+		out := make([]domain.ResourceRef, 0, len(tj.Resources))
+		for _, r := range tj.Resources {
+			out = append(out, domain.ResourceRef{Type: r.Type, ID: r.ID})
+		}
+		return domain.AccessTarget{Resources: out}, nil
+	}
+	return domain.AccessTarget{AllInScope: true}, nil
 }
 
 // Delete — простой DELETE. 0 rows → NotFound. Used by paths that have already
@@ -689,8 +748,9 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		revokedByUID sql.NullString
 		scopeI       int16
 		labelsJSON   []byte
+		targetJSON   []byte
 	)
-	dest := make([]any, 0, 17)
+	dest := make([]any, 0, 18)
 	if len(versionOut) > 0 {
 		dest = append(dest, versionOut[0])
 	}
@@ -711,12 +771,17 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		&scopeI,
 		&ab.DeletionProtection,
 		&labelsJSON,
+		&targetJSON,
 	)
 	err := row.Scan(dest...)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
 	ab.Labels, err = unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.AccessBinding{}, err
+	}
+	ab.Target, err = unmarshalTarget(targetJSON)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}

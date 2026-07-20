@@ -313,6 +313,10 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 		GrantedByUserID:    domain.UserID(actor),
 		DeletionProtection: true,
 		Subjects:           []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(inserted.OwnerUserID)}},
+		// F8: the owner grant is whole-account (all objects under the account
+		// anchor, incl. future) — the explicit allInScope opt-in, mirroring the
+		// public AccessBinding.Create least-priv contract.
+		Target: domain.AccessTarget{AllInScope: true},
 	}
 	// Self-validating-domain: assert the internally-built
 	// owner-binding is well-formed BEFORE Insert — parity with the public

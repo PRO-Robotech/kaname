@@ -286,6 +286,8 @@ func (uc *InviteUserUseCase) doInvite(
 					RoleID:       in.RoleID,
 					ResourceType: domain.ResourceType("project"),
 					ResourceID:   string(in.ProjectID),
+					// F8: whole-project invite grant (explicit allInScope).
+					Target: domain.AccessTarget{AllInScope: true},
 				}
 				ins, abErr := w.AccessBindingsW().Insert(ctx, ab)
 				if abErr != nil {

@@ -128,6 +128,13 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequ
 		return nil, err
 	}
 	rid := req.GetScopeId()
+	// F8: target is REQUIRED (least-privilege). A missing/empty target → sync
+	// INVALID_ARGUMENT first statement; an unknown per-object type → sync
+	// INVALID_ARGUMENT (closed-table). Before any Operation is minted.
+	tgt, err := targetFromProto(req.GetTarget())
+	if err != nil {
+		return nil, err
+	}
 	b := domain.AccessBinding{
 		SubjectType: domain.SubjectType(req.GetSubjectType()),
 		SubjectID:   domain.SubjectID(req.GetSubjectId()),
@@ -149,6 +156,8 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequ
 		// labels — own-resource tenant-facing метки самого binding-ресурса,
 		// делают AccessBinding label-selectable (catalog-видимость).
 		Labels: labelsFromProto(req.GetLabels()),
+		// F8: object-selection under the anchor (allInScope | per-object resources).
+		Target: tgt,
 	}
 	op, err := h.create.Execute(ctx, b)
 	if err != nil {

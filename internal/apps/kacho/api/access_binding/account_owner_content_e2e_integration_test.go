@@ -59,9 +59,11 @@ func TestAccountOwner_MaterializesOnServiceAccountContent_E2E(t *testing.T) {
 	owner := mustSeedUser(t, ctx, pool, "aoc-own")
 	octx := operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(owner)})
 
-	// 1) Account.Create (owner=creator) → co-committed owner-binding + reconcile.
+	// 1) Account.Create → co-committed owner-binding + reconcile. ownerUserId° is
+	// derived from the caller (redesign-2026 F1 — not accepted in the body); the
+	// principal in octx (owner) becomes the account owner.
 	accUC := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
-	accOp, err := accUC.Execute(octx, domain.Account{Name: "acme-aoc", OwnerUserID: owner})
+	accOp, err := accUC.Execute(octx, domain.Account{Name: "acme-aoc"})
 	require.NoError(t, err)
 	require.NoError(t, operations.Wait(ctx))
 	doneAcc, err := opsRepo.Get(ctx, accOp.ID)

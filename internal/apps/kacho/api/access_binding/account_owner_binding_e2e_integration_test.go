@@ -47,11 +47,12 @@ func TestAccountCreate_P6_OwnerBinding_CoCommit_E2E(t *testing.T) {
 
 	createUC := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
 
-	// Owner-create: principal == owner (anti-hijack guard passes).
+	// Owner-create: ownerUserId° is derived from the caller (redesign-2026 F1 —
+	// output-only, NOT accepted in the Create body). The principal in octx becomes
+	// the owner.
 	octx := operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(creator)})
 	op, err := createUC.Execute(octx, domain.Account{
-		Name:        "acme-p6-own",
-		OwnerUserID: creator,
+		Name: "acme-p6-own",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, op)

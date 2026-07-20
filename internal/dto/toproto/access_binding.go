@@ -41,6 +41,10 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		// legacy single subject, so subjects[] is ALWAYS populated (paritet
 		// new←legacy). The legacy single = subjects[0] holds reciprocally.
 		Subjects: domainSubjectsToProto(b),
+		// F8: surface the object-selection under the anchor on every read
+		// (allInScope | per-object resources). Legacy / whole-anchor rows project
+		// as allInScope.
+		Target: domainTargetToProto(b.Target),
 		// RBAC explicit-model — surface deletion_protection on
 		// every read so clients can see / clear it before Delete.
 		DeletionProtection: b.DeletionProtection,
@@ -83,6 +87,26 @@ func subjectTypeToProtoDTO(t domain.SubjectType) iamv1.SubjectType {
 		return iamv1.SubjectType_SUBJECT_TYPE_GROUP
 	default:
 		return iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED
+	}
+}
+
+// domainTargetToProto projects the domain target onto the proto AccessTarget oneof
+// (F8). A per-object set → resources; AllInScope OR the empty/legacy whole-anchor
+// zero value → allInScope (so every read carries an explicit target arm).
+func domainTargetToProto(t domain.AccessTarget) *iamv1.AccessTarget {
+	if len(t.Resources) > 0 {
+		refs := make([]*iamv1.ResourceRef, 0, len(t.Resources))
+		for _, r := range t.Resources {
+			refs = append(refs, &iamv1.ResourceRef{Type: r.Type, Id: r.ID})
+		}
+		return &iamv1.AccessTarget{
+			Target: &iamv1.AccessTarget_Resources{
+				Resources: &iamv1.AccessTargetResources{Resources: refs},
+			},
+		}
+	}
+	return &iamv1.AccessTarget{
+		Target: &iamv1.AccessTarget_AllInScope{AllInScope: &iamv1.AccessTargetAllInScope{}},
 	}
 }
 

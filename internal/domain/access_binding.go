@@ -59,6 +59,12 @@ type AccessBinding struct {
 	// на iam.accessBinding → v_list по `labels @> matchLabels`; List фильтрует
 	// viewer ∪ v_list).
 	Labels Labels
+
+	// Target — WHICH objects under the scope-anchor the grant applies to
+	// (redesign-2026 F8). AllInScope = whole anchor (incl. future); Resources =
+	// closed per-object set. The zero value is treated as AllInScope (legacy /
+	// internal rows); the public Create RPC rejects a missing target (least-priv).
+	Target AccessTarget
 }
 
 func (b AccessBinding) Validate() error {
@@ -66,6 +72,9 @@ func (b AccessBinding) Validate() error {
 	errs = multierr.Append(errs, b.SubjectType.Validate())
 	errs = multierr.Append(errs, b.ResourceType.Validate())
 	errs = multierr.Append(errs, b.Labels.Validate())
+	// F8: per-object target types must be in the closed registry; arms mutually
+	// exclusive. AllInScope / empty (whole-anchor) is always well-formed.
+	errs = multierr.Append(errs, b.Target.Validate())
 	if b.SubjectID == "" || b.RoleID == "" || b.ResourceID == "" {
 		errs = multierr.Append(errs, ErrEmpty)
 	}

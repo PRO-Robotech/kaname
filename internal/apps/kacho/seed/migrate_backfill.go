@@ -90,7 +90,7 @@ WHERE NOT EXISTS (
      AND b.resource_id   = a.id
      AND b.revoked_at IS NULL
 )
-ON CONFLICT (subject_id, subject_type, role_id, resource_type, resource_id)
+ON CONFLICT (subject_id, subject_type, role_id, resource_type, resource_id, target_digest)
   WHERE revoked_at IS NULL
   DO NOTHING`
 

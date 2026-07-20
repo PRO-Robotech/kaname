@@ -67,6 +67,7 @@ func TestAB_IAM_1_18_DottedScope_RoundTrip(t *testing.T) {
 		RoleId:      string(role),
 		ScopeType:   "iam.account",
 		ScopeId:     string(acc),
+		Target:      allInScopeTarget(),
 	})
 	require.NoError(t, err)
 	done := awaitOp(t, ctx, opsRepo, op.GetId())
@@ -201,7 +202,7 @@ func TestAB_IAM_1_18_ConcurrentIdenticalCreate_StrictCreateUnchanged(t *testing.
 	newReq := func() *iamv1.CreateAccessBindingRequest {
 		return &iamv1.CreateAccessBindingRequest{
 			SubjectType: "user", SubjectId: string(member), RoleId: string(role),
-			ScopeType: "iam.account", ScopeId: string(acc),
+			ScopeType: "iam.account", ScopeId: string(acc), Target: allInScopeTarget(),
 		}
 	}
 

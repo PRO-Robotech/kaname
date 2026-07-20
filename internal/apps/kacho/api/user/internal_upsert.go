@@ -453,6 +453,8 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 		GrantedByUserID:    domain.UserID(actor),
 		DeletionProtection: true,
 		Subjects:           []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(userID)}},
+		// F8: whole-account owner grant (explicit allInScope).
+		Target: domain.AccessTarget{AllInScope: true},
 	}
 	// project-scoped self-grant stays the "admin" system-role (explicit
 	// project-admin grant). The user's ACCESS on the project (and its content) is
@@ -468,6 +470,8 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 		RoleID:       domain.RoleID(domain.ClusterAdminRoleID),
 		ResourceType: domain.ResourceType("project"),
 		ResourceID:   string(prjID),
+		// F8: whole-project grant (explicit allInScope).
+		Target: domain.AccessTarget{AllInScope: true},
 	}
 	// Self-validating-domain (parity with account/create.go): the internally-built
 	// owner-binding must be well-formed BEFORE Insert. A failure means field drift,
