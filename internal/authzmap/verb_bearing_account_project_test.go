@@ -44,7 +44,7 @@ func TestVerbBearing_LeafTypesStillVerbBearing(t *testing.T) {
 		"compute_snapshot_schedule", "compute_host_type",
 		"vpc_network", "vpc_subnet", "vpc_address", "vpc_security_group",
 		"vpc_route_table", "vpc_gateway", "vpc_network_interface", "vpc_address_pool",
-		"lb_network_load_balancer", "lb_target_group", "lb_listener",
+		"nlb_network_load_balancer", "nlb_target_group", "nlb_listener",
 		"iam_user", "iam_service_account", "iam_group", "iam_role",
 		"iam_access_binding", "iam_condition",
 	}

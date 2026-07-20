@@ -45,15 +45,14 @@ var forbiddenProxyObjectTypes = map[string]struct{}{
 }
 
 // moduleObjectDomain маппит service-short-name модуля (из mTLS SAN, напр. "nlb")
-// на префикс FGA-object-домена, которым реально владеют его ресурсы. Большинство
-// модулей совпадают с собственным именем (vpc→`vpc_*`, compute→`compute_*`), но
-// kacho-nlb владеет доменом loadbalancer, чьи FGA-object-типы префиксуются `lb_`
-// (lb_network_load_balancer / lb_listener / lb_target_group), НЕ `nlb_`. Без этого
-// маппинга verified-SAN domain-binding отвергал бы все owner-tuple nlb → LB-ресурсы
-// становились невидимы в authz-filtered List.
-var moduleObjectDomain = map[string]string{
-	"nlb": "lb",
-}
+// на префикс FGA-object-домена, которым реально владеют его ресурсы, КОГДА он
+// расходится с service-именем. По умолчанию (пустая карта) домен = service-имя:
+// vpc→`vpc_*`, compute→`compute_*`, nlb→`nlb_*` (после NLB-1a hard-rename FGA
+// object-типы kacho-nlb — `nlb_network_load_balancer` / `nlb_listener` /
+// `nlb_target_group` — совпадают с SAN-именем "nlb", поэтому исключение больше не
+// нужно). Карта сохранена как extension-point для будущего модуля, чей FGA-домен
+// разойдётся с его SAN short-name.
+var moduleObjectDomain = map[string]string{}
 
 // objectDomainForCaller — object-домен, которым модуль вправе владеть. По умолчанию
 // совпадает с service-именем; исключения — в moduleObjectDomain.
@@ -87,7 +86,7 @@ func ValidateProxyTuple(callerDomain, subject, relation, object string) error {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	// Domain-binding: объект обязан принадлежать домену caller (vpc→`vpc_*`,
-	// compute→`compute_*`, nlb→`lb_*`). Пустой callerDomain (dev-mode) пропускает
+	// compute→`compute_*`, nlb→`nlb_*`). Пустой callerDomain (dev-mode) пропускает
 	// эту проверку, но forbidden-set + relation-allowlist выше все равно держат
 	// границу против cluster/iam/privilege.
 	if callerDomain != "" && !strings.HasPrefix(objType, objectDomainForCaller(callerDomain)+"_") {

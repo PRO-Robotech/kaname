@@ -17,8 +17,8 @@ points are pinned:
     never match the selector even freshly created, making any revoke test falsely
     green on an empty mirror.
   - post-Update DENY pins the Update-emit fix — label-remove revokes the grant.
-nlb fga type: lb_listener (authzmap/fga_types.go: loadbalancer.listeners →
-lb_listener). The rule module/resource is loadbalancer.listeners.
+nlb fga type: nlb_listener (authzmap/fga_types.go: loadbalancer.listeners →
+nlb_listener). The rule module/resource is loadbalancer.listeners.
 
 Seed chain: a listener needs a parent NetworkLoadBalancer (EXTERNAL, so the VIP
 auto-allocates without a subnet). region_id = existingRegionId (region-1,
@@ -247,13 +247,13 @@ CASES.append(Case(
         Step(name="poll-listener", method="GET", path="/operations/{{_op_t31nLsn}}",
              auth="jwtAccountAdminA", test_script=poll_op_done("_op_t31nLsn", out_id_var="_t31nLsn")),
         check_step("lsn-pre-grant-deny", "service_account:{{_t31nSa}}", "v_list",
-                   "lb_listener:{{_t31nLsn}}", expect_allowed=False),
+                   "nlb_listener:{{_t31nLsn}}", expect_allowed=False),
         *create_label_role("_t31nRole", "lsn"),
         *bind_role_on_account("_t31nRole", "_t31nBind", "_t31nSa", "lsn"),
         # Create-emit fix anchor: a fresh listener WITH labels matches the selector
         # (a bare-intent mirror without labels would never match → false-green trap).
         check_step("lsn-post-grant-allow", "service_account:{{_t31nSa}}", "v_list",
-                   "lb_listener:{{_t31nLsn}}", expect_allowed=True, poll=True),
+                   "nlb_listener:{{_t31nLsn}}", expect_allowed=True, poll=True),
         # Update-emit fix: remove the label → selector stops matching → revoke.
         # updateMask is a STRING ("labels"): protojson serializes FieldMask as a
         # comma-separated string, NOT a {paths:[...]} object (object form 400s →
@@ -266,6 +266,6 @@ CASES.append(Case(
         Step(name="poll-update-listener", method="GET", path="/operations/{{_opu_t31nLsn}}",
              auth="jwtAccountAdminA", test_script=poll_op_done("_opu_t31nLsn")),
         check_step("lsn-post-revoke-deny", "service_account:{{_t31nSa}}", "v_list",
-                   "lb_listener:{{_t31nLsn}}", expect_allowed=False, poll=True),
+                   "nlb_listener:{{_t31nLsn}}", expect_allowed=False, poll=True),
     ],
 ))

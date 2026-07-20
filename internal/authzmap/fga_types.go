@@ -174,9 +174,9 @@ var verbBearingTypes = map[string]bool{
 	"vpc_network_interface":          true,
 	"vpc_address_pool":               true,
 	"vpc_anycast_address_pool":       true,
-	"lb_network_load_balancer":       true,
-	"lb_target_group":                true,
-	"lb_listener":                    true,
+	"nlb_network_load_balancer":       true,
+	"nlb_target_group":                true,
+	"nlb_listener":                    true,
 	"registry_registry":              true,
 	"registry_repository":            true,
 	"iam_user":                       true,
@@ -263,9 +263,9 @@ var objectTypes = map[string]string{
 	"vpc.anycastAddressPool": "vpc_anycast_address_pool",
 
 	// load balancer (kacho-nlb)
-	"loadbalancer.networkLoadBalancers": "lb_network_load_balancer",
-	"loadbalancer.targetGroups":         "lb_target_group",
-	"loadbalancer.listeners":            "lb_listener",
+	"loadbalancer.networkLoadBalancers": "nlb_network_load_balancer",
+	"loadbalancer.targetGroups":         "nlb_target_group",
+	"loadbalancer.listeners":            "nlb_listener",
 
 	// registry (kacho-registry) — object-prefix `registry_` == service name, so
 	// no moduleObjectDomain mapping is required. `registries` is the namespace

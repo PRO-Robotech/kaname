@@ -2663,7 +2663,7 @@
     "permission": "loadbalancer.networkLoadBalancers.reportAnnounceState",
     "required_relation": "announce_writer",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2682,7 +2682,7 @@
     "permission": "loadbalancer.listeners.create",
     "required_relation": "editor",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2692,7 +2692,7 @@
     "permission": "loadbalancer.listeners.delete",
     "required_relation": "v_delete",
     "scope_extractor": {
-      "object_type": "lb_listener",
+      "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
     "required_acr_min": "2"
@@ -2702,7 +2702,7 @@
     "permission": "loadbalancer.listeners.get",
     "required_relation": "v_get",
     "scope_extractor": {
-      "object_type": "lb_listener",
+      "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
     "required_acr_min": "2"
@@ -2721,7 +2721,7 @@
     "permission": "loadbalancer.listeners.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
-      "object_type": "lb_listener",
+      "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
     "required_acr_min": "2"
@@ -2731,7 +2731,7 @@
     "permission": "loadbalancer.listeners.update",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_listener",
+      "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
     "required_acr_min": "2"
@@ -2741,7 +2741,7 @@
     "permission": "loadbalancer.networkLoadBalancers.attachTargetGroup",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2761,7 +2761,7 @@
     "permission": "loadbalancer.networkLoadBalancers.delete",
     "required_relation": "v_delete",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2771,7 +2771,7 @@
     "permission": "loadbalancer.networkLoadBalancers.detachTargetGroup",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2781,7 +2781,7 @@
     "permission": "loadbalancer.networkLoadBalancers.get",
     "required_relation": "v_get",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2791,7 +2791,7 @@
     "permission": "loadbalancer.networkLoadBalancers.getTargetStates",
     "required_relation": "v_get",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2810,7 +2810,7 @@
     "permission": "loadbalancer.networkLoadBalancers.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2820,7 +2820,7 @@
     "permission": "loadbalancer.networkLoadBalancers.move",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2830,7 +2830,7 @@
     "permission": "loadbalancer.networkLoadBalancers.start",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2840,7 +2840,7 @@
     "permission": "loadbalancer.networkLoadBalancers.stop",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2850,7 +2850,7 @@
     "permission": "loadbalancer.networkLoadBalancers.update",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_network_load_balancer",
+      "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
     "required_acr_min": "2"
@@ -2860,7 +2860,7 @@
     "permission": "loadbalancer.targetGroups.addTargets",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"
@@ -2880,7 +2880,7 @@
     "permission": "loadbalancer.targetGroups.delete",
     "required_relation": "v_delete",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"
@@ -2890,7 +2890,7 @@
     "permission": "loadbalancer.targetGroups.get",
     "required_relation": "v_get",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"
@@ -2909,7 +2909,7 @@
     "permission": "loadbalancer.targetGroups.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"
@@ -2919,7 +2919,7 @@
     "permission": "loadbalancer.targetGroups.move",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"
@@ -2929,7 +2929,7 @@
     "permission": "loadbalancer.targetGroups.removeTargets",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"
@@ -2939,7 +2939,7 @@
     "permission": "loadbalancer.targetGroups.update",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "lb_target_group",
+      "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
     "required_acr_min": "2"

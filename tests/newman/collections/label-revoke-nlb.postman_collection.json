@@ -490,7 +490,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"service_account:{{_t31nSa}}\", \"relation\": \"v_list\", \"object\": \"lb_listener:{{_t31nLsn}}\"}",
+              "raw": "{\"subjectId\": \"service_account:{{_t31nSa}}\", \"relation\": \"v_list\", \"object\": \"nlb_listener:{{_t31nLsn}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -807,7 +807,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"service_account:{{_t31nSa}}\", \"relation\": \"v_list\", \"object\": \"lb_listener:{{_t31nLsn}}\"}",
+              "raw": "{\"subjectId\": \"service_account:{{_t31nSa}}\", \"relation\": \"v_list\", \"object\": \"nlb_listener:{{_t31nLsn}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1003,7 +1003,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"service_account:{{_t31nSa}}\", \"relation\": \"v_list\", \"object\": \"lb_listener:{{_t31nLsn}}\"}",
+              "raw": "{\"subjectId\": \"service_account:{{_t31nSa}}\", \"relation\": \"v_list\", \"object\": \"nlb_listener:{{_t31nLsn}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
