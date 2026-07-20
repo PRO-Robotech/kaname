@@ -170,7 +170,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 f"pm.environment.unset('{dup_var}');",
                 "if (pm.response.code === 200) {",
                 "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId'));",
+                f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                 f"  if (dup && dup.id) pm.environment.set('{dup_var}', dup.id);",
                 "}",
                 f"if (!pm.environment.get('{dup_var}')) {{ pm.execution.setNextRequest('{grant_step_name}'); }}",

@@ -284,7 +284,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: create-net-n1-rya12",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-01 :: create-net-n1-rya30",
           "request": {
             "method": "POST",
             "header": [
@@ -648,7 +648,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaN1}}\", \"roleId\": \"{{_t31RoleN1}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaN1}}\", \"roleId\": \"{{_t31RoleN1}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -817,6 +817,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -897,6 +898,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -1101,6 +1103,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -1436,7 +1439,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-net-sg-rya13",
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-net-sg-rya31",
           "request": {
             "method": "POST",
             "header": [
@@ -1579,7 +1582,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-sg-rya14",
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: create-sg-rya32",
           "request": {
             "method": "POST",
             "header": [
@@ -1943,7 +1946,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaSg}}\", \"roleId\": \"{{_t31RoleSg}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaSg}}\", \"roleId\": \"{{_t31RoleSg}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2112,6 +2115,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -2127,7 +2131,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: update-sg-labels",
+          "name": "T31-LBLREVOKE-VPC-SECGROUP-02 :: update-sg-labels-rya33",
           "request": {
             "method": "PATCH",
             "header": [
@@ -2179,6 +2183,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 25) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -2316,6 +2335,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -2593,7 +2613,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: create-net-add-rya15",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-ADD-01 :: create-net-add-rya34",
           "request": {
             "method": "POST",
             "header": [
@@ -2886,7 +2906,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaAdd}}\", \"roleId\": \"{{_t31RoleAdd}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaAdd}}\", \"roleId\": \"{{_t31RoleAdd}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3055,6 +3075,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -3135,6 +3156,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -3339,6 +3361,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -3744,7 +3767,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: create-net-chg-rya16",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 :: create-net-chg-rya35",
           "request": {
             "method": "POST",
             "header": [
@@ -4165,7 +4188,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaBoth}}\", \"roleId\": \"{{_t31RoleT}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaBoth}}\", \"roleId\": \"{{_t31RoleT}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4291,7 +4314,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaBoth}}\", \"roleId\": \"{{_t31RoleO}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaBoth}}\", \"roleId\": \"{{_t31RoleO}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4417,7 +4440,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaTreska}}\", \"roleId\": \"{{_t31RoleT}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaTreska}}\", \"roleId\": \"{{_t31RoleT}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4586,6 +4609,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -4666,6 +4690,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -4746,6 +4771,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -4950,6 +4976,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -5030,6 +5057,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -5307,7 +5335,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: create-net-idm-rya17",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-IDM-01 :: create-net-idm-rya36",
           "request": {
             "method": "POST",
             "header": [
@@ -5671,7 +5699,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaIdm}}\", \"roleId\": \"{{_t31RoleIdm}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaIdm}}\", \"roleId\": \"{{_t31RoleIdm}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5840,6 +5868,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -5920,6 +5949,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -6124,6 +6154,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -6401,7 +6432,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpa-rya18",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpa-rya37",
           "request": {
             "method": "POST",
             "header": [
@@ -6765,7 +6796,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaFp}}\", \"roleId\": \"{{_t31RoleFp}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaFp}}\", \"roleId\": \"{{_t31RoleFp}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6934,6 +6965,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -7014,6 +7046,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -7218,6 +7251,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -7233,7 +7267,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpb-rya19",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01 :: create-net-fpb-rya38",
           "request": {
             "method": "POST",
             "header": [
@@ -7441,6 +7475,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -7521,6 +7556,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -7725,6 +7761,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -7874,7 +7911,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: create-net-un-rya20",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: create-net-un-rya39",
           "request": {
             "method": "POST",
             "header": [
@@ -8082,6 +8119,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -8221,7 +8259,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: un-update-not-unavailable",
+          "name": "T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01 :: un-update-not-unavailable-rya40",
           "request": {
             "method": "GET",
             "header": [
@@ -8264,6 +8302,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 25) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.test('label Update applied (mutation not blocked by async mirror-emit)', () => {",
                   "  const j = pm.response.json();",
@@ -8660,7 +8713,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: create-net-inv-rya21",
+          "name": "T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE :: create-net-inv-rya41",
           "request": {
             "method": "POST",
             "header": [
@@ -9024,7 +9077,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaInv}}\", \"roleId\": \"{{_t31RoleInv}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31SaInv}}\", \"roleId\": \"{{_t31RoleInv}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9193,6 +9246,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -9273,6 +9327,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -9477,6 +9532,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",

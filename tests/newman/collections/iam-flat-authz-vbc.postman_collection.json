@@ -74,8 +74,8 @@
                   "pm.environment.unset('vbcDupAcbId');",
                   "if (pm.response.code === 200) {",
                   "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.resourceType === 'account'",
-                  "       && b.resourceId === pm.environment.get('accountAId'));",
+                  "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account'",
+                  "       && b.scopeId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) pm.environment.set('vbcDupAcbId', dup.id);",
                   "}",
                   "if (!pm.environment.get('vbcDupAcbId')) { pm.execution.setNextRequest('IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: create-derive'); }"

@@ -9848,7 +9848,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9909,7 +9909,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10076,7 +10076,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10143,7 +10143,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10328,7 +10328,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10395,7 +10395,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10580,7 +10580,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10827,7 +10827,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11012,7 +11012,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11079,7 +11079,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11444,7 +11444,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11511,7 +11511,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16315,7 +16315,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16376,7 +16376,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16437,7 +16437,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16504,7 +16504,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16571,7 +16571,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPA1Id}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPA1Id}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16638,7 +16638,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPA1Id}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPA1Id}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16705,7 +16705,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAAAId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAAAId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16771,7 +16771,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAAAId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAAAId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16838,7 +16838,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAABId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAABId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16905,7 +16905,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAABId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userAABId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16971,7 +16971,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userINVId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userINVId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17038,7 +17038,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userINVId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountBId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userINVId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17271,8 +17271,8 @@
       ]
     },
     {
-      "name": "AUTHZ-ESC-ACCT-HIJACK-AAA — [ALLOW] Create Account with ownerUserId=AAA as acct-adm-a (esc-account-hijack)",
-      "description": "class:AUTHZ | class:POS | priority:P1",
+      "name": "AUTHZ-ESC-ACCT-HIJACK-AAA — [DENY] Create Account with ownerUserId=AAA as acct-adm-a (esc-account-hijack)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
           "name": "AUTHZ-ESC-ACCT-HIJACK-AAA :: post",
@@ -17326,9 +17326,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ESC-ACCT-HIJACK-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
-                  "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ESC-ACCT-HIJACK-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "let rj; try { rj = pm.response.json(); } catch(e) { rj = null; }",
+                  "pm.test('[AUTHZ-ESC-ACCT-HIJACK-AAA] REJECT: status 400 or 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([400, 403]));",
+                  "pm.test('[AUTHZ-ESC-ACCT-HIJACK-AAA] REJECT: grpc code 3 or 7', () => pm.expect(rj && rj.code, JSON.stringify(rj)).to.be.oneOf([3, 7]));"
                 ]
               }
             }
@@ -18227,7 +18227,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userINVId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userINVId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"

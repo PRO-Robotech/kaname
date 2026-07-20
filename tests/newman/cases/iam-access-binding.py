@@ -259,8 +259,8 @@ CASES.append(Case(
                 "  const arr = (j && j.accessBindings) || [];",
                 f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}'",
                 "       && b.subjectId === pm.environment.get('userNOBId')",
-                "       && b.resourceType === 'account'",
-                "       && b.resourceId === pm.environment.get('accountAId'));",
+                "       && b.scopeType === 'iam.account'",
+                "       && b.scopeId === pm.environment.get('accountAId'));",
                 "  if (dup && dup.id) { pm.environment.set('dupAcbId', dup.id); }",
                 "}",
                 # No pre-existing dup (clean DB, or NOB not visible) → skip revoke+poll.
@@ -339,8 +339,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -410,9 +411,9 @@ CASES.append(Case(
                 f"  const j = pm.response.json();",
                 f"  pm.expect(j.roleId).to.eql('{ROLE_VIEW}');",
                 "});",
-                "pm.test('AccessBinding.resourceType = account', () => {",
+                "pm.test('AccessBinding.scopeType = account', () => {",
                 "  const j = pm.response.json();",
-                "  pm.expect(j.resourceType).to.eql('account');",
+                "  pm.expect(j.scopeType).to.eql('iam.account');",
                 "});",
                 *assert_created_at_seconds("pm.response.json().createdAt"),
             ],
@@ -445,8 +446,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -529,8 +531,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": GARBAGE_ROLE,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -567,8 +570,9 @@ CASES.append(Case(
                 "subjectType": "notARealType",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -598,8 +602,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="anonymous",
             test_script=[
@@ -632,8 +637,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtNoBindings",
             test_script=[
@@ -679,8 +685,8 @@ CASES.append(Case(
                 "  pm.expect(j.subjectType, 'subjectType').to.be.a('string').with.length.greaterThan(0);",
                 "  pm.expect(j.subjectId, 'subjectId').to.be.a('string').with.length.greaterThan(0);",
                 "  pm.expect(j.roleId, 'roleId').to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(j.resourceType, 'resourceType').to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(j.resourceId, 'resourceId').to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect(j.scopeType, 'resourceType').to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect(j.scopeId, 'resourceId').to.be.a('string').with.length.greaterThan(0);",
                 "});",
                 *assert_created_at_seconds("pm.response.json().createdAt"),
             ],
@@ -1147,8 +1153,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userAABId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -1250,8 +1257,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -1357,8 +1365,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_ADMIN,
-                "resourceType": "cluster",
-                "resourceId": CLUSTER_SINGLETON_ID,
+                "scopeType": "iam.cluster",
+                "scopeId": CLUSTER_SINGLETON_ID,
+                "target": {"allInScope": {}},
             },
             auth="jwtBootstrap",
             test_script=[
@@ -1409,13 +1418,13 @@ CASES.append(Case(
             auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
-                "pm.test('cluster-binding.resourceType = cluster', () => {",
+                "pm.test('cluster-binding.scopeType = cluster', () => {",
                 "  const j = pm.response.json();",
-                "  pm.expect(j.resourceType, JSON.stringify(j)).to.eql('cluster');",
+                "  pm.expect(j.scopeType, JSON.stringify(j)).to.eql('iam.cluster');",
                 "});",
-                f"pm.test('cluster-binding.resourceId = singleton', () => {{",
+                f"pm.test('cluster-binding.scopeId = singleton', () => {{",
                 "  const j = pm.response.json();",
-                f"  pm.expect(j.resourceId, JSON.stringify(j)).to.eql('{CLUSTER_SINGLETON_ID}');",
+                f"  pm.expect(j.scopeId, JSON.stringify(j)).to.eql('{CLUSTER_SINGLETON_ID}');",
                 "});",
                 "pm.test('cluster-binding.id prefix acb', () => {",
                 "  const j = pm.response.json();",
@@ -1460,8 +1469,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userAABId}}",
                 "roleId": ROLE_ADMIN,
-                "resourceType": "cluster",
-                "resourceId": CLUSTER_SINGLETON_ID,
+                "scopeType": "iam.cluster",
+                "scopeId": CLUSTER_SINGLETON_ID,
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -1494,8 +1504,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_ADMIN,
-                "resourceType": "cluster",
-                "resourceId": "not_the_singleton",
+                "scopeType": "iam.cluster",
+                "scopeId": "not_the_singleton",
+                "target": {"allInScope": {}},
             },
             auth="jwtBootstrap",
             test_script=[
@@ -1532,8 +1543,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,  # *.*.{get,list,read} — ARM_ANCHOR, NOT *.*.*
-                "resourceType": "cluster",
-                "resourceId": CLUSTER_SINGLETON_ID,
+                "scopeType": "iam.cluster",
+                "scopeId": CLUSTER_SINGLETON_ID,
+                "target": {"allInScope": {}},
             },
             auth="jwtBootstrap",
             test_script=[
@@ -1601,8 +1613,9 @@ CASES.append(Case(
                 "subjectType": "group",
                 "subjectId": "{{lspGroupId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -1628,8 +1641,8 @@ CASES.append(Case(
                 f"  const p = (j.privileges || []).find(x => x.roleId === '{ROLE_VIEW}');",
                 "  pm.expect(p, 'viewer privilege for the group binding').to.exist;",
                 "  pm.expect(p.roleName, 'role_name resolved server-side (non-empty)').to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(p.resourceType, 'resourceType=account').to.eql('account');",
-                "  pm.expect(p.resourceId, 'resourceId=accountAId').to.eql(pm.environment.get('accountAId'));",
+                "  pm.expect(p.scopeType, 'resourceType=account').to.eql('iam.account');",
+                "  pm.expect(p.scopeId, 'resourceId=accountAId').to.eql(pm.environment.get('accountAId'));",
                 "});",
             ],
         ),
@@ -1877,8 +1890,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": "{{misRoleId}}",
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -2053,21 +2067,26 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-ACB-F51-TARGET-IGNORED — Create with a body that ALSO carries the
-# removed `target` / `selector` keys (now unknown fields) → binding is created
-# from subjects/roleId/scope only (200, iop Operation done); Get(binding) carries
-# NO `target` and NO `selector`/`targetRef` field.
+# IAM-ACB-F51-TARGET-IGNORED — REPURPOSED for IAM-1 F8 (redesign-2026):
+#   `target` is REINTRODUCED as a REQUIRED first-class field (allInScope | resources).
+#   The OLD tombstoned selection surface — `selector` / `targetRef` — stays REMOVED
+#   (unknown JSON keys, silently ignored by grpc-gateway). This case proves: a Create
+#   whose body ALSO carries the removed `selector`/`targetRef` keys succeeds (they are
+#   ignored), the REQUIRED `target.allInScope{}` IS honored, and Get carries `target`
+#   (F8) but NO `selector`/`targetRef`. See cases/iam-access-binding-redesign.py for
+#   the full F8 target coverage (target-required / per-object / closed-table).
 # Self-contained: synthetic runId-suffixed subject + teardown so re-runs don't
 # trip the strict-create active-grant UNIQUE.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ACB-F51-TARGET-IGNORED",
-    title="Create with unknown target/selector keys → created from subjects/roleId/scope only; Get has no target/selector/targetRef",
+    title="IAM-1-21: Create с REQUIRED target.allInScope + removed selector/targetRef keys → target "
+          "honored, legacy keys ignored; Get несёт target.allInScope, НЕ несёт selector/targetRef",
     classes=["CRUD", "CONF", "CLEANCUT"],
     priority="P0",
     steps=[
-        # verifies (unknown target/selector keys ignored on Create)
+        # verifies (F8 target honored; legacy selector/targetRef keys unknown-ignored)
         # subject must be a REAL user (migration 0049 subject_ref_exists) — mint one.
         *mint_user("f51UserId", "usr-f51"),
         Step(
@@ -2078,12 +2097,11 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{f51UserId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
-                # Removed surface — these keys are now UNKNOWN and must be ignored.
-                "target": {"resources": {"resources": [
-                    {"type": "compute.instance", "id": "inst-f51-{{runId}}"},
-                ]}},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                # F8: target is REQUIRED and HONORED (allInScope opt-in for the whole anchor).
+                "target": {"allInScope": {}},
+                # Removed tombstoned surface — these keys are UNKNOWN and must be ignored.
                 "selector": {"types": ["compute.instance"], "matchLabels": {"env": "prod"}},
                 "targetRef": {"byName": {"resources": [
                     {"type": "compute.instance", "id": "inst-f51-{{runId}}"},
@@ -2141,11 +2159,13 @@ CASES.append(Case(
                 "  const j = pm.response.json();",
                 "  pm.expect(j.subjectType).to.eql('user');",
                 f"  pm.expect(j.roleId).to.eql('{ROLE_VIEW}');",
-                "  pm.expect(j.resourceType).to.eql('account');",
-                "  pm.expect(j.resourceId).to.eql(pm.environment.get('accountAId'));",
+                "  pm.expect(j.scopeType).to.eql('iam.account');",
+                "  pm.expect(j.scopeId).to.eql(pm.environment.get('accountAId'));",
                 "});",
-                "pm.test('response has NO target field (removed surface)', () => {",
-                "  pm.expect(pm.response.json().target, JSON.stringify(pm.response.json())).to.be.undefined;",
+                "pm.test('F8: target.allInScope IS honored (reintroduced required field)', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.target, JSON.stringify(j)).to.be.an('object');",
+                "  pm.expect(j.target.allInScope, JSON.stringify(j.target)).to.be.an('object');",
                 "});",
                 "pm.test('response has NO selector field (removed surface)', () => {",
                 "  pm.expect(pm.response.json().selector, JSON.stringify(pm.response.json())).to.be.undefined;",
@@ -2190,8 +2210,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
                 "deletionProtection": True,
             },
             auth="jwtAccountAdminA",
@@ -2263,8 +2284,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
                 "deletionProtection": True,
             },
             auth="jwtAccountAdminA",
@@ -2371,8 +2393,8 @@ CASES.append(Case(
                 "  const list = j.accessBindings || j.bindings || [];",
                 "  const owner = list.find(b =>",
                 "    b.roleId === '" + ROLE_OWNER + "' &&",
-                "    b.resourceType === 'account' &&",
-                "    b.resourceId === pm.environment.get('accountAId'));",
+                "    b.scopeType === 'iam.account' &&",
+                "    b.scopeId === pm.environment.get('accountAId'));",
                 "  pm.expect(owner, 'owner-binding present on accountAId').to.not.be.undefined;",
                 "  pm.expect(owner.deletionProtection, 'owner-binding deletion_protected').to.eql(true);",
                 "  pm.environment.set('ownerAcbId', owner.id);",
@@ -2449,7 +2471,7 @@ CASES.append(Case(
                 "if (pm.response.code === 200) {",
                 "  const j = pm.response.json();",
                 "  const rows = (j.accessBindings || j.bindings || []);",
-                "  const m = rows.find(b => b.roleId === '" + ROLE_ADMIN + "' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
+                "  const m = rows.find(b => b.roleId === '" + ROLE_ADMIN + "' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
                 "  if (m && m.id) { pm.environment.set('t33StaleAcbId', m.id); }",
                 "}",
                 # No stale binding (clean DB) → skip the revoke and go straight to create.
@@ -2501,8 +2523,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_ADMIN,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
                 "labels": {"stage": "prod"},
             },
             auth="jwtAccountAdminA",
@@ -2616,7 +2639,7 @@ CASES.append(Case(
                 "if (pm.response.code === 200) {",
                 "  const j = pm.response.json();",
                 "  const rows = (j.accessBindings || j.bindings || []);",
-                "  const m = rows.find(b => b.roleId === '" + ROLE_VIEW + "' && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId') && b.subjectId === pm.environment.get('userINVId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
+                "  const m = rows.find(b => b.roleId === '" + ROLE_VIEW + "' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId') && b.subjectId === pm.environment.get('userINVId') && (!b.status || b.status === 'ACTIVE' || b.status === 'STATUS_UNSPECIFIED'));",
                 "  if (m && m.id) { pm.environment.set('t33immStaleAcbId', m.id); }",
                 "}",
                 "if (!pm.environment.get('t33immStaleAcbId')) { pm.execution.setNextRequest('t33imm-create'); }",
@@ -2663,8 +2686,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userINVId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

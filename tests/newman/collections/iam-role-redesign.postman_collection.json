@@ -1,7 +1,7 @@
 {
   "info": {
-    "_postman_id": "eb2254a2-363c-5c20-86f4-8f5427e5be75",
-    "name": "kacho-iam / newman / label-revoke-iam",
+    "_postman_id": "69c59258-697e-5599-965e-6a9de06ddedf",
+    "name": "kacho-iam / newman / iam-role-redesign",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -24,749 +24,11 @@
   ],
   "item": [
     {
-      "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 — project label-clear via updateMask=labels + empty body empties labels (was silent no-op)",
-      "description": "class:IAM | class:LABELS | class:REVOKE | class:NEG | priority:P0",
+      "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK — IAM-1-10: Role.Create с definitionTier{iam.account,accountA}+rules → Get: definitionTier.tierType=='iam.account', tierId==accountA, isSystem°==false (derived tier!=iam.cluster); ответ НЕ несёт поля scope/scopeType/scopeId (зарезервировано за AccessBinding); rules roundtrip",
+      "description": "class:CRUD | class:CONF | priority:P0",
       "item": [
         {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: create-proj-clr",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lriam-prj-clr-{{runId}}\", \"labels\": {\"labelrevoke\": \"treska\"}}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.projectId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_lriamPrjC', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_op__lriamPrjC', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: poll-proj-clr",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_op__lriamPrjC}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_op__lriamPrjC}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('_lriamPrjC')) { pm.environment.set('_lriamPrjC', j.response.id); }",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: clr-precheck-has-label-rya25",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{_lriamPrjC}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects",
-                "{{_lriamPrjC}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// bounded read-your-writes retry over the owner-tuple materialization window",
-                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
-                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_authRetryCount', '0');",
-                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
-                  "}",
-                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
-                  "if ([403,404].includes(pm.response.code) && _arc < 25) {",
-                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
-                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_authRetryCount');",
-                  "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('project has the label before clear', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect((j.labels || {}).labelrevoke, JSON.stringify(j)).to.eql('treska');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: update-proj-clr-rya26",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{_lriamPrjC}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects",
-                "{{_lriamPrjC}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"updateMask\": \"labels\", \"labels\": {}}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// bounded read-your-writes retry over the owner-tuple materialization window",
-                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
-                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_authRetryCount', '0');",
-                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
-                  "}",
-                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
-                  "if ([403].includes(pm.response.code) && _arc < 25) {",
-                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
-                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_authRetryCount');",
-                  "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_opu__lriamPrjC', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: poll-update-proj-clr",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_opu__lriamPrjC}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_opu__lriamPrjC}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: clr-post-clear-empty-rya27",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{_lriamPrjC}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects",
-                "{{_lriamPrjC}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// bounded read-your-writes retry over the owner-tuple materialization window",
-                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
-                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_authRetryCount', '0');",
-                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
-                  "}",
-                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
-                  "if ([403,404].includes(pm.response.code) && _arc < 25) {",
-                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
-                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_authRetryCount');",
-                  "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('project labels now empty (clear is NOT a no-op)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-LBLREVOKE-PROJECT-01 — project label-clear via updateMask=labels revokes ARM_LABELS grant (Check v_list True→False)",
-      "description": "class:IAM | class:LABELS | class:REVOKE | class:FGA | class:AUTHZ | class:STATE | priority:P0",
-      "item": [
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: create-sa-r1",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/serviceAccounts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "serviceAccounts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lriam-sa-r1-{{runId}}\", \"description\": \"newman iam label-revoke clean subject\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.serviceAccountId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_lriamSa1', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_op__lriamSa1', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: poll-sa-r1",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_op__lriamSa1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_op__lriamSa1}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('_lriamSa1')) { pm.environment.set('_lriamSa1', j.response.id); }",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: create-proj-r1",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lriam-prj-r1-{{runId}}\", \"labels\": {\"labelrevoke\": \"treska\"}}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.projectId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_lriamPrj1', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_op__lriamPrj1', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: poll-proj-r1",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_op__lriamPrj1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_op__lriamPrj1}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('_lriamPrj1')) { pm.environment.set('_lriamPrj1', j.response.id); }",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: r1-pre-grant-deny",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "internal",
-                "iam:check"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"subjectId\": \"service_account:{{_lriamSa1}}\", \"relation\": \"v_list\", \"object\": \"project:{{_lriamPrj1}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtBootstrap'",
-                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
-                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
-                  "if (!intBase) {",
-                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
-                  "} else {",
-                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "pm.test('r1-pre-grant-deny: Check denies (allowed !== true)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
-                  "  pm.expect(j.allowed, JSON.stringify(j)).to.not.eql(true);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: create-role-r1",
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: create-role-tier",
           "request": {
             "method": "POST",
             "header": [
@@ -788,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lriam_r1_{{runId}}\", \"description\": \"newman iam ARM_LABELS probe role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"labelrevoke\": \"treska\"}}]}",
+              "raw": "{\"name\": \"rdtier{{runId}}\", \"definitionTier\": {\"tierType\": \"iam.account\", \"tierId\": \"{{accountAId}}\"}, \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"get\", \"list\", \"create\", \"update\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -818,15 +80,20 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
                   "try {",
                   "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.roleId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_lriamRole1', String(v));",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
                   "} catch (e) {}",
                   "try {",
                   "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_op__lriamRole1', String(v));",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('rdRoleId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -834,7 +101,7 @@
           ]
         },
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: poll-role-r1",
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: poll-op",
           "request": {
             "method": "GET",
             "header": [
@@ -844,13 +111,81 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{_op__lriamRole1}}",
+              "raw": "{{baseUrl}}/operations/{{opId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{_op__lriamRole1}}"
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
               ]
             }
           },
@@ -876,25 +211,227 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('_lriamRole1')) { pm.environment.set('_lriamRole1', j.response.id); }",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: bind-r1",
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: get-role-tier-rya16",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{rdRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{rdRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('definitionTier dotted projection', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.definitionTier, JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(j.definitionTier.tierType).to.eql('iam.account');",
+                  "  pm.expect(j.definitionTier.tierId).to.eql(pm.environment.get('accountAId'));",
+                  "});",
+                  "pm.test('isSystem° derived false (custom account-tier)', () => pm.expect(pm.response.json().isSystem).to.eql(false));",
+                  "pm.test('no scope/scopeType/scopeId field on Role (reserved for AccessBinding)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.not.have.property('scope');",
+                  "  pm.expect(j).to.not.have.property('scopeType');",
+                  "  pm.expect(j).to.not.have.property('scopeId');",
+                  "});",
+                  "pm.test('rules roundtrip (public surface)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect((j.rules||[]).length, JSON.stringify(j)).to.be.above(0);",
+                  "  pm.expect(j.rules[0].module).to.eql('compute');",
+                  "  pm.expect(j.rules[0].resources).to.include('instance');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: cleanup-role-tier",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{rdRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{rdRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-CR-DEFINITIONTIER-EMPTY-TIERTYPE-NEG — IAM-1-11/12: definitionTier с tierId но БЕЗ tierType → sync 400 INVALID_ARGUMENT 'Illegal argument definitionTier' (pre-Phase-0 tierType ОБЯЗАТЕЛЕН — prefix-derivation B3-gated; ровно один валидный anchor)",
+      "description": "class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-EMPTY-TIERTYPE-NEG :: create-role-empty-tiertype",
           "request": {
             "method": "POST",
             "header": [
@@ -904,19 +441,157 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "raw": "{{baseUrl}}/iam/v1/roles",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings"
+                "roles"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_lriamSa1}}\", \"roleId\": \"{{_lriamRole1}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"name\": \"rdbadtier{{runId}}\", \"definitionTier\": {\"tierId\": \"{{accountAId}}\"}, \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('Illegal argument definitionTier text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument definitionTier'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-CR-LEGACY-BOTH-SCOPES-XOR-NEG — IAM-1-11: legacy accountId И projectId оба непустые → sync 400 INVALID_ARGUMENT XOR ('exactly one of account_id / project_id') — ровно один anchor",
+      "description": "class:NEG | priority:P2",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-CR-LEGACY-BOTH-SCOPES-XOR-NEG :: create-role-both-scopes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"rdxor{{runId}}\", \"accountId\": \"{{accountAId}}\", \"projectId\": \"{{projectA1Id}}\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('XOR scope text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('exactly one of account_id'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS — IAM-1-13: public Role.Get несёт rules[] (authored), НЕ несёт compiled permissions[] (two-projection — compiled M.R.rn.V только Internal GetRoleCompiled :9091, field-absence на public)",
+      "description": "class:CONF | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: seed-role-for-projection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"rdproj{{runId}}\", \"accountId\": \"{{accountAId}}\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"list\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -946,10 +621,20 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_lriamBind1', String(v));",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('projRoleId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -957,7 +642,7 @@
           ]
         },
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: poll-bind-r1",
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: poll-op",
           "request": {
             "method": "GET",
             "header": [
@@ -967,13 +652,81 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{_lriamBind1}}",
+              "raw": "{{baseUrl}}/operations/{{opId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{_lriamBind1}}"
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
               ]
             }
           },
@@ -999,20 +752,77 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: get-role-no-compiled-rya17",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{projRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{projRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "pm.test('bind-r1: bind operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('bind-r1: bind operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "pm.test('bind-r1: bind NOT FailedPrecondition (assignable)', () => {",
-                  "  const code = j.error && j.error.code;",
-                  "  pm.expect(code, JSON.stringify(j)).to.not.eql(9);",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('rules[] present (authored public surface)', () => pm.expect((pm.response.json().rules||[]).length).to.be.above(0));",
+                  "pm.test('compiled permissions[] absent/empty on public Get', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect((j.permissions||[]).length, JSON.stringify(j)).to.eql(0);",
                   "});"
                 ]
               }
@@ -1020,7 +830,135 @@
           ]
         },
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: r1-post-grant-allow",
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: cleanup-role-proj",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{projRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{projRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-CR-PERMISSIONS-INPUT-REJECT-NEG — IAM-1-14: client-sent compiled permissions[] в Create-body → sync 400 INVALID_ARGUMENT 'Illegal argument permissions' (output-only compiled-проекция; политика только через rules[])",
+      "description": "class:NEG | class:SEC | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-CR-PERMISSIONS-INPUT-REJECT-NEG :: create-role-with-permissions",
           "request": {
             "method": "POST",
             "header": [
@@ -1030,20 +968,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
+              "raw": "{{baseUrl}}/iam/v1/roles",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "internal",
-                "iam:check"
+                "roles"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"service_account:{{_lriamSa1}}\", \"relation\": \"v_list\", \"object\": \"project:{{_lriamPrj1}}\"}",
+              "raw": "{\"name\": \"rdperm{{runId}}\", \"accountId\": \"{{accountAId}}\", \"permissions\": [\"compute.instance.*.get\"], \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1057,20 +994,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtBootstrap'",
-                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
-                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
-                  "if (!intBase) {",
-                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
-                  "} else {",
-                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1080,28 +1009,177 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('Illegal argument permissions text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('illegal argument permissions'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-CR-EMPTY-RULES-REJECT-NEG — IAM-1-14: Create БЕЗ rules[] (пустой) → sync 400 INVALID_ARGUMENT 'Illegal argument rules (must be non-empty)' — legacy permissions-only отклоняется",
+      "description": "class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-CR-EMPTY-RULES-REJECT-NEG :: create-role-empty-rules",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"rdnorules{{runId}}\", \"accountId\": \"{{accountAId}}\", \"rules\": []}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('rules must be non-empty text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('rules'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-LS-CANONICAL-CATALOG-OK — IAM-1-15: RoleService.List → system-роли первыми в порядке view→edit→admin→owner (first-in-order rank); каждая isSystem°==true; edit.authoredVerbs°==[get,list,update], effectiveVerbs°==[get,list,update,delete*] (честный editor delete*-qualifier), verbNotes[delete*] дословно; view НЕ несёт delete*",
+      "description": "class:CONF | priority:P0",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-LS-CANONICAL-CATALOG-OK :: list-catalog",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles?pageSize=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles?pageSize=1000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('_ckStarted') !== pm.info.requestName) { pm.environment.set('_ckCount', '0'); pm.environment.set('_ckStarted', pm.info.requestName); }",
-                  "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
-                  "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
-                  "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_ckCount');",
-                  "pm.environment.unset('_ckStarted');",
-                  "pm.test('r1-post-grant-allow: allowed == true', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
-                  "  pm.expect(j.allowed, JSON.stringify(j)).to.eql(true);",
+                  "const roles = j.roles || [];",
+                  "const names = roles.map(r => r.name);",
+                  "pm.test('catalog leads with view→edit→admin→owner (first-in-order)', () => {",
+                  "  pm.expect(names.slice(0,4), JSON.stringify(names)).to.eql(['view','edit','admin','owner']);",
+                  "});",
+                  "pm.test('canonical four are isSystem° true (derived cluster-tier)', () => {",
+                  "  for (const n of ['view','edit','admin','owner']) {",
+                  "    const r = roles.find(x => x.name === n);",
+                  "    pm.expect(r && r.isSystem, n).to.eql(true);",
+                  "  }",
+                  "});",
+                  "pm.test('edit.authoredVerbs° == [get,list,update]', () => {",
+                  "  const e = roles.find(x => x.name === 'edit');",
+                  "  pm.expect(e.authoredVerbs, JSON.stringify(e)).to.eql(['get','list','update']);",
+                  "});",
+                  "pm.test('edit.effectiveVerbs° includes delete* (honest editor co-materialization)', () => {",
+                  "  const e = roles.find(x => x.name === 'edit');",
+                  "  pm.expect(e.effectiveVerbs, JSON.stringify(e)).to.eql(['get','list','update','delete*']);",
+                  "});",
+                  "pm.test('edit.verbNotes[delete*] verbatim', () => {",
+                  "  const e = roles.find(x => x.name === 'edit');",
+                  "  pm.expect((e.verbNotes||{})['delete*'], JSON.stringify(e)).to.eql('co-materialized on in-scope leaf objects, NOT on the account/project anchor itself');",
+                  "});",
+                  "pm.test('view.effectiveVerbs° does NOT include delete* (not editor-tier)', () => {",
+                  "  const v = roles.find(x => x.name === 'view');",
+                  "  pm.expect(v.effectiveVerbs||[], JSON.stringify(v)).to.not.include('delete*');",
                   "});"
                 ]
               }
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG — IAM-1-16: Update system-роли (cluster-tier 'edit') → sync FAILED_PRECONDITION 'System role is read-only and cannot be updated' (seed/system immutable)",
+      "description": "class:NEG | priority:P1",
+      "item": [
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: update-proj-r1-rya28",
+          "name": "IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG :: update-system-role",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1111,228 +1189,20 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{_lriamPrj1}}",
+              "raw": "{{baseUrl}}/iam/v1/roles/rolde95b43bceeb4b998",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "projects",
-                "{{_lriamPrj1}}"
+                "roles",
+                "rolde95b43bceeb4b998"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": \"labels\", \"labels\": {}}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// bounded read-your-writes retry over the owner-tuple materialization window",
-                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
-                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_authRetryCount', '0');",
-                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
-                  "}",
-                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
-                  "if ([403].includes(pm.response.code) && _arc < 25) {",
-                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
-                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_authRetryCount');",
-                  "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_opu__lriamPrj1', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: poll-update-proj-r1",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_opu__lriamPrj1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_opu__lriamPrj1}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: r1-labels-empty-rya29",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{_lriamPrj1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects",
-                "{{_lriamPrj1}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// bounded read-your-writes retry over the owner-tuple materialization window",
-                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
-                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_authRetryCount', '0');",
-                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
-                  "}",
-                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
-                  "if ([403,404].includes(pm.response.code) && _arc < 25) {",
-                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
-                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_authRetryCount');",
-                  "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('project labels now empty (clear is NOT a no-op)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(Object.keys(j.labels || {}).length, JSON.stringify(j)).to.eql(0);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: r1-post-revoke-deny",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "internal",
-                "iam:check"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"subjectId\": \"service_account:{{_lriamSa1}}\", \"relation\": \"v_list\", \"object\": \"project:{{_lriamPrj1}}\"}",
+              "raw": "{\"updateMask\": [\"description\"], \"description\": \"hacked-{{runId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1352,14 +1222,6 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
-                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
-                  "if (!intBase) {",
-                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
-                  "} else {",
-                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1369,21 +1231,133 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('_ckStarted') !== pm.info.requestName) { pm.environment.set('_ckCount', '0'); pm.environment.set('_ckStarted', pm.info.requestName); }",
-                  "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
-                  "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
-                  "  pm.environment.set('_ckCount', String(cc + 1));",
-                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
+                  "pm.test('sync FAILED_PRECONDITION (9)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400);",
+                  "  pm.expect(pm.response.json().code).to.eql(9);",
+                  "});",
+                  "pm.test('read-only system role text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('system role is read-only'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ROL-RD-DL-SYSTEM-NEG — IAM-1-16: Delete system-роли (cluster-tier 'view') → Operation.error FAILED_PRECONDITION 'System role <id> cannot be deleted'",
+      "description": "class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-DL-SYSTEM-NEG :: delete-system-role",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/rol1bda80f2be4d3658e",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "rol1bda80f2be4d3658e"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch(e) { j = {}; }",
+                  "if (pm.response.code === 200 && (j.id||'').match(/^iop/)) {",
+                  "  pm.environment.set('opId', j.id);",
+                  "  pm.test('async Delete accepted (op minted)', () => pm.expect(true).to.eql(true));",
+                  "} else {",
+                  "  pm.environment.unset('opId');",
+                  "  pm.test('sync FAILED_PRECONDITION', () => pm.expect(pm.response.code).to.eql(400));",
+                  "  pm.test('sync code 9', () => pm.expect(j.code).to.eql(9));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-RD-DL-SYSTEM-NEG :: assert-system-delete-op-error",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "pm.environment.unset('_ckCount');",
-                  "pm.environment.unset('_ckStarted');",
-                  "pm.test('r1-post-revoke-deny: Check denies (allowed !== true)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
-                  "  pm.expect(j.allowed, JSON.stringify(j)).to.not.eql(true);",
-                  "});"
+                  "if (!pm.environment.get('opId')) { pm.execution.setNextRequest(null); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get('opId')) {",
+                  "  const j = pm.response.json();",
+                  "  if (pm.environment.get('_sysDelStarted') !== pm.info.requestName) { pm.environment.set('_sysDelCount','0'); pm.environment.set('_sysDelStarted', pm.info.requestName); }",
+                  "  const pc = parseInt(pm.environment.get('_sysDelCount')||'0',10);",
+                  "  if (!j.done && pc < 50) { pm.environment.set('_sysDelCount', String(pc+1)); const _d=Date.now(); while(Date.now()-_d<500){} pm.execution.setNextRequest(pm.info.requestName); return; }",
+                  "  pm.environment.unset('_sysDelCount'); pm.environment.unset('_sysDelStarted');",
+                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "  pm.test('op.error FAILED_PRECONDITION (9)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
+                  "  pm.test('cannot be deleted text', () => pm.expect(((j.error&&j.error.message)||'').toLowerCase(), JSON.stringify(j)).to.include('cannot be deleted'));",
+                  "}"
                 ]
               }
             }

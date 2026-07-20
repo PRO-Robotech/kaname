@@ -164,7 +164,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-CR-CRUD-OK :: get-confirms-rya4",
+          "name": "IAM-PRJ-CR-CRUD-OK :: get-confirms-rya15",
           "request": {
             "method": "GET",
             "header": [

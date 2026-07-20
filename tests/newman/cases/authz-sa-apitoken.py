@@ -271,14 +271,14 @@ emit("AUTHZ-SA-ESC-SELF-ADMIN", "Self-grant iam.admin on account-A (escalation)"
      "DENY", "POST", "/iam/v1/accessBindings",
      {"subjectType": "service_account", "subjectId": "{{svaAId}}",
       "roleId": ROLE_ADMIN,
-      "resourceType": "account", "resourceId": "{{accountAId}}"}, SA_GRANTED)
+      "scopeType":"iam.account","scopeId":"{{accountAId}}","target":{"allInScope":{}}}, SA_GRANTED)
 
 # SA-A-10: SA-A пытается выдать себе vpc-admin на project-B1 (cross-account escalation).
 emit("AUTHZ-SA-ESC-SELF-VPC-B1", "Self-grant vpc-admin on project-B1 (cross-account escalation)",
      "DENY", "POST", "/iam/v1/accessBindings",
      {"subjectType": "service_account", "subjectId": "{{svaAId}}",
       "roleId": ROLE_ADMIN,
-      "resourceType": "project", "resourceId": "{{projectB1Id}}"}, SA_GRANTED)
+      "scopeType":"iam.project","scopeId":"{{projectB1Id}}","target":{"allInScope":{}}}, SA_GRANTED)
 
 # SA-A-11: SA-A пытается self-modify собственную SA-row (поднять привилегии
 #          через rename / labels) — у SA нет iam-write на свой Account → DENY.
@@ -400,4 +400,4 @@ emit("AUTHZ-APITOK-ESC-SELF-ADMIN", "Self-grant iam.admin via valid API token (e
      "DENY", "POST", "/iam/v1/accessBindings",
      {"subjectType": "service_account", "subjectId": "{{svaAId}}",
       "roleId": ROLE_ADMIN,
-      "resourceType": "account", "resourceId": "{{accountAId}}"}, API_VALID)
+      "scopeType":"iam.account","scopeId":"{{accountAId}}","target":{"allInScope":{}}}, API_VALID)

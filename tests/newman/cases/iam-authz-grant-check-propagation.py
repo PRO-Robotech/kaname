@@ -364,8 +364,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -406,8 +407,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -628,8 +630,9 @@ CASES.append(Case(
                 # seeds earlier in the umbrella. (NOB, ROLE_ADMIN, accountA) is a
                 # free, unprotected 5-tuple → the admin DELETE below stays a 200.
                 "roleId": ROLE_ADMIN,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -717,8 +720,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -895,8 +899,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": ROLE_VIEW,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -968,8 +973,9 @@ CASES.append(Case(
                 # accountA) row seeded by the DP suite, so the revoke DELETE below
                 # is a genuine 200 (revoke→Check propagation, the case's intent).
                 "roleId": ROLE_ADMIN,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

@@ -290,8 +290,10 @@ def bind_role(role_var, bind_op_var, resource_type, resource_id, subject_var, na
                 "subjectType": "service_account",
                 "subjectId": f"{{{{{subject_var}}}}}",
                 "roleId": f"{{{{{role_var}}}}}",
-                "resourceType": resource_type,
-                "resourceId": resource_id,
+                # IAM-1 F7/F8: dotted scopeType (callers pass bare account/project/cluster) + REQUIRED target.
+                "scopeType": f"iam.{resource_type}",
+                "scopeId": resource_id,
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

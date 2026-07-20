@@ -384,176 +384,9 @@
       ]
     },
     {
-      "name": "IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY — List users ?accountId=accountAId as jwtNoBindings (non-member) → 200 + empty list (scope-filter)",
+      "name": "IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY — List users ?accountId=accountAId as jwtPureNoBindings (non-member) → 200 + empty list (scope-filter)",
       "description": "class:AUTHZ | class:SCOPE | priority:P1",
       "item": [
-        {
-          "name": "IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (pm.environment.get('_nobStarted') !== pm.info.requestName) { pm.environment.set('_nobCount', '0'); pm.environment.set('_nobStarted', pm.info.requestName); }"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('nob pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
-                  "const c = parseInt(pm.environment.get('_nobCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
-                  "if (arr.length > 0 && c < 12) {",
-                  "  pm.environment.set('nobDup', arr[0].id);",
-                  "  pm.environment.set('_nobCount', String(c + 1));",
-                  "  pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-del');",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_nobCount'); pm.environment.unset('_nobStarted'); pm.environment.unset('nobDup');",
-                  "pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: list-nonmember');"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-del",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{nobDup}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessBindings",
-                "{{nobDup}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('nob pre-clean delete acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
-                  "pm.environment.unset('nobDelOp');",
-                  "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('nobDelOp', dj.id); }",
-                  "if (!pm.environment.get('nobDelOp')) { pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list'); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-await",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{nobDelOp}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{nobDelOp}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (pm.environment.get('_nobAwaitStarted') !== pm.info.requestName) { pm.environment.set('_nobAwaitCount', '0'); pm.environment.set('_nobAwaitStarted', pm.info.requestName); }"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "const c = parseInt(pm.environment.get('_nobAwaitCount') || '0', 10);",
-                  "if (!j.done && c < 50) { pm.environment.set('_nobAwaitCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_nobAwaitCount'); pm.environment.unset('_nobAwaitStarted');",
-                  "pm.execution.setNextRequest('IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: nob-preclean-list');"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY :: list-nonmember",
           "request": {
@@ -582,8 +415,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -598,7 +431,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('NOB: users empty (scope-filter default-deny)', () => {",
+                  "pm.test('non-member: users empty (scope-filter default-deny)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect((j.users || []).length, 'zero users for non-member').to.equal(0);",
                   "});"

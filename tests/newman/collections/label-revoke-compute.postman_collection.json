@@ -339,7 +339,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-DISK-03 :: create-disk-disk-rya7",
+          "name": "T31-LBLREVOKE-COMPUTE-DISK-03 :: create-disk-disk-rya20",
           "request": {
             "method": "POST",
             "header": [
@@ -703,7 +703,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31cSadisk}}\", \"roleId\": \"{{_t31cRoledisk}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31cSadisk}}\", \"roleId\": \"{{_t31cRoledisk}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -872,6 +872,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -1076,6 +1077,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -1408,7 +1410,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-disk-snapsrc-rya8",
+          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-disk-snapsrc-rya21",
           "request": {
             "method": "POST",
             "header": [
@@ -1551,7 +1553,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-snapshot-rya9",
+          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-snapshot-rya22",
           "request": {
             "method": "POST",
             "header": [
@@ -1915,7 +1917,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31cSasnapshot}}\", \"roleId\": \"{{_t31cRolesnapshot}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31cSasnapshot}}\", \"roleId\": \"{{_t31cRolesnapshot}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2084,6 +2086,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -2288,6 +2291,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -2620,7 +2624,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-disk-imgsrc-rya10",
+          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-disk-imgsrc-rya23",
           "request": {
             "method": "POST",
             "header": [
@@ -2763,7 +2767,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-image-rya11",
+          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-image-rya24",
           "request": {
             "method": "POST",
             "header": [
@@ -3127,7 +3131,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31cSaimage}}\", \"roleId\": \"{{_t31cRoleimage}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31cSaimage}}\", \"roleId\": \"{{_t31cRoleimage}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3296,6 +3300,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -3500,6 +3505,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",

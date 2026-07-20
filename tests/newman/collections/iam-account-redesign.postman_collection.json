@@ -1,7 +1,7 @@
 {
   "info": {
-    "_postman_id": "dc256b17-f3ea-5bff-a171-424dde3c1526",
-    "name": "kacho-iam / newman / iam-group",
+    "_postman_id": "b925d40c-dfcf-5e7b-a055-16d119f8ca11",
+    "name": "kacho-iam / newman / iam-account-redesign",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -24,11 +24,11 @@
   ],
   "item": [
     {
-      "name": "IAM-GRP-CR-CRUD-OK — Create group in accountAId → Operation(iop) done → Get confirms id prefix `grp`",
-      "description": "class:CRUD | priority:P0",
+      "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK — IAM-1-01: Account.Create БЕЗ ownerUserId → op(iop) done → Get: ownerUserId° == caller (derive-from-caller, principal userAAAId), status ACTIVE, createdAt truncate",
+      "description": "class:CRUD | class:CONF | priority:P0",
       "item": [
         {
-          "name": "IAM-GRP-CR-CRUD-OK :: create",
+          "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK :: create-no-owner",
           "request": {
             "method": "POST",
             "header": [
@@ -38,19 +38,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups",
+              "raw": "{{baseUrl}}/iam/v1/accounts",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups"
+                "accounts"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"grp-{{runId}}\", \"description\": \"newman group create probe\"}",
+              "raw": "{\"name\": \"rdown{{runId}}\", \"description\": \"iam-1 owner-derive probe\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -80,7 +80,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
@@ -92,8 +92,8 @@
                   "} catch (e) {}",
                   "try {",
                   "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.groupId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('crudGroupId', String(v));",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('rdAccId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -101,7 +101,75 @@
           ]
         },
         {
-          "name": "IAM-GRP-CR-CRUD-OK :: poll-op",
+          "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK :: assert-op-success",
           "request": {
             "method": "GET",
             "header": [
@@ -142,29 +210,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('operation succeeded (no error)', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
-                  "if (j.response && j.response.id && !pm.environment.get('crudGroupId')) {",
-                  "  pm.environment.set('crudGroupId', j.response.id);",
-                  "}"
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-GRP-CR-CRUD-OK :: get-confirms-rya14",
+          "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK :: get-owner-derived-rya8",
           "request": {
             "method": "GET",
             "header": [
@@ -174,15 +229,15 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rdAccId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups",
-                "{{crudGroupId}}"
+                "accounts",
+                "{{rdAccId}}"
               ]
             }
           },
@@ -214,7 +269,7 @@
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
                   "}",
                   "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
-                  "if ([403,404].includes(pm.response.code) && _arc < 60) {",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
                   "  pm.environment.set('_authRetryCount', String(_arc + 1));",
                   "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
@@ -223,18 +278,11 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('Group.id prefix grp', () => {",
+                  "pm.test('ownerUserId° derived from caller (== userAAAId)', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.id, 'id must start with grp').to.match(/^grp[a-z0-9]+$/);",
+                  "  pm.expect(j.ownerUserId, JSON.stringify(j)).to.eql(pm.environment.get('userAAAId'));",
                   "});",
-                  "pm.test('Group.accountId matches accountAId', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.accountId).to.eql(pm.environment.get('accountAId'));",
-                  "});",
-                  "pm.test('Group.name contains runId', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.name, 'name must contain runId').to.include(pm.environment.get('runId'));",
-                  "});",
+                  "pm.test('status ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));",
                   "pm.test('createdAt truncated to seconds', () => {",
                   "  const ts = (pm.response.json().createdAt);",
                   "  pm.expect(ts, 'createdAt present').to.be.a('string');",
@@ -250,11 +298,11 @@
       ]
     },
     {
-      "name": "IAM-GRP-CR-NEG-NAME-INVALID — Create group with invalid name (UPPERCASE) → 400 InvalidArgument",
-      "description": "class:NEG | class:VAL | priority:P1",
+      "name": "IAM-ACC-RD-CR-OWNER-INBODY-ATTACKER-NEG — IAM-1-02: Account.Create с ownerUserId=<attacker> в теле → sync 400 INVALID_ARGUMENT 'Illegal argument ownerUserId (derived from caller)', no Operation minted",
+      "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
-          "name": "IAM-GRP-CR-NEG-NAME-INVALID :: create-invalid",
+          "name": "IAM-ACC-RD-CR-OWNER-INBODY-ATTACKER-NEG :: create-owner-attacker",
           "request": {
             "method": "POST",
             "header": [
@@ -264,19 +312,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups",
+              "raw": "{{baseUrl}}/iam/v1/accounts",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups"
+                "accounts"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"BAD-GROUP-{{runId}}\"}",
+              "raw": "{\"name\": \"rdatk{{runId}}\", \"ownerUserId\": \"usr00000000000000bad\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -309,7 +357,12 @@
                   "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
-                  "});"
+                  "});",
+                  "pm.test('exact reject text (derived from caller)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('Illegal argument ownerUserId (derived from caller)');",
+                  "});",
+                  "pm.test('no Operation minted', () => pm.expect((pm.response.json().id)||'').to.not.match(/^iop/));"
                 ]
               }
             }
@@ -318,11 +371,11 @@
       ]
     },
     {
-      "name": "IAM-GRP-CR-NEG-ACCOUNT-MISSING — Create group with non-existent accountId → Operation.error FAILED_PRECONDITION (9)",
+      "name": "IAM-ACC-RD-CR-OWNER-INBODY-SELF-NEG — IAM-1-02: даже ownerUserId == principal.id (self) в теле → тот же sync 400 INVALID_ARGUMENT (поле output-only by construction — нет required-branch, нет anti-hijack-branch)",
       "description": "class:NEG | priority:P1",
       "item": [
         {
-          "name": "IAM-GRP-CR-NEG-ACCOUNT-MISSING :: create-bad-account",
+          "name": "IAM-ACC-RD-CR-OWNER-INBODY-SELF-NEG :: create-owner-self",
           "request": {
             "method": "POST",
             "header": [
@@ -332,806 +385,24 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups",
+              "raw": "{{baseUrl}}/iam/v1/accounts",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups"
+                "accounts"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"acc00000000000notfnd\", \"name\": \"grpbadacc{{runId}}\"}",
+              "raw": "{\"name\": \"rdself{{runId}}\", \"ownerUserId\": \"{{userAAAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('sync 200 or 400 or 403', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403]));",
-                  "const j = pm.response.json();",
-                  "if (pm.response.code === 400) {",
-                  "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                  "} else if (pm.response.code === 200) {",
-                  "  pm.environment.set('badAccGrpOpId', j.id || '');",
-                  "} else {",
-                  "  pm.environment.set('badAccGrpOpId', '');",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-GRP-CR-NEG-ACCOUNT-MISSING :: poll-bad-account",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{badAccGrpOpId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{badAccGrpOpId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (!pm.environment.get('badAccGrpOpId')) {",
-                  "  pm.execution.setNextRequest(null);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('badAccGrpOpId')) {",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('error code 9 or 3 (FAILED_PRECONDITION — account FK)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                  "  });",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-CR-AUTHZ-ANON-DENY — Create group as anonymous → 401 Unauthenticated",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-CR-AUTHZ-ANON-DENY :: create-anon",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"anongrp{{runId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-CR-AUTHZ-NONADMIN-DENY — Create group as jwtNoBindings (no editor on accountAId) → 403 PermissionDenied",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-CR-AUTHZ-NONADMIN-DENY :: create-nonadmin",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"nonadmingrp{{runId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('NONADMIN: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('NONADMIN: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-GT-CRUD-OK — Get crudGroupId → 200 + id prefix grp, accountId matches",
-      "description": "class:CRUD | priority:P0",
-      "item": [
-        {
-          "name": "IAM-GRP-GT-CRUD-OK :: get-ok",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('Group.id prefix grp', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.id, 'id must start with grp').to.match(/^grp[a-z0-9]+$/);",
-                  "});",
-                  "pm.test('Group.id matches requested', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.id).to.eql(pm.environment.get('crudGroupId'));",
-                  "});",
-                  "pm.test('createdAt truncated to seconds', () => {",
-                  "  const ts = (pm.response.json().createdAt);",
-                  "  pm.expect(ts, 'createdAt present').to.be.a('string');",
-                  "  // RFC3339; если есть дробная часть — это .000... либо отсутствует",
-                  "  const m = ts.match(/\\.(\\d+)/);",
-                  "  if (m) pm.expect(parseInt(m[1].padEnd(9,'0'), 10), 'sub-second part is zero').to.eql(0);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-GT-NEG-NOTFOUND — Get non-existent group id → 404 NotFound or 403 (no FGA path)",
-      "description": "class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-GT-NEG-NOTFOUND :: get-notfound",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/grp00000000000notfnd",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "grp00000000000notfnd"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('code 5 or 7', () => pm.expect(j && j.code).to.be.oneOf([5, 7]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-GT-AUTHZ-FOREIGN-DENY — Get crudGroupId as jwtNoBindings (no v_get on accountA) → 404 NOT_FOUND (hide existence)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-GT-AUTHZ-FOREIGN-DENY :: get-foreign",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('FOREIGN: status 404 (hide existence, was 403)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('FOREIGN: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
-                  "pm.test('FOREIGN: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-CRUD-OK — List groups ?accountId=accountAId → 200, groups array contains crudGroupId",
-      "description": "class:CRUD | priority:P0",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-CRUD-OK :: list-ok",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('groups array present', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.groups, 'groups field').to.be.an('array');",
-                  "});",
-                  "pm.test('crudGroupId present in list', () => {",
-                  "  const j = pm.response.json();",
-                  "  const gid = pm.environment.get('crudGroupId');",
-                  "  if (gid) {",
-                  "    pm.expect((j.groups || []).some(g => g.id === gid), 'crudGroupId in list').to.be.true;",
-                  "  }",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-AUTHZ-ANON-DENY — List groups as anonymous → 401 Unauthenticated",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-AUTHZ-ANON-DENY :: list-anon",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-AUTHZ-SCOPE-FILTER — List groups ?accountId=accountAId as jwtNoBindings → 200 + empty list (scope-filter)",
-      "description": "class:AUTHZ | class:SCOPE | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-AUTHZ-SCOPE-FILTER :: list-nonmember",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('scope-filter: groups array present', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.groups, 'groups field').to.be.an('array');",
-                  "});",
-                  "pm.test('scope-filter: non-member sees empty group list', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect((j.groups || []).length, 'empty list for non-member').to.eql(0);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-BVA-PAGESIZE-0 — List groups pageSize=0 → 200 (default applied)",
-      "description": "class:BVA | class:PAGE | priority:P2",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-BVA-PAGESIZE-0 :: ls-ps0",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}&pageSize=0",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}&pageSize=0"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-BVA-PAGESIZE-1 — List groups pageSize=1 → ≤1 item returned",
-      "description": "class:BVA | class:PAGE | priority:P2",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-BVA-PAGESIZE-1 :: ls-ps1",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}&pageSize=1",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}&pageSize=1"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('at most 1 item', () => { const j = pm.response.json(); pm.expect((j.groups||[]).length).to.be.at.most(1); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-BVA-PAGESIZE-MAX — List groups pageSize=1000 (boundary max) → 200",
-      "description": "class:BVA | class:PAGE | priority:P2",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-BVA-PAGESIZE-MAX :: ls-ps1000",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}&pageSize=1000",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}&pageSize=1000"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LS-BVA-PAGESIZE-OVER — List groups pageSize=1001 (over-max) → 400 InvalidArgument",
-      "description": "class:BVA | class:VAL | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-LS-BVA-PAGESIZE-OVER :: ls-ps1001",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}&pageSize=1001",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups?accountId={{accountAId}}&pageSize=1001"
-              ]
             }
           },
           "event": [
@@ -1159,6 +430,10 @@
                   "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('self-id still rejected (derived from caller)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('Illegal argument ownerUserId (derived from caller)');",
                   "});"
                 ]
               }
@@ -1168,11 +443,11 @@
       ]
     },
     {
-      "name": "IAM-GRP-UP-CRUD-OK — Update crudGroupId description (updateMask=description) → Operation done, Get confirms",
-      "description": "class:CRUD | priority:P0",
+      "name": "IAM-ACC-RD-UP-OWNER-IMMUTABLE-NEG — IAM-1-03: Account.Update updateMask=[ownerUserId] → sync 400 INVALID_ARGUMENT 'ownerUserId is immutable after Account.Create' (immutable-switch до UpdateMask)",
+      "description": "class:NEG | priority:P1",
       "item": [
         {
-          "name": "IAM-GRP-UP-CRUD-OK :: update",
+          "name": "IAM-ACC-RD-UP-OWNER-IMMUTABLE-NEG :: update-owner-immutable",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1182,20 +457,92 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups",
-                "{{crudGroupId}}"
+                "accounts",
+                "{{accountAId}}"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"description\": \"updated-{{runId}}\", \"updateMask\": \"description\"}",
+              "raw": "{\"updateMask\": [\"ownerUserId\"], \"ownerUserId\": \"usr00000000000000bad\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('immutable owner text', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('ownerUserId is immutable after Account.Create');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK — IAM-1-04: Account.Create сага → metadata несёт accountId И defaultProjectId (оба до done); default Project name=='default', accountId==metadata.accountId (co-commit); owner-AccessBinding scopeType iam.account, deletionProtection=true (F5 owner-binding защищён)",
+      "description": "class:CRUD | class:SAGA | class:CONF | priority:P0",
+      "item": [
+        {
+          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: create-saga",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"rdsaga{{runId}}\", \"description\": \"iam-1 saga two-id metadata\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1225,7 +572,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
@@ -1234,14 +581,26 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
-                  "} catch (e) {}"
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('sagaAccId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('sagaDefProjId', String(v));",
+                  "} catch (e) {}",
+                  "pm.test('metadata carries accountId (acc-prefix)', () => pm.expect(pm.environment.get('sagaAccId')||'').to.match(/^acc[a-z0-9]/));",
+                  "pm.test('metadata carries defaultProjectId (prj-prefix)', () => pm.expect(pm.environment.get('sagaDefProjId')||'').to.match(/^prj[a-z0-9]/));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-GRP-UP-CRUD-OK :: poll-op",
+          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: poll-op",
           "request": {
             "method": "GET",
             "header": [
@@ -1309,7 +668,7 @@
           ]
         },
         {
-          "name": "IAM-GRP-UP-CRUD-OK :: get-confirms-update",
+          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: assert-op-success",
           "request": {
             "method": "GET",
             "header": [
@@ -1319,15 +678,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
+              "raw": "{{baseUrl}}/operations/{{opId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}"
+                "operations",
+                "{{opId}}"
               ]
             }
           },
@@ -1352,10 +709,150 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: get-default-project-rya9",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{sagaDefProjId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{sagaDefProjId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('Group.description updated', () => {",
+                  "pm.test('default project name==default', () => pm.expect(pm.response.json().name).to.eql('default'));",
+                  "pm.test('default project accountId==saga account', () => pm.expect(pm.response.json().accountId).to.eql(pm.environment.get('sagaAccId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: list-owner-binding",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings?filter=subject%3D%22{{userAAAId}}%22&pageSize=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings?filter=subject%3D%22{{userAAAId}}%22&pageSize=1000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_list_owner_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_list_owner_binding', '0');",
+                  "  pm.environment.set('_poll200_started_list_owner_binding', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_list_owner_binding') || '0', 10);",
+                  "const _p200retryCode = [403,404].includes(pm.response.code);",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { const j = pm.response.json(); const acc = pm.environment.get('sagaAccId'); return !((j.accessBindings)||[]).some(b => b.scopeId === acc); })());",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_list_owner_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_list_owner_binding');",
+                  "pm.environment.unset('_poll200_started_list_owner_binding');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('owner-AccessBinding on saga account: iam.account + deletionProtection', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.description, 'description must include updated-').to.include('updated-');",
+                  "  const acc = pm.environment.get('sagaAccId');",
+                  "  const owner = ((j.accessBindings)||[]).find(b => b.scopeId === acc);",
+                  "  pm.expect(owner, JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(owner.scopeType, 'scopeType dotted').to.eql('iam.account');",
+                  "  pm.expect(owner.deletionProtection, 'owner binding is deletion-protected').to.eql(true);",
                   "});"
                 ]
               }
@@ -1365,145 +862,11 @@
       ]
     },
     {
-      "name": "IAM-GRP-UP-NEG-NOTFOUND — Update non-existent group → 404 NotFound or 403 (no FGA path)",
-      "description": "class:NEG | priority:P1",
+      "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG — IAM-1-06: Account.Delete на аккаунт с ≥1 Project (default из саги) → Operation{done} c result.error FAILED_PRECONDITION 'Account <id> contains projects and cannot be deleted' (within-service FK RESTRICT, ban #10 DB-backstop)",
+      "description": "class:NEG | class:SAGA | priority:P1",
       "item": [
         {
-          "name": "IAM-GRP-UP-NEG-NOTFOUND :: update-notfound",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/grp00000000000notfnd",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "grp00000000000notfnd"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"description\": \"ghost\", \"updateMask\": \"description\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('code 5 or 7', () => pm.expect(j && j.code).to.be.oneOf([5, 7]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-UP-AUTHZ-NONADMIN-DENY — Update crudGroupId as jwtNoBindings (no editor on accountA) → 403 or 404",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-UP-AUTHZ-NONADMIN-DENY :: update-nonadmin",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"description\": \"nonadmin\", \"updateMask\": \"description\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('NONADMIN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('NONADMIN: code 7 or 5', () => pm.expect(j && j.code).to.be.oneOf([7, 5]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-AM-CRUD-OK — AddMember (user/userNOBId) to crudGroupId → Operation done",
-      "description": "class:CRUD | priority:P0",
-      "item": [
-        {
-          "name": "IAM-GRP-AM-CRUD-OK :: add-member",
+          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: seed-acc-for-restrict",
           "request": {
             "method": "POST",
             "header": [
@@ -1513,20 +876,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:addMember",
+              "raw": "{{baseUrl}}/iam/v1/accounts",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups",
-                "{{crudGroupId}}:addMember"
+                "accounts"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"name\": \"rdrst{{runId}}\", \"description\": \"iam-1 delete-restrict probe\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1556,7 +918,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
@@ -1565,6 +927,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('rstAccId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -1572,7 +939,7 @@
           ]
         },
         {
-          "name": "IAM-GRP-AM-CRUD-OK :: poll-op",
+          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: poll-op",
           "request": {
             "method": "GET",
             "header": [
@@ -1638,81 +1005,9 @@
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-AM-NEG-DUP — AddMember duplicate (userNOBId already in group) → async AlreadyExists (6)",
-      "description": "class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-AM-NEG-DUP :: add-dup",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:addMember",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}:addMember"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('sync 200 or 400/409', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 409]));",
-                  "const j = pm.response.json();",
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set('dupAddMemberOpId', j.id || '');",
-                  "} else {",
-                  "  // sync rejection: 6 (ALREADY_EXISTS) or 3 (INVALID_ARGUMENT)",
-                  "  pm.test('sync code 3 or 6', () => pm.expect(j.code).to.be.oneOf([3, 6]));",
-                  "}"
-                ]
-              }
-            }
-          ]
         },
         {
-          "name": "IAM-GRP-AM-NEG-DUP :: poll-dup-add",
+          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: assert-op-success",
           "request": {
             "method": "GET",
             "header": [
@@ -1722,13 +1017,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{dupAddMemberOpId}}",
+              "raw": "{{baseUrl}}/operations/{{opId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{dupAddMemberOpId}}"
+                "{{opId}}"
               ]
             }
           },
@@ -1744,9 +1039,6 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (!pm.environment.get('dupAddMemberOpId')) {",
-                  "  pm.execution.setNextRequest(null);",
                   "}"
                 ]
               }
@@ -1757,27 +1049,17 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('dupAddMemberOpId')) {",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('error code 6 (ALREADY_EXISTS — duplicate member)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(6);",
-                  "  });",
-                  "}"
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-AM-NEG-MEMBER-MISSING — AddMember non-existent user → Operation.error FAILED_PRECONDITION (9) from DB trigger",
-      "description": "class:NEG | priority:P1",
-      "item": [
+        },
         {
-          "name": "IAM-GRP-AM-NEG-MEMBER-MISSING :: add-bad-member",
+          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: delete-nonempty-rya10",
           "request": {
-            "method": "POST",
+            "method": "DELETE",
             "header": [
               {
                 "key": "Content-Type",
@@ -1785,25 +1067,16 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:addMember",
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rstAccId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups",
-                "{{crudGroupId}}:addMember"
+                "accounts",
+                "{{rstAccId}}"
               ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"usr0000000000000ghst\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
             }
           },
           "event": [
@@ -1827,20 +1100,39 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('sync 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                  "const j = pm.response.json();",
-                  "if (pm.response.code === 400) {",
-                  "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                  "} else {",
-                  "  pm.environment.set('opId', j.id || '');",
-                  "}"
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-GRP-AM-NEG-MEMBER-MISSING :: assert-op-error",
+          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: assert-op-error",
           "request": {
             "method": "GET",
             "header": [
@@ -1893,7 +1185,7 @@
                   "pm.environment.unset('_opErrStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('error text includes \"not found\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('not found'));"
+                  "pm.test('error text includes \"contains projects\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('contains projects'));"
                 ]
               }
             }
@@ -1902,11 +1194,11 @@
       ]
     },
     {
-      "name": "IAM-GRP-AM-AUTHZ-NONADMIN-DENY — AddMember to crudGroupId as jwtNoBindings → 403 or 404 (no editor binding)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
+      "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK — IAM-1-07: Project.Create под accountA → op → Get accountId==accountA, status ACTIVE; leaf-workspace (нет parent-project/folder поля — иерархия строго 2 уровня)",
+      "description": "class:CRUD | class:CONF | priority:P0",
       "item": [
         {
-          "name": "IAM-GRP-AM-AUTHZ-NONADMIN-DENY :: add-nonadmin",
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: create-project",
           "request": {
             "method": "POST",
             "header": [
@@ -1916,87 +1208,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:addMember",
+              "raw": "{{baseUrl}}/iam/v1/projects",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups",
-                "{{crudGroupId}}:addMember"
+                "projects"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('NONADMIN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('NONADMIN: code 7 or 5', () => pm.expect(j && j.code).to.be.oneOf([7, 5]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-RM-CRUD-OK — RemoveMember (user/userNOBId) from crudGroupId → Operation done",
-      "description": "class:CRUD | priority:P0",
-      "item": [
-        {
-          "name": "IAM-GRP-RM-CRUD-OK :: remove-member",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:removeMember",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}:removeMember"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rdprj{{runId}}\", \"description\": \"iam-1 project\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2026,832 +1250,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
-                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
-                  "});",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-GRP-RM-CRUD-OK :: poll-op",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{opId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{opId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// poll-counter reset on first entry (request-name-scoped flag);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_pollCount', '0');",
-                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const j = pm.response.json();",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 50) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-RM-NEG-NOT-MEMBER — RemoveMember non-member (userINVId not in group) → 404 NotFound or 9 FailedPrecondition",
-      "description": "class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-RM-NEG-NOT-MEMBER :: remove-not-member",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:removeMember",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}:removeMember"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('sync 200 or 4xx', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 404]));",
-                  "const j = pm.response.json();",
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set('rmNotMemberOpId', j.id || '');",
-                  "} else {",
-                  "  pm.test('sync code 3, 5, or 9', () => pm.expect(j.code).to.be.oneOf([3, 5, 9]));",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-GRP-RM-NEG-NOT-MEMBER :: poll-rm-not-member",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{rmNotMemberOpId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{rmNotMemberOpId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (!pm.environment.get('rmNotMemberOpId')) {",
-                  "  pm.execution.setNextRequest(null);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('rmNotMemberOpId')) {",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('error code 5 or 9 (NOT_FOUND or FAILED_PRECONDITION)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([5, 9]);",
-                  "  });",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-RM-AUTHZ-NONADMIN-DENY — RemoveMember from crudGroupId as jwtNoBindings → 403 or 404",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-RM-AUTHZ-NONADMIN-DENY :: remove-nonadmin",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}:removeMember",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}:removeMember"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('NONADMIN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('NONADMIN: code 7 or 5', () => pm.expect(j && j.code).to.be.oneOf([7, 5]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LM-CRUD-OK — ListMembers of crudGroupId → 200, members array present",
-      "description": "class:CRUD | priority:P0",
-      "item": [
-        {
-          "name": "IAM-GRP-LM-CRUD-OK :: list-members",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}/members",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}",
-                "members"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('members array present', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.members, 'members field').to.be.an('array');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LM-NEG-NOTFOUND — ListMembers of non-existent group → 404 NotFound or 403",
-      "description": "class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-LM-NEG-NOTFOUND :: list-members-notfound",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/grp00000000000notfnd/members",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "grp00000000000notfnd",
-                "members"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LM-AUTHZ-FOREIGN-DENY — ListMembers of crudGroupId as jwtNoBindings (no viewer on group) → 403",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-LM-AUTHZ-FOREIGN-DENY :: list-members-foreign",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}/members",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}",
-                "members"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('FOREIGN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('FOREIGN: code 7 or 5', () => pm.expect(j && j.code).to.be.oneOf([7, 5]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-DL-CRUD-OK — Delete crudGroupId (no AccessBindings) → Operation done, Get returns 404 or 403",
-      "description": "class:CRUD | priority:P0",
-      "item": [
-        {
-          "name": "IAM-GRP-DL-CRUD-OK :: delete",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
-                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
-                  "});",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-GRP-DL-CRUD-OK :: poll-op",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{opId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{opId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// poll-counter reset on first entry (request-name-scoped flag);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_pollCount', '0');",
-                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const j = pm.response.json();",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 50) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-GRP-DL-CRUD-OK :: get-after-delete",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{crudGroupId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "{{crudGroupId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// gone-counter reset on first entry (request-name-scoped flag);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_goneStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_goneCount', '0');",
-                  "  pm.environment.set('_goneStarted', pm.info.requestName);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const gc = parseInt(pm.environment.get('_goneCount') || '0', 10);",
-                  "if (pm.response.code === 200 && gc < 50) {",
-                  "  // resource not yet gone (async delete + FGA-tuple removal lag) — retry.",
-                  "  pm.environment.set('_goneCount', String(gc + 1));",
-                  "  const _gd = Date.now(); while (Date.now() - _gd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_goneCount');",
-                  "pm.environment.unset('_goneStarted');",
-                  "pm.test('Group: gone after delete — 404 or 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-DL-NEG-NOTFOUND — Delete non-existent group → 404 NotFound or 403 (no FGA path)",
-      "description": "class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-DL-NEG-NOTFOUND :: delete-notfound",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/grp00000000000notfnd",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "grp00000000000notfnd"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('code 5 or 7', () => pm.expect(j && j.code).to.be.oneOf([5, 7]));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-DL-AUTHZ-ANON-DENY — Delete group as anonymous → 401 Unauthenticated",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-DL-AUTHZ-ANON-DENY :: delete-anon",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/grp00000000000notfnd",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups",
-                "grp00000000000notfnd"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-GRP-LSOP-CRUD-OK — ListOperations for a group → 200, operations array present",
-      "description": "class:CRUD | priority:P1",
-      "item": [
-        {
-          "name": "IAM-GRP-LSOP-CRUD-OK :: create-for-lsop",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "groups"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lsopgrp{{runId}}\", \"description\": \"lsop probe\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
@@ -2863,8 +1262,8 @@
                   "} catch (e) {}",
                   "try {",
                   "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.groupId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('lsopGroupId', String(v));",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('rdPrjId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -2872,7 +1271,75 @@
           ]
         },
         {
-          "name": "IAM-GRP-LSOP-CRUD-OK :: poll-create-lsop",
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: assert-op-success",
           "request": {
             "method": "GET",
             "header": [
@@ -2914,25 +1381,15 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('lsopGroupId')) {",
-                  "  pm.environment.set('lsopGroupId', j.response.id);",
-                  "}"
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-GRP-LSOP-CRUD-OK :: list-ops",
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: get-project-rya11",
           "request": {
             "method": "GET",
             "header": [
@@ -2942,16 +1399,15 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/groups/{{lsopGroupId}}/operations",
+              "raw": "{{baseUrl}}/iam/v1/projects/{{rdPrjId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "groups",
-                "{{lsopGroupId}}",
-                "operations"
+                "projects",
+                "{{rdPrjId}}"
               ]
             }
           },
@@ -2976,11 +1432,986 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('operations array present', () => {",
+                  "pm.test('accountId == accountA', () => pm.expect(pm.response.json().accountId).to.eql(pm.environment.get('accountAId')));",
+                  "pm.test('status ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));",
+                  "pm.test('no parent-project/folder field (strictly 2 levels)', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.operations, 'operations field').to.be.an('array');",
+                  "  pm.expect(j).to.not.have.property('parentProjectId');",
+                  "  pm.expect(j).to.not.have.property('folderId');",
+                  "});",
+                  "pm.test('createdAt truncated to seconds', () => {",
+                  "  const ts = (pm.response.json().createdAt);",
+                  "  pm.expect(ts, 'createdAt present').to.be.a('string');",
+                  "  // RFC3339; если есть дробная часть — это .000... либо отсутствует",
+                  "  const m = ts.match(/\\.(\\d+)/);",
+                  "  if (m) pm.expect(parseInt(m[1].padEnd(9,'0'), 10), 'sub-second part is zero').to.eql(0);",
                   "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: cleanup-project",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{rdPrjId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{rdPrjId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-PRJ-RD-UP-ACCOUNT-IMMUTABLE-NEG — IAM-1-08: Project.Update updateMask=[accountId] → sync 400 INVALID_ARGUMENT 'accountId is immutable after Project.Create' (нет Move RPC — cross-account перенос запрещён by construction; сломал бы scope-координату downstream)",
+      "description": "class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "IAM-PRJ-RD-UP-ACCOUNT-IMMUTABLE-NEG :: update-account-immutable",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{projectA1Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{projectA1Id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"updateMask\": [\"accountId\"], \"accountId\": \"{{accountBId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('accountId immutable text', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('accountId is immutable after Project.Create');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT — IAM-1-09: dup name в том же аккаунте → Operation.error ALREADY_EXISTS (partial UNIQUE(accountId,name), 23505); то же имя в ДРУГОМ аккаунте → OK (uniqueness per-account)",
+      "description": "class:NEG | class:EDGE | priority:P1",
+      "item": [
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: create-first-A",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rddup{{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('dupPrjA', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: create-dup-A",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rddup{{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: assert-op-error",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_opErrStarted') !== pm.info.requestName) { pm.environment.set('_opErrCount', '0'); pm.environment.set('_opErrStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_opErrCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_opErrCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_opErrCount');",
+                  "pm.environment.unset('_opErrStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('error code 6 (ALREADY_EXISTS)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(6));",
+                  "pm.test('error text includes \"already exists\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('already exists'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: create-same-name-B",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountBId}}\", \"name\": \"rddup{{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('dupPrjB', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: assert-op-success #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-A",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{dupPrjA}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{dupPrjA}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: poll-op #3",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-B",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{dupPrjB}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{dupPrjB}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: poll-op #4",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
               }
             }

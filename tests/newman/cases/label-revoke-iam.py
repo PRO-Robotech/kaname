@@ -251,8 +251,8 @@ def bind_role_on_account(role_var, bind_op_var, subject_var, name_suffix):
     return [
         Step(name=f"bind-{name_suffix}", method="POST", path="/iam/v1/accessBindings",
              body={"subjectType": "service_account", "subjectId": f"{{{{{subject_var}}}}}",
-                   "roleId": f"{{{{{role_var}}}}}", "resourceType": "account",
-                   "resourceId": "{{accountAId}}"},
+                   "roleId": f"{{{{{role_var}}}}}", "scopeType": "iam.account",
+                   "scopeId": "{{accountAId}}", "target": {"allInScope": {}}},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200), *save_from_response("j.id", bind_op_var)]),
         Step(name=f"poll-bind-{name_suffix}", method="GET", path=f"/operations/{{{{{bind_op_var}}}}}",

@@ -204,8 +204,9 @@ def bind_role_steps(role_var, bind_op_var, name_suffix):
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": f"{{{{{role_var}}}}}",
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

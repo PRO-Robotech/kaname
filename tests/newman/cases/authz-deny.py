@@ -382,8 +382,8 @@ define_account_scoped(
 )
 define_account_scoped(
     "AB", "accessBindings",
-    lambda s: {"subjectType":"user","subjectId":"{{userNOBId}}","roleId":ROLE_VIEW,"resourceType":"account","resourceId":"{{accountAId}}"},
-    lambda s: {"subjectType":"user","subjectId":"{{userNOBId}}","roleId":ROLE_VIEW,"resourceType":"account","resourceId":"{{accountBId}}"},
+    lambda s: {"subjectType":"user","subjectId":"{{userNOBId}}","roleId":ROLE_VIEW,"scopeType":"iam.account","scopeId":"{{accountAId}}","target":{"allInScope":{}}},
+    lambda s: {"subjectType":"user","subjectId":"{{userNOBId}}","roleId":ROLE_VIEW,"scopeType":"iam.account","scopeId":"{{accountBId}}","target":{"allInScope":{}}},
     GARBAGE_AB,
     with_list=False,  # AccessBindingService has no plain account-scoped List RPC.
 )
@@ -658,7 +658,12 @@ EXPECT["esc-self-grant-B"]     = {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":
 # ownerUserId обязан совпадать с caller'ом. Body фиксирует ownerUserId=AAA, так
 # что для caller'а AAA это нормальное self-owned account creation (ALLOW); для
 # любого другого subject — попытка назначить чужого owner'а (DENY = hijack).
-EXPECT["esc-account-hijack"]   = {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"ALLOW","AAB":"DENY","INV":"DENY"}
+# IAM-1 F1 (redesign-2026): ownerUserId° is OUTPUT-ONLY derived-from-caller. Setting ANY
+# ownerUserId in the Create body — even the caller's OWN id — is a sync INVALID_ARGUMENT
+# ("Illegal argument ownerUserId (derived from caller)"). The hijack vector is now closed
+# by construction for EVERY subject, so AAA (which used to self-own via ownerUserId=AAA) is
+# now DENY(reject) too. reject_asserts already accepts code 3/400.
+EXPECT["esc-account-hijack"]   = {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"}
 # ESC-CUSTOM-ROLE creates a custom Role in account-A. Role.Create
 # is gated `editor@account` — the account-A owner (AAA) holds it and may
 # create custom roles in their own account (defining a role is not itself
@@ -680,11 +685,11 @@ for subj in SUBJECTS:
     emit("ESC-SELF-ADMIN-A", "Self-grant iam.admin on account-A",
          "esc-self-grant-A", "POST", "/iam/v1/accessBindings",
          {"subjectType":"user","subjectId":user_var,"roleId":ROLE_ADMIN,
-          "resourceType":"account","resourceId":"{{accountAId}}"}, subj)
+          "scopeType":"iam.account","scopeId":"{{accountAId}}","target":{"allInScope":{}}}, subj)
     emit("ESC-SELF-ADMIN-B", "Self-grant iam.admin on account-B",
          "esc-self-grant-B", "POST", "/iam/v1/accessBindings",
          {"subjectType":"user","subjectId":user_var,"roleId":ROLE_ADMIN,
-          "resourceType":"account","resourceId":"{{accountBId}}"}, subj)
+          "scopeType":"iam.account","scopeId":"{{accountBId}}","target":{"allInScope":{}}}, subj)
 
 # ESC-2: создание Account. Body фиксирует ownerUserId=AAA → для caller AAA это
 # self-owned creation (ALLOW), для остальных — hijack (DENY).
@@ -766,8 +771,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userINVId}}",
                 "roleId": ROLE_ADMIN,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

@@ -1082,8 +1082,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{userNOBId}}",
                 "roleId": "{{a16RoleId}}",
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

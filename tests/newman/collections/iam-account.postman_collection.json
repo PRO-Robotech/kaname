@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"crud-{{runId}}\", \"description\": \"newman account create probe\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"crud-{{runId}}\", \"description\": \"newman account create probe\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -164,7 +164,7 @@
           ]
         },
         {
-          "name": "IAM-ACC-CR-CRUD-OK :: get-confirms-rya1",
+          "name": "IAM-ACC-CR-CRUD-OK :: get-confirms-rya12",
           "request": {
             "method": "GET",
             "header": [
@@ -282,7 +282,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"ACME-{{runId}}\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"ACME-{{runId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -354,7 +354,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"crud-{{runId}}\", \"description\": \"dup-name\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"crud-{{runId}}\", \"description\": \"dup-name\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -457,11 +457,11 @@
       ]
     },
     {
-      "name": "IAM-ACC-CR-NEG-OWNER-MISSING — Create with non-existent owner_user_id → Operation.error FAILED_PRECONDITION (9)",
+      "name": "IAM-ACC-CR-NEG-OWNER-MISSING — IAM-1-02: Account.Create с ownerUserId в теле → sync 400 INVALID_ARGUMENT 'Illegal argument ownerUserId (derived from caller)' (owner° output-only — old required/unknown-owner путь удалён)",
       "description": "class:NEG | priority:P1",
       "item": [
         {
-          "name": "IAM-ACC-CR-NEG-OWNER-MISSING :: create-bad-owner",
+          "name": "IAM-ACC-CR-NEG-OWNER-MISSING :: create-owner-in-body",
           "request": {
             "method": "POST",
             "header": [
@@ -483,7 +483,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"badowner-{{runId}}\", \"description\": \"bad owner\", \"ownerUserId\": \"usr00000000000000bad\"}",
+              "raw": "{\"name\": \"badowner-{{runId}}\", \"description\": \"owner-in-body reject\", \"ownerUserId\": \"usr00000000000000bad\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -512,72 +512,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('sync response 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                  "const j = pm.response.json();",
-                  "if (pm.response.code === 400) {",
-                  "  pm.test('sync error code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                  "} else {",
-                  "  // 200 = Operation accepted; save id for the poll step below.",
-                  "  pm.environment.set('badOwnerOpId', j.id || '');",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-NEG-OWNER-MISSING :: poll-bad-owner",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{badOwnerOpId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{badOwnerOpId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "// If sync returned 400, no operation was created — skip poll step.",
-                  "if (!pm.environment.get('badOwnerOpId')) {",
-                  "  pm.execution.setNextRequest(null);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('badOwnerOpId')) {",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('operation error code 9 or 3 (FAILED_PRECONDITION or INVALID_ARGUMENT)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                  "  });",
-                  "}"
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('derived-from-caller reject text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument ownerUserId (derived from caller)'));",
+                  "pm.test('no Operation minted', () => pm.expect((pm.response.json().id)||'').to.not.match(/^iop/));"
                 ]
               }
             }
@@ -612,7 +553,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"anon-{{runId}}\", \"ownerUserId\": \"usr00000000000000bad\"}",
+              "raw": "{\"name\": \"anon-{{runId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -647,11 +588,11 @@
       ]
     },
     {
-      "name": "IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY — Create with ownerUserId != principal → 400 InvalidArgument (RequireOwnerMatchesPrincipal)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
+      "name": "IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY — IAM-1-02: Account.Create с ownerUserId != caller (jwtNoBindings шлёт userAAAId) → sync 400 INVALID_ARGUMENT 'Illegal argument ownerUserId (derived from caller)' (не authz-403 — anti-hijack-branch удалён, поле output-only)",
+      "description": "class:NEG | priority:P1",
       "item": [
         {
-          "name": "IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY :: create-hijack",
+          "name": "IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY :: create-owner-mismatch",
           "request": {
             "method": "POST",
             "header": [
@@ -702,9 +643,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('HIJACK: 400 or 403', () => pm.expect(pm.response.code).to.be.oneOf([400, 403]));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('HIJACK: grpc code 3 or 7', () => pm.expect(j && j.code).to.be.oneOf([3, 7]));"
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('derived-from-caller reject text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument ownerUserId (derived from caller)'));"
                 ]
               }
             }
@@ -739,7 +683,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"abc\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"abc\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -881,7 +825,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbz\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbz\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1023,7 +967,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbz\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbz\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1091,7 +1035,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"test' OR 1=1--\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"test' OR 1=1--\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3025,7 +2969,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"lsop-{{runId}}\", \"description\": \"newman account list-ops test\", \"ownerUserId\": \"{{userAAAId}}\"}",
+              "raw": "{\"name\": \"lsop-{{runId}}\", \"description\": \"newman account list-ops test\"}",
               "options": {
                 "raw": {
                   "language": "json"

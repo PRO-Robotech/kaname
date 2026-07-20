@@ -174,7 +174,7 @@ def preclean_account_loop(tag, next_step):
                 "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                 f"const c = parseInt(pm.environment.get('_{tag}Count') || '0', 10);",
                 "let arr = [];",
-                "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                 f"if (arr.length > 0 && c < {PRECLEAN_LIST_CAP}) {{",
                 f"  pm.environment.set('{dup}', arr[0].id);",
                 f"  pm.environment.set('_{tag}Count', String(c + 1));",
@@ -241,9 +241,9 @@ def create_suite_account(acc_var, op_var):
     assertion.)"""
     return [
         Step(name="create-suite-account", method="POST", path="/iam/v1/accounts",
+             # IAM-1 F1: ownerUserId° derived-from-caller (jwtAccountAdminA == userAAAId) — not sent.
              body={"name": "rbacvis-{{runId}}",
-                   "description": "rbac-visibility-set per-run private account",
-                   "ownerUserId": "{{userAAAId}}"},
+                   "description": "rbac-visibility-set per-run private account"},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),
                           *save_from_response("j.metadata && j.metadata.accountId", acc_var),

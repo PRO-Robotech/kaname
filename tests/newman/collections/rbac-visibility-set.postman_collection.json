@@ -28,6 +28,135 @@
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV2 | class:LABELS | class:EXACT-SET | priority:P0",
       "item": [
         {
+          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: create-suite-account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"rbacvis-{{runId}}\", \"description\": \"rbac-visibility-set per-run private account\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visSetAcct', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visSetAcctOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: poll-visSetAcctOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{visSetAcctOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{visSetAcctOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.response && j.response.id && !pm.environment.get('visSetAcct')) { pm.environment.set('visSetAcct', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: create-setpp1",
           "request": {
             "method": "POST",
@@ -50,7 +179,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setpp1-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"foo\": \"{{runId}}\"}}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setpp1-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"foo\": \"{{runId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -179,7 +308,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setpp2-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"foo\": \"{{runId}}\"}}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setpp2-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"foo\": \"{{runId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -308,7 +437,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setpp3-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"foo\": \"{{runId}}\"}}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setpp3-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"foo\": \"{{runId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -437,7 +566,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setpm1-{{runId}}\", \"description\": \"newman exact-set project\"}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setpm1-{{runId}}\", \"description\": \"newman exact-set project\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -566,7 +695,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setpm2-{{runId}}\", \"description\": \"newman exact-set project\"}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setpm2-{{runId}}\", \"description\": \"newman exact-set project\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -695,7 +824,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setpm3-{{runId}}\", \"description\": \"newman exact-set project\"}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setpm3-{{runId}}\", \"description\": \"newman exact-set project\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -824,7 +953,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setbq1-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"baz\": \"{{runId}}\"}}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setbq1-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"baz\": \"{{runId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -953,7 +1082,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setbq2-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"baz\": \"{{runId}}\"}}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setbq2-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"baz\": \"{{runId}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1060,174 +1189,6 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: visSet-preclean-list",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (pm.environment.get('_visSetStarted') !== pm.info.requestName) { pm.environment.set('_visSetCount', '0'); pm.environment.set('_visSetStarted', pm.info.requestName); }"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
-                  "const c = parseInt(pm.environment.get('_visSetCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
-                  "if (arr.length > 0 && c < 12) {",
-                  "  pm.environment.set('visSetDup', arr[0].id);",
-                  "  pm.environment.set('_visSetCount', String(c + 1));",
-                  "  pm.execution.setNextRequest('IAM-SET-PRJ-LABEL-EXACT-OK :: visSet-preclean-del');",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_visSetCount'); pm.environment.unset('_visSetStarted'); pm.environment.unset('visSetDup');",
-                  "pm.test('jwtInvitee has zero residual account-A bindings (clean slate for by-label visibility)', () => pm.expect(arr.length, JSON.stringify(arr.map(b => b.id))).to.eql(0));",
-                  "pm.execution.setNextRequest('IAM-SET-PRJ-LABEL-EXACT-OK :: create-role');"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: visSet-preclean-del",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{visSetDup}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessBindings",
-                "{{visSetDup}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('pre-clean delete acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
-                  "pm.environment.unset('visSetDelOp');",
-                  "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('visSetDelOp', dj.id); }",
-                  "if (!pm.environment.get('visSetDelOp')) { pm.execution.setNextRequest('IAM-SET-PRJ-LABEL-EXACT-OK :: visSet-preclean-list'); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: visSet-preclean-await",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{visSetDelOp}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{visSetDelOp}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (pm.environment.get('_visSetAwaitStarted') !== pm.info.requestName) { pm.environment.set('_visSetAwaitCount', '0'); pm.environment.set('_visSetAwaitStarted', pm.info.requestName); }"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "const c = parseInt(pm.environment.get('_visSetAwaitCount') || '0', 10);",
-                  "if (!j.done && c < 50) { pm.environment.set('_visSetAwaitCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_visSetAwaitCount'); pm.environment.unset('_visSetAwaitStarted');",
-                  "pm.execution.setNextRequest('IAM-SET-PRJ-LABEL-EXACT-OK :: visSet-preclean-list');"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: create-role",
           "request": {
             "method": "POST",
@@ -1250,7 +1211,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setlblrole_{{runId}}\", \"description\": \"newman exact-set by-label role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"foo\": \"{{runId}}\"}}]}",
+              "raw": "{\"accountId\": \"{{visSetAcct}}\", \"name\": \"setlblrole_{{runId}}\", \"description\": \"newman exact-set by-label role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"foo\": \"{{runId}}\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1379,7 +1340,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{visSetRole}}\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{visSetRole}}\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{visSetAcct}}\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1498,14 +1459,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects?accountId={{accountAId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/iam/v1/projects?accountId={{visSetAcct}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "projects?accountId={{accountAId}}&pageSize=1000"
+                "projects?accountId={{visSetAcct}}&pageSize=1000"
               ]
             }
           },
@@ -1538,7 +1499,7 @@
                 "exec": [
                   "const _p200c = parseInt(pm.environment.get('_poll200_read_exact_set') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().projects || []).map(p => p.id); const want = ['visPP1','visPP2','visPP3'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().projects || []).map(p => p.id); const want = ['visPP1','visPP2','visPP3'].map(v => pm.environment.get(v)); const mneg = ['visPM1','visPM2','visPM3'].map(v => pm.environment.get(v)); const bz = ['visBQ1','visBQ2'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1) || mneg.some(w => ids.indexOf(w) !== -1) || bz.some(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_read_exact_set', String(_p200c + 1));",
@@ -2070,6 +2031,56 @@
               }
             }
           ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: teardown-suite-account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{visSetAcct}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{visSetAcct}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('suite-account teardown best-effort', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403, 404, 409]));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2253,7 +2264,7 @@
                   "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "const c = parseInt(pm.environment.get('_visVlCount') || '0', 10);",
                   "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('visVlDup', arr[0].id);",
                   "  pm.environment.set('_visVlCount', String(c + 1));",
@@ -3996,7 +4007,7 @@
                   "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "const c = parseInt(pm.environment.get('_setSvaSetCount') || '0', 10);",
                   "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setSvaSetDup', arr[0].id);",
                   "  pm.environment.set('_setSvaSetCount', String(c + 1));",
@@ -4428,7 +4439,7 @@
                 "exec": [
                   "const _p200c = parseInt(pm.environment.get('_poll200_read_exact_set') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().serviceAccounts || []).map(o => o.id); const want = ['setSvaPP1','setSvaPP2','setSvaPP3'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().serviceAccounts || []).map(o => o.id); const want = ['setSvaPP1','setSvaPP2','setSvaPP3'].map(v => pm.environment.get(v)); const mneg = ['setSvaPM1','setSvaPM2','setSvaPM3'].map(v => pm.environment.get(v)); const bz = ['setSvaBQ1','setSvaBQ2'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1) || mneg.some(w => ids.indexOf(w) !== -1) || bz.some(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_read_exact_set', String(_p200c + 1));",
@@ -6037,7 +6048,7 @@
                   "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "const c = parseInt(pm.environment.get('_setRolSetCount') || '0', 10);",
                   "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setRolSetDup', arr[0].id);",
                   "  pm.environment.set('_setRolSetCount', String(c + 1));",
@@ -6469,7 +6480,7 @@
                 "exec": [
                   "const _p200c = parseInt(pm.environment.get('_poll200_read_exact_set') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().roles || []).map(o => o.id); const want = ['setRolPP1','setRolPP2','setRolPP3'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().roles || []).map(o => o.id); const want = ['setRolPP1','setRolPP2','setRolPP3'].map(v => pm.environment.get(v)); const mneg = ['setRolPM1','setRolPM2','setRolPM3'].map(v => pm.environment.get(v)); const bz = ['setRolBQ1','setRolBQ2'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1) || mneg.some(w => ids.indexOf(w) !== -1) || bz.some(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_read_exact_set', String(_p200c + 1));",
@@ -8078,7 +8089,7 @@
                   "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "const c = parseInt(pm.environment.get('_setGrpSetCount') || '0', 10);",
                   "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setGrpSetDup', arr[0].id);",
                   "  pm.environment.set('_setGrpSetCount', String(c + 1));",
@@ -8510,7 +8521,7 @@
                 "exec": [
                   "const _p200c = parseInt(pm.environment.get('_poll200_read_exact_set') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().groups || []).map(o => o.id); const want = ['setGrpPP1','setGrpPP2','setGrpPP3'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().groups || []).map(o => o.id); const want = ['setGrpPP1','setGrpPP2','setGrpPP3'].map(v => pm.environment.get(v)); const mneg = ['setGrpPM1','setGrpPM2','setGrpPM3'].map(v => pm.environment.get(v)); const bz = ['setGrpBQ1','setGrpBQ2'].map(v => pm.environment.get(v)); return !want.every(w => ids.indexOf(w) !== -1) || mneg.some(w => ids.indexOf(w) !== -1) || bz.some(w => ids.indexOf(w) !== -1); } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
                   "  pm.environment.set('_poll200_read_exact_set', String(_p200c + 1));",
@@ -9216,7 +9227,7 @@
                   "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "const c = parseInt(pm.environment.get('_setSvaVlCount') || '0', 10);",
                   "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setSvaVlDup', arr[0].id);",
                   "  pm.environment.set('_setSvaVlCount', String(c + 1));",
@@ -10053,7 +10064,7 @@
                   "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "const c = parseInt(pm.environment.get('_setGrpVlCount') || '0', 10);",
                   "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.resourceType === 'account' && b.resourceId === pm.environment.get('accountAId')); }",
+                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setGrpVlDup', arr[0].id);",
                   "  pm.environment.set('_setGrpVlCount', String(c + 1));",

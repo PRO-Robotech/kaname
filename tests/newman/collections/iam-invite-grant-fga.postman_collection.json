@@ -377,7 +377,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaAnchor}}\", \"roleId\": \"{{_igRoleAnchor}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaAnchor}}\", \"roleId\": \"{{_igRoleAnchor}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -916,7 +916,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaContain}}\", \"roleId\": \"{{_igRoleContain}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaContain}}\", \"roleId\": \"{{_igRoleContain}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1526,7 +1526,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaNames}}\", \"roleId\": \"{{_igRoleNames}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaNames}}\", \"roleId\": \"{{_igRoleNames}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2065,7 +2065,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaProj}}\", \"roleId\": \"{{_igRoleProj}}\", \"resourceType\": \"project\", \"resourceId\": \"{{projectA1Id}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_igSaProj}}\", \"roleId\": \"{{_igRoleProj}}\", \"scopeType\": \"iam.project\", \"scopeId\": \"{{projectA1Id}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"

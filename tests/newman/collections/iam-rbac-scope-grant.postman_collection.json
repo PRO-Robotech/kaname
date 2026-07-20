@@ -178,7 +178,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"{{_sgRoleA}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"{{_sgRoleA}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -711,7 +711,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"{{_sgRoleGC}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"{{_sgRoleGC}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"

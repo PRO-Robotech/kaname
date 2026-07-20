@@ -80,7 +80,8 @@ CASES.append(Case(
             name="create",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "crud-{{runId}}", "description": "newman account create probe", "ownerUserId": "{{userAAAId}}"},
+            # IAM-1 F1: ownerUserId° is derived-from-caller — NOT sent in the body.
+            body={"name": "crud-{{runId}}", "description": "newman account create probe"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -162,7 +163,7 @@ CASES.append(Case(
             name="create-invalid",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "ACME-{{runId}}", "ownerUserId": "{{userAAAId}}"},
+            body={"name": "ACME-{{runId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
@@ -193,7 +194,7 @@ CASES.append(Case(
             name="create-dup",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "crud-{{runId}}", "description": "dup-name", "ownerUserId": "{{userAAAId}}"},
+            body={"name": "crud-{{runId}}", "description": "dup-name"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -209,61 +210,31 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-ACC-CR-NEG-OWNER-MISSING — unknown owner_user_id → async FailedPrecondition
+# IAM-ACC-CR-NEG-OWNER-MISSING — REPURPOSED for IAM-1 F1 (redesign-2026):
+#   owner_user_id° is OUTPUT-ONLY derived-from-caller. The AS-IS "owner required /
+#   unknown owner → error" path is REMOVED — supplying ANY ownerUserId in the Create
+#   body is now a sync INVALID_ARGUMENT (before the Operation is minted). See
+#   cases/iam-account-redesign.py::IAM-ACC-RD-CR-OWNER-* for the full F1 coverage.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ACC-CR-NEG-OWNER-MISSING",
-    title="Create with non-existent owner_user_id → Operation.error FAILED_PRECONDITION (9)",
+    title="IAM-1-02: Account.Create с ownerUserId в теле → sync 400 INVALID_ARGUMENT 'Illegal argument "
+          "ownerUserId (derived from caller)' (owner° output-only — old required/unknown-owner путь удалён)",
     classes=["NEG"],
     priority="P1",
     steps=[
-        # The JWT sub must match ownerUserId for RequireOwnerMatchesPrincipal.
-        # We use jwtAccountAdminA whose resolved id is userAAAId, but pass a
-        # garbage owner_user_id that differs from userAAAId.
-        # NOTE: RequireOwnerMatchesPrincipal fires SYNC (before Operation) and
-        # returns InvalidArgument (3) when owner_user_id != principal. The FK
-        # violation "user not found" fires ASYNC (9). Both are valid negative
-        # signals; we assert whichever fires.
         Step(
-            name="create-bad-owner",
+            name="create-owner-in-body",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "badowner-{{runId}}", "description": "bad owner", "ownerUserId": "usr00000000000000bad"},
+            body={"name": "badowner-{{runId}}", "description": "owner-in-body reject", "ownerUserId": "usr00000000000000bad"},
             auth="jwtAccountAdminA",
             test_script=[
-                # Sync: could be 400 (owner mismatch / invalid id format) or 200 (Operation).
-                "pm.test('sync response 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                "const j = pm.response.json();",
-                # If 400, must be INVALID_ARGUMENT or FAILED_PRECONDITION.
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync error code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                "} else {",
-                "  // 200 = Operation accepted; save id for the poll step below.",
-                "  pm.environment.set('badOwnerOpId', j.id || '');",
-                "}",
-            ],
-        ),
-        # Poll only if an Operation was returned.
-        Step(
-            name="poll-bad-owner",
-            method="GET",
-            path="/operations/{{badOwnerOpId}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                "// If sync returned 400, no operation was created — skip poll step.",
-                "if (!pm.environment.get('badOwnerOpId')) {",
-                "  pm.execution.setNextRequest(null);",
-                "}",
-            ],
-            test_script=[
-                "const j = pm.response.json();",
-                "if (pm.environment.get('badOwnerOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('operation error code 9 or 3 (FAILED_PRECONDITION or INVALID_ARGUMENT)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                "  });",
-                "}",
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                "pm.test('derived-from-caller reject text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument ownerUserId (derived from caller)'));",
+                "pm.test('no Operation minted', () => pm.expect((pm.response.json().id)||'').to.not.match(/^iop/));",
             ],
         ),
     ],
@@ -286,7 +257,7 @@ CASES.append(Case(
             name="create-anon",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "anon-{{runId}}", "ownerUserId": "usr00000000000000bad"},
+            body={"name": "anon-{{runId}}"},
             auth="anonymous",
             test_script=[
                 "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
@@ -299,29 +270,32 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY — ownerUserId != principal → 403 or 400
-# RequireOwnerMatchesPrincipal: owner_user_id MUST equal the calling principal.
-# jwtNoBindings' resolved user id is userNOBId, not userAAAId.
+# IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY — REPURPOSED for IAM-1 F1 (redesign-2026):
+#   the AS-IS anti-hijack branch (RequireOwnerMatchesPrincipal → 403/400 when
+#   owner != principal) is GONE. ownerUserId is output-only by construction, so a
+#   mismatched value in the body is simply rejected as INVALID_ARGUMENT (there is
+#   nothing to "hijack" — the owner is always the authenticated caller).
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY",
-    title="Create with ownerUserId != principal → 400 InvalidArgument (RequireOwnerMatchesPrincipal)",
-    classes=["AUTHZ", "NEG"],
+    title="IAM-1-02: Account.Create с ownerUserId != caller (jwtNoBindings шлёт userAAAId) → sync 400 "
+          "INVALID_ARGUMENT 'Illegal argument ownerUserId (derived from caller)' (не authz-403 — "
+          "anti-hijack-branch удалён, поле output-only)",
+    classes=["NEG"],
     priority="P1",
     steps=[
         Step(
-            name="create-hijack",
+            name="create-owner-mismatch",
             method="POST",
             path="/iam/v1/accounts",
-            # jwtNoBindings principal resolves to userNOBId, but ownerUserId is userAAAId → mismatch.
+            # jwtNoBindings principal resolves to userNOBId; the body sets a DIFFERENT ownerUserId.
             body={"name": "hijack-{{runId}}", "ownerUserId": "{{userAAAId}}"},
             auth="jwtNoBindings",
             test_script=[
-                # RequireOwnerMatchesPrincipal fires sync → 400 INVALID_ARGUMENT or 403 PERMISSION_DENIED.
-                "pm.test('HIJACK: 400 or 403', () => pm.expect(pm.response.code).to.be.oneOf([400, 403]));",
-                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                "pm.test('HIJACK: grpc code 3 or 7', () => pm.expect(j && j.code).to.be.oneOf([3, 7]));",
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                "pm.test('derived-from-caller reject text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument ownerUserId (derived from caller)'));",
             ],
         ),
     ],
@@ -342,7 +316,7 @@ CASES.append(Case(
             name="cr-name-min",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "ab{{runId}}"[:3] if False else "abc", "ownerUserId": "{{userAAAId}}"},
+            body={"name": "ab{{runId}}"[:3] if False else "abc"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -370,7 +344,7 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             # 63 chars: 'a' + 61 lowercase alphanumeric + 'z'
-            body={"name": "a" + "b" * 61 + "z", "ownerUserId": "{{userAAAId}}"},
+            body={"name": "a" + "b" * 61 + "z"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -397,7 +371,7 @@ CASES.append(Case(
             name="cr-name-over",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "a" + "b" * 62 + "z", "ownerUserId": "{{userAAAId}}"},  # 64 chars
+            body={"name": "a" + "b" * 62 + "z"},  # 64 chars
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
@@ -422,7 +396,7 @@ CASES.append(Case(
             name="sec-sqli",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "test' OR 1=1--", "ownerUserId": "{{userAAAId}}"},
+            body={"name": "test' OR 1=1--"},
             auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('not 500', () => pm.expect(pm.response.code).to.not.eql(500));",
@@ -1156,7 +1130,7 @@ CASES.append(Case(
             name="create-for-lsop",
             method="POST",
             path="/iam/v1/accounts",
-            body={"name": "lsop-{{runId}}", "description": "newman account list-ops test", "ownerUserId": "{{userAAAId}}"},
+            body={"name": "lsop-{{runId}}", "description": "newman account list-ops test"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),

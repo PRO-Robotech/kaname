@@ -116,3 +116,107 @@ umbrella run):
   it does not resolve, so a future phantom is diagnosable instead of hiding behind green
   FGA tuples. `label-revoke-nlb` create-half stays whitelisted-RED (unchanged — needs the
   umbrella to seed nlb external resources).
+
+---
+
+## IAM-1 redesign (tenancy-tree + authz-core, F1–F11) — newman coverage
+
+Black-box coverage of the **IAM-1** owner-side redesign
+(`docs/specs/sub-phase-IAM-1-tenancy-authz-core-acceptance.md`), grounded in the
+**landed** `services/iam` code (proto + use-cases + seed migrations), authored test-only
+(ban #13 — no product code touched). Local newman env is blocked (no HTTPS ingress on the
+kind stand); the cases are `gen.py`-generated + `coverage.py`-validated here and executed
+by the `newman-e2e` CI job. IAM Operation id-prefix is **`iop`** (not `epd`).
+
+### New case files (34 cases, `# verifies IAM-1-NN` in each title)
+
+| File | F | Cases (IAM-1-NN) |
+|---|---|---|
+| `cases/iam-account-redesign.py` (9) | F1/F2/F3 | ownerUserId derive-from-caller + reject-in-body (attacker/self) + Update-immutable (01/02/03); Create-saga two-id metadata + default `"default"` Project + owner-binding `deletionProtection` (04); Delete RESTRICT-non-empty (06); Project.Create under account + no-parent (07); accountId immutable (08); dup-name per-account vs cross-account OK (09) |
+| `cases/iam-role-redesign.py` (9) | F4/F5/F6 | definitionTier dotted + isSystem° derived + no scope-field (10); definitionTier empty-tierType + legacy both-scope XOR (11); public Get no compiled `permissions` (13); permissions-input reject + empty-rules reject (14); canonical catalog `view→edit→admin→owner` first-in-order + `edit.effectiveVerbs=[get,list,update,delete*]` + verbNotes verbatim (15); system-role Update (sync FP) + Delete (op.error FP) immutable (16) |
+| `cases/iam-access-binding-redesign.py` (16) | F7/F8/F9/F10/F11 | scopeType dotted + target.allInScope + no resourceType/resourceId (18/21); per-object target.resources ResourceRef closed-table no-name (21/23); no-target reject (22); unknown target-type reject (23); scopeType-required + bare-not-dotted reject (18); scope/subjects immutable Update (19); RoleCoversType FP (24); IsRoleAssignable FP (25); malformed scopeId + missing-anchor (26); Delete-hard→gone (27); :revoke soft→REVOKED+revokedAt (28); re-grant-after-revoke new-ACTIVE + dup-ACTIVE ALREADY_EXISTS (29); List garbage-token / pageSize>1000 / unknown-filter-key before authz + whitelist-filter (32) |
+
+Exact error texts/codes/fields are pinned from the landed code (e.g. `"Illegal argument
+ownerUserId (derived from caller)"`, `"target is required; use target.allInScope{} to
+grant all objects under the anchor"`, `"role %s does not grant verbs on compute.instance;
+target type must be covered by role.rules"`, `verbNotes["delete*"] == "co-materialized on
+in-scope leaf objects, NOT on the account/project anchor itself"`, seed catalog names
+`view/edit/admin/owner`, `edit` rules `verbs=[get,list,update]` ⇒ editor-tier delete*).
+`AccessBindingService.Revoke` (the new `:revoke` RPC) is now covered by newman.
+
+### Existing cases updated to the IAM-1 contract (registry-agent style)
+
+- **F1 ownerUserId derived-from-caller** (`Account.Create` body no longer carries
+  `ownerUserId`; supplying any value → sync `INVALID_ARGUMENT`):
+  - `iam-account.py` — 11 create/BVA/SEC bodies had `ownerUserId` removed (owner° derives
+    from the caller = `userAAAId`, so the existing `Get.ownerUserId==userAAAId` assertions
+    still hold); the two legacy owner-negatives **repurposed**:
+    `IAM-ACC-CR-NEG-OWNER-MISSING` (was "unknown owner → error") and
+    `IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY` (was anti-hijack 403) now both assert the
+    reject-in-body `400 INVALID_ARGUMENT` — the AS-IS required-branch and anti-hijack-branch
+    are gone.
+  - `authz-deny.py` — `EXPECT["esc-account-hijack"]` flipped `AAA:ALLOW→DENY` (the
+    ownerUserId-hijack vector is now closed for **every** subject, incl. self; `reject_asserts`
+    already accepts code 3/400).
+  - `rbac-visibility-set.py` — fixture-seed `create-suite-account` dropped `ownerUserId`.
+- **F7/F8 AccessBinding scope-anchor + target** — the landed `CreateAccessBindingRequest`
+  requires `scopeType` (dotted `iam.account|iam.cluster|iam.project`) + `scopeId` + a
+  REQUIRED `target`; the resource message exposes **only** `scopeType`/`scopeId` (no legacy
+  `resourceType`/`resourceId`). All **41** legacy create bodies across **15** files
+  (`iam-access-binding.py` ×19, `authz-deny.py`, `authz-sa-apitoken.py`,
+  `iam-authz-grant-check-propagation.py`, `iam-rbac-scope-grant.py`, `iam-rbac-subjects.py`,
+  `iam-role.py`, `iam-invite-grant-fga.py`, `label-revoke-{vpc,compute,nlb,iam}.py`, …) were
+  migrated: `resourceType:"account"→scopeType:"iam.account"` (+cluster/project),
+  `resourceId→scopeId`, and a `target:{allInScope:{}}` injected (these are all whole-scope
+  grants, so `allInScope` is the semantically-correct target). The ~40 response-reader
+  assertions (`b.resourceType==='account'` → `b.scopeType==='iam.account'`,
+  `.resourceId`→`.scopeId`) were migrated with the value change. The legacy
+  `:listByScope?resourceType=…&resourceId=…` **query params stay** (the ListByScope/BySubject/
+  ByRole/ByAccount RPCs still exist and their request messages keep `resource_type`/
+  `resource_id`).
+- **F8 target reintroduced** — `IAM-ACB-F51-TARGET-IGNORED` repurposed: the OLD premise
+  ("`target` is a removed/ignored key") is inverted — `target` is now REQUIRED and HONORED;
+  the case asserts `target.allInScope` IS honored while the still-removed `selector`/
+  `targetRef` keys are unknown-ignored.
+
+### `[PHASE-0-GATED]` scenarios — asserted UNGATED-only, gated part documented
+
+The acceptance marks several scenarios `[PHASE-0-GATED]` (land only after the B1/B3/B6
+governance change-set). The landed code is **pre-Phase-0**, so these newman cases assert
+the **ungated** behavior and do NOT assert the gated part:
+
+- **B3 prefix-derivation** — IAM-1-12 (`tierType` from `tierId` prefix) and IAM-1-18
+  (`scopeType` from `scopeId` prefix) are gated. Landed code REQUIRES `tierType`/`scopeType`
+  explicitly (`"scopeType is required"`, `role/handler.go` requires `tierType`). The cases
+  send explicit dotted `tierType`/`scopeType` and additionally lock the pre-Phase-0
+  requirement (empty → `INVALID_ARGUMENT`). Prefix-derivation is a follow-up.
+- **B3 hyphen ids** — IAM-1-17 (system roles `rol-viewer`…). Seed ids are the current
+  non-hyphen `rol1bda80f2be4d3658e`/`rolde95b43bceeb4b998`/`rol21232f297a57a5a74`/
+  `rol72122ce96bfec66e2`. The catalog case keys on role **name** (`view/edit/admin/owner`)
+  + verb preview, not the id form.
+- **reason-token in `google.rpc.Status.details`** — IAM-1-24/25 gate `reason` tokens
+  (`ROLE_DOES_NOT_COVER_TYPE`, `ROLE_NOT_ASSIGNABLE_ON_TIER`) are gated; the cases assert
+  the **code + message text** (ungated), not the token.
+
+### Non-black-box scenarios — integration-covered (NOT newman), declared honestly
+
+- **IAM-1-13 (internal `GetRoleCompiled` positive)** — the compiled `permissions[]`
+  projection lives on the internal listener (`InternalIAMService.GetRoleCompiled`, :9091),
+  which is not reachable from this public-gateway newman env. Newman covers the **public**
+  side (two-projection field-ABSENCE on public `Role.Get`/`List`); the internal-positive is
+  covered by `services/iam/internal/apps/kacho/api/role/f5_compiled_projection_test.go`.
+- **IAM-1-33 (INTERNAL never echoes pgx/SQL)** — requires injecting an uncategorized DB
+  error on the write path (not reproducible black-box). Integration-covered
+  (INTERNAL-opaque mapping tests). Documented here, not a newman case.
+- **IAM-1-31 (Operation.done durability ≠ tuple-visibility materialization timing)** — not a
+  standalone black-box assertion; it is the **read-your-writes discipline** applied across
+  every positive case via `retry_until_authorized` / `poll_request_until_status`. The saga
+  atomicity / re-grant-after-revoke CAS races are integration-covered
+  (`create_saga_iam1_test.go`, `revoke_test.go`, `*_integration_test.go`).
+
+### Validation
+
+`gen.py` regenerates all 24 collections cleanly (Python-parse OK on all case files);
+`coverage.py` reports **57%** RPC→case coverage (≥ the CI `--min 30` gate, exit 0); no
+duplicate case-ids; **no product code touched** (diff is `tests/newman/**` + this doc).
+Runtime GREEN is validated by the `newman-e2e` CI job (local env blocked).

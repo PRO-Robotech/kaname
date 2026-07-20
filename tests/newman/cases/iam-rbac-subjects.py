@@ -528,8 +528,8 @@ CASES.append(Case(
                 "  pm.expect(pm.response.json().subjectId).to.eql(want);",
                 "});",
                 # Legacy scope projection derived from scopeRef.
-                "pm.test('legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().resourceType).to.eql('account'));",
-                "pm.test('legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().resourceId).to.eql(pm.environment.get('accountAId')));",
+                "pm.test('legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().scopeType).to.eql('iam.account'));",
+                "pm.test('legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().scopeId).to.eql(pm.environment.get('accountAId')));",
                 "pm.test('legacy enum scope filled = ACCOUNT (from scopeRef)', () => pm.expect(pm.response.json().scope).to.eql('ACCOUNT'));",
             ],
         ),
@@ -563,8 +563,9 @@ CASES.append(Case(
                 "subjectType": "user",
                 "subjectId": "{{e34LegUserId}}",
                 "roleId": ROLE_COMPUTE_ADMIN,
-                "resourceType": "account",
-                "resourceId": "{{accountAId}}",
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

@@ -1038,8 +1038,8 @@
                   "  const want = pm.environment.get('e34NewUserId');",
                   "  pm.expect(pm.response.json().subjectId).to.eql(want);",
                   "});",
-                  "pm.test('legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().resourceType).to.eql('account'));",
-                  "pm.test('legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().resourceId).to.eql(pm.environment.get('accountAId')));",
+                  "pm.test('legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().scopeType).to.eql('iam.account'));",
+                  "pm.test('legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().scopeId).to.eql(pm.environment.get('accountAId')));",
                   "pm.test('legacy enum scope filled = ACCOUNT (from scopeRef)', () => pm.expect(pm.response.json().scope).to.eql('ACCOUNT'));"
                 ]
               }
@@ -1257,7 +1257,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{e34LegUserId}}\", \"roleId\": \"rolfe4e91e8c9f6542a6\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{e34LegUserId}}\", \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"

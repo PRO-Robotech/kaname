@@ -233,7 +233,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31n-lb-{{runId}}\", \"regionId\": \"{{_t31nRegionId}}\", \"type\": \"EXTERNAL\"}",
+              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"t31n-lb-{{runId}}\", \"regionId\": \"{{_t31nRegionId}}\", \"type\": \"EXTERNAL\", \"v4Source\": {\"public\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -510,6 +510,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -680,7 +688,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31nSa}}\", \"roleId\": \"{{_t31nRole}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"service_account\", \"subjectId\": \"{{_t31nSa}}\", \"roleId\": \"{{_t31nRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -827,6 +835,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -841,6 +857,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === true) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
@@ -1023,6 +1040,14 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
                 ]
               }
@@ -1037,6 +1062,7 @@
                   "const cc = parseInt(pm.environment.get('_ckCount') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed === false) && cc < 30) {",
                   "  pm.environment.set('_ckCount', String(cc + 1));",
+                  "  const _ckd = Date.now(); while (Date.now() - _ckd < 500) { /* inter-poll materialization wait ~500ms */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",

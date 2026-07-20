@@ -164,7 +164,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-CR-CRUD-OK :: get-confirms-rya5",
+          "name": "IAM-ROL-CR-CRUD-OK :: get-confirms-rya18",
           "request": {
             "method": "GET",
             "header": [
@@ -2358,7 +2358,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"{{a16RoleId}}\", \"resourceType\": \"account\", \"resourceId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"{{a16RoleId}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
