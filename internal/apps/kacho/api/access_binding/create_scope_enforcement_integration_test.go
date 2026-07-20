@@ -7,16 +7,17 @@ package access_binding_test
 // (testcontainers PG16) for scope-enforcement on AccessBinding.Create plus the
 // forward-only guarantee.
 //
-// Create is async: the contractual error surface for a mis-scoped role is
-// Operation.error (code FAILED_PRECONDITION), NOT a sync error (mutations are
-// async, ban #9). A sync pre-check optimisation is allowed but the contract is
-// asserted on Operation.error here.
+// redesign-2026 F9 (IAM-1-25): the structural gate IsRoleAssignable (role tier ↔
+// scope anchor) is now a SYNC gate — a mis-scoped / missing role is rejected as a
+// FIRST-statement FAILED_PRECONDITION, before the Operation is minted
+// (Operation.error is reserved for truly-async FGA tuple-emission). These assert the
+// SYNC error surface.
 //
 // Scenarios:
-//   - list⇔create parity (assignable accepted; foreign account-role rejected
-//     via Operation.error FAILED_PRECONDITION; binding not created).
-//   - concurrent mis-scoped Create → BOTH FAILED_PRECONDITION, none written.
-//   - account-role on cluster → FAILED_PRECONDITION (cluster ⇒ system only).
+//   - list⇔create parity (assignable accepted; foreign account-role rejected sync
+//     FAILED_PRECONDITION; binding not created).
+//   - concurrent mis-scoped Create → BOTH sync FAILED_PRECONDITION, none written.
+//   - account-role on cluster → sync FAILED_PRECONDITION (cluster ⇒ system only).
 //   - a pre-existing mis-scoped binding (inserted directly) → ListByScope /
 //     ListSubjectPrivileges still show it; Delete revokes it OK
 //     (enforcement gates ONLY new Create).
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
@@ -89,19 +91,19 @@ func TestCreate_ScopeEnforcement_ListCreateParity(t *testing.T) {
 	require.Nil(t, doneOK.Error, "assignable role → Operation has no error (1.5-13 happy)")
 	assert.Equal(t, 1, bindingCount(t, ctx, repo, accustom, "account", string(accA)))
 
-	// foreign account-role (NOT assignable) → Operation.error FAILED_PRECONDITION.
-	opBad, err := create.Execute(callerCtx, domain.AccessBinding{
+	// foreign account-role (NOT assignable) → SYNC FAILED_PRECONDITION (F9 gate 2,
+	// first statement, before the Operation is minted).
+	_, err = create.Execute(callerCtx, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: bcustom, ResourceType: "account", ResourceID: string(accA),
 		Scope: domain.ScopeAccount,
 	})
-	require.NoError(t, err, "Execute still enqueues the Operation (async contract)")
-	doneBad := awaitOp(t, ctx, opsRepo, opBad.ID)
-	require.NotNil(t, doneBad.Error, "mis-scoped role → Operation.error (1.5-12)")
-	assert.Equal(t, int32(codes.FailedPrecondition), doneBad.Error.Code,
-		"mis-scoped → FAILED_PRECONDITION via Operation.error (Q#3, ban#9)")
-	assert.Contains(t, doneBad.Error.Message, string(bcustom))
-	assert.Contains(t, doneBad.Error.Message, "not assignable")
+	require.Error(t, err, "mis-scoped role → sync error (F9 IsRoleAssignable gate)")
+	stBad, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, stBad.Code(), "mis-scoped → FAILED_PRECONDITION (sync)")
+	assert.Contains(t, stBad.Message(), string(bcustom))
+	assert.Contains(t, stBad.Message(), "not assignable")
 	assert.Equal(t, 0, bindingCount(t, ctx, repo, bcustom, "account", string(accA)),
 		"no binding written for mis-scoped role")
 }
@@ -129,28 +131,28 @@ func TestCreate_ScopeEnforcement_ConcurrentMisScoped_BothRejected(t *testing.T) 
 	callerCtx := asUser(ctx, ownerA)
 
 	subjects := []domain.UserID{m1, m2}
-	ops := make([]*operations.Operation, 2)
+	errs := make([]error, 2)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	for i := range subjects {
 		go func() {
 			defer wg.Done()
-			op, err := create.Execute(callerCtx, domain.AccessBinding{
+			_, err := create.Execute(callerCtx, domain.AccessBinding{
 				SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(subjects[i]),
 				RoleID: bcustom, ResourceType: "account", ResourceID: string(accA),
 				Scope: domain.ScopeAccount,
 			})
-			require.NoError(t, err)
-			ops[i] = op
+			errs[i] = err
 		}()
 	}
 	wg.Wait()
 
-	for i := range ops {
-		done := awaitOp(t, ctx, opsRepo, ops[i].ID)
-		require.NotNil(t, done.Error, "concurrent mis-scoped Create #%d must fail (1.5-12b)", i)
-		assert.Equal(t, int32(codes.FailedPrecondition), done.Error.Code,
-			"both concurrent mis-scoped → FAILED_PRECONDITION (no TOCTOU window)")
+	for i := range errs {
+		require.Error(t, errs[i], "concurrent mis-scoped Create #%d must fail sync (F9)", i)
+		st, ok := status.FromError(errs[i])
+		require.True(t, ok)
+		assert.Equal(t, codes.FailedPrecondition, st.Code(),
+			"both concurrent mis-scoped → sync FAILED_PRECONDITION (no TOCTOU window)")
 	}
 	assert.Equal(t, 0, bindingCount(t, ctx, repo, bcustom, "account", string(accA)),
 		"NO binding written for mis-scoped role under concurrency (1.5-12b)")
@@ -173,16 +175,16 @@ func TestCreate_ScopeEnforcement_AccountRoleOnCluster_FailedPrecondition(t *test
 	member := mustSeedUser(t, ctx, pool, "ce13m")
 	accustom := seedAccountCustomRole(t, ctx, pool, acc, "ce13_acc")
 
-	op, err := create.Execute(asUser(ctx, admin), domain.AccessBinding{
+	_, err := create.Execute(asUser(ctx, admin), domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: accustom, ResourceType: "cluster", ResourceID: domain.ClusterSingletonID,
 		Scope: domain.ScopeCluster,
 	})
-	require.NoError(t, err)
-	done := awaitOp(t, ctx, opsRepo, op.ID)
-	require.NotNil(t, done.Error, "account-role on cluster → Operation.error (1.5-13)")
-	assert.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
-	assert.Contains(t, done.Error.Message, "not assignable")
+	require.Error(t, err, "account-role on cluster → sync error (F9 gate 2)")
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "not assignable")
 	assert.Equal(t, 0, bindingCount(t, ctx, repo, accustom, "cluster", domain.ClusterSingletonID))
 }
 
@@ -210,17 +212,17 @@ func TestCreate_RoleMissing_FailedPrecondition(t *testing.T) {
 	acc := seedAccountByOwner(t, ctx, pool, "acc-cerm", admin)
 	member := mustSeedUser(t, ctx, pool, "cermm")
 
-	op, err := create.Execute(asUser(ctx, admin), domain.AccessBinding{
+	_, err := create.Execute(asUser(ctx, admin), domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: domain.RoleID("rol00000000000notfnd"), ResourceType: "account", ResourceID: string(acc),
 		Scope: domain.ScopeAccount,
 	})
-	require.NoError(t, err, "Execute still enqueues the Operation (async contract)")
-	done := awaitOp(t, ctx, opsRepo, op.ID)
-	require.NotNil(t, done.Error, "non-existent role → Operation.error")
-	assert.Equal(t, int32(codes.FailedPrecondition), done.Error.Code,
+	require.Error(t, err, "non-existent role → sync error (F9 role read)")
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code(),
 		"missing role → FAILED_PRECONDITION (FK RESTRICT contract), not NotFound")
-	assert.Contains(t, done.Error.Message, "not found")
+	assert.Contains(t, st.Message(), "not found")
 	assert.Equal(t, 0, bindingCount(t, ctx, repo, domain.RoleID("rol00000000000notfnd"), "account", string(acc)))
 }
 

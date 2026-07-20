@@ -128,8 +128,21 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// from a request-body field). This also feeds the durable audit_outbox
 	// compliance event's `actor` so "who granted this" is recorded.
 	b.GrantedByUserID = domain.UserID(authzguard.PrincipalUserID(ctx))
+	// F9 gate 1 (IAM-1-26): scope well-formedness — first statement, BEFORE
+	// domain.Validate, so a malformed scope id yields the canonical
+	// "invalid access binding scope id '<x>'" (not a generic scope-mismatch).
+	if err := validateScopeID(string(b.ResourceType), b.ResourceID); err != nil {
+		return nil, err
+	}
 	if err := b.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
+	}
+	// F9 gates 2 & 3 (IAM-1-24/25): IsRoleAssignable + RoleCoversType — SYNC, before
+	// any Operation is minted (Operation.error reserved for truly-async FGA
+	// tuple-emission) and before requireGrantAuthority (an anchor-read would else mask
+	// a structural reject as PermissionDenied).
+	if err := u.validateStructuralGates(ctx, b); err != nil {
+		return nil, err
 	}
 	// Grant-authority on the binding's scope (group-amplification guard): a GROUP
 	// subject grants the role to every member, so an
@@ -229,35 +242,17 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 		}
 	}()
 	// Read the role inside the writer-tx (the writer also satisfies the Reader
-	// interface) BEFORE the binding INSERT — both for the permission-based FGA
-	// mapping below AND for the role-scope enforcement: a role
-	// not assignable to the target resource (per the single source-of-truth
-	// predicate domain.IsRoleAssignable) is rejected here with
-	// FAILED_PRECONDITION. The error is captured by the operations worker into
-	// Operation.error (async contract, ban #9) — the binding is NEVER
-	// INSERTed (the tx rolls back). Reading the role first also makes the
-	// rejection deterministic per role-row + resource under concurrency:
-	// no TOCTOU window — the predicate reads the role's immutable
-	// scope, not the state of other bindings.
+	// interface) BEFORE the binding INSERT for the permission-based FGA mapping
+	// below. The structural gates (role-scope IsRoleAssignable, RoleCoversType) are
+	// enforced SYNC before the Operation is minted (validateStructuralGates, F9) — a
+	// mis-scoped role never reaches doCreate. A missing role is still handled here as
+	// the FK-RESTRICT backstop (FAILED_PRECONDITION), defensive to a direct caller.
 	role, err := w.Roles().Get(ctx, b.RoleID)
 	if err != nil {
-		// A non-existent role must keep the pre-1.5 contract: the binding INSERT
-		// would have hit FK access_bindings_role_fk RESTRICT (23503 →
-		// FailedPrecondition). The early role-read added here for D-2
-		// scope-enforcement must NOT regress that to NotFound — both a missing
-		// role and a mis-scoped role are FAILED_PRECONDITION on Create
-		// (newman IAM-ACB-CR-NEG-ROLE-MISSING / -MISSCOPED).
 		if stderrors.Is(err, iamerr.ErrNotFound) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Role %s not found", b.RoleID)
 		}
 		return nil, shared.MapRepoErr(err)
-	}
-	// Gate (1) — role-scope: role ↔ scope anchor. Runs
-	// FIRST and independently of the target gate (a mis-scoped role is
-	// rejected before the target is even evaluated).
-	if !domain.IsRoleAssignable(role, string(b.ResourceType), string(b.ResourceID)) {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"role %s is not assignable on %s:%s", b.RoleID, b.ResourceType, b.ResourceID)
 	}
 
 	created, err := w.AccessBindingsW().Insert(ctx, b)

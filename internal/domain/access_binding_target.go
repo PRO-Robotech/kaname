@@ -87,20 +87,48 @@ func (t AccessTarget) Digest() string {
 	return "obj:" + hex.EncodeToString(sum[:])
 }
 
+// splitDottedType splits a dotted `<module>.<resource>` type into its parts on the
+// first dot. ok=false when the form is not `<nonempty>.<nonempty>`.
+func splitDottedType(dotted string) (module, resource string, ok bool) {
+	i := strings.IndexByte(dotted, '.')
+	if i <= 0 || i >= len(dotted)-1 {
+		return "", "", false
+	}
+	return dotted[:i], dotted[i+1:], true
+}
+
+// CoversType reports whether the role's authored rules grant verbs on the dotted
+// `<module>.<resource>` type (redesign-2026 F9 gate 3 / IAM-1-24). A rule covers the
+// type when its Module matches and its Resources list the resource (or "*"). Empty
+// rules cover nothing.
+func (rs Rules) CoversType(dottedType string) bool {
+	module, resource, ok := splitDottedType(dottedType)
+	if !ok {
+		return false
+	}
+	for _, r := range rs {
+		if r.Module != module {
+			continue
+		}
+		for _, res := range r.Resources {
+			if res == "*" || res == resource {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ValidTargetType reports whether a dotted `<module>.<resource>` target type is in
 // the closed type-registry. It maps the dotted form to the bare vocabulary
 // (`compute.instance` → `compute_instance`) shared with `validResourceTypes`, so the
 // target registry stays in sync with the FGA object-type vocabulary by construction.
 // The wildcard `*` is NOT a valid per-object target type.
 func ValidTargetType(dotted string) bool {
-	i := strings.IndexByte(dotted, '.')
-	if i <= 0 || i >= len(dotted)-1 {
+	module, resource, ok := splitDottedType(dotted)
+	if !ok {
 		return false
 	}
-	bare := dotted[:i] + "_" + dotted[i+1:]
-	if bare == "*" {
-		return false
-	}
-	_, ok := validResourceTypes[ResourceType(bare)]
-	return ok
+	_, known := validResourceTypes[ResourceType(module+"_"+resource)]
+	return known
 }
