@@ -192,8 +192,7 @@ Move идемпотентен в особом смысле: повторный M
 |-------------------------------------------|------------------------|------|------------------------------------------------------------------|
 | Имя занято в Account                      | `ALREADY_EXISTS`       | 409  | `Project with name prod already exists in account acc_xxx`       |
 | `account_id` не существует                | `FAILED_PRECONDITION`  | 412  | `account_id acc_xxx not found`                                   |
-| Move CAS mismatch                         | `FAILED_PRECONDITION`  | 412  | `project current account_id differs from expected`               |
-| Update с `account_id` в mask              | `INVALID_ARGUMENT`     | 400  | `account_id is immutable after Project.Create (use Move)`        |
+| Update с `account_id` в mask              | `INVALID_ARGUMENT`     | 400  | `accountId is immutable after Project.Create`                    |
 | Project не найден                         | `NOT_FOUND`            | 404  | `Project prj_xxx not found`                                      |
 
 ## Как воспроизвести локально

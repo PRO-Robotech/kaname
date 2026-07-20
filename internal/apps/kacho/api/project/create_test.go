@@ -103,7 +103,8 @@ func TestUpdateProject_Sync_ImmutableAccountID(t *testing.T) {
 	assert.Nil(t, op)
 	st, _ := status.FromError(err)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, err.Error(), "account_id is immutable")
+	// redesign-2026 F3: camelCase contract text (no Move RPC).
+	assert.Contains(t, err.Error(), "accountId is immutable after Project.Create")
 }
 
 // ── UpdateProject: unknown mask field → InvalidArg ─────────────────────────
