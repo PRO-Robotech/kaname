@@ -38,7 +38,17 @@ type AssignableRole struct {
 //   - PROJECT-scoped custom role → assignable IFF resource_type=="project" AND
 //     role.project_id == resource_id.
 //   - cluster resource → only SYSTEM roles.
-// No hierarchy-down: an account-role is NOT assignable on its projects (STRICT).
+//
+// STATELESS predicate — no hierarchy-down: the pure IsRoleAssignable cannot know a
+// project's OWNING account (it holds no repo), so it treats an account-role on a
+// project as NOT assignable. That keeps the ListAssignableRoles palette (WHERE filter)
+// and its SQL mirror strict-per-tier. The hierarchy-down rule "an iam.account-tier
+// role IS assignable on a project NESTED in the role's account" (acceptance IAM-1-25)
+// is admitted by IsRoleAssignableInAccount, which takes the RESOLVED owning-account of
+// the scope — the Create gate resolves project→account and calls it, so the
+// authoritative Create boundary honours nesting while the stateless predicate stays
+// pure. The account boundary is never crossed: a role of a DIFFERENT account is still
+// rejected.
 
 // RoleScopeGroup — server-computed scope tier of a role, surfaced to the UI in
 // AssignableRole.scope_group so the picker groups without client-side logic
@@ -103,4 +113,29 @@ func IsRoleAssignable(r Role, resourceType, resourceID string) bool {
 	default:
 		return false
 	}
+}
+
+// IsRoleAssignableInAccount extends IsRoleAssignable with the hierarchy-down rule that
+// needs the scope's RESOLVED owning-account — knowledge the stateless predicate does
+// not have (acceptance IAM-1-25). scopeOwningAccountID is the account that OWNS the
+// scope anchor: for an account scope it is the account id itself; for a project scope
+// it is the project's account_id (resolved by the caller via a project→account lookup);
+// for cluster / cross-service scopes it is "".
+//
+// It admits the strict matrix (IsRoleAssignable) PLUS the single hierarchy-down case:
+// an iam.account-tier custom role is assignable on a PROJECT nested in the role's own
+// account (role.account_id == the project's owning account). The account boundary is
+// never crossed — an account-role of a DIFFERENT account stays not-assignable — and no
+// other tier gains breadth (system stays everywhere, project-role stays own-project).
+// scopeOwningAccountID=="" (unresolved / non-account scope) collapses to the strict
+// predicate, so a missing resolve never over-grants (fail-closed).
+func IsRoleAssignableInAccount(r Role, resourceType, resourceID, scopeOwningAccountID string) bool {
+	if IsRoleAssignable(r, resourceType, resourceID) {
+		return true
+	}
+	// Hierarchy-down: iam.account-tier role on a project nested in the role's account.
+	if resourceType == "project" && !r.IsSystem && r.AccountID != "" && r.ProjectID == "" {
+		return scopeOwningAccountID != "" && string(r.AccountID) == scopeOwningAccountID
+	}
+	return false
 }

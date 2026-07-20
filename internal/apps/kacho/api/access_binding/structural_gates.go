@@ -57,8 +57,18 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 		return shared.MapRepoErr(err)
 	}
 
-	// Gate 2 — IsRoleAssignable: the role's definition tier ↔ scope anchor.
-	if !domain.IsRoleAssignable(role, string(b.ResourceType), b.ResourceID) {
+	// Gate 2 — IsRoleAssignable: the role's definition tier ↔ scope anchor. The
+	// stateless STRICT predicate runs first (system / own-account / own-project); if it
+	// rejects, an iam.account-tier role may still be assignable on a project NESTED in
+	// the role's account (hierarchy-down, IAM-1-25) — a case the stateless predicate
+	// cannot decide (it holds no repo), so resolve the project's owning account here and
+	// re-check via IsRoleAssignableInAccount. The account boundary is never crossed: a
+	// role of a DIFFERENT account stays rejected with the same actionable text.
+	assignable, err := u.roleAssignableOnScope(ctx, rd, role, b)
+	if err != nil {
+		return err
+	}
+	if !assignable {
 		tier := roleTierDotted(role)
 		scope := domain.ScopeTypeToDotted(string(b.ResourceType))
 		return status.Errorf(codes.FailedPrecondition,
@@ -80,6 +90,34 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 		}
 	}
 	return nil
+}
+
+// roleAssignableOnScope decides gate 2 (IsRoleAssignable) with the IAM-1-25
+// hierarchy-down resolution the stateless domain predicate cannot do. The stateless
+// STRICT predicate is tried first (system / own-account / own-project — no repo). Only
+// when it rejects AND the role is iam.account-tier AND the scope is a project does this
+// resolve the project's OWNING account (a single same-DB read) and re-check via
+// domain.IsRoleAssignableInAccount — admitting an account-role on a project NESTED in
+// the role's account while never crossing the account boundary. A well-formed-but-
+// missing project yields not-assignable (the same reject; scope existence + grant
+// authority are enforced downstream by requireGrantAuthority).
+func (u *CreateAccessBindingUseCase) roleAssignableOnScope(ctx context.Context, rd Reader, role domain.Role, b domain.AccessBinding) (bool, error) {
+	if domain.IsRoleAssignable(role, string(b.ResourceType), b.ResourceID) {
+		return true, nil
+	}
+	// Hierarchy-down is admissible ONLY for an iam.account-tier role on a project scope.
+	if b.ResourceType != "project" || domain.ScopeGroupOf(role) != domain.RoleScopeGroupAccount {
+		return false, nil
+	}
+	prj, err := rd.Projects().Get(ctx, domain.ProjectID(b.ResourceID))
+	if err != nil {
+		if stderrors.Is(err, iamerr.ErrNotFound) {
+			// Cannot confirm nesting → not assignable (fail-closed; no over-grant).
+			return false, nil
+		}
+		return false, shared.MapRepoErr(err)
+	}
+	return domain.IsRoleAssignableInAccount(role, string(b.ResourceType), b.ResourceID, string(prj.AccountID)), nil
 }
 
 // validateScopeID checks the scope-anchor id is well-formed for its tier (IAM-1-26,

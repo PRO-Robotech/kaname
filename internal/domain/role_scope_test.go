@@ -70,6 +70,49 @@ func TestIsRoleAssignable_Matrix(t *testing.T) {
 	}
 }
 
+// TestIsRoleAssignableInAccount_HierarchyDown locks the IAM-1-25 hierarchy-down rule:
+// an iam.account-tier role IS assignable on a project nested in the role's account
+// (resolved owning-account == role.account_id), but never on a project of a different
+// account. Every stateless-matrix verdict is preserved (the resolved account only ADDS
+// the one nesting case; it never broadens system / project-role / cluster).
+func TestIsRoleAssignableInAccount_HierarchyDown(t *testing.T) {
+	const (
+		accA = AccountID("acc00000000000000000A")
+		accB = AccountID("acc00000000000000000B")
+		prjP = ProjectID("prj00000000000000000P")
+	)
+	cases := []struct {
+		name          string
+		role          Role
+		resourceType  string
+		resourceID    string
+		owningAccount string // resolved owning account of the scope
+		want          bool
+	}{
+		// hierarchy-down: account-role on a project nested in the SAME account → OK.
+		{"account-role on nested project (same account)", accountRole(accA), "project", string(prjP), string(accA), true},
+		// isolation: account-role on a project of a DIFFERENT account → rejected.
+		{"account-role on project of different account", accountRole(accA), "project", string(prjP), string(accB), false},
+		// unresolved owning account (empty) → collapses to strict → rejected (fail-closed).
+		{"account-role on project, unresolved account", accountRole(accA), "project", string(prjP), "", false},
+		// strict verdicts preserved regardless of the resolved account:
+		{"own account-role on account", accountRole(accA), "account", string(accA), string(accA), true},
+		{"foreign account-role on account", accountRole(accB), "account", string(accA), string(accA), false},
+		{"own project-role on project", projectRole(prjP), "project", string(prjP), string(accA), true},
+		{"system on project", systemRole(), "project", string(prjP), string(accA), true},
+		{"account-role on cluster", accountRole(accA), "cluster", ClusterSingletonID, string(accA), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsRoleAssignableInAccount(tc.role, tc.resourceType, tc.resourceID, tc.owningAccount)
+			if got != tc.want {
+				t.Fatalf("IsRoleAssignableInAccount(%s on %s:%s, owning=%s) = %v, want %v",
+					tc.role.ID, tc.resourceType, tc.resourceID, tc.owningAccount, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestScopeGroupOf(t *testing.T) {
 	if g := ScopeGroupOf(systemRole()); g != RoleScopeGroupSystem {
 		t.Fatalf("system role scope group = %v, want SYSTEM", g)
