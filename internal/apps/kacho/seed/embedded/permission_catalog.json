@@ -2304,6 +2304,15 @@
     }
   },
   {
+    "fqn": "kacho.cloud.iam.v1.InternalIAMService/GetRoleCompiled",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    }
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
@@ -2707,7 +2716,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserTokenService/Issue",
     "permission": "iam.issue_user_tokens.issue",
-    "required_relation": "token_admin",
+    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"
@@ -2717,7 +2726,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserTokenService/List",
     "permission": "iam.user_tokens.list",
-    "required_relation": "token_admin",
+    "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"
@@ -2727,7 +2736,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserTokenService/Revoke",
     "permission": "iam.revoke_user_tokens.revoke",
-    "required_relation": "token_admin",
+    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"
