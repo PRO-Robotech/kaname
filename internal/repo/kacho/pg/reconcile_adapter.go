@@ -162,8 +162,13 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		// (+ verb-bearing v_*) tuple on the scope object itself (the write-authz /
 		// no-access-loss anchor the removed binding-time anchor emit produced).
 		ScopeSelfVerbs: role.Rules.ScopeSelfVerbs(string(b.ResourceType)),
-		RoleID:         string(b.RoleID),
-		Active:         b.Status == domain.AccessBindingStatusActive,
+		// Target — the per-object least-privilege selection (F8, IAM-1-21). When
+		// Target.Resources is non-empty the reconciler materializes ONLY the listed
+		// objects (never the whole scope). Read from the persisted access_bindings.target
+		// column by scanAB (unmarshalTarget). AllInScope/empty ⇒ whole-anchor grant.
+		Target: b.Target,
+		RoleID: string(b.RoleID),
+		Active: b.Status == domain.AccessBindingStatusActive,
 	}, true, nil
 }
 

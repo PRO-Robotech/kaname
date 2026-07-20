@@ -215,6 +215,14 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	if !ok || !bs.Active {
 		return nil // deleted / not ACTIVE — nothing to materialize.
 	}
+	// Per-object target least-priv (F8, IAM-1-21): the additive forward path materializes
+	// a freshly-registered object ONLY when the binding's per-object target lists it. A
+	// binding whose ROLE has an ARM_ANCHOR selector matches EVERY object of the type via
+	// SelectorBindingsMatchingObject, so without this guard an unlisted new object would be
+	// granted (over-grant). AllInScope/empty target ⇒ no restriction (existing behaviour).
+	if len(bs.Target.Resources) > 0 && !bs.Target.Contains(obj.ObjectType, obj.ObjectID) {
+		return nil
+	}
 	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
 	for _, sel := range bs.Selectors {
 		// Match this ONE object against the selector's arm (scope-aware projection). A

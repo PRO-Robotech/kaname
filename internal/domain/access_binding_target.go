@@ -70,6 +70,49 @@ func (t AccessTarget) Validate() error {
 	return errs
 }
 
+// Contains reports whether the closed per-object target set lists the object
+// (dottedType, id). It is the least-privilege membership test the reconciler applies so
+// a role.rules match materializes ONLY an object the target also lists. An
+// AllInScope/empty target lists NO explicit object here (its breadth is the whole
+// anchor, materialized by the reconciler's all-in-scope path — not this test), so
+// Contains returns false for it; callers gate on IsEmpty()/AllInScope before using it.
+func (t AccessTarget) Contains(dottedType, id string) bool {
+	for _, r := range t.Resources {
+		if r.Type == dottedType && r.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// ResourceIDsForTypes returns the ids of the per-object target resources whose dotted
+// type is in `types` (order-preserving, de-duplicated). It lets the reconciler resolve a
+// per-object target's ARM_ANCHOR candidates by id (MatchByIDs) instead of scanning the
+// whole scope (MatchAllInScope) — the least-privilege materialization path (IAM-1-21).
+// Empty when no listed resource matches the given types.
+func (t AccessTarget) ResourceIDsForTypes(types []string) []string {
+	if len(t.Resources) == 0 || len(types) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{}, len(types))
+	for _, ty := range types {
+		want[ty] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(t.Resources))
+	var out []string
+	for _, r := range t.Resources {
+		if _, ok := want[r.Type]; !ok {
+			continue
+		}
+		if _, dup := seen[r.ID]; dup {
+			continue
+		}
+		seen[r.ID] = struct{}{}
+		out = append(out, r.ID)
+	}
+	return out
+}
+
 // Digest returns a deterministic, set-based canonicalization of the target for the
 // active-grant partial UNIQUE. AllInScope / empty → "all"; a resource set → a hash
 // of its SORTED "type:id" members (order-independent — the same set in any order

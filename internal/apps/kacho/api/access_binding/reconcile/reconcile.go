@@ -62,6 +62,15 @@ type BindingScope struct {
 	// scope anchor (its access lives on the matched content objects). Derived by the
 	// adapter from role.Rules.ScopeSelfVerbs(scope.resource).
 	ScopeSelfVerbs []string
+	// Target — the binding's per-object least-privilege selection (redesign-2026 F8,
+	// IAM-1-21). When Target.Resources is non-empty the grant is restricted to EXACTLY
+	// the listed objects: the role.rules ARM_ANCHOR arm is resolved by the target ids
+	// (never MatchAllInScope), every arm's matches are INTERSECTED with the target set,
+	// and the scope-self anchor grant is SUPPRESSED (a per-object target never grants
+	// tier on the whole scope object). AllInScope / empty ⇒ the whole-anchor grant
+	// (existing behaviour — the role.rules selectors drive membership across the scope).
+	// Loaded by the adapter from the persisted access_bindings.target column.
+	Target domain.AccessTarget
 	// Active reports whether the binding is still ACTIVE (a REVOKED/expired
 	// binding is not re-materialized).
 	Active bool
@@ -668,22 +677,34 @@ func (r *Reconciler) desiredMembers(ctx context.Context, s ReconcileStore, bs Bi
 // candidate set. The binding's `scope` is passed to the ANCHOR arm so the candidate set
 // is pushed-down to O(scope) in SQL rather than scanned cluster-wide + narrowed in Go —
 // the Go re-verify remains authoritative (the SQL predicate is a proven superset).
-func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore, sel domain.RuleSelector, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
+//
+// PER-OBJECT TARGET (F8, IAM-1-21): when the binding carries a per-object target
+// (target.Resources non-empty), the ANCHOR arm is resolved BY the target ids
+// (MatchByIDs) instead of MatchAllInScope — so a least-priv grant never scans/materializes
+// the whole scope — and the matched set of EVERY arm is finally INTERSECTED with the
+// target (a role rule can only grant an object the target also lists).
+func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore, sel domain.RuleSelector, scope domain.ScopeAnchor, target domain.AccessTarget) ([]domain.MirrorObject, error) {
 	mirrorTypes, iamTypes := partitionByFeed(sel.ObjectTypes)
 	var matched []domain.MirrorObject
 	if len(mirrorTypes) > 0 {
-		objs, err := r.matchByArm(ctx, sel, mirrorTypes, false, s, scope)
+		objs, err := r.matchByArm(ctx, sel, mirrorTypes, false, s, scope, target)
 		if err != nil {
 			return nil, fmt.Errorf("match rule selector %s (mirror): %w", sel.RuleFP, err)
 		}
 		matched = append(matched, objs...)
 	}
 	if len(iamTypes) > 0 {
-		objs, err := r.matchByArm(ctx, sel, iamTypes, true, s, scope)
+		objs, err := r.matchByArm(ctx, sel, iamTypes, true, s, scope, target)
 		if err != nil {
 			return nil, fmt.Errorf("match rule selector %s (iam-direct): %w", sel.RuleFP, err)
 		}
 		matched = append(matched, objs...)
+	}
+	// Per-object target intersection: keep ONLY objects the target lists (uniform across
+	// all arms — anchor already resolves by target ids, but names/labels may match objects
+	// the target does not list, so intersect them out; least-priv, IAM-1-21).
+	if len(target.Resources) > 0 {
+		matched = filterMatchedToTarget(matched, target)
 	}
 	return matched, nil
 }
@@ -692,7 +713,12 @@ func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore,
 // ANCHOR arm passes the binding's `scope` for the SQL scope push-down; the NAMES/LABELS arms
 // are already narrow (specific ids / labels) AND a foreign-scope match is a wanted
 // REJECTED-containment audit signal, so they are LEFT UNSCOPED (the reconciler re-verifies).
-func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, types []string, iamDirect bool, s ReconcileStore, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
+//
+// For a PER-OBJECT target the ANCHOR arm resolves the candidate set BY the target ids
+// (MatchByIDs) rather than MatchAllInScope: a least-priv grant materializes only the listed
+// objects, never the whole scope (IAM-1-21). The NAMES/LABELS arms keep their own narrow
+// resolution and are intersected with the target by the caller (matchSelectorObjects).
+func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, types []string, iamDirect bool, s ReconcileStore, scope domain.ScopeAnchor, target domain.AccessTarget) ([]domain.MirrorObject, error) {
 	switch sel.Arm {
 	case domain.ArmNames:
 		if iamDirect {
@@ -705,11 +731,38 @@ func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, ty
 		}
 		return s.MatchSelector(ctx, types, sel.MatchLabels)
 	default: // ArmAnchor (all)
+		if len(target.Resources) > 0 {
+			// Per-object target: resolve the anchor candidates by the target ids of these
+			// types (never the whole-scope scan). Empty ⇒ no candidate of these types.
+			ids := target.ResourceIDsForTypes(types)
+			if len(ids) == 0 {
+				return nil, nil
+			}
+			if iamDirect {
+				return s.MatchByIDsIAMDirect(ctx, types, ids)
+			}
+			return s.MatchByIDs(ctx, types, ids)
+		}
 		if iamDirect {
 			return s.MatchAllInScopeIAMDirect(ctx, types, scope)
 		}
 		return s.MatchAllInScope(ctx, types, scope)
 	}
+}
+
+// filterMatchedToTarget keeps only the matched objects listed in a per-object target
+// (exact dotted-type + id). It is the uniform intersection applied to EVERY arm when the
+// binding carries a per-object target, so a role rule (anchor/names/labels) can only grant
+// an object the target also lists (least-priv, IAM-1-21). Never called for an
+// AllInScope/empty target (the caller gates on len(target.Resources) > 0).
+func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTarget) []domain.MirrorObject {
+	out := matched[:0:0]
+	for _, o := range matched {
+		if target.Contains(o.ObjectType, o.ObjectID) {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 // desiredRuleMembers computes the desired per-rule membership for a role.rules-
@@ -723,6 +776,12 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
 	var out []DesiredMember
 
+	// perObject — the binding carries a per-object target (Target.Resources non-empty):
+	// the grant is restricted to EXACTLY the listed objects (least-priv, IAM-1-21). The
+	// scope-self anchor grant is suppressed and every selector's matches are intersected
+	// with the target set below.
+	perObject := len(bs.Target.Resources) > 0
+
 	// Scope-self member: the role's tier (+ verb-bearing v_*) ON
 	// THE BINDING'S OWN SCOPE OBJECT (`account:<X>`/`project:<X>`). This is the
 	// write-authz / no-access-loss anchor the removed binding-time scope-anchor emit
@@ -732,16 +791,23 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// on the scope entirely. Keyed by
 	// a sentinel rule_fp so it has its own member row + ledger lineage (symmetric
 	// revoke). The cluster super-admin path short-circuits and is not materialized here.
-	if len(bs.ScopeSelfVerbs) > 0 {
+	//
+	// SUPPRESSED for a per-object target: granting the tier on the WHOLE scope object
+	// (account:<X>/project:<X>) contradicts a per-object least-priv grant — the target
+	// lists specific content objects, not the scope anchor. So a per-object target never
+	// materializes the scope-self member (over-grant guard, IAM-1-21).
+	if len(bs.ScopeSelfVerbs) > 0 && !perObject {
 		if sm, ok := scopeSelfMember(subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
 			out = append(out, sm)
 		}
 	}
 
 	for _, sel := range bs.Selectors {
-		// Pass the binding's scope so the ANCHOR arm pushes containment into SQL
-		// (O(scope) candidate set); IsContainedIn below stays the authoritative re-verify.
-		matched, err := r.matchSelectorObjects(ctx, s, sel, bs.Scope)
+		// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
+		// per the target (by-id when per-object; O(scope) push-down otherwise), and every
+		// arm's matches are intersected with the target. IsContainedIn below stays the
+		// authoritative containment re-verify.
+		matched, err := r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
 		if err != nil {
 			return nil, err
 		}
