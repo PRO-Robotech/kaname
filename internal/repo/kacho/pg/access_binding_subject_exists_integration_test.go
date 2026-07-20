@@ -143,8 +143,8 @@ func TestABSubjectExists_InsertLiveSubjects_Accepted(t *testing.T) {
 	prjID := kac127SeedProject(t, ctx, pool, accID, "abse4")
 	roleID := padOrTrim20("rol00000abse4")
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles (id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'role_abse4', '', '["x.y.*.z"]'::jsonb)`, roleID, prjID)
+		INSERT INTO kacho_iam.roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, 'role_abse4', '', '["x.y.*.z"]'::jsonb)`, roleID, prjID)
 	require.NoError(t, err)
 
 	said := seedSAID(t, ctx, pool, accID, "abse4")
@@ -234,8 +234,8 @@ func TestABSubjectExists_ConcurrentDeleteVsCreate_NoDangling(t *testing.T) {
 	prjID := kac127SeedProject(t, ctx, pool, accID, "abse7")
 	roleID := padOrTrim20("rol00000abse7")
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles (id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'role_abse7', '', '["x.y.*.z"]'::jsonb)`, roleID, prjID)
+		INSERT INTO kacho_iam.roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, 'role_abse7', '', '["x.y.*.z"]'::jsonb)`, roleID, prjID)
 	require.NoError(t, err)
 
 	// A plain member user (account_id set, NOT an account owner → deletable by

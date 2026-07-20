@@ -174,8 +174,8 @@ func TestRole_A13_DirectInsertMalformedRulesRejected(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := pool.Exec(ctx, `
-				INSERT INTO roles (id, account_id, name, description, permissions, rules, is_system, created_at)
-				VALUES ($1, $2, $3, '', '["vpc.subnet.*.get"]'::jsonb, $4::jsonb, false, now())`,
+				INSERT INTO roles (id, account_id, name, description, permissions, rules, created_at)
+				VALUES ($1, $2, $3, '', '["vpc.subnet.*.get"]'::jsonb, $4::jsonb, now())`,
 				ids.NewID(domain.PrefixRole), string(acc.ID), "bad_"+ids.NewID(domain.PrefixRole)[:8], c.rules,
 			)
 			require.Error(t, err, "iam_rules_valid CHECK must reject malformed rules at the DB level")
@@ -318,8 +318,8 @@ func TestRole_LegacyEmptyPermissionsRejectedByDB(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-rale", uid)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO roles (id, account_id, name, description, permissions, rules, is_system, created_at)
-		VALUES ($1, $2, $3, '', '[]'::jsonb, '[]'::jsonb, false, now())`,
+		INSERT INTO roles (id, account_id, name, description, permissions, rules, created_at)
+		VALUES ($1, $2, $3, '', '[]'::jsonb, '[]'::jsonb, now())`,
 		ids.NewID(domain.PrefixRole), string(acc.ID), "legacy_empty",
 	)
 	require.Error(t, err, "legacy permissions-only role with empty permissions AND empty rules must be rejected")

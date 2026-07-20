@@ -22,7 +22,10 @@ func TestRoleHandler_212_MapsProjectID(t *testing.T) {
 			{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}},
 		},
 	}
-	r := roleFromCreateReq(req)
+	r, err := roleFromCreateReq(req)
+	if err != nil {
+		t.Fatalf("roleFromCreateReq: %v", err)
+	}
 	if got := string(r.ProjectID); got != "prj0000000000000abcd" {
 		t.Fatalf("ProjectID = %q, want the request project_id", got)
 	}
@@ -39,7 +42,10 @@ func TestRoleHandler_212_MapsAccountID(t *testing.T) {
 			{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}},
 		},
 	}
-	r := roleFromCreateReq(req)
+	r, err := roleFromCreateReq(req)
+	if err != nil {
+		t.Fatalf("roleFromCreateReq: %v", err)
+	}
 	if got := string(r.AccountID); got != "acc0000000000000abcd" {
 		t.Fatalf("AccountID = %q, want the request account_id", got)
 	}

@@ -214,9 +214,9 @@ func TestSeed_NLB_04_ReapplyIdempotent(t *testing.T) {
 	// for each id).
 	_, err = pool.Exec(ctx, `
 		INSERT INTO kacho_iam.roles
-		 (id, cluster_id, account_id, is_system, name, description, permissions)
+		 (id, cluster_id, account_id, name, description, permissions)
 		VALUES
-		 ($1, 'cluster_kacho_root', NULL, true,
+		 ($1, 'cluster_kacho_root', NULL,
 		 'loadbalancer.operator',
 		 'NLB operator (start/stop/getTargetStates/listOperations + viewer on LB hierarchy)',
 		 '[

@@ -49,7 +49,11 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 	if len(req.GetPermissions()) > 0 { //nolint:staticcheck // A-02: deprecated field read solely to reject it
 		return nil, shared.InvalidArg("permissions", "Illegal argument permissions (compiled/output-only)")
 	}
-	op, err := h.create.Execute(ctx, roleFromCreateReq(req))
+	r, err := roleFromCreateReq(req)
+	if err != nil {
+		return nil, err
+	}
+	op, err := h.create.Execute(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -156,8 +160,8 @@ func (h *Handler) ListOperations(ctx context.Context, req *iamv1.ListRoleOperati
 // use-case. BOTH scope columns are mapped (account_id XOR project_id, #212) —
 // the use-case enforces the XOR. IsSystem is always false (system roles are
 // seeded by migration, never via this RPC).
-func roleFromCreateReq(req *iamv1.CreateRoleRequest) domain.Role {
-	return domain.Role{
+func roleFromCreateReq(req *iamv1.CreateRoleRequest) (domain.Role, error) {
+	r := domain.Role{
 		AccountID:   domain.AccountID(req.GetAccountId()),
 		ProjectID:   domain.ProjectID(req.GetProjectId()),
 		Name:        domain.RoleName(req.GetName()),
@@ -168,6 +172,19 @@ func roleFromCreateReq(req *iamv1.CreateRoleRequest) domain.Role {
 		Labels:   labelsFromProto(req.GetLabels()),
 		IsSystem: false,
 	}
+	// redesign-2026 F4: definitionTier is the canonical scope input; when set it
+	// supersedes the legacy account_id/project_id pair. Pre-Phase-0 tierType is
+	// REQUIRED (prefix-derivation is B3-gated); iam.cluster is rejected (system
+	// roles are seeded by migration, never created via this RPC).
+	if dt := req.GetDefinitionTier(); dt != nil && (dt.GetTierType() != "" || dt.GetTierId() != "") {
+		acc, prj, ok := domain.CustomDefinitionTierToScope(dt.GetTierType(), dt.GetTierId())
+		if !ok {
+			return domain.Role{}, shared.InvalidArg("definitionTier", "Illegal argument definitionTier")
+		}
+		r.AccountID = domain.AccountID(acc)
+		r.ProjectID = domain.ProjectID(prj)
+	}
+	return r, nil
 }
 
 // rulesFromProto maps the authored proto rules into domain.Rule, preserving the

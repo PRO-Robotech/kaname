@@ -35,9 +35,9 @@ func seedAccountRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	t.Helper()
 	rid := domain.RoleID(ids.NewID(domain.PrefixRole))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, rules, is_system)
+		INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, rules)
 		VALUES ($1, $2, $3, $4, '[]'::jsonb,
-		        ('[{"module":"'||$5||'","resources":["network"],"verbs":["get","list"]}]')::jsonb, false)`,
+		        ('[{"module":"'||$5||'","resources":["network"],"verbs":["get","list"]}]')::jsonb)`,
 		string(rid), string(acc), name, "rules role "+name, module)
 	require.NoError(t, err)
 	return rid

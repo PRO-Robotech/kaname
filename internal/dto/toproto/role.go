@@ -41,20 +41,28 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		})
 	}
 	return &iamv1.Role{
-		Id:              string(r.ID),
-		AccountId:       string(r.AccountID),
-		ProjectId:       string(r.ProjectID),
-		ClusterId:       string(r.ClusterID),
-		Name:            string(r.Name),
-		Description:     string(r.Description),
-		Rules:           rules,
-		IsSystem:        r.IsSystem,
+		Id:          string(r.ID),
+		AccountId:   string(r.AccountID),
+		ProjectId:   string(r.ProjectID),
+		ClusterId:   string(r.ClusterID),
+		Name:        string(r.Name),
+		Description: string(r.Description),
+		Rules:       rules,
+		// redesign-2026 F4: is_system is DERIVED from the definition tier
+		// (tierType==iam.cluster ⇔ cluster_id set), not the stored flag.
+		IsSystem: r.IsSystemDerived(),
+		// redesign-2026 F4: definitionTier dotted projection over the typed scope
+		// columns; the word "scope" is reserved for the AccessBinding anchor.
+		DefinitionTier: &iamv1.DefinitionTier{
+			TierType: r.DefinitionTierType(),
+			TierId:   r.DefinitionTierID(),
+		},
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		CreatedByUserId: string(r.CreatedByUserID),
 		Labels:          labelsToStringMap(r.Labels),
 		// Permissions intentionally omitted (internal compiled; not on the public
-		// API surface — R-7).
+		// API surface — R-7/F5). Read compiled perms via InternalIAMService.GetRoleCompiled.
 	}, nil
 }
 

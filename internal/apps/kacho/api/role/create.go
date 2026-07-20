@@ -75,7 +75,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	}
 	// #212: a custom role is EXACTLY ONE scope — account XOR project. System
 	// roles are seeded via migration, never via this RPC. The DB CHECK
-	// roles_scope_xor is the backstop; this gives a friendly sync error first.
+	// roles_definition_tier_xor is the backstop; this gives a friendly sync error first.
 	accountSet := r.AccountID != ""
 	projectSet := r.ProjectID != ""
 	switch {

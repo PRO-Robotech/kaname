@@ -38,8 +38,8 @@ func seedCustomRoleSQL(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ac
 	t.Helper()
 	rid := domain.RoleID(ids.NewID(domain.PrefixRole))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, is_system)
-		VALUES ($1, $2, $3, $4, '["compute.instance.*.get"]'::jsonb, false)`,
+		INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions)
+		VALUES ($1, $2, $3, $4, '["compute.instance.*.get"]'::jsonb)`,
 		string(rid), string(accID), name, "custom "+name)
 	require.NoError(t, err, "seed custom role")
 	return rid

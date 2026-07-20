@@ -258,7 +258,7 @@ type roleWriter struct {
 // (internal, derived from rules by the use-case in the same writer-tx; never
 // recomputed in SQL — drift hazard). account_id / project_id are written via
 // NULLIF($, ”) so the unset scope column is stored NULL (not ”) — required by
-// the roles_scope_xor CHECK and the roles_acc/prj_custom_unique partial indexes,
+// the roles_definition_tier_xor CHECK and the roles_acc/prj_custom_unique partial indexes,
 // and by the account_id/project_id FK (an ” would dangle).
 func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, error) {
 	permsJSON, err := json.Marshal(stringSlice(r.Permissions))
@@ -276,13 +276,17 @@ func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, er
 		return domain.Role{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	now := time.Now().UTC()
+	// redesign-2026 F4: is_system is a GENERATED column (derived from cluster_id) —
+	// it is NEVER inserted explicitly (Postgres rejects a non-DEFAULT value into a
+	// generated column). Custom roles set account_id XOR project_id, cluster_id NULL,
+	// so the generated is_system evaluates to false. System roles are seeded only.
 	q := fmt.Sprintf(`
-		INSERT INTO roles (id, account_id, project_id, name, description, permissions, rules, is_system, created_at, labels)
-		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO roles (id, account_id, project_id, name, description, permissions, rules, created_at, labels)
+		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), $4, $5, $6, $7, $8, $9)
 		RETURNING %s`, roleCols)
 	row := w.tx.QueryRow(ctx, q,
 		string(r.ID), string(r.AccountID), string(r.ProjectID), string(r.Name), string(r.Description),
-		permsJSON, rulesJSON, r.IsSystem, now, labelsJSON,
+		permsJSON, rulesJSON, now, labelsJSON,
 	)
 	out, err := scanRole(row)
 	if err != nil {

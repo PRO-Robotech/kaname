@@ -291,22 +291,22 @@ func TestIamExt_Migrations_6_4_4_RoleScopeXor_TwoScopesInvalid(t *testing.T) {
 	// Теперь invalid INSERT: custom role с двумя non-NULL scope (account_id + project_id).
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO kacho_iam.roles
-		 (id, account_id, project_id, is_system, name, permissions)
+		 (id, account_id, project_id, name, permissions)
 		VALUES
 		 ('rol_kac127twoscope1', 'acc_kac127test001ab', 'prj_kac127test001ab',
-		 false, 'invalid_two_scope', '["compute.instance.*.read"]'::jsonb)`)
-	require.Error(t, err, "expected CHECK violation roles_scope_xor")
+		 'invalid_two_scope', '["compute.instance.*.read"]'::jsonb)`)
+	require.Error(t, err, "expected CHECK violation roles_definition_tier_xor")
 	assert.Contains(t, err.Error(), "23514", "expected CHECK violation 23514")
-	assert.Contains(t, strings.ToLower(err.Error()), "roles_scope_xor",
-		"expected violation на constraint roles_scope_xor")
+	assert.Contains(t, strings.ToLower(err.Error()), "roles_definition_tier_xor",
+		"expected violation на constraint roles_definition_tier_xor (renamed from roles_scope_xor in 0056)")
 
 	// Valid project-scoped role работает.
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO kacho_iam.roles
-		 (id, project_id, is_system, name, permissions)
+		 (id, project_id, name, permissions)
 		VALUES
 		 ('rol_kac127prj00001a', 'prj_kac127test001ab',
-		 false, 'deployer', '["compute.instance.*.read","compute.instance.*.list"]'::jsonb)`)
+		 'deployer', '["compute.instance.*.read","compute.instance.*.list"]'::jsonb)`)
 	require.NoError(t, err, "valid project-scoped role insert must succeed")
 }
 

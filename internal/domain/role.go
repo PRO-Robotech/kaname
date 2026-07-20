@@ -15,7 +15,7 @@ import (
 //   - is_system=false + AccountID set: account-scoped custom role.
 //   - is_system=false + ProjectID set: project-scoped custom role.
 //
-// Enforced by DB CHECK `roles_scope_xor` + a partial UNIQUE per scope.
+// Enforced by DB CHECK `roles_definition_tier_xor` + a partial UNIQUE per scope.
 // Domain.Validate duplicates the CHECK to give friendly errors before
 // reaching the DB. (The legacy B2B-tenant role scope was removed; a custom
 // role is scoped to exactly one of {account, project}.)

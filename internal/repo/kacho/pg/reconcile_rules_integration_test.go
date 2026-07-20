@@ -41,7 +41,7 @@ import (
 // excluded) and syncing role_rule_selectors — exactly what Role.Create does, but
 // direct-SQL for the reconcile integration fixtures.
 //
-// A custom role is account- XOR project-scoped (DB CHECK roles_scope_xor +
+// A custom role is account- XOR project-scoped (DB CHECK roles_definition_tier_xor +
 // the roles_acc/prj_custom_unique partial indexes). role_repo.Insert now persists
 // project_id (previously dropped), so the role MUST carry exactly ONE scope column.
 // These reconcile fixtures bind on the member's project scope, so the seeded role

@@ -13,7 +13,7 @@ package pg_test
 //
 // Asserts:
 //   - Insert(project-scoped role) round-trips through Get with ProjectID set,
-//     AccountID empty, IsSystem=false (the XOR CHECK roles_scope_xor accepts it
+//     AccountID empty, IsSystem=false (the XOR CHECK roles_definition_tier_xor accepts it
 //     because account_id is stored NULL, not '').
 //   - domain.IsRoleAssignable(role, "project", <P>) == true (so AccessBinding
 //     on project:<P> passes the scope gate).
@@ -86,7 +86,7 @@ func TestRole_212_InsertProjectScoped_RoundTrip(t *testing.T) {
 }
 
 // 212 negative at the DB layer: inserting a role with BOTH account_id and
-// project_id set must be rejected by the roles_scope_xor CHECK (the use-case
+// project_id set must be rejected by the roles_definition_tier_xor CHECK (the use-case
 // also rejects it earlier, but the DB is the backstop, ban #10).
 func TestRole_212_InsertBothScopes_CheckViolation(t *testing.T) {
 	if testing.Short() {
@@ -115,6 +115,6 @@ func TestRole_212_InsertBothScopes_CheckViolation(t *testing.T) {
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	_, err = w.RolesW().Insert(ctx, r)
-	require.Error(t, err, "DB CHECK roles_scope_xor must reject account_id AND project_id both set")
+	require.Error(t, err, "DB CHECK roles_definition_tier_xor must reject account_id AND project_id both set")
 	_ = w.Rollback(ctx)
 }

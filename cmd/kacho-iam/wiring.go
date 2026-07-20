@@ -365,7 +365,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		// Defense-in-depth ReBAC gate for ForceLogout (security.md "AuthN+AuthZ
 		// ВЕЗДЕ"): require the authenticated principal hold system_admin@cluster.
 		// relationStore satisfies authzguard.RelationChecker; nil-safe fail-closed.
-		WithAdminChecker(relationStore)
+		WithAdminChecker(relationStore).
+		// F5 (IAM-1-13): GetRoleCompiled — Internal-only compiled-permission
+		// projection (two-projection; public RoleService carries only rules[]).
+		WithRoleCompiledReader(roleapp.NewGetRoleCompiledUseCase(kachoRepo))
 
 	// ── InternalSessionRevocationsService ─────────────────────────────────
 	// Revoke (logout / force-logout) + IsRevoked (api-gateway hot-path) +

@@ -36,8 +36,8 @@ func seedProjectRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, prj 
 	t.Helper()
 	rid := domain.RoleID(ids.NewID(domain.PrefixRole))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, project_id, name, description, permissions, is_system)
-		VALUES ($1, $2, $3, $4, '["iam.users.*.read"]'::jsonb, false)`,
+		INSERT INTO roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, $3, $4, '["iam.users.*.read"]'::jsonb)`,
 		string(rid), string(prj), name, "project role "+name)
 	require.NoError(t, err, "seed project-scoped role")
 	return rid

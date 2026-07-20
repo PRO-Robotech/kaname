@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
@@ -76,6 +77,15 @@ type resourceRegistrar interface {
 	Unregister(ctx context.Context, in unregisterInput) error
 }
 
+// roleCompiledReader — narrow read port returning a Role's compiled permission
+// projection (redesign-2026 F5 GetRoleCompiled). Implemented by
+// *role.GetRoleCompiledUseCase, wired in the composition root. nil → the RPC fails
+// closed (Unavailable). Errors (malformed id → InvalidArgument, missing → NotFound)
+// are already gRPC-status shaped by the use-case.
+type roleCompiledReader interface {
+	Execute(ctx context.Context, id domain.RoleID) ([]string, error)
+}
+
 // Handler — gRPC server для InternalIAMService.
 type Handler struct {
 	iamv1.UnimplementedInternalIAMServiceServer
@@ -84,6 +94,7 @@ type Handler struct {
 	authz         Authorizer
 	subjectChange subjectChanger
 	relations     relationWriter
+	roleCompiled  roleCompiledReader
 
 	// Resource-registration gate. Both nil when the registration
 	// stack is not wired (degraded/dev) — RegisterResource then returns

@@ -126,8 +126,8 @@ func TestIamExtRepos_6_4_1_Role_ProjectScope_Happy(t *testing.T) {
 
 	roleID := "rol00000kac127rl410ab"[:20]
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'deployer_rl41', 'project role',
+		INSERT INTO roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, 'deployer_rl41', 'project role',
 		 '["compute.instances.*.read"]'::jsonb)`,
 		roleID, prjID)
 	require.NoError(t, err)
@@ -142,8 +142,8 @@ func TestIamExtRepos_6_4_2_Role_AccountScope_Happy(t *testing.T) {
 
 	roleID := "rol00000kac127rl420ab"[:20]
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, account_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'billing_admin', 'account role',
+		INSERT INTO roles (id, account_id, name, description, permissions)
+		VALUES ($1, $2, 'billing_admin', 'account role',
 		 '["billing.invoices.*.read"]'::jsonb)`,
 		roleID, accID)
 	require.NoError(t, err)
@@ -159,8 +159,8 @@ func TestIamExtRepos_6_4_4_Role_TwoScopes_CHECK_Fails(t *testing.T) {
 
 	roleID := "rol00000kac127rl440ab"[:20]
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, account_id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, $3, false, 'invalid_role', '', '["x.y.*.z"]'::jsonb)`,
+		INSERT INTO roles (id, account_id, project_id, name, description, permissions)
+		VALUES ($1, $2, $3, 'invalid_role', '', '["x.y.*.z"]'::jsonb)`,
 		roleID, accID, prjID)
 	require.Error(t, err)
 	assertSQLState(t, err, "23514")
@@ -185,8 +185,8 @@ func kac127SeedABRow(
 	prjID := kac127SeedProject(t, ctx, pool, accID, suffix)
 	roleID = padOrTrim20("rol00000kac127" + suffix)
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, $3, '', '["x.y.*.z"]'::jsonb)`,
+		INSERT INTO roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, $3, '', '["x.y.*.z"]'::jsonb)`,
 		roleID, prjID, "role_"+suffix)
 	require.NoError(t, err)
 
@@ -273,8 +273,8 @@ func TestIamExtRepos_6_5_4_AccessBinding_RevokedTerminal_CAS_NoMatch(t *testing.
 	prjID := kac127SeedProject(t, ctx, pool, accID, "ab54")
 	roleID := padOrTrim20("rol00000kac127ab54")
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'role_ab54', '', '["x.y.*.z"]'::jsonb)`,
+		INSERT INTO roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, 'role_ab54', '', '["x.y.*.z"]'::jsonb)`,
 		roleID, prjID)
 	require.NoError(t, err)
 
@@ -343,8 +343,8 @@ func TestIamExtRepos_6_5_5_AccessBinding_InvalidStatus_CHECK(t *testing.T) {
 	prjID := kac127SeedProject(t, ctx, pool, accID, "ab55")
 	roleID := padOrTrim20("rol00000kac127ab55")
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, project_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'role_ab55', '', '["x.y.*.z"]'::jsonb)`,
+		INSERT INTO roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, 'role_ab55', '', '["x.y.*.z"]'::jsonb)`,
 		roleID, prjID)
 	require.NoError(t, err)
 
@@ -491,8 +491,8 @@ func TestIamExtRepos_6_11_1a_OutboxAtomic_Commit(t *testing.T) {
 
 	roleID := "rol00000kac127ob1a0ab"[:20]
 	_, err := tx.Exec(ctx, `
-		INSERT INTO roles (id, account_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'role_ob1a', '', '["x.y.*.z"]'::jsonb)`, roleID, accID)
+		INSERT INTO roles (id, account_id, name, description, permissions)
+		VALUES ($1, $2, 'role_ob1a', '', '["x.y.*.z"]'::jsonb)`, roleID, accID)
 	require.NoError(t, err)
 
 	tenantAcc := domain.AccountID(accID)
@@ -530,8 +530,8 @@ func TestIamExtRepos_6_11_1b_OutboxAtomic_Rollback(t *testing.T) {
 
 	roleID := "rol00000kac127ob1b0ab"[:20]
 	_, err := tx.Exec(ctx, `
-		INSERT INTO roles (id, account_id, is_system, name, description, permissions)
-		VALUES ($1, $2, false, 'role_ob1b', '', '["x.y.*.z"]'::jsonb)`, roleID, accID)
+		INSERT INTO roles (id, account_id, name, description, permissions)
+		VALUES ($1, $2, 'role_ob1b', '', '["x.y.*.z"]'::jsonb)`, roleID, accID)
 	require.NoError(t, err)
 
 	evtID := "evt_" + strings.Repeat("b", 22)

@@ -35,8 +35,8 @@ func seedComputeEditorRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	// 4-segment RBAC-v2 grammar (migration 0005): module.resource.resourceName.verb.
 	// `compute.instance.*.update` → editor tier on compute_instance (verb-bundle).
 	_, err := pool.Exec(ctx, `
-		INSERT INTO roles (id, project_id, name, description, permissions, is_system)
-		VALUES ($1, $2, $3, $4, '["compute.instance.*.update"]'::jsonb, false)`,
+		INSERT INTO roles (id, project_id, name, description, permissions)
+		VALUES ($1, $2, $3, $4, '["compute.instance.*.update"]'::jsonb)`,
 		string(rid), string(prj), name, "compute editor "+name)
 	require.NoError(t, err, "seed compute-editor role")
 	return rid

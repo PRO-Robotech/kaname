@@ -54,8 +54,8 @@ func seedNativeRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc d
 	t.Helper()
 	rid := ids.NewID(domain.PrefixRole)
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles (id, account_id, name, permissions, is_system)
-		VALUES ($1, $2, $3, '["compute.instance.*.get"]'::jsonb, false)`,
+		INSERT INTO kacho_iam.roles (id, account_id, name, permissions)
+		VALUES ($1, $2, $3, '["compute.instance.*.get"]'::jsonb)`,
 		rid, string(acc), name)
 	require.NoError(t, err, "seed native role")
 	return rid
