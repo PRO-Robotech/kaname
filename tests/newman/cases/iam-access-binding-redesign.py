@@ -314,7 +314,8 @@ CASES.append(Case(
             name="up-scopeid-immutable",
             method="PATCH",
             path="/iam/v1/accessBindings/{{rdAcbIm}}",
-            body={"updateMask": ["scopeId"], "scopeId": "{{accountBId}}"},
+            # FieldMask → comma-separated STRING in proto3 JSON, not an array.
+            body={"updateMask": "scopeId", "scopeId": "{{accountBId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
@@ -326,7 +327,8 @@ CASES.append(Case(
             name="up-subjects-immutable",
             method="PATCH",
             path="/iam/v1/accessBindings/{{rdAcbIm}}",
-            body={"updateMask": ["subjects"], "subjects": [{"type": "USER", "id": "{{userAAAId}}"}]},
+            # FieldMask → comma-separated STRING in proto3 JSON, not an array.
+            body={"updateMask": "subjects", "subjects": [{"type": "USER", "id": "{{userAAAId}}"}]},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
@@ -603,7 +605,9 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('page_size range text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('page_size must be in [0..1000]'));",
+                # the specific range text lives in details[].fieldViolations[].description
+                # (top-level message is the generic 'invalid argument') → match the full body.
+                "pm.test('page_size range text', () => pm.expect(JSON.stringify(pm.response.json()).toLowerCase(), pm.response.text()).to.include('page_size must be in [0..1000]'));",
             ],
         ),
     ],

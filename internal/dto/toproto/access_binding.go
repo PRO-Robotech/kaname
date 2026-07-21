@@ -6,6 +6,8 @@ package toproto
 // access_binding.go — Transfer domain.AccessBinding → *iamv1.AccessBinding.
 
 import (
+	"time"
+
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
@@ -33,6 +35,16 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		ScopeType: domain.ScopeTypeToDotted(string(b.ResourceType)),
 		ScopeId:   b.ResourceID,
 		CreatedAt: createdAt,
+		// redesign-2026 F10: the lifecycle projection MUST be surfaced on every read
+		// — status (ACTIVE on create, REVOKED after :revoke) + the audit/overlay
+		// columns. Previously dropped here → every binding read back as
+		// STATUS_UNSPECIFIED and revoke was invisible to clients.
+		Status:          abStatusToProto(b.Status),
+		ConditionId:     string(b.ConditionID),
+		ExpiresAt:       nullableTsTrunc(b.ExpiresAt),
+		GrantedByUserId: string(b.GrantedByUserID),
+		RevokedAt:       nullableTsTrunc(b.RevokedAt),
+		RevokedByUserId: userIDPtrToString(b.RevokedByUserID),
 		// RBAC rules-model: fill the canonical
 		// subjects[] AND the legacy single subject_type/subject_id (above) — two
 		// views of one model. When the read-side loaded the multi-subject set it
@@ -108,6 +120,38 @@ func domainTargetToProto(t domain.AccessTarget) *iamv1.AccessTarget {
 	return &iamv1.AccessTarget{
 		Target: &iamv1.AccessTarget_AllInScope{AllInScope: &iamv1.AccessTargetAllInScope{}},
 	}
+}
+
+// abStatusToProto maps the domain lifecycle status to the proto enum. An unset /
+// unknown status projects as STATUS_UNSPECIFIED (never guessed).
+func abStatusToProto(s domain.AccessBindingStatus) iamv1.AccessBinding_Status {
+	switch s {
+	case domain.AccessBindingStatusPending:
+		return iamv1.AccessBinding_PENDING
+	case domain.AccessBindingStatusActive:
+		return iamv1.AccessBinding_ACTIVE
+	case domain.AccessBindingStatusRevoked:
+		return iamv1.AccessBinding_REVOKED
+	default:
+		return iamv1.AccessBinding_STATUS_UNSPECIFIED
+	}
+}
+
+// nullableTsTrunc projects a nullable timestamp, truncated to the API second
+// granularity (parity with created_at); nil stays nil.
+func nullableTsTrunc(t *time.Time) *timestamppb.Timestamp {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t.Truncate(tsTruncate))
+}
+
+// userIDPtrToString flattens a nullable UserID to its string ("" when nil).
+func userIDPtrToString(u *domain.UserID) string {
+	if u == nil {
+		return ""
+	}
+	return string(*u)
 }
 
 func init() {

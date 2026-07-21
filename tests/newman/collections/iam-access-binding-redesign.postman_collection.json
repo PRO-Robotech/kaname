@@ -2743,7 +2743,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": [\"scopeId\"], \"scopeId\": \"{{accountBId}}\"}",
+              "raw": "{\"updateMask\": \"scopeId\", \"scopeId\": \"{{accountBId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2822,7 +2822,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": [\"subjects\"], \"subjects\": [{\"type\": \"USER\", \"id\": \"{{userAAAId}}\"}]}",
+              "raw": "{\"updateMask\": \"subjects\", \"subjects\": [{\"type\": \"USER\", \"id\": \"{{userAAAId}}\"}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7247,7 +7247,7 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});",
-                  "pm.test('page_size range text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('page_size must be in [0..1000]'));"
+                  "pm.test('page_size range text', () => pm.expect(JSON.stringify(pm.response.json()).toLowerCase(), pm.response.text()).to.include('page_size must be in [0..1000]'));"
                 ]
               }
             }
