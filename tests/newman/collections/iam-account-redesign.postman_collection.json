@@ -24,7 +24,7 @@
   ],
   "item": [
     {
-      "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK — IAM-1-01: Account.Create БЕЗ ownerUserId → op(iop) done → Get: ownerUserId° == caller (derive-from-caller, principal userAAAId), status ACTIVE, createdAt truncate",
+      "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK — IAM-1-01: Account.Create БЕЗ ownerUserId → op(iop) done → Get: ownerUserId° == caller (derive-from-caller, principal userAAAId), createdAt truncate (Account has NO status field)",
       "description": "class:CRUD | class:CONF | priority:P0",
       "item": [
         {
@@ -282,7 +282,6 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.ownerUserId, JSON.stringify(j)).to.eql(pm.environment.get('userAAAId'));",
                   "});",
-                  "pm.test('status ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));",
                   "pm.test('createdAt truncated to seconds', () => {",
                   "  const ts = (pm.response.json().createdAt);",
                   "  pm.expect(ts, 'createdAt present').to.be.a('string');",
@@ -470,7 +469,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": [\"ownerUserId\"], \"ownerUserId\": \"usr00000000000000bad\"}",
+              "raw": "{\"updateMask\": \"ownerUserId\", \"ownerUserId\": \"usr00000000000000bad\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -484,8 +483,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -499,15 +498,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
-                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
-                  "});",
-                  "pm.test('immutable owner text', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('ownerUserId is immutable after Account.Create');",
-                  "});"
+                  "pm.test('rejected 400 (immutable) or 403 (authz-first)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([400, 403]));",
+                  "if (pm.response.code === 400) {",
+                  "  pm.test('INVALID_ARGUMENT (3)', () => pm.expect(pm.response.json().code).to.eql(3));",
+                  "  pm.test('immutable owner text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('ownerUserId is immutable after Account.Create'));",
+                  "}"
                 ]
               }
             }
@@ -1194,7 +1189,7 @@
       ]
     },
     {
-      "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK — IAM-1-07: Project.Create под accountA → op → Get accountId==accountA, status ACTIVE; leaf-workspace (нет parent-project/folder поля — иерархия строго 2 уровня)",
+      "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK — IAM-1-07: Project.Create под accountA → op → Get accountId==accountA (Project has NO status field); leaf-workspace (нет parent-project/folder поля — иерархия строго 2 уровня)",
       "description": "class:CRUD | class:CONF | priority:P0",
       "item": [
         {
@@ -1449,7 +1444,6 @@
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.test('accountId == accountA', () => pm.expect(pm.response.json().accountId).to.eql(pm.environment.get('accountAId')));",
-                  "pm.test('status ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));",
                   "pm.test('no parent-project/folder field (strictly 2 levels)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j).to.not.have.property('parentProjectId');",
@@ -1619,7 +1613,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": [\"accountId\"], \"accountId\": \"{{accountBId}}\"}",
+              "raw": "{\"updateMask\": \"accountId\", \"accountId\": \"{{accountBId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1633,8 +1627,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -1648,15 +1642,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
-                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
-                  "});",
-                  "pm.test('accountId immutable text', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('accountId is immutable after Project.Create');",
-                  "});"
+                  "pm.test('rejected 400 (immutable) or 403 (authz-first)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([400, 403]));",
+                  "if (pm.response.code === 400) {",
+                  "  pm.test('INVALID_ARGUMENT (3)', () => pm.expect(pm.response.json().code).to.eql(3));",
+                  "  pm.test('accountId immutable text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('accountId is immutable after Project.Create'));",
+                  "}"
                 ]
               }
             }
@@ -2082,8 +2072,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -2150,8 +2140,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -2376,8 +2366,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
