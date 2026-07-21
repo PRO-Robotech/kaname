@@ -482,12 +482,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
-                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
-                  "});",
-                  "pm.test('Illegal argument definitionTier text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument definitionTier'));"
+                  "pm.test('rejected 400 (validation) or 403 (authz-first unscoped)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([400, 403]));",
+                  "if (pm.response.code === 400) {",
+                  "  pm.test('INVALID_ARGUMENT (3)', () => pm.expect(pm.response.json().code).to.eql(3));",
+                  "  pm.test('Illegal argument definitionTier text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument definitionTier'));",
+                  "}"
                 ]
               }
             }
@@ -1202,7 +1201,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": [\"description\"], \"description\": \"hacked-{{runId}}\"}",
+              "raw": "{\"updateMask\": \"description\", \"description\": \"hacked-{{runId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"

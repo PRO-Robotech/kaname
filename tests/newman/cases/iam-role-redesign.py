@@ -141,9 +141,18 @@ CASES.append(Case(
                   "rules": [{"module": "compute", "resources": ["instance"], "verbs": ["get"]}]},
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_status(400),
-                *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('Illegal argument definitionTier text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument definitionTier'));",
+                # authz-first: an empty tierType is UNSCOPEABLE at the gateway (no
+                # object type to derive from the anchor; pre-Phase-0 prefix-derivation
+                # is B3-gated) → the scope_extractor cannot resolve account|project and
+                # fail-closes 403 BEFORE the iam handler's sync 400 'Illegal argument
+                # definitionTier'. Both are correct rejections of a malformed anchor —
+                # tolerate 400|403 (testing.md authz-first). Assert the canonical text
+                # only when the request reached the handler (400).
+                "pm.test('rejected 400 (validation) or 403 (authz-first unscoped)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([400, 403]));",
+                "if (pm.response.code === 400) {",
+                "  pm.test('INVALID_ARGUMENT (3)', () => pm.expect(pm.response.json().code).to.eql(3));",
+                "  pm.test('Illegal argument definitionTier text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument definitionTier'));",
+                "}",
             ],
         ),
     ],
@@ -331,7 +340,10 @@ CASES.append(Case(
             name="update-system-role",
             method="PATCH",
             path=f"/iam/v1/roles/{SYS_EDIT}",
-            body={"updateMask": ["description"], "description": "hacked-{{runId}}"},
+            # google.protobuf.FieldMask serialises to a COMMA-SEPARATED STRING in
+            # proto3 JSON, not an array — `["description"]` → grpc-gateway
+            # "proto: syntax error unexpected token [".
+            body={"updateMask": "description", "description": "hacked-{{runId}}"},
             auth="jwtBootstrap",
             test_script=[
                 # System-role read-only fires SYNC (FAILED_PRECONDITION) before the Operation is minted.
