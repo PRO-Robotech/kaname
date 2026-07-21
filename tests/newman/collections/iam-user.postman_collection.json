@@ -585,7 +585,7 @@
       ]
     },
     {
-      "name": "IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW — List users ?accountId=accountBId as jwtInvitee (member, no user-viewer grant) → 200, NO membership-over-show (does not leak B's users)",
+      "name": "IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW — List users ?accountId=accountBId as jwtPureNoBindings (authenticated, zero grants) → 200, NO over-show (empty scope-list, does not leak B's users)",
       "description": "class:AUTHZ | class:SCOPE | priority:P1",
       "item": [
         {
@@ -616,8 +616,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -632,17 +632,16 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('member without user-viewer grant does NOT see accountB users (membership-over-show removed)', () => {",
+                  "pm.test('subject without a user-viewer/v_list grant does NOT see accountB users (no over-show)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.users, 'users field').to.be.an('array');",
-                  "  // A plain member no longer sees the account's users via membership.",
-                  "  // The invitee holds no iam_user viewer/v_list grant on accountB → empty scope-list.",
-                  "  pm.expect((j.users || []).length, 'no membership-over-show: list is empty for a no-grant member').to.eql(0);",
+                  "  // Bare authentication (no account/user grant) yields no user visibility.",
+                  "  pm.expect((j.users || []).length, 'no over-show: list is empty for a no-grant subject').to.eql(0);",
                   "});",
-                  "pm.test('no leak of accountB owner via membership-over-show', () => {",
+                  "pm.test('no leak of accountB owner to a no-grant subject', () => {",
                   "  const j = pm.response.json();",
                   "  const ownerId = pm.environment.get('userAABId');",
-                  "  pm.expect((j.users || []).some(u => u.id === ownerId), 'accountB owner must not be visible to a no-grant member').to.be.false;",
+                  "  pm.expect((j.users || []).some(u => u.id === ownerId), 'accountB owner must not be visible to a no-grant subject').to.be.false;",
                   "});"
                 ]
               }
