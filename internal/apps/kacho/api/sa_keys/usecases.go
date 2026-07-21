@@ -440,6 +440,28 @@ func (u *IssueSAKeyUseCase) doIssue(ctx context.Context, keyID domain.SAOAuthCli
 	return u.doIssuePrivateKeyJWT(ctx, keyID, in, actor)
 }
 
+// hydraUnavailable maps a failed Hydra-admin call to a fixed, opaque
+// codes.Unavailable status and logs the raw cause.
+//
+// This runs on the async operations worker (operations.Run). That worker maps any
+// UNRECOGNIZED error — anything status.FromError can't read as a gRPC status,
+// including a plain fmt.Errorf even when it wraps iamerr.ErrUnavailable — to a
+// generic codes.Internal "internal worker error" and logs NOTHING. So the previous
+// `fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)` degraded a
+// peer-UNREACHABLE hydra-admin (e.g. KACHO_IAM_HYDRA_ADMIN_URL absent → issuer-derived
+// public host unresolvable in-cluster) into an opaque INTERNAL with zero diagnostics.
+//
+// Returning an explicit UNAVAILABLE keeps the mutation fail-closed per the
+// peer-unavailable convention; the raw driver/URL text is LOGGED, never returned, so
+// it never leaks infra topology on the wire (hardening: INTERNAL/UNAVAILABLE opaque).
+func (u *IssueSAKeyUseCase) hydraUnavailable(ctx context.Context, action string, err error) error {
+	if u.logger != nil {
+		u.logger.ErrorContext(ctx, "hydra admin call failed",
+			slog.String("action", action), slog.Any("error", err))
+	}
+	return status.Error(codes.Unavailable, "hydra admin unavailable")
+}
+
 // doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, register
 // Hydra client with private_key_jwt + embedded JWK, persist mapping with
 // PublicKeyPEM + KeyAlgorithm, return PrivateKeyPEM exactly once.
@@ -471,7 +493,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	hydraReq.Audience = u.resolveAudience(in)
 	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
 	if err != nil {
-		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
+		return nil, u.hydraUnavailable(ctx, "create-client", err)
 	}
 
 	// 3. Persist mapping row in TX.
@@ -594,7 +616,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	hydraReq.Audience = u.resolveAudience(in)
 	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
 	if err != nil {
-		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
+		return nil, u.hydraUnavailable(ctx, "create-client", err)
 	}
 
 	// Register an EXACT-subject jwt-bearer trust-grant per trusted subject: Hydra
@@ -674,7 +696,7 @@ func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInp
 			ExpiresAt:       expiresAt,
 		}
 		if err := u.trustGrants.CreateJWTBearerTrustGrant(ctx, grant); err != nil {
-			return fmt.Errorf("%w: hydra create-trust-grant: %w", iamerr.ErrUnavailable, err)
+			return u.hydraUnavailable(ctx, "create-trust-grant", err)
 		}
 	}
 	return nil
