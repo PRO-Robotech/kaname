@@ -19,6 +19,7 @@ import (
 	reconcileapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
 	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
 	authorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/authorize"
+	bootstraptoken "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/cluster"
 	conditionsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/conditions"
 	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
@@ -36,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/bootstraptokenwire"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
@@ -90,6 +92,12 @@ type services struct {
 	// Internal-only (запрет #6), registered on port 9091; admin-tier gated
 	// (system_admin@cluster ReBAC Check in-handler + gateway permission-catalog).
 	internalOperationsHandler *internaloperationsapp.Handler
+
+	// internalBootstrapTokenHandler — InternalBootstrapTokenService.MintBootstrapToken:
+	// non-interactive bootstrap RS256 token mint (#58). Internal-only (ban #6),
+	// registered on port 9091; the mTLS listener + gateway-fronted caller-policy
+	// are the gate (permission="<exempt>").
+	internalBootstrapTokenHandler *bootstraptoken.Handler
 
 	// relationStore — shared OpenFGA client. Always non-nil (composition root
 	// fails fast on missing KACHO_IAM_OPENFGA_STORE_ID). Reused by runServe
@@ -390,6 +398,23 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
 
+	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
+	// The requested token audience is the gateway audience (https://{API_DOMAIN});
+	// override via KACHO_IAM_BOOTSTRAP_TOKEN_AUDIENCE, else derived from the domain.
+	bootstrapAudience := os.Getenv("KACHO_IAM_BOOTSTRAP_TOKEN_AUDIENCE")
+	if bootstrapAudience == "" {
+		bootstrapAudience = "https://" + cfg.AuthN.ResolveDomain()
+	}
+	bootstrapTokenH := bootstraptokenwire.Build(pool, bootstraptokenwire.BuildConfig{
+		SigningKeyPEM:     os.Getenv("KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM"),
+		HydraAdminURL:     cfg.AuthN.ResolveHydraAdminURL(),
+		HydraAdminToken:   os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
+		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
+		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
+		GatewayAudience:   bootstrapAudience,
+		Logger:            logger,
+	})
+
 	// ── InternalClusterService ────────────────────────────────────────────
 	clusterReader := kachopg.NewClusterReader(pool)
 	clusterGrantWriter := kachopg.NewClusterAdminGrantWriter(pool)
@@ -450,6 +475,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 
 		// cluster-wide admin operations feed.
 		internalOperationsHandler: internalOperationsHandler,
+
+		// non-interactive bootstrap token mint (#58).
+		internalBootstrapTokenHandler: bootstrapTokenH,
 
 		// AuthZ core.
 		authorizeHandler:         authzServices.authorize,

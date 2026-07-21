@@ -128,4 +128,11 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	if svcs != nil && svcs.internalOperationsHandler != nil {
 		iamv1.RegisterInternalOperationsServiceServer(srv, svcs.internalOperationsHandler)
 	}
+	// InternalBootstrapTokenService — non-interactive bootstrap RS256 token mint
+	// (#58). Internal-only (ban #6): NEVER on the external listener. The mTLS
+	// listener boundary is the gate (permission="<exempt>"); the caller-policy
+	// (authzguard.GatewayFrontedInternalRPCs) restricts the dialer to the gateway SA.
+	if svcs != nil && svcs.internalBootstrapTokenHandler != nil {
+		iamv1.RegisterInternalBootstrapTokenServiceServer(srv, svcs.internalBootstrapTokenHandler)
+	}
 }

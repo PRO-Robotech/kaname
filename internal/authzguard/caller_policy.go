@@ -90,6 +90,12 @@ func GatewayFrontedInternalRPCs() []string {
 		// lazy-mirror / recovery flow.
 		"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 		"/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
+		// InternalBootstrapTokenService — non-interactive bootstrap token mint
+		// (#58). Gateway-fronted: only the api-gateway SA may dial :9091 for it
+		// (the operator/CI reaches it through the internal sub-mux). permission=
+		// "<exempt>" → no acr-floor requirement in the catalog, so the acr-floor
+		// passes; the mTLS listener + this caller-policy are the gate.
+		"/kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken",
 	}
 }
 
