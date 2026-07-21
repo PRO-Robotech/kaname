@@ -164,7 +164,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-CR-CRUD-OK :: get-confirms-rya18",
+          "name": "IAM-ROL-CR-CRUD-OK :: get-confirms-rya20",
           "request": {
             "method": "GET",
             "header": [

@@ -2164,7 +2164,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-A",
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-A-rya12",
           "request": {
             "method": "DELETE",
             "header": [
@@ -2207,6 +2207,22 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2286,7 +2302,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-B",
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-B-rya13",
           "request": {
             "method": "DELETE",
             "header": [
@@ -2329,6 +2345,22 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",

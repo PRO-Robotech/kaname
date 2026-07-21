@@ -422,12 +422,22 @@ CASES.append(Case(
         # (and assert) with the CREATOR's identity.
         poll_operation_until_done(auth="jwtAccountAdminB"),
         assert_op_success(auth="jwtAccountAdminB"),
-        # cleanup both.
-        Step(name="cleanup-dup-A", method="DELETE", path="/iam/v1/projects/{{dupPrjA}}",
-             auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
+        # cleanup both. The DELETE is the FIRST authz-gated access of each just-
+        # created project (the prior polls were on the Create *Operation*, not the
+        # project resource), so its creator/owner FGA tuple can still be materialising
+        # (opgate removed → op.done ≠ tuple visible). Under load that surfaces as a
+        # transient 403 at the delete authz gate → the raw DELETE never saved a fresh
+        # `opId`, so the following poll polled the STALE op id (the prior delete's, minted
+        # by a DIFFERENT principal) → 404 from OperationService.Get's principal-scoped
+        # hide-existence. Wrap the own-fresh-resource delete in the bounded read-your-
+        # writes retry (retries SELF only on 403/404, fail-closed at budget).
+        retry_until_authorized(Step(
+            name="cleanup-dup-A", method="DELETE", path="/iam/v1/projects/{{dupPrjA}}",
+            auth="jwtAccountAdminA", test_script=[*assert_status(200), *save_from_response("j.id", "opId")])),
         poll_operation_until_done(),
-        Step(name="cleanup-dup-B", method="DELETE", path="/iam/v1/projects/{{dupPrjB}}",
-             auth="jwtAccountAdminB", test_script=[*save_from_response("j.id", "opId")]),
+        retry_until_authorized(Step(
+            name="cleanup-dup-B", method="DELETE", path="/iam/v1/projects/{{dupPrjB}}",
+            auth="jwtAccountAdminB", test_script=[*assert_status(200), *save_from_response("j.id", "opId")])),
         poll_operation_until_done(auth="jwtAccountAdminB"),
     ],
 ))

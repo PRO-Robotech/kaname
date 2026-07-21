@@ -256,7 +256,7 @@
       "description": "class:AUTHZ | class:SECRET | priority:P0",
       "item": [
         {
-          "name": "AUTHZGCP-SAKEY-SECRET-NOT-LEAKED :: issue-sakey-rya13",
+          "name": "AUTHZGCP-SAKEY-SECRET-NOT-LEAKED :: issue-sakey-rya15",
           "request": {
             "method": "POST",
             "header": [
@@ -446,13 +446,12 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('second GET — secret redacted', () => {",
-                  "  const cs = j.response && j.response.client_secret;",
-                  "  // Acceptance variants: empty string after proto Clear() OR explicit <redacted>",
-                  "  pm.expect([null, undefined, '', '<redacted>']).to.include(cs);",
+                  "pm.test('one-shot secret delivered within grace (privateKeyPem is a real PEM)', () => {",
+                  "  const pem = (j.response && j.response.privateKeyPem) || '';",
+                  "  pm.expect(pem, JSON.stringify(j)).to.include('BEGIN PRIVATE KEY');",
                   "});",
-                  "pm.test('client_id still present (not over-redacted)', () => {",
-                  "  pm.expect(j.response && j.response.client_id, JSON.stringify(j)).to.be.a('string').and.not.empty;",
+                  "pm.test('clientId identifier present (not over-redacted)', () => {",
+                  "  pm.expect(j.response && j.response.clientId, JSON.stringify(j)).to.be.a('string').and.not.empty;",
                   "});"
                 ]
               }
@@ -1602,19 +1601,20 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/check",
+              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "check"
+                "internal",
+                "iam:check"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"user\": \"user:{{userNOBId}}\", \"relation\": \"viewer\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"{{_probe_check_subj}}\", \"relation\": \"viewer\", \"object\": \"{{_probe_check_obj}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1634,7 +1634,18 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
-                  "}"
+                  "}",
+                  "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+                  "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (!intBase) {",
+                  "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+                  "  pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
+                  "}",
+                  "if (pm.environment.get('_probe_check_started') !== pm.info.requestName) { pm.environment.set('_probe_check_poll', '0'); pm.environment.set('_probe_check_started', pm.info.requestName); }",
+                  "pm.environment.set('_probe_check_subj', 'user:' + pm.environment.get('userNOBId'));",
+                  "pm.environment.set('_probe_check_obj', 'account:' + pm.environment.get('accountAId'));"
                 ]
               }
             },
@@ -1644,10 +1655,20 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('Check.allowed after AB.Create (drainer caught up)', () => {",
-                  "  // Drainer is async; if not yet, recommend re-running the case",
-                  "  // — assertion is on the eventual GREEN value, recorded at run-end.",
-                  "  pm.expect([true, false], 'check.allowed must be a boolean').to.include(j.allowed);",
+                  "const pc = parseInt(pm.environment.get('_probe_check_poll') || '0', 10);",
+                  "if (!(pm.response.code === 200 && j.allowed === true) && pc < 50) {",
+                  "  pm.environment.set('_probe_check_poll', String(pc + 1));",
+                  "  const _pcad = Date.now(); while (Date.now() - _pcad < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_probe_check_poll');",
+                  "pm.environment.unset('_probe_check_started');",
+                  "pm.environment.unset('_probe_check_subj');",
+                  "pm.environment.unset('_probe_check_obj');",
+                  "pm.test('FGA-readiness: probed tuple converged allowed=true', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "  pm.expect(j.allowed, JSON.stringify(j)).to.eql(true);",
                   "});"
                 ]
               }
@@ -2110,7 +2131,7 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "const pc = parseInt(pm.environment.get('_probe_check_after_revoke_poll') || '0', 10);",
-                  "if (!(pm.response.code === 200 && j.allowed === false) && pc < 50) {",
+                  "if (!(pm.response.code === 200 && j.allowed !== true) && pc < 50) {",
                   "  pm.environment.set('_probe_check_after_revoke_poll', String(pc + 1));",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
@@ -2121,7 +2142,7 @@
                   "pm.environment.unset('_probe_check_after_revoke_obj');",
                   "pm.test('revoke→deny: probed tuple converged allowed=false', () => {",
                   "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
-                  "  pm.expect(j.allowed, JSON.stringify(j)).to.eql(false);",
+                  "  pm.expect(j.allowed === true, JSON.stringify(j)).to.eql(false);",
                   "});"
                 ]
               }

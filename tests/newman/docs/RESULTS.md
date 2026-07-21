@@ -4,6 +4,60 @@ The suite is gated by `scripts/assert-suites-green.sh`: the gate subtracts a sma
 explicitly-enumerated known-RED set from each suite's failure count; everything else
 must be 0. The known-RED set is kept tiny and each entry has a documented reason.
 
+## Test-side fixes (round — 2026-07-21, qa; base `redesign/integration`@99f33d2)
+
+Triaged the clean-seed umbrella CI artifact (`na4/iam/.../out/*.json`). Findings by class:
+
+- **`iam-account-redesign` — 52 raw failures → 0 (ONE case, gate-blocking, FIXED).**
+  All 52 collapse to `IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: poll-op #4`. Root: the case's
+  `cleanup-dup-B` DELETE of account-B's **own freshly-created** project 403'd at the authz
+  gate — the creator's `v_delete` FGA owner-tuple was still materialising (opgate removed →
+  `op.done` ≠ tuple-visible; the prior create-op polls confirmed the *Operation*, not the
+  project resource). The un-retried DELETE never saved a fresh `opId`, so the following
+  poll polled the **stale** prior-delete op (minted by a DIFFERENT principal) → 404 from the
+  principal-scoped `OperationService.Get` hide-existence (51 retries + 1 done-assert). Fix
+  (test-only): wrap both own-fresh-resource cleanup deletes in `retry_until_authorized`
+  (bounded read-your-writes, fail-closed at budget). Not a product bug — canonical EC lag.
+
+- **`iam-authz-grant-check-propagation` — 3 (whitelisted, net-positive improvements).**
+  (a) `poll_check_denied_step` asserted `j.allowed === false`, but a real
+  `InternalIAMService.Check` deny returns `{"reason":…}` with the `false` bool OMITTED
+  (proto3-JSON default omission) → the poll could never converge on a correct deny. Fixed
+  to `code===200 && j.allowed !== true` (a genuine still-allowed `{"allowed":true}` still
+  fails — nothing masked). (b) `AUTHZGCP-AB-CREATE-CHECK-VISIBLE::probe-check` hit the
+  unregistered `/iam/v1/check` (always `403 catalog: no entry for method`) → migrated to the
+  working `poll_check_allowed_step` internal `/iam/v1/internal/iam:check` probe. (c)
+  `AUTHZGCP-SAKEY-SECRET-NOT-LEAKED::re-get-op-redacted` read non-existent snake_case
+  `client_id/client_secret` (real fields are camelCase `clientId`/`privateKeyPem`/
+  `clientSecret`) — the "redacted" assert passed vacuously, "client_id present" failed on
+  `undefined`. Reframed to lock the black-box observable (one-shot delivery + identifier);
+  the 120 s-grace redaction timing is unit-covered (`sa_keys/usecase_redaction_grace_test.go`).
+
+- **`rbac-visibility-set` (12) + `iam-rbac-subjects` (11) — grant-materialisation timing
+  under umbrella-parallel load; NOT confidently test-fixable, NOT force-masked.** These are
+  dominated by FGA tuple-materialisation lag that exceeded even the ~25 s bounded
+  `poll_request_until_status` window (`get-subjects-len-2`/`get-legacy-fills-subjects` → 404
+  own-AB hide-existence for the full 51-poll cap; `check-member-allowed`/`expand-access-members`
+  → 181 non-converging retries on group#member→viewer). **Wandering-flake signature**:
+  `RBACSUBJ-CR-NEW-AUTHOR::get-new-fills-legacy` uses the identical pattern and CONVERGED,
+  while its siblings did not — timing, not a functional/test hole (the hint's "0/138 green on
+  a healthy seed" confirms). The documented replica-lag remedy (`iam replicaCount=1`) is
+  **already** applied in `values.dev.yaml`; the residual is grant-materialisation THROUGHPUT
+  under the full parallel run (see MEMORY "grant-materialization O(mirror) root"). Two
+  `rbac-visibility-set` sub-classes are **over-shows** (`IAM-SET-*-VLIST-ONLY-DETAIL-404`
+  detail-Get returned 200; `*-LABEL-EXACT-OK` List over-showed no-label/other-label objects)
+  — deliberately **left RED, NOT whitelisted** (whitelisting an over-show could mask a real
+  leak; the `GroupService.List` v_list-filter gap is a pre-existing product finding, above).
+  Budget-inflation would be an anti-fix (MEMORY "budget-raise = timeout-cancel"). Disposition:
+  re-run on a healthy/less-loaded stack to confirm convergence; a persistent over-show after a
+  clean re-run is a product finding for TDD, not a test change. **The account-redesign fix is
+  the only gate-blocker in this set that is a genuine test defect.**
+
+- **Out of the artifact but NOT in scope**: `iam-internal-only-check` (8) fail with
+  `getaddrinfo ENOTFOUND api.kacho.local` — the external endpoint is unresolvable in the
+  port-forward-only newman CI (env limitation, not a leak); `iam-rbac-scope-grant` (7) not
+  triaged this round.
+
 ## Known failing — confirmed product-bug-floor (round-4: WHITELISTED, over-restrictive, cannot leak)
 
 These are **confirmed product defects**, each tracked by a GitHub issue, that are

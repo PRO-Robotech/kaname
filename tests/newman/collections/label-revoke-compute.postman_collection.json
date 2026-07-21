@@ -339,7 +339,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-DISK-03 :: create-disk-disk-rya20",
+          "name": "T31-LBLREVOKE-COMPUTE-DISK-03 :: create-disk-disk-rya22",
           "request": {
             "method": "POST",
             "header": [
@@ -1410,7 +1410,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-disk-snapsrc-rya21",
+          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-disk-snapsrc-rya23",
           "request": {
             "method": "POST",
             "header": [
@@ -1553,7 +1553,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-snapshot-rya22",
+          "name": "T31-LBLREVOKE-COMPUTE-SNAPSHOT-03 :: create-snapshot-rya24",
           "request": {
             "method": "POST",
             "header": [
@@ -2624,7 +2624,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-disk-imgsrc-rya23",
+          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-disk-imgsrc-rya25",
           "request": {
             "method": "POST",
             "header": [
@@ -2767,7 +2767,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-image-rya24",
+          "name": "T31-LBLREVOKE-COMPUTE-IMAGE-03 :: create-image-rya26",
           "request": {
             "method": "POST",
             "header": [

@@ -270,7 +270,15 @@ def poll_check_denied_step(name, subject_expr, object_expr, relation,
         test_script=[
             "const j = pm.response.json();",
             f"const pc = parseInt(pm.environment.get('{counter_var}') || '0', 10);",
-            f"if (!(pm.response.code === 200 && j.allowed === false) && pc < {max_attempts}) {{",
+            # DENY predicate is `allowed !== true`, NOT `allowed === false`: the
+            # InternalIAMService.Check response is proto3-JSON, which OMITS the bool
+            # `allowed` when it is the default `false` (a real deny returns
+            # `{"reason":"subject ... lacks relation ..."}` with NO `allowed` field).
+            # `j.allowed === false` is therefore `undefined === false` → never true →
+            # the poll would spin to the cap and fail even on a correct deny. A genuine
+            # still-allowed returns `{"allowed":true}`, so `allowed !== true` still
+            # fails it — nothing is masked.
+            f"if (!(pm.response.code === 200 && j.allowed !== true) && pc < {max_attempts}) {{",
             f"  pm.environment.set('{counter_var}', String(pc + 1));",
             "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
@@ -281,7 +289,7 @@ def poll_check_denied_step(name, subject_expr, object_expr, relation,
             f"pm.environment.unset('{body_object_var}');",
             "pm.test('revoke→deny: probed tuple converged allowed=false', () => {",
             "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
-            "  pm.expect(j.allowed, JSON.stringify(j)).to.eql(false);",
+            "  pm.expect(j.allowed === true, JSON.stringify(j)).to.eql(false);",
             "});",
         ],
     )
@@ -493,7 +501,22 @@ CASES.append(Case(
                 "}",
             ],
         ),
-        # Step 3: second GET — secret must now be redacted ("" or "<redacted>" or absent).
+        # Step 3: second GET — verify the OBSERVABLE one-shot-delivery shape with the
+        # ACTUAL proto3-JSON field names (camelCase: `privateKeyPem` / `clientId` /
+        # `clientSecret`, under `response`). The prior version read snake_case
+        # `client_secret`/`client_id` — fields that DON'T EXIST in the JSON — so
+        # "secret redacted" passed vacuously (undefined ∈ allow-list) while "client_id
+        # present" failed on undefined. The real one-shot secret for a keypair SA key is
+        # `privateKeyPem` (an ES256 PEM); `clientSecret` is "" for this key type.
+        #
+        # Redaction is time-gated: the plaintext is deliberately re-readable for the
+        # `sakey-redact-grace` window (default 120s — the one-shot client's read+save
+        # budget) and only then cleared to "<redacted>". A fast e2e cannot observe the
+        # 120s-delayed redaction, so that timing behavior is unit-covered
+        # (services/iam/.../sa_keys/usecase_redaction_grace_test.go, short injected grace
+        # — the correct layer for timing). Here we lock the black-box observable: the
+        # credential is delivered (privateKeyPem is a real PEM) and the identifier is
+        # present (clientId) — never over-redacted away.
         Step(
             name="re-get-op-redacted",
             method="GET",
@@ -501,13 +524,12 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             test_script=[
                 "const j = pm.response.json();",
-                "pm.test('second GET — secret redacted', () => {",
-                "  const cs = j.response && j.response.client_secret;",
-                "  // Acceptance variants: empty string after proto Clear() OR explicit <redacted>",
-                "  pm.expect([null, undefined, '', '<redacted>']).to.include(cs);",
+                "pm.test('one-shot secret delivered within grace (privateKeyPem is a real PEM)', () => {",
+                "  const pem = (j.response && j.response.privateKeyPem) || '';",
+                "  pm.expect(pem, JSON.stringify(j)).to.include('BEGIN PRIVATE KEY');",
                 "});",
-                "pm.test('client_id still present (not over-redacted)', () => {",
-                "  pm.expect(j.response && j.response.client_id, JSON.stringify(j)).to.be.a('string').and.not.empty;",
+                "pm.test('clientId identifier present (not over-redacted)', () => {",
+                "  pm.expect(j.response && j.response.clientId, JSON.stringify(j)).to.be.a('string').and.not.empty;",
                 "});",
             ],
         ),
@@ -937,26 +959,17 @@ CASES.append(Case(
                 "pm.test('op done', () => pm.expect(j.done).to.eql(true));",
             ],
         ),
-        # We probe Check; acceptance is that drainer pushes tuples quickly.
-        # We accept a short wait (handled by sendRequest poll).
-        Step(
+        # Probe Check on the api-gateway cluster-internal REST listener
+        # (InternalIAMService.Check, /iam/v1/internal/iam:check) — the prior
+        # /iam/v1/check path is NOT in the route catalog (AuthorizeService maps to
+        # /iam/v1/authorize:check) so it always 403s "catalog: no entry for method"
+        # and can never read a real `allowed`. Poll until the fresh grant's tuple
+        # converges allowed=true (fga_outbox emit-in-tx + drainer chain works).
+        poll_check_allowed_step(
             name="probe-check",
-            method="POST",
-            path="/iam/v1/check",
-            body={
-                "user": "user:{{userNOBId}}",
-                "relation": "viewer",
-                "object": "account:{{accountAId}}",
-            },
-            auth="jwtBootstrap",
-            test_script=[
-                "const j = pm.response.json();",
-                "pm.test('Check.allowed after AB.Create (drainer caught up)', () => {",
-                "  // Drainer is async; if not yet, recommend re-running the case",
-                "  // — assertion is on the eventual GREEN value, recorded at run-end.",
-                "  pm.expect([true, false], 'check.allowed must be a boolean').to.include(j.allowed);",
-                "});",
-            ],
+            subject_expr="'user:' + pm.environment.get('userNOBId')",
+            object_expr="'account:' + pm.environment.get('accountAId')",
+            relation="viewer",
         ),
     ],
 ))

@@ -219,7 +219,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: get-role-tier-rya16",
+          "name": "IAM-ROL-RD-CR-DEFINITIONTIER-OK :: get-role-tier-rya18",
           "request": {
             "method": "GET",
             "header": [
@@ -759,7 +759,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: get-role-no-compiled-rya17",
+          "name": "IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS :: get-role-no-compiled-rya19",
           "request": {
             "method": "GET",
             "header": [
