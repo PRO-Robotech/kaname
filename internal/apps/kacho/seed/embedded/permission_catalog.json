@@ -3104,7 +3104,8 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "2",
+    "hide_existence": true
   },
   {
     "fqn": "kacho.cloud.registry.v1.RegistryService/DeleteRepository",
@@ -3206,7 +3207,8 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "2",
+    "hide_existence": true
   },
   {
     "fqn": "kacho.cloud.registry.v1.RegistryService/UpdateRepository",
