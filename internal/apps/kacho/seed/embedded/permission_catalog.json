@@ -2237,6 +2237,15 @@
     }
   },
   {
+    "fqn": "kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    }
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.InternalClusterService/Get",
     "permission": "iam.cluster_admins.get",
     "required_relation": "system_admin",
