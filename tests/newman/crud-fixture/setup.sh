@@ -154,7 +154,7 @@ ensure_account() {
   found=$(find_account_by_name "$name" "$owner_token")
   if [ -n "$found" ]; then echo "$found"; return; fi
   local body op op_id
-  body=$(printf '{"name":"%s","description":"crud-fixture seed account","ownerUserId":"%s"}' "$name" "$owner")
+  body=$(printf '{"name":"%s","description":"crud-fixture seed account"}' "$name")
   op=$(api POST "/iam/v1/accounts" "$owner_token" "$body")
   op_id=$(echo "$op" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))' 2>/dev/null)
   if [ -z "$op_id" ]; then echo "[crud-fixture] FATAL: Account.Create no id: $op" >&2; return 1; fi

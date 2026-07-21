@@ -213,7 +213,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -912,7 +912,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgEquivGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgEquivGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1482,7 +1482,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgFlipGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgFlipGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2322,7 +2322,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgNmGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgNmGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3016,7 +3016,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgRvGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{chgRvGrp}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3563,7 +3563,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaAId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaAId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4167,7 +4167,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaAId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaAId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4766,7 +4766,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"

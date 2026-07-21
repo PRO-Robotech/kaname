@@ -81,6 +81,16 @@ else
   for res in authz-deny authz-sa-apitoken iam-account iam-project iam-user iam-role iam-group iam-service-account iam-access-binding iam-rbac-scope-grant iam-rbac-rules-labels iam-rbac-subjects iam-whoami; do
     run_one "$res"
   done
+  # IAM-1 REDESIGN authz-core suites (Account/Project tenancy-tree, Role
+  # definitionTier+catalog, AccessBinding scope+target+revoke) — tenant-facing
+  # source-of-truth for the new contract (docs/specs/sub-phase-IAM-1-tenancy-
+  # authz-core-acceptance.md, F1-F11). gen.py emits collections/iam-*-redesign.json,
+  # and the CI `assert all suites green` step parses EVERY collections/*.json — so
+  # these MUST run here, else the gate reports `iam-*-redesign(no-report)` as a
+  # phantom failure. Env deps seeded by the shared authz-fixtures.
+  run_one "iam-account-redesign"
+  run_one "iam-role-redesign"
+  run_one "iam-access-binding-redesign"
   # geo-read — AUTHENTICATED kacho-geo public reads through the api-gateway
   # (gateway->geo "no children to pick from" 503 regression; api-gateway#83 +
   # deploy#99). kacho-geo has no own tests/newman/, so the authenticated geo

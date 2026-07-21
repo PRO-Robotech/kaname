@@ -318,7 +318,9 @@ def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, ac
             body={
                 "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}],
                 "roleId": "{{" + role_var + "}}",
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{" + acct_var + "}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{" + acct_var + "}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -586,7 +588,9 @@ def grant_bylabel_generic(spec, role_var, acb_var, role_op, bind_op, verbs, role
         Step(name="grant-bylabel", method="POST", path="/iam/v1/accessBindings",
              body={"subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}],
                    "roleId": "{{" + role_var + "}}",
-                   "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"}},
+                   "scopeType": "iam.account",
+                   "scopeId": "{{accountAId}}",
+                   "target": {"allInScope": {}}},
              auth="jwtAccountAdminA",
              test_script=["const j = pm.response.json();",
                           "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",

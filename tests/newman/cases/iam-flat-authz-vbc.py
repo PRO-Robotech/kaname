@@ -143,7 +143,9 @@ CASES.append(Case(
             body={
                 "subjects": [{"type": "user", "id": "{{userNOBId}}"}],
                 "roleId": ROLE_VIEW,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -201,7 +203,9 @@ CASES.append(Case(
             body={
                 "subjects": [{"type": "", "id": "rol-not-a-subject"}],
                 "roleId": ROLE_VIEW,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

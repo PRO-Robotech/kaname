@@ -341,7 +341,9 @@ CASES.append(Case(
                     {"type": "SUBJECT_TYPE_GROUP", "id": "{{e30GroupId}}"},
                 ],
                 "roleId": ROLE_COMPUTE_ADMIN,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -410,7 +412,9 @@ CASES.append(Case(
             body={
                 "subjects": [],
                 "roleId": ROLE_COMPUTE_ADMIN,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -450,7 +454,9 @@ CASES.append(Case(
                 "const reqBody = {",
                 "  subjects: subs,",
                 f"  roleId: '{ROLE_COMPUTE_ADMIN}',",
-                "  scopeRef: { tier: 'ACCOUNT', id: accId },",
+                "  scopeType: 'iam.account',",
+                "  scopeId: accId,",
+                "  target: { allInScope: {} },",
                 "};",
                 "pm.request.body = { mode: 'raw', raw: JSON.stringify(reqBody), options: { raw: { language: 'json' } } };",
             ],
@@ -493,7 +499,9 @@ CASES.append(Case(
                     {"type": "SUBJECT_TYPE_USER", "id": "{{e34NewUserId}}"},
                 ],
                 "roleId": ROLE_COMPUTE_ADMIN,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -631,7 +639,9 @@ CASES.append(Case(
             body={
                 "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{e33UserId}}"}],
                 "roleId": ROLE_COMPUTE_ADMIN,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -828,7 +838,9 @@ CASES.append(Case(
             body={
                 "subjects": [{"type": "SUBJECT_TYPE_GROUP", "id": "{{e31GroupId}}"}],
                 "roleId": ROLE_VIEW,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -981,7 +993,9 @@ CASES.append(Case(
             body={
                 "subjects": [{"type": "SUBJECT_TYPE_GROUP", "id": "{{gmGrantGroupId}}"}],
                 "roleId": ROLE_VIEW,
-                "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"},
+                "scopeType": "iam.account",
+                "scopeId": "{{accountAId}}",
+                "target": {"allInScope": {}},
             },
             auth="jwtAccountAdminA",
             test_script=[

@@ -88,6 +88,11 @@ CASES.append(Case(
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "opId"),
                 *save_from_response("j.metadata && j.metadata.accountId", "crudAccountId"),
+                # IAM-1 F2: Account.Create co-creates a "default" Project (id in
+                # metadata.defaultProjectId). Capture it so the Delete case can remove
+                # the child first — projects_account_fk is ON DELETE RESTRICT, so
+                # Account.Delete fails FailedPrecondition while the default project exists.
+                *save_from_response("j.metadata && j.metadata.defaultProjectId", "crudDefaultProjectId"),
             ],
         ),
         # Step 2: Poll Operation until done.
@@ -983,10 +988,25 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-ACC-DL-CRUD-OK",
-    title="Delete crud account (no children) → Operation done, Get returns 404",
+    title="Delete crud account → remove F2 default project first (RESTRICT FK), then Operation done, Get returns 404",
     classes=["CRUD"],
     priority="P0",
     steps=[
+        # IAM-1 F2: the account carries a co-created "default" Project. Account.Delete
+        # is fail-closed while children exist (projects_account_fk ON DELETE RESTRICT →
+        # FailedPrecondition; TestAccount_08_Delete_WithProjects). Remove the default
+        # project first so the account is genuinely child-free.
+        Step(
+            name="delete-default-project",
+            method="DELETE",
+            path="/iam/v1/projects/{{crudDefaultProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
         Step(
             name="delete",
             method="DELETE",

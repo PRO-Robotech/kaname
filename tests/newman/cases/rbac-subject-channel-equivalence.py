@@ -214,7 +214,7 @@ def grant_view(name, subjects, acb_var, op_var):
         name=name,
         method="POST",
         path="/iam/v1/accessBindings",
-        body={"subjects": subjects, "roleId": ROLE_VIEW, "scopeRef": {"tier": "ACCOUNT", "id": "{{accountAId}}"}},
+        body={"subjects": subjects, "roleId": ROLE_VIEW, "scopeType": "iam.account", "scopeId": "{{accountAId}}", "target": {"allInScope": {}}},
         auth="jwtAccountAdminA",
         test_script=[
             "const j = pm.response.json();",

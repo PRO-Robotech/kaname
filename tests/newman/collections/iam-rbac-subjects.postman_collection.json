@@ -312,7 +312,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e30UserId}}\"}, {\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{e30GroupId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e30UserId}}\"}, {\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{e30GroupId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -585,7 +585,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -673,7 +673,9 @@
                   "const reqBody = {",
                   "  subjects: subs,",
                   "  roleId: 'rolfe4e91e8c9f6542a6',",
-                  "  scopeRef: { tier: 'ACCOUNT', id: accId },",
+                  "  scopeType: 'iam.account',",
+                  "  scopeId: accId,",
+                  "  target: { allInScope: {} },",
                   "};",
                   "pm.request.body = { mode: 'raw', raw: JSON.stringify(reqBody), options: { raw: { language: 'json' } } };"
                 ]
@@ -854,7 +856,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e34NewUserId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e34NewUserId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1663,7 +1665,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e33UserId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{e33UserId}}\"}], \"roleId\": \"rolfe4e91e8c9f6542a6\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2436,7 +2438,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{e31GroupId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{e31GroupId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2975,7 +2977,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{gmGrantGroupId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeRef\": {\"tier\": \"ACCOUNT\", \"id\": \"{{accountAId}}\"}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_GROUP\", \"id\": \"{{gmGrantGroupId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
