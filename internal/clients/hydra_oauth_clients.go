@@ -63,6 +63,10 @@ type HydraOAuthClient struct {
 	// JWKS — embedded JSON Web Key Set; populated when
 	// `token_endpoint_auth_method == "private_key_jwt"`.
 	JWKS *JWKS `json:"jwks,omitempty"`
+	// AccessTokenLifespan — per-client access-token lifetime (Go duration string,
+	// e.g. "15m0s"). Empty → Hydra's global default. Set for the bootstrap client
+	// so its minted tokens are deliberately short-lived (#58, IBT-09).
+	AccessTokenLifespan string `json:"access_token_lifespan,omitempty"`
 }
 
 // CreateOAuthClientRequest — input for HydraAdminClient.CreateOAuthClient.
@@ -95,6 +99,9 @@ type CreateOAuthClientRequest struct {
 	// public JWK here). Hydra stores it, validates `client_assertion`
 	// signatures against it, and never sees the private half.
 	JWKS *JWKS
+	// AccessTokenLifespan — per-client access-token lifetime (Go duration string).
+	// Empty → Hydra's global default.
+	AccessTokenLifespan string
 }
 
 // CreateOAuthClient registers a new client_credentials OAuth2 client with
@@ -125,6 +132,7 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 		TokenEndpointAuthMethod:     authMethod,
 		TokenEndpointAuthSigningAlg: req.TokenEndpointAuthSigningAlg,
 		JWKS:                        req.JWKS,
+		AccessTokenLifespan:         req.AccessTokenLifespan,
 	}
 	// #nosec G117 -- client_secret is a legitimate field of the Hydra OAuth2 client-registration payload, not a leaked credential.
 	body, err := json.Marshal(payload)
