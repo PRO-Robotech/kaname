@@ -538,7 +538,9 @@ CASES.append(Case(
                 # Legacy scope projection derived from scopeRef.
                 "pm.test('legacy resourceType filled = account (from scopeRef)', () => pm.expect(pm.response.json().scopeType).to.eql('iam.account'));",
                 "pm.test('legacy resourceId filled = accountAId (from scopeRef)', () => pm.expect(pm.response.json().scopeId).to.eql(pm.environment.get('accountAId')));",
-                "pm.test('legacy enum scope filled = ACCOUNT (from scopeRef)', () => pm.expect(pm.response.json().scope).to.eql('ACCOUNT'));",
+                # NB: the legacy `scope` enum field (proto tag 15) is a TOMBSTONE in the
+                # redesign — scope is projected ONLY as the dotted scopeType/scopeId
+                # (asserted above). The removed enum is no longer part of the contract.
             ],
         ),
         teardown_delete("e34NewAcbId"),

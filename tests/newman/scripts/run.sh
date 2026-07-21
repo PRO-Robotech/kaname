@@ -78,7 +78,12 @@ if [[ -n "$SERVICE" ]]; then
   run_one "$SERVICE"
 else
   # authz matrices + the IAM resource suites (Case/Step format).
-  for res in authz-deny authz-sa-apitoken iam-account iam-project iam-user iam-role iam-group iam-service-account iam-access-binding iam-rbac-scope-grant iam-rbac-rules-labels iam-rbac-subjects iam-whoami; do
+  # NB: the legacy iam-access-binding suite is RETIRED — superseded by
+  # iam-access-binding-redesign (IAM-1 F7-F11, the new scope_type/target/revoke
+  # contract). The legacy suite tested the tombstoned scope/scope_ref surface and
+  # was only half-migrated; the redesign suite is the authoritative AccessBinding
+  # coverage.
+  for res in authz-deny authz-sa-apitoken iam-account iam-project iam-user iam-role iam-group iam-service-account iam-rbac-scope-grant iam-rbac-rules-labels iam-rbac-subjects iam-whoami; do
     run_one "$res"
   done
   # IAM-1 REDESIGN authz-core suites (Account/Project tenancy-tree, Role
