@@ -53,7 +53,6 @@ func (a hydraExchange) Exchange(ctx context.Context, in bootstraptoken.ExchangeI
 	out, err := a.client.ClientCredentials(ctx, clients.ClientCredentialsRequest{
 		ClientAssertion: in.ClientAssertion,
 		Audience:        in.Audience,
-		Scope:           in.Scope,
 	})
 	if err != nil {
 		if errors.Is(err, clients.ErrHydraUnavailable) {

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -139,11 +138,16 @@ func (u *MintUseCase) Execute(ctx context.Context, ttlSeconds int64) (*Result, e
 		ClientAssertion: assertion,
 		Audience:        u.cfg.GatewayAudience,
 	})
-	if xerr != nil || out.AccessToken == "" {
-		// Fail-closed: peer unavailability / rejection must NOT yield a token and
-		// must NOT open-fail. The raw Hydra body never rides in the error (no
-		// auth-oracle); the cause is logged, not returned.
+	// Fail-closed: peer unavailability / rejection / a 2xx-but-empty token must
+	// NOT yield a token and must NOT open-fail. The raw Hydra body never rides in
+	// the error (no auth-oracle); the cause is logged (with a distinct message for
+	// the empty-token case so the trail isn't a nil err), not returned.
+	if xerr != nil {
 		u.logErr(ctx, "hydra exchange", xerr)
+		return nil, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
+	}
+	if out.AccessToken == "" {
+		u.logErr(ctx, "hydra exchange", errors.New("issuer returned an empty access token"))
 		return nil, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
 	}
 
@@ -202,7 +206,12 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 			Audience:            []string{u.cfg.GatewayAudience},
 			AccessTokenLifespan: u.cfg.MaxTTL.String(),
 		})
-		if herr != nil && !isHydraConflict(herr) {
+		// A Hydra 409 (client already exists — a prior/concurrent provision under
+		// retry) is idempotent success: the deterministic client_id + the JWK
+		// derived from the same env signing key target the identical client. NOTE
+		// (ops): this does NOT reconcile an existing client's JWKS — rotating the
+		// bootstrap signing key requires deleting the Hydra client so it re-provisions.
+		if herr != nil && !clients.IsConflict(herr) {
 			u.logErr(ctx, "hydra create-client", herr)
 			return Identity{}, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
 		}
@@ -264,14 +273,6 @@ func (u *MintUseCase) effectiveExpiresIn(reqTTL int64, hydraExpiresIn int) int64
 		eff = maxSec
 	}
 	return eff
-}
-
-// isHydraConflict reports whether a Hydra create-client error is a 409 (the
-// client already exists — a concurrent/prior provision under retry). Idempotent:
-// treated as success so provisioning re-converges.
-func isHydraConflict(err error) bool {
-	var apiErr *clients.HydraAPIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
 }
 
 // mapErr maps a repo error to a gRPC status, never leaking pgx/driver text.

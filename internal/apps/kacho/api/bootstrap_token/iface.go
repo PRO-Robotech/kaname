@@ -39,11 +39,12 @@ type OAuthClientAdmin interface {
 	CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error)
 }
 
-// ExchangeInput — the Hydra client_credentials exchange request.
+// ExchangeInput — the Hydra client_credentials exchange request. The bootstrap
+// mint requests no scope (the token carries identity only; per-RPC authz is the
+// gateway FGA Check), so there is no scope field.
 type ExchangeInput struct {
 	ClientAssertion string // the signed ES256 client_assertion (private_key_jwt).
 	Audience        string // requested token `aud` — the gateway audience (API_DOMAIN).
-	Scope           string // optional scope (empty → not requested).
 }
 
 // ExchangeOutput — Hydra's minted access-token relayed to the caller.

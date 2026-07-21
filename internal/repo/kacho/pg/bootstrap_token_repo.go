@@ -46,6 +46,9 @@ func (s *BootstrapStore) LockAndGet(ctx context.Context, txh service.Tx) (domain
 	tx := txAsPgx(txh)
 	// Serialise concurrent first-callers so only the winner reaches the external
 	// Hydra create; losers block here until the winner commits, then read the row.
+	// The no-orphan guarantee relies on the repo-wide READ COMMITTED isolation: a
+	// loser's post-lock SELECT runs on a fresh snapshot that sees the winner's
+	// committed mapping (found=true → skip create). UNIQUE(sva_id) is the backstop.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, bootstrapProvisionLockName); err != nil {
 		return domain.ServiceAccountOAuthClient{}, false, mapErr(err, "", "")
 	}
