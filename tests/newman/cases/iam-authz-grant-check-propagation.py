@@ -518,7 +518,12 @@ CASES.append(Case(
             path="/operations/{{_sakeyRedact_opId}}",
             auth="anonymous",
             test_script=[
-                "pm.test('anonymous GET → 404', () => pm.expect(pm.response.code).to.eql(404));",
+                # Anonymous hits the authN gate FIRST → 401 UNAUTHENTICATED; hide-existence
+                # 404 only applies to an AUTHENTICATED-but-unauthorized caller. Either way
+                # anonymous is DENIED and cannot see the op (no leak). Mirrors OP-GET-ANON-DENY.
+                "pm.test('anonymous GET → denied (401 authN / 404 hide-existence)', () => {",
+                "  pm.expect([401, 404], 'expected 401 or 404, got '+pm.response.code).to.include(pm.response.code);",
+                "});",
             ],
         ),
     ],

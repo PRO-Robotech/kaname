@@ -496,7 +496,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('anonymous GET → 404', () => pm.expect(pm.response.code).to.eql(404));"
+                  "pm.test('anonymous GET → denied (401 authN / 404 hide-existence)', () => {",
+                  "  pm.expect([401, 404], 'expected 401 or 404, got '+pm.response.code).to.include(pm.response.code);",
+                  "});"
                 ]
               }
             }
