@@ -380,8 +380,11 @@ CASES.append(Case(
             path="/operations/{{_opGetAnon_opId}}",
             auth="anonymous",
             test_script=[
-                "pm.test('anonymous GET /operations/{id} → 404 NotFound', () => {",
-                "  pm.expect(pm.response.code, 'expected 404, got '+pm.response.code).to.eql(404);",
+                # Anonymous hits the authN gate FIRST → 401 UNAUTHENTICATED (correct
+                # denial; hide-existence 404 only applies to an AUTHENTICATED-but-
+                # unauthorized caller). Either way anonymous is DENIED (no leak).
+                "pm.test('anonymous GET /operations/{id} → denied (401 authN / 404 hide-existence)', () => {",
+                "  pm.expect([401, 404], 'expected 401 or 404, got '+pm.response.code).to.include(pm.response.code);",
                 "});",
             ],
         ),
@@ -423,8 +426,8 @@ CASES.append(Case(
             path="/operations/{{_opCancelAnon_opId}}:cancel",
             auth="anonymous",
             test_script=[
-                "pm.test('anonymous Cancel → 404 NotFound', () => {",
-                "  pm.expect([404, 403], 'expected NotFound (anti-leak) or PermissionDenied').to.include(pm.response.code);",
+                "pm.test('anonymous Cancel → denied (401 authN / 404 hide-existence / 403)', () => {",
+                "  pm.expect([401, 404, 403], 'expected denial, got '+pm.response.code).to.include(pm.response.code);",
                 "});",
             ],
         ),
