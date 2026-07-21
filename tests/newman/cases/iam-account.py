@@ -545,7 +545,12 @@ CASES.append(Case(
             name="get-foreign",
             method="GET",
             path="/iam/v1/accounts/{{accountAId}}",
-            auth="jwtNoBindings",
+            # jwtNoBindings is used DOUBLY in the seed (also a grant-TARGET for the
+            # grant/revoke suites), so under the shared wave it can carry a live
+            # v_get on accountAId → 200 (over-visibility that is a SEED artifact, not
+            # a product leak). Use the DEDICATED never-granted jwtPureNoBindings so
+            # the foreign-deny is a true no-access probe.
+            auth="jwtPureNoBindings",
             test_script=[
                 "pm.test('FOREIGN: status 404 (hide existence, was 403)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                 "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
