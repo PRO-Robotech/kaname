@@ -25,6 +25,16 @@ func (s *stubSAClientRepo) AccountForServiceAccount(ctx context.Context, id doma
 	return "acc00000000000000001", nil
 }
 
+// OwnerUserForServiceAccount — резолвер владельца account'а SA (порт SAClientRepo,
+// #60 SA-key analog). Дефолт — фиксированный owner; тесты created_by-стемпинга для
+// SA-caller'а подставляют свой.
+func (s *stubSAClientRepo) OwnerUserForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.UserID, error) {
+	if s.ownerUserID != "" {
+		return s.ownerUserID, nil
+	}
+	return "usr00000000000000001", nil
+}
+
 // TestIssue_NameLabels_MapThrough — name + labels из IssueInput попадают в
 // persisted row (Insert) и в proto-response (saClientToProto).
 func TestIssue_NameLabels_MapThrough(t *testing.T) {

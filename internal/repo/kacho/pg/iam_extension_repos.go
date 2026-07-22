@@ -123,6 +123,27 @@ func (r *SAOAuthClientRepo) AccountForServiceAccount(ctx context.Context, id dom
 	return domain.AccountID(accountID), nil
 }
 
+// OwnerUserForServiceAccount resolves the account owner (a users(id)) of a
+// ServiceAccount via service_accounts → accounts. Used by SAKeyService.Issue to
+// stamp a VALID created_by when the caller is a service-account principal (whose
+// `sva…` id is not a users row) — the #60 analog for SA-keys. Missing SA →
+// ErrNotFound ("ServiceAccount <id> not found", contract tone).
+func (r *SAOAuthClientRepo) OwnerUserForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.UserID, error) {
+	var ownerUserID string
+	err := r.pool.QueryRow(ctx,
+		`SELECT a.owner_user_id
+		   FROM service_accounts sa
+		   JOIN accounts a ON a.id = sa.account_id
+		  WHERE sa.id = $1`, string(id)).Scan(&ownerUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
+	}
+	if err != nil {
+		return "", mapErr(err, "SAOAuthClient.OwnerUserForServiceAccount", string(id))
+	}
+	return domain.UserID(ownerUserID), nil
+}
+
 // FindByExternalSubject — reverse lookup for federation IN: given an
 // external OIDC (issuer, sub) tuple, return the SA-OAuth-client mapping whose
 // `trusted_subjects` contains an entry with matching issuer AND a

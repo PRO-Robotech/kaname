@@ -33,11 +33,12 @@ import (
 // ---- Mocks ----
 
 type stubSAClientRepo struct {
-	inserted  domain.ServiceAccountOAuthClient
-	insertOK  bool
-	accountID domain.AccountID
-	getRow    domain.ServiceAccountOAuthClient
-	getErr    error
+	inserted    domain.ServiceAccountOAuthClient
+	insertOK    bool
+	accountID   domain.AccountID
+	ownerUserID domain.UserID
+	getRow      domain.ServiceAccountOAuthClient
+	getErr      error
 }
 
 func (s *stubSAClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {

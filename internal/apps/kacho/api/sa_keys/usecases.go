@@ -65,6 +65,12 @@ type SAClientRepo interface {
 	// Issue/Revoke can stamp `account_id` on the Operation metadata (account-scoped
 	// /iam/operations feed). Missing SA → ErrNotFound.
 	AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, error)
+	// OwnerUserForServiceAccount resolves the account owner (a users(id)) of a
+	// ServiceAccount. Used to stamp a VALID `created_by` when the caller is a
+	// machine (service-account) principal that is not itself a users row — the
+	// #60 analog for SA-keys (see Execute). Deterministic (never caller-chosen),
+	// so it opens no created_by-spoofing surface. Missing SA → ErrNotFound.
+	OwnerUserForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.UserID, error)
 }
 
 // OAuthClientAdmin abstracts hydra-admin operations needed by Issue/Revoke.
@@ -200,6 +206,16 @@ type IssueInput struct {
 	TTLSeconds       int64
 	CreatedByUserID  string
 
+	// CallerIsServiceAccount marks that the authenticated caller is a
+	// service-account principal (the acr-exempt #58 bootstrap-admin SA, or any
+	// system_admin SA the gateway FGA-authorized for v_update@iam_service_account).
+	// Its `sva…` principal id is NOT a users(id) row, so recording it as
+	// created_by would fail the created_by FK (23503) as an opaque async code-9
+	// (the SA-key half of #60). When true, Execute resolves created_by to the SA's
+	// account OWNER (a valid users row, deterministic) instead of the SA id. The
+	// audit actor stays the real caller (the SA) — see `actor` in Execute.
+	CallerIsServiceAccount bool
+
 	// Name — человекочитаемое имя ключа (create-only, immutable). Пусто → "".
 	Name string
 	// Labels — произвольные метки ключа (create-only, immutable). Пусто → {}.
@@ -264,6 +280,24 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	accountID, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
 	if err != nil {
 		return nil, mapPGErr(err)
+	}
+
+	// #60 analog (SA-key non-interactive seed path): a service-account principal
+	// caller cannot be the created_by — its `sva…` id is not a users(id) row, so
+	// created_by=principal would fail the created_by FK (23503) as an opaque async
+	// code-9, and there is no non-interactive path to mint an SA token (SAKeyService
+	// .Issue is acr=2 → only an acr-exempt SA may call it, but that same SA could
+	// not supply a valid created_by). Record created_by = the SA's account OWNER (a
+	// valid users row). Deterministic — the owner is resolved from the target SA,
+	// never chosen by the caller, so no created_by-spoofing surface opens. The REAL
+	// actor (the SA) is still captured as the audit actor (`actor` below), so
+	// accountability is preserved.
+	if in.CallerIsServiceAccount {
+		owner, oerr := u.repo.OwnerUserForServiceAccount(ctx, in.ServiceAccountID)
+		if oerr != nil {
+			return nil, mapPGErr(oerr)
+		}
+		in.CreatedByUserID = string(owner)
 	}
 
 	keyID := domain.SAOAuthClientID(ids.NewID(domain.PrefixSAOAuthClient))

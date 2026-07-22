@@ -12,6 +12,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
@@ -45,9 +46,22 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 	if principal == "" {
 		return nil, authzguard.PermissionDenied()
 	}
-	if rv := req.GetCreatedByUserId(); rv != "" && rv != principal {
-		return nil, status.Error(codes.InvalidArgument,
-			"Illegal argument created_by_user_id: must match authenticated principal or be empty")
+	// Admin/seed path (#60 SA-key analog): a service-account principal caller (the
+	// acr-exempt #58 bootstrap-admin SA, or any system_admin SA the gateway
+	// FGA-authorized for v_update@iam_service_account) is not a users(id) row, so it
+	// cannot itself be the created_by — forcing created_by=principal would fail the
+	// created_by FK (23503) as an opaque async code-9 (issue #60). For an SA caller
+	// the use-case records created_by = the target SA's account OWNER (a valid users
+	// row, deterministic — never a request-body value, so no spoofing), while the
+	// REAL actor (the SA) is still captured in the durable audit_outbox event.
+	callerIsServiceAccount := operations.PrincipalFromContext(ctx).Type == "service_account"
+	if !callerIsServiceAccount {
+		// user/system caller — anti-spoofing: a request-body created_by must match
+		// the authenticated principal (or be empty).
+		if rv := req.GetCreatedByUserId(); rv != "" && rv != principal {
+			return nil, status.Error(codes.InvalidArgument,
+				"Illegal argument created_by_user_id: must match authenticated principal or be empty")
+		}
 	}
 	// Phase 3b: federated trusted-subjects passthrough. nil/empty slice keeps
 	// Phase 3a private_key_jwt behaviour intact (no schema change for
@@ -66,11 +80,12 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		}
 	}
 	op, err := h.issue.Execute(ctx, IssueInput{
-		ServiceAccountID: domain.ServiceAccountID(req.GetServiceAccountId()),
-		Description:      req.GetDescription(),
-		TTLSeconds:       req.GetTtlSeconds(),
-		CreatedByUserID:  principal,
-		TrustedSubjects:  ts,
+		ServiceAccountID:       domain.ServiceAccountID(req.GetServiceAccountId()),
+		Description:            req.GetDescription(),
+		TTLSeconds:             req.GetTtlSeconds(),
+		CreatedByUserID:        principal,
+		CallerIsServiceAccount: callerIsServiceAccount,
+		TrustedSubjects:        ts,
 		// Create-only metadata: name + labels are set on Issue and immutable
 		// (the resource carries only Issue/List/Revoke — no Update).
 		Name:   req.GetName(),
