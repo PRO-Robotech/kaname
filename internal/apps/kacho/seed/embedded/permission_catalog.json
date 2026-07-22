@@ -2842,16 +2842,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/AttachTargetGroup",
-    "permission": "loadbalancer.networkLoadBalancers.attachTargetGroup",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "nlb_network_load_balancer",
-      "from_request_field": "network_load_balancer_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Create",
     "permission": "loadbalancer.networkLoadBalancers.create",
     "required_relation": "editor",
@@ -2865,16 +2855,6 @@
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Delete",
     "permission": "loadbalancer.networkLoadBalancers.delete",
     "required_relation": "v_delete",
-    "scope_extractor": {
-      "object_type": "nlb_network_load_balancer",
-      "from_request_field": "network_load_balancer_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/DetachTargetGroup",
-    "permission": "loadbalancer.networkLoadBalancers.detachTargetGroup",
-    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
@@ -2923,26 +2903,6 @@
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Move",
     "permission": "loadbalancer.networkLoadBalancers.move",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "nlb_network_load_balancer",
-      "from_request_field": "network_load_balancer_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Start",
-    "permission": "loadbalancer.networkLoadBalancers.start",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "nlb_network_load_balancer",
-      "from_request_field": "network_load_balancer_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Stop",
-    "permission": "loadbalancer.networkLoadBalancers.stop",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "nlb_network_load_balancer",

@@ -64,8 +64,6 @@ var expectedOperatorPermissions = []string{
 	"loadbalancer.networkLoadBalancers.*.getTargetStates",
 	"loadbalancer.networkLoadBalancers.*.list",
 	"loadbalancer.networkLoadBalancers.*.listOperations",
-	"loadbalancer.networkLoadBalancers.*.start",
-	"loadbalancer.networkLoadBalancers.*.stop",
 	"loadbalancer.operations.*.get",
 	"loadbalancer.targetGroups.*.get",
 	"loadbalancer.targetGroups.*.list",
@@ -218,10 +216,8 @@ func TestSeed_NLB_04_ReapplyIdempotent(t *testing.T) {
 		VALUES
 		 ($1, 'cluster_kacho_root', NULL,
 		 'loadbalancer.operator',
-		 'NLB operator (start/stop/getTargetStates/listOperations + viewer on LB hierarchy)',
+		 'NLB operator (getTargetStates/listOperations + viewer on LB hierarchy)',
 		 '[
-		 "loadbalancer.networkLoadBalancers.*.start",
-		 "loadbalancer.networkLoadBalancers.*.stop",
 		 "loadbalancer.networkLoadBalancers.*.getTargetStates",
 		 "loadbalancer.networkLoadBalancers.*.listOperations",
 		 "loadbalancer.networkLoadBalancers.*.get",
