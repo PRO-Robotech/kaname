@@ -179,6 +179,14 @@ var verbBearingTypes = map[string]bool{
 	"nlb_listener":                   true,
 	"registry_registry":              true,
 	"registry_repository":            true,
+	// storage (kacho-storage) — Volume/Snapshot/Image per-object authz objects.
+	// Verb-bearing so the reconciler materializes per-object v_* for the creator's
+	// project binding — the model type + these Go tables + knownModules("storage")
+	// are ALL required or owner-GET fail-closes 403 (#71). Parity with nlb (project-
+	// only emitter, DIRECT v_*, no `owner` derivation).
+	"storage_volume":                 true,
+	"storage_snapshot":               true,
+	"storage_image":                  true,
 	"iam_user":                       true,
 	"iam_service_account":            true,
 	"iam_group":                      true,
@@ -272,6 +280,17 @@ var objectTypes = map[string]string{
 	// resource; `repositories` is the per-repo authz object (docker pull/push).
 	"registry.registries":   "registry_registry",
 	"registry.repositories": "registry_repository",
+
+	// storage (kacho-storage) — object-prefix `storage_` == service name (like
+	// registry), so no moduleObjectDomain mapping is required. Volume / Snapshot /
+	// Image are per-object verb-bearing authz targets: their Get/Update/Delete
+	// scope_extractor anchors on the object itself ({storage_volume,volume_id} etc.),
+	// so RegisterResource mirrors them here → the reconciler materializes per-object
+	// v_* for the creator's project binding (#71). Dotted segments are the plural
+	// catalog form (storage.volumes.*).
+	"storage.volumes":   "storage_volume",
+	"storage.snapshots": "storage_snapshot",
+	"storage.images":    "storage_image",
 
 	// iam — note the hierarchy types `account` and `project` are bare
 	// (no `iam_` prefix) because they're shared hierarchy ancestors in

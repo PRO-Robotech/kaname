@@ -50,7 +50,7 @@ func TestModuleSetDrift_AuthzmapVsDomain(t *testing.T) {
 	}
 
 	// (3) Pin the exact set for a human-readable failure if either side changes.
-	want := []string{"compute", "iam", "loadbalancer", "registry", "vpc"}
+	want := []string{"compute", "iam", "loadbalancer", "registry", "storage", "vpc"}
 	if len(prefixes) != len(want) {
 		t.Fatalf("authzmap module-prefix set = %v, want %v", prefixes, want)
 	}

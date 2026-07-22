@@ -19,7 +19,7 @@ package domain
 
 // knownModules — the closed set of platform modules a rule may grant over. Order
 // is the canonical platform order (iam first, then resource domains).
-var knownModules = []string{"iam", "vpc", "compute", "loadbalancer", "registry"}
+var knownModules = []string{"iam", "vpc", "compute", "loadbalancer", "registry", "storage"}
 
 // knownModuleSet — membership index built once from knownModules.
 var knownModuleSet = func() map[string]struct{} {
