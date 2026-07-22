@@ -172,6 +172,15 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	if in.CreatedByUserID == "" {
 		return nil, status.Error(codes.InvalidArgument, "created_by_user_id required")
 	}
+	// DEFECT (b) / UTM-12: created_by MUST be a user principal. An SA caller
+	// (`sva…`) is not a users(id) row → without this sync guard the async Insert
+	// hits the created_by FK (23503) and surfaces as an opaque done+error code-9.
+	// Reject SYNC with a clear message; the admin/seed path is
+	// InternalUserTokenService.MintUserToken (#60), not this public RPC.
+	if !strings.HasPrefix(in.CreatedByUserID, domain.PrefixUser) {
+		return nil, status.Error(codes.InvalidArgument,
+			"created_by_user_id must be a user principal")
+	}
 	if in.TTLSeconds < 0 {
 		return nil, status.Error(codes.InvalidArgument, "ttl_seconds must be >= 0")
 	}
@@ -190,6 +199,20 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	accountID, err := u.repo.AccountForUser(ctx, in.UserID)
 	if err != nil {
 		return nil, mapPGErr(err)
+	}
+
+	// DEFECT (b) / UTM-12: created_by existence — the own-DB created_by FK
+	// precondition. Validate SYNC so a well-formed-but-unknown user fails
+	// FAILED_PRECONDITION here, never as an async code-9. Skipped when created_by
+	// == the target user (already resolved just above — the common self-issue path).
+	if in.CreatedByUserID != string(in.UserID) {
+		if _, cerr := u.repo.AccountForUser(ctx, domain.UserID(in.CreatedByUserID)); cerr != nil {
+			if errors.Is(cerr, iamerr.ErrNotFound) {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"created_by_user_id %s is not a known user", in.CreatedByUserID)
+			}
+			return nil, mapPGErr(cerr)
+		}
 	}
 
 	tokenID := domain.UserOAuthClientID(ids.NewID(domain.PrefixUserOAuthClient))
