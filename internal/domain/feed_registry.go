@@ -53,6 +53,18 @@ var labelSelectableTypes = map[string]struct{}{
 	// materializable but NOT label-selectable — see materializableTypes below).
 	"registry.registries": {},
 
+	// storage (kacho-storage) — Volume/Snapshot/Image carry own-table labels
+	// (mirror-fed via storage→iam RegisterResource `Labels` payload), exactly like
+	// vpc/compute, so they are label-selectable AND materializable. #71: without
+	// these the wildcard-expansion set AllMaterializableTypes() excluded storage →
+	// SyncAllSystemRoleSelectors never projected storage into the edit/view/admin
+	// role_rule_selectors → the reconciler materialized NO per-object v_* for a
+	// project-editor binding → the owner got 403 on their OWN just-created volume
+	// (the storage_volume tuple carried only `#project`, no v_get for the creator).
+	"storage.volumes":   {},
+	"storage.snapshots": {},
+	"storage.images":    {},
+
 	// iam-direct — labels live on the native table + an iam-hierarchy
 	// containment. Unified model: ALL iam-native types are label-selectable,
 	// matched SAME-DB from their own table (no self-mirror, acyclic).

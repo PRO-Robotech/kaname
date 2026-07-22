@@ -118,6 +118,7 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
 		"registry.registries", "registry.repositories",
+		"storage.images", "storage.snapshots", "storage.volumes",
 		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
 		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
 	}
@@ -154,6 +155,7 @@ func TestSystemWildcardRoleSelectors_MigrationLockstep(t *testing.T) {
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
 		"registry.registries", "registry.repositories",
+		"storage.images", "storage.snapshots", "storage.volumes",
 		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
 		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
 	}
