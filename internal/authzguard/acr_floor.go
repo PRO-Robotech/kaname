@@ -15,9 +15,12 @@
 //
 // For each RPC in the GATEWAY-FRONTED set (GatewayFrontedInternalRPCs — caller-
 // context = api-gateway acting for an end user) whose catalog
-// `required_acr_min > 0`, it enforces `acr >= required_acr_min` (the SAME
-// grpcsrv.ACRSatisfies ranking the public StepUpGate uses, so the two never
-// drift). The presented acr is read from the trusted ctx
+// `required_acr_min > 0`, it enforces `acr >= required_acr_min` via
+// grpcsrv.ACRSatisfies (the iam-side ACR ranking). The public gateway StepUpGate
+// maintains a SEPARATE, functionally-identical ranking table (its own acrRank) —
+// the two are NOT shared, but read the same catalog value; their identical
+// pass/deny verdict is locked by a verdict-parity test (SEC-ACR-16) so they
+// cannot drift. The presented acr is read from the trusted ctx
 // (grpcsrv.TrustedACRFromContext): on the mTLS-verified gateway→iam edge the
 // gateway forwards x-kacho-token-acr; on an unverified/foreign-SAN peer the acr
 // is dropped upstream (corelib) → treated as rank 0 → denied (anti-spoof).

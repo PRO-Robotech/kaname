@@ -7,7 +7,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/Delete",
@@ -17,7 +17,7 @@
       "object_type": "compute_disk_placement_group",
       "from_request_field": "disk_placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/Get",
@@ -27,7 +27,7 @@
       "object_type": "compute_disk_placement_group",
       "from_request_field": "disk_placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/List",
@@ -37,7 +37,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/ListAccessBindings",
@@ -47,7 +47,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/ListDisks",
@@ -57,7 +57,7 @@
       "object_type": "compute_disk_placement_group",
       "from_request_field": "disk_placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/ListOperations",
@@ -67,7 +67,7 @@
       "object_type": "compute_disk_placement_group",
       "from_request_field": "disk_placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/SetAccessBindings",
@@ -87,7 +87,7 @@
       "object_type": "compute_disk_placement_group",
       "from_request_field": "disk_placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/UpdateAccessBindings",
@@ -107,7 +107,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/Delete",
@@ -117,7 +117,7 @@
       "object_type": "compute_disk",
       "from_request_field": "disk_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/Get",
@@ -127,7 +127,7 @@
       "object_type": "compute_disk",
       "from_request_field": "disk_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/List",
@@ -137,7 +137,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/ListAccessBindings",
@@ -147,7 +147,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/ListOperations",
@@ -157,7 +157,7 @@
       "object_type": "compute_disk",
       "from_request_field": "disk_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/ListSnapshotSchedules",
@@ -167,7 +167,7 @@
       "object_type": "compute_disk",
       "from_request_field": "disk_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/Relocate",
@@ -177,7 +177,7 @@
       "object_type": "compute_disk",
       "from_request_field": "disk_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/SetAccessBindings",
@@ -197,7 +197,7 @@
       "object_type": "compute_disk",
       "from_request_field": "disk_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/UpdateAccessBindings",
@@ -217,7 +217,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.DiskTypeService/List",
@@ -227,7 +227,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/Create",
@@ -237,7 +237,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/Delete",
@@ -247,7 +247,7 @@
       "object_type": "compute_filesystem",
       "from_request_field": "filesystem_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/Get",
@@ -257,7 +257,7 @@
       "object_type": "compute_filesystem",
       "from_request_field": "filesystem_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/List",
@@ -267,7 +267,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/ListAccessBindings",
@@ -277,7 +277,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/ListOperations",
@@ -287,7 +287,7 @@
       "object_type": "compute_filesystem",
       "from_request_field": "filesystem_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/SetAccessBindings",
@@ -307,7 +307,7 @@
       "object_type": "compute_filesystem",
       "from_request_field": "filesystem_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.FilesystemService/UpdateAccessBindings",
@@ -327,7 +327,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/Delete",
@@ -337,7 +337,7 @@
       "object_type": "compute_gpu_cluster",
       "from_request_field": "gpu_cluster_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/Get",
@@ -347,7 +347,7 @@
       "object_type": "compute_gpu_cluster",
       "from_request_field": "gpu_cluster_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/List",
@@ -357,7 +357,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/ListAccessBindings",
@@ -367,7 +367,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/ListInstances",
@@ -377,7 +377,7 @@
       "object_type": "compute_gpu_cluster",
       "from_request_field": "gpu_cluster_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/ListOperations",
@@ -387,7 +387,7 @@
       "object_type": "compute_gpu_cluster",
       "from_request_field": "gpu_cluster_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/SetAccessBindings",
@@ -407,7 +407,7 @@
       "object_type": "compute_gpu_cluster",
       "from_request_field": "gpu_cluster_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/UpdateAccessBindings",
@@ -427,7 +427,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/Delete",
@@ -437,7 +437,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/Get",
@@ -447,7 +447,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/List",
@@ -457,7 +457,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/ListAccessBindings",
@@ -467,7 +467,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/ListHosts",
@@ -477,7 +477,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/ListInstances",
@@ -487,7 +487,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/ListOperations",
@@ -497,7 +497,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/SetAccessBindings",
@@ -517,7 +517,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostGroupService/UpdateAccessBindings",
@@ -537,7 +537,7 @@
       "object_type": "compute_host_group",
       "from_request_field": "host_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostTypeService/Get",
@@ -547,7 +547,7 @@
       "object_type": "compute_host_type",
       "from_request_field": "host_type_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.HostTypeService/List",
@@ -557,7 +557,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/Create",
@@ -567,7 +567,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/Delete",
@@ -577,7 +577,7 @@
       "object_type": "compute_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/Get",
@@ -587,7 +587,7 @@
       "object_type": "compute_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/GetLatestByFamily",
@@ -597,7 +597,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/List",
@@ -607,7 +607,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/ListAccessBindings",
@@ -617,7 +617,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/ListOperations",
@@ -627,7 +627,7 @@
       "object_type": "compute_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/SetAccessBindings",
@@ -647,7 +647,7 @@
       "object_type": "compute_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ImageService/UpdateAccessBindings",
@@ -667,7 +667,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/AttachDisk",
@@ -677,7 +677,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/AttachFilesystem",
@@ -687,7 +687,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/AttachNetworkInterface",
@@ -697,7 +697,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Create",
@@ -707,7 +707,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Delete",
@@ -717,7 +717,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/DetachDisk",
@@ -727,7 +727,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/DetachFilesystem",
@@ -737,7 +737,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/DetachNetworkInterface",
@@ -747,7 +747,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Get",
@@ -757,7 +757,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/GetSerialPortOutput",
@@ -767,7 +767,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/List",
@@ -777,7 +777,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/ListAccessBindings",
@@ -787,7 +787,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/ListOperations",
@@ -797,7 +797,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Relocate",
@@ -807,7 +807,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/RemoveOneToOneNat",
@@ -817,7 +817,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Restart",
@@ -827,7 +827,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/SetAccessBindings",
@@ -847,7 +847,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Start",
@@ -857,7 +857,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Stop",
@@ -867,7 +867,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/Update",
@@ -877,7 +877,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/UpdateAccessBindings",
@@ -897,7 +897,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/UpdateNetworkInterface",
@@ -907,7 +907,7 @@
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalDiskTypeService/Create",
@@ -917,7 +917,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalDiskTypeService/Delete",
@@ -927,7 +927,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalDiskTypeService/Update",
@@ -937,7 +937,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalMachineTypeService/Create",
@@ -947,7 +947,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalMachineTypeService/Delete",
@@ -957,7 +957,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalMachineTypeService/Update",
@@ -967,7 +967,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InternalResourceLifecycleService/Subscribe",
@@ -995,7 +995,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.MachineTypeService/List",
@@ -1005,7 +1005,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.MaintenanceService/Get",
@@ -1015,7 +1015,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.MaintenanceService/List",
@@ -1025,7 +1025,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.MaintenanceService/Reschedule",
@@ -1035,7 +1035,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Create",
@@ -1045,7 +1045,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Delete",
@@ -1055,7 +1055,7 @@
       "object_type": "compute_placement_group",
       "from_request_field": "placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Get",
@@ -1065,7 +1065,7 @@
       "object_type": "compute_placement_group",
       "from_request_field": "placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/List",
@@ -1075,7 +1075,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/ListAccessBindings",
@@ -1085,7 +1085,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/ListInstances",
@@ -1095,7 +1095,7 @@
       "object_type": "compute_placement_group",
       "from_request_field": "placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/ListOperations",
@@ -1105,7 +1105,7 @@
       "object_type": "compute_placement_group",
       "from_request_field": "placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/SetAccessBindings",
@@ -1125,7 +1125,7 @@
       "object_type": "compute_placement_group",
       "from_request_field": "placement_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/UpdateAccessBindings",
@@ -1145,7 +1145,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ReservedInstancePoolService/Delete",
@@ -1155,7 +1155,7 @@
       "object_type": "compute_reserved_instance_pool",
       "from_request_field": "reserved_instance_pool_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ReservedInstancePoolService/Get",
@@ -1165,7 +1165,7 @@
       "object_type": "compute_reserved_instance_pool",
       "from_request_field": "reserved_instance_pool_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ReservedInstancePoolService/List",
@@ -1175,7 +1175,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ReservedInstancePoolService/ListInstances",
@@ -1185,7 +1185,7 @@
       "object_type": "compute_reserved_instance_pool",
       "from_request_field": "reserved_instance_pool_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ReservedInstancePoolService/ListOperations",
@@ -1195,7 +1195,7 @@
       "object_type": "compute_reserved_instance_pool",
       "from_request_field": "reserved_instance_pool_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.ReservedInstancePoolService/Update",
@@ -1205,7 +1205,7 @@
       "object_type": "compute_reserved_instance_pool",
       "from_request_field": "reserved_instance_pool_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Create",
@@ -1215,7 +1215,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Delete",
@@ -1225,7 +1225,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Disable",
@@ -1235,7 +1235,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Enable",
@@ -1245,7 +1245,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Get",
@@ -1255,7 +1255,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/List",
@@ -1265,7 +1265,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListAccessBindings",
@@ -1275,7 +1275,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListDisks",
@@ -1285,7 +1285,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListOperations",
@@ -1295,7 +1295,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListSnapshots",
@@ -1305,7 +1305,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/SetAccessBindings",
@@ -1325,7 +1325,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/UpdateAccessBindings",
@@ -1345,7 +1345,7 @@
       "object_type": "compute_snapshot_schedule",
       "from_request_field": "snapshot_schedule_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/Create",
@@ -1355,7 +1355,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/Delete",
@@ -1365,7 +1365,7 @@
       "object_type": "compute_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/Get",
@@ -1375,7 +1375,7 @@
       "object_type": "compute_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/List",
@@ -1385,7 +1385,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/ListAccessBindings",
@@ -1395,7 +1395,7 @@
       "object_type": "project",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/ListOperations",
@@ -1405,7 +1405,7 @@
       "object_type": "compute_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/SetAccessBindings",
@@ -1425,7 +1425,7 @@
       "object_type": "compute_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/UpdateAccessBindings",
@@ -1445,7 +1445,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/CreateFromYaml",
@@ -1455,7 +1455,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/Delete",
@@ -1465,7 +1465,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/DeleteInstances",
@@ -1475,7 +1475,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/DisableZones",
@@ -1485,7 +1485,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/EnableZones",
@@ -1495,7 +1495,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/Get",
@@ -1505,7 +1505,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/List",
@@ -1515,7 +1515,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/ListAccessBindings",
@@ -1525,7 +1525,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "resource_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/ListInstances",
@@ -1535,7 +1535,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/ListLogRecords",
@@ -1545,7 +1545,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/ListOperations",
@@ -1555,7 +1555,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/PauseProcesses",
@@ -1565,7 +1565,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/ResumeProcesses",
@@ -1575,7 +1575,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/RollingRecreate",
@@ -1585,7 +1585,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/RollingRestart",
@@ -1595,7 +1595,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/SetAccessBindings",
@@ -1615,7 +1615,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/Stop",
@@ -1625,7 +1625,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/StopInstances",
@@ -1635,7 +1635,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/Update",
@@ -1645,7 +1645,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.instancegroup.InstanceGroupService/UpdateAccessBindings",
@@ -1665,7 +1665,7 @@
       "object_type": "compute_instance_group",
       "from_request_field": "instance_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalRegionService/Create",
@@ -1675,7 +1675,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalRegionService/Delete",
@@ -1685,7 +1685,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalRegionService/GetInternal",
@@ -1695,7 +1695,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalRegionService/Update",
@@ -1705,7 +1705,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalZoneService/Create",
@@ -1715,7 +1715,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalZoneService/Delete",
@@ -1725,7 +1725,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalZoneService/GetInternal",
@@ -1735,7 +1735,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.InternalZoneService/Update",
@@ -1745,7 +1745,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.RegionService/Get",
@@ -1790,7 +1790,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "required_acr_min": "2"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/Delete",
@@ -1810,7 +1811,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/Get",
@@ -1820,7 +1821,7 @@
       "object_type": "iam_access_binding",
       "from_request_field": "access_binding_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/List",
@@ -1830,7 +1831,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListAssignableRoles",
@@ -1841,7 +1842,7 @@
       "from_request_field": "resource_id",
       "object_type_from_request_field": "resource_type"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListByAccount",
@@ -1851,7 +1852,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListByRole",
@@ -1861,7 +1862,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListByScope",
@@ -1872,7 +1873,7 @@
       "from_request_field": "resource_id",
       "object_type_from_request_field": "resource_type"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListBySubject",
@@ -1882,7 +1883,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListOperations",
@@ -1892,7 +1893,7 @@
       "object_type": "iam_access_binding",
       "from_request_field": "access_binding_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/ListSubjectPrivileges",
@@ -1902,7 +1903,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/Revoke",
@@ -1951,7 +1952,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/List",
@@ -1970,7 +1971,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/ListOperations",
@@ -1980,7 +1981,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/Update",
@@ -1990,7 +1991,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/BatchCheck",
@@ -2000,7 +2001,7 @@
       "object_type": "project",
       "from_request_field": "scope_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/Check",
@@ -2010,7 +2011,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/ExpandRelations",
@@ -2020,7 +2021,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/ListObjects",
@@ -2030,7 +2031,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/ListSubjects",
@@ -2040,7 +2041,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/WhoAmI",
@@ -2059,7 +2060,7 @@
       "object_type": "project",
       "from_request_field": "folder_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ConditionsService/Delete",
@@ -2079,7 +2080,7 @@
       "object_type": "iam_condition",
       "from_request_field": "condition_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ConditionsService/Get",
@@ -2089,7 +2090,7 @@
       "object_type": "iam_condition",
       "from_request_field": "condition_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ConditionsService/List",
@@ -2099,7 +2100,7 @@
       "object_type": "project",
       "from_request_field": "folder_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ConditionsService/Update",
@@ -2129,7 +2130,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/Delete",
@@ -2149,7 +2150,7 @@
       "object_type": "iam_group",
       "from_request_field": "group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/List",
@@ -2168,7 +2169,7 @@
       "object_type": "iam_group",
       "from_request_field": "group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/ListOperations",
@@ -2178,7 +2179,7 @@
       "object_type": "iam_group",
       "from_request_field": "group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/RemoveMember",
@@ -2198,7 +2199,7 @@
       "object_type": "iam_group",
       "from_request_field": "group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
@@ -2253,7 +2254,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalClusterService/GrantAdmin",
@@ -2273,7 +2274,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
@@ -2392,7 +2393,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",
@@ -2465,7 +2466,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/Delete",
@@ -2485,7 +2486,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/List",
@@ -2504,7 +2505,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/Update",
@@ -2514,7 +2515,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/Create",
@@ -2524,7 +2525,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/Delete",
@@ -2562,7 +2563,7 @@
       "object_type": "iam_role",
       "from_request_field": "role_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/Update",
@@ -2592,7 +2593,7 @@
       "object_type": "iam_service_account",
       "from_request_field": "service_account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.SAKeyService/Revoke",
@@ -2612,7 +2613,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/Delete",
@@ -2622,7 +2623,7 @@
       "object_type": "iam_service_account",
       "from_request_field": "service_account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/Get",
@@ -2632,7 +2633,7 @@
       "object_type": "iam_service_account",
       "from_request_field": "service_account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/List",
@@ -2651,7 +2652,7 @@
       "object_type": "iam_service_account",
       "from_request_field": "service_account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/Update",
@@ -2661,7 +2662,7 @@
       "object_type": "iam_service_account",
       "from_request_field": "service_account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Delete",
@@ -2671,7 +2672,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Get",
@@ -2681,7 +2682,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Invite",
@@ -2691,7 +2692,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/List",
@@ -2710,7 +2711,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Update",
@@ -2720,7 +2721,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserTokenService/Issue",
@@ -2740,7 +2741,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserTokenService/Revoke",
@@ -2760,7 +2761,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.InternalLoadBalancerAnnounceService/ReportAnnounceState",
@@ -2770,7 +2771,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.InternalResourceLifecycleService/Subscribe",
@@ -2789,7 +2790,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.ListenerService/Delete",
@@ -2799,7 +2800,7 @@
       "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.ListenerService/Get",
@@ -2809,7 +2810,7 @@
       "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.ListenerService/List",
@@ -2828,7 +2829,7 @@
       "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.ListenerService/Update",
@@ -2838,7 +2839,7 @@
       "object_type": "nlb_listener",
       "from_request_field": "listener_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/AttachTargetGroup",
@@ -2848,7 +2849,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Create",
@@ -2858,7 +2859,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Delete",
@@ -2868,7 +2869,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/DetachTargetGroup",
@@ -2878,7 +2879,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Get",
@@ -2888,7 +2889,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/GetTargetStates",
@@ -2898,7 +2899,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/List",
@@ -2917,7 +2918,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Move",
@@ -2927,7 +2928,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Start",
@@ -2937,7 +2938,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Stop",
@@ -2947,7 +2948,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.NetworkLoadBalancerService/Update",
@@ -2957,7 +2958,7 @@
       "object_type": "nlb_network_load_balancer",
       "from_request_field": "network_load_balancer_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/AddTargets",
@@ -2967,7 +2968,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/Create",
@@ -2977,7 +2978,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/Delete",
@@ -2987,7 +2988,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/Get",
@@ -2997,7 +2998,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/List",
@@ -3016,7 +3017,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/Move",
@@ -3026,7 +3027,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/RemoveTargets",
@@ -3036,7 +3037,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/Update",
@@ -3046,7 +3047,7 @@
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.operation.OperationService/Cancel",
@@ -3074,7 +3075,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.registry.v1.InternalRegistryService/TriggerGarbageCollection",
@@ -3084,7 +3085,7 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.registry.v1.RegistryService/Create",
@@ -3094,7 +3095,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.registry.v1.RegistryService/CreateRepository",
@@ -3113,7 +3114,7 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2",
+    "required_acr_min": "1",
     "hide_existence": true
   },
   {
@@ -3142,7 +3143,7 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.registry.v1.RegistryService/GetRepository",
@@ -3170,7 +3171,7 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.registry.v1.RegistryService/ListReferrers",
@@ -3216,7 +3217,7 @@
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
     },
-    "required_acr_min": "2",
+    "required_acr_min": "1",
     "hide_existence": true
   },
   {
@@ -3236,7 +3237,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.DiskTypeService/List",
@@ -3246,7 +3247,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Create",
@@ -3256,7 +3257,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Delete",
@@ -3266,7 +3267,7 @@
       "object_type": "storage_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Get",
@@ -3276,7 +3277,7 @@
       "object_type": "storage_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/List",
@@ -3286,7 +3287,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/ListOperations",
@@ -3296,7 +3297,7 @@
       "object_type": "storage_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Update",
@@ -3306,7 +3307,7 @@
       "object_type": "storage_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalDiskTypeService/Create",
@@ -3316,7 +3317,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalDiskTypeService/Delete",
@@ -3326,7 +3327,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalDiskTypeService/Update",
@@ -3336,7 +3337,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalImageService/GetInternal",
@@ -3346,7 +3347,7 @@
       "object_type": "storage_image",
       "from_request_field": "image_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalVolumeService/Attach",
@@ -3356,7 +3357,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalVolumeService/Detach",
@@ -3366,7 +3367,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalVolumeService/GetInternal",
@@ -3376,7 +3377,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.InternalVolumeService/ListAttachments",
@@ -3386,7 +3387,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Create",
@@ -3396,7 +3397,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Delete",
@@ -3406,7 +3407,7 @@
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Get",
@@ -3416,7 +3417,7 @@
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/List",
@@ -3426,7 +3427,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Update",
@@ -3436,7 +3437,7 @@
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Create",
@@ -3446,7 +3447,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Delete",
@@ -3456,7 +3457,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Get",
@@ -3466,7 +3467,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/List",
@@ -3476,7 +3477,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/ListOperations",
@@ -3486,7 +3487,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Update",
@@ -3496,7 +3497,7 @@
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/Create",
@@ -3506,7 +3507,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/Delete",
@@ -3516,7 +3517,7 @@
       "object_type": "vpc_address",
       "from_request_field": "address_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/Get",
@@ -3526,7 +3527,7 @@
       "object_type": "vpc_address",
       "from_request_field": "address_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/GetByValue",
@@ -3536,7 +3537,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/List",
@@ -3546,7 +3547,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/ListBySubnet",
@@ -3556,7 +3557,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/ListOperations",
@@ -3566,7 +3567,7 @@
       "object_type": "vpc_address",
       "from_request_field": "address_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/Update",
@@ -3576,7 +3577,7 @@
       "object_type": "vpc_address",
       "from_request_field": "address_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Create",
@@ -3586,7 +3587,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Delete",
@@ -3596,7 +3597,7 @@
       "object_type": "vpc_gateway",
       "from_request_field": "gateway_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Get",
@@ -3606,7 +3607,7 @@
       "object_type": "vpc_gateway",
       "from_request_field": "gateway_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/List",
@@ -3616,7 +3617,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/ListOperations",
@@ -3626,7 +3627,7 @@
       "object_type": "vpc_gateway",
       "from_request_field": "gateway_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Update",
@@ -3636,7 +3637,7 @@
       "object_type": "vpc_gateway",
       "from_request_field": "gateway_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/AddCidrBlocks",
@@ -3646,7 +3647,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/BindAsNetworkDefault",
@@ -3656,7 +3657,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/Create",
@@ -3666,7 +3667,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/Delete",
@@ -3676,7 +3677,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/Get",
@@ -3686,7 +3687,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/GetUtilization",
@@ -3696,7 +3697,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/List",
@@ -3706,7 +3707,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/ListAddresses",
@@ -3716,7 +3717,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/RemoveCidrBlocks",
@@ -3726,7 +3727,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/UnbindNetworkDefault",
@@ -3736,7 +3737,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressPoolService/Update",
@@ -3746,7 +3747,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressService/AllocateExternalIP",
@@ -3828,7 +3829,7 @@
       "object_type": "vpc_network_interface",
       "from_request_field": "nic_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalNetworkInterfaceService/Detach",
@@ -3838,7 +3839,7 @@
       "object_type": "vpc_network_interface",
       "from_request_field": "nic_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalNetworkInterfaceService/ListByInstance",
@@ -3848,7 +3849,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalNetworkService/GetNetwork",
@@ -3858,7 +3859,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalNetworkService/SetDefaultSecurityGroupId",
@@ -3868,7 +3869,7 @@
       "object_type": "cluster",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.InternalResourceLifecycleService/Subscribe",
@@ -3896,7 +3897,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/Delete",
@@ -3906,7 +3907,7 @@
       "object_type": "vpc_network_interface",
       "from_request_field": "network_interface_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/Get",
@@ -3916,7 +3917,7 @@
       "object_type": "vpc_network_interface",
       "from_request_field": "network_interface_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/List",
@@ -3926,7 +3927,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/ListOperations",
@@ -3936,7 +3937,7 @@
       "object_type": "vpc_network_interface",
       "from_request_field": "network_interface_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/Update",
@@ -3946,7 +3947,7 @@
       "object_type": "vpc_network_interface",
       "from_request_field": "network_interface_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/AddCidrBlocks",
@@ -3956,7 +3957,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/Create",
@@ -3966,7 +3967,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/Delete",
@@ -3976,7 +3977,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/Get",
@@ -3986,7 +3987,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/List",
@@ -4005,7 +4006,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListRouteTables",
@@ -4015,7 +4016,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListSecurityGroups",
@@ -4025,7 +4026,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListSubnets",
@@ -4035,7 +4036,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/RemoveCidrBlocks",
@@ -4045,7 +4046,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/Update",
@@ -4055,7 +4056,7 @@
       "object_type": "vpc_network",
       "from_request_field": "network_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/AddRoutes",
@@ -4065,7 +4066,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/Create",
@@ -4075,7 +4076,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/Delete",
@@ -4085,7 +4086,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/Get",
@@ -4095,7 +4096,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/List",
@@ -4105,7 +4106,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/ListOperations",
@@ -4115,7 +4116,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/RemoveRoutes",
@@ -4125,7 +4126,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/Update",
@@ -4135,7 +4136,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/UpdateRoute",
@@ -4145,7 +4146,7 @@
       "object_type": "vpc_route_table",
       "from_request_field": "route_table_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/Create",
@@ -4155,7 +4156,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/Delete",
@@ -4165,7 +4166,7 @@
       "object_type": "vpc_security_group",
       "from_request_field": "security_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/Get",
@@ -4175,7 +4176,7 @@
       "object_type": "vpc_security_group",
       "from_request_field": "security_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/List",
@@ -4185,7 +4186,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/ListOperations",
@@ -4195,7 +4196,7 @@
       "object_type": "vpc_security_group",
       "from_request_field": "security_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/Update",
@@ -4205,7 +4206,7 @@
       "object_type": "vpc_security_group",
       "from_request_field": "security_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/UpdateRule",
@@ -4215,7 +4216,7 @@
       "object_type": "vpc_security_group",
       "from_request_field": "security_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/UpdateRules",
@@ -4225,7 +4226,7 @@
       "object_type": "vpc_security_group",
       "from_request_field": "security_group_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/AddCidrBlocks",
@@ -4235,7 +4236,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/Create",
@@ -4245,7 +4246,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/Delete",
@@ -4255,7 +4256,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/Get",
@@ -4265,7 +4266,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/List",
@@ -4275,7 +4276,7 @@
       "object_type": "project",
       "from_request_field": "project_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/ListOperations",
@@ -4285,7 +4286,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/ListUsedAddresses",
@@ -4295,7 +4296,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/RemoveCidrBlocks",
@@ -4305,7 +4306,7 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/Update",
@@ -4315,6 +4316,6 @@
       "object_type": "vpc_subnet",
       "from_request_field": "subnet_id"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   }
 ]
