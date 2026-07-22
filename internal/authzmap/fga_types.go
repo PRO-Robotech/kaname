@@ -184,15 +184,15 @@ var verbBearingTypes = map[string]bool{
 	// project binding — the model type + these Go tables + knownModules("storage")
 	// are ALL required or owner-GET fail-closes 403 (#71). Parity with nlb (project-
 	// only emitter, DIRECT v_*, no `owner` derivation).
-	"storage_volume":                 true,
-	"storage_snapshot":               true,
-	"storage_image":                  true,
-	"iam_user":                       true,
-	"iam_service_account":            true,
-	"iam_group":                      true,
-	"iam_role":                       true,
-	"iam_access_binding":             true,
-	"iam_condition":                  true,
+	"storage_volume":      true,
+	"storage_snapshot":    true,
+	"storage_image":       true,
+	"iam_user":            true,
+	"iam_service_account": true,
+	"iam_group":           true,
+	"iam_role":            true,
+	"iam_access_binding":  true,
+	"iam_condition":       true,
 	// rbac-2026 P3 / D-6: account/project are now verb-bearing (additive — they
 	// also keep their tier relations as write-authz anchors, D-7).
 	"account": true,
