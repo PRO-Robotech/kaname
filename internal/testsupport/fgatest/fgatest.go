@@ -66,8 +66,26 @@ func New(t *testing.T) *Harness {
 	if testing.Short() {
 		t.Skip("skipping real-OpenFGA integration test in -short mode")
 	}
+	return newFromModelJSON(t, transformModelToJSON(t, fgaModelPath(t)))
+}
+
+// NewFromModelJSON spins a real OpenFGA server and loads the given
+// authorization-model JSON (an OpenFGA WriteAuthorizationModel body) instead of
+// transforming the canonical fga_model.fga. Use it to exercise the DEPLOYED model
+// (the openfga-bootstrap ConfigMap `model.json` block) with real Check/Write when
+// the sibling canonical .fga is not on disk (monorepo checkout). Skipped under
+// -short.
+func NewFromModelJSON(t *testing.T, modelJSON []byte) *Harness {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping real-OpenFGA integration test in -short mode")
+	}
+	return newFromModelJSON(t, modelJSON)
+}
+
+func newFromModelJSON(t *testing.T, modelJSON []byte) *Harness {
+	t.Helper()
 	ctx := context.Background()
-	modelJSON := transformModelToJSON(t, fgaModelPath(t))
 
 	req := testcontainers.ContainerRequest{
 		Image:        openfgaServerImage,
