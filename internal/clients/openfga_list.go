@@ -21,6 +21,9 @@ type fgaWireListObjectsRequest struct {
 	Relation             string         `json:"relation"`
 	Type                 string         `json:"type"`
 	Context              map[string]any `json:"context,omitempty"`
+	// Consistency — OpenFGA read-consistency preference (see openfgaCheckRequest.
+	// Consistency). ListObjects always sends HIGHER_CONSISTENCY — see the method doc.
+	Consistency string `json:"consistency,omitempty"`
 }
 
 type fgaWireListObjectsResponse struct {
@@ -28,6 +31,20 @@ type fgaWireListObjectsResponse struct {
 }
 
 // ListObjects — see RelationQueries.
+//
+// Consistency: ListObjects always sends HIGHER_CONSISTENCY (strong read-after-write),
+// unlike the hot per-RPC enforcement Check which keeps OpenFGA's cache-eligible
+// default (MINIMIZE_LATENCY). ListObjects resolves a subject's VISIBLE set for a
+// List RPC (list-authz), which is inherently a read-your-writes path: a subject that
+// just created a resource — its owner tuple written synchronously to the primary —
+// must see its OWN object on the very first List. Under the deployed multi-replica
+// OpenFGA a default read can land on a lagging replica and omit the fresh object for
+// seconds (the compute list-includes flake). Reading strong restores parity with the
+// confirm-gate Check (CheckWithContextConsistent), which already resolves fresh. This
+// is the same "strong-read only where read-your-writes correctness demands it"
+// philosophy: List demands it; the hot single-object enforcement gate does not
+// (covered by the confirm-gate / bounded client-retry). List RPCs are far lower
+// frequency than per-RPC Checks, so the strong-read cost is bounded.
 func (c *OpenFGAHTTPClient) ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return nil, ErrNotConfigured
@@ -38,6 +55,7 @@ func (c *OpenFGAHTTPClient) ListObjects(ctx context.Context, subject, relation, 
 		Relation:             relation,
 		Type:                 objectType,
 		Context:              condCtx,
+		Consistency:          consistencyHigherConsistency,
 	})
 	cctx, cancel := context.WithTimeout(ctx, c.listTimeout())
 	defer cancel()

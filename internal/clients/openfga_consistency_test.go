@@ -99,3 +99,63 @@ func TestOpenFGA_CheckWithContext_DefaultVsConsistent(t *testing.T) {
 
 	assert.Equal(t, []string{"", "HIGHER_CONSISTENCY"}, *seen)
 }
+
+// ── ListObjects read-your-writes consistency (list-authz path) ────────────────
+//
+// The list-authz path (AuthorizeService.ListObjects → this client's ListObjects)
+// resolves a subject's VISIBLE set for a List RPC. Under the deployed multi-replica
+// OpenFGA it suffered the SAME read-after-write lag as the Check confirm-gate: a
+// subject that just created a resource (owner tuple written synchronously to the
+// primary) could list against a lagging replica and NOT see its own fresh object
+// for seconds — while the single-object enforcement Check confirm-gate ALREADY
+// resolves fresh (HIGHER_CONSISTENCY). That asymmetry is the compute list-includes
+// flake ("expected [] to include <own-fresh-id>"). ListObjects must read at
+// HIGHER_CONSISTENCY for parity, so read-your-writes holds on List as it does on Get.
+
+// newStaleReplicaListObjectsFGA — fake OpenFGA modelling read-after-write lag on
+// list-objects: a default (MINIMIZE_LATENCY / unset) /list-objects reads the STALE
+// replica → empty; a HIGHER_CONSISTENCY /list-objects reads fresh → the just-written
+// object. Captures the `consistency` field of every /list-objects request.
+func newStaleReplicaListObjectsFGA(t *testing.T) (*OpenFGAHTTPClient, *[]string) {
+	t.Helper()
+	seen := &[]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/list-objects") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Consistency string `json:"consistency"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		*seen = append(*seen, body.Consistency)
+		w.Header().Set("Content-Type", "application/json")
+		if body.Consistency == "HIGHER_CONSISTENCY" {
+			// Fresh replica: the just-written owner tuple is visible.
+			_, _ = fmt.Fprint(w, `{"objects":["compute_instance:ins-fresh"]}`)
+			return
+		}
+		// Stale replica: read-after-write lag → empty visible set.
+		_, _ = fmt.Fprint(w, `{"objects":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+	return &OpenFGAHTTPClient{
+		Endpoint: strings.TrimPrefix(srv.URL, "http://"),
+		StoreID:  "store-test",
+	}, seen
+}
+
+// ListObjects must set consistency=HIGHER_CONSISTENCY so the list-authz read reads
+// fresh (parity with the confirm-gate Check). RED before the fix: the wire request
+// omits consistency → MINIMIZE_LATENCY → the stale replica returns an empty set and
+// the subject cannot see its own just-granted object on the FIRST list.
+func TestOpenFGA_ListObjects_HigherConsistency_ReadsFresh(t *testing.T) {
+	c, seen := newStaleReplicaListObjectsFGA(t)
+	objs, err := c.ListObjects(context.Background(), "user:u1", "v_list", "compute_instance", nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ins-fresh"}, objs,
+		"list-authz must read fresh (HIGHER_CONSISTENCY) so read-your-writes holds on List")
+	assert.Equal(t, []string{"HIGHER_CONSISTENCY"}, *seen,
+		"ListObjects must send consistency=HIGHER_CONSISTENCY (parity with the confirm-gate Check)")
+}
