@@ -59,6 +59,14 @@ import (
 // binding-object. Both run synchronously post-commit so a GET right after the
 // Operation reports done does not race the async drain.
 type SelectorReconciler interface {
+	// ReconcileBindingForward is the ADDITIVE create-path fast-path (sub-phase IAM-FMB):
+	// it materializes THIS freshly-created binding's per-object membership additively under
+	// a SHARE advisory lock (no EXCLUSIVE / FOR UPDATE / delete-stale), the throughput fix
+	// for a mass-binding-create burst. It transparently delegates to the FULL
+	// ReconcileBinding if the binding already has members (delete-stale guard).
+	ReconcileBindingForward(ctx context.Context, bindingID domain.AccessBindingID) error
+	// ReconcileBinding is the FULL EXCLUSIVE path (Role.Update fan-out + sweep backstop);
+	// still consumed by the reconcile machinery, not by the create hot-path.
 	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 }
@@ -371,10 +379,20 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// removed, D-4). The reconcile runs in its OWN writer-tx (it reads the
 	// just-committed binding). nil-safe: the periodic sweep materializes it
 	// otherwise. Non-fatal to Create — the binding is durably created; log + proceed.
+	//
+	// IAM-FMB throughput fix: the create-path takes the ADDITIVE forward
+	// (ReconcileBindingForward, SHARE advisory lock, no delete-stale) instead of the FULL
+	// EXCLUSIVE ReconcileBinding — a create is purely additive (the binding is brand-new →
+	// nothing stale to delete), so a mass-binding-create burst no longer serializes on the
+	// per-binding EXCLUSIVE lock / O(scope) delete-stale recompute (which lagged grant
+	// materialization past the client read-your-writes retry budget). The forward
+	// transparently delegates to the FULL path if the binding already has members
+	// (delete-stale guard). The FULL EXCLUSIVE ReconcileBinding REMAINS for the Role.Update
+	// fan-out + periodic sweep backstop (delete-stale needs EXCLUSIVE there).
 	needsReconcile := len(role.Rules.MaterializingSelectors()) > 0
 	if needsReconcile && u.reconciler != nil {
-		if rerr := u.reconciler.ReconcileBinding(ctx, created.ID); rerr != nil && u.logger != nil {
-			u.logger.Error("access_binding create: rules reconcile failed (sweep will retry)",
+		if rerr := u.reconciler.ReconcileBindingForward(ctx, created.ID); rerr != nil && u.logger != nil {
+			u.logger.Error("access_binding create: rules forward reconcile failed (fga_outbox drainer + sweep will retry)",
 				"binding_id", string(created.ID), "err", rerr)
 		}
 	}

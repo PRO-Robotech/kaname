@@ -92,6 +92,120 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
+// ReconcileBindingForward is the ADDITIVE forward fast-path used by the AccessBinding
+// create-path (post-commit membership materialization, sub-phase IAM-FMB). It is the
+// binding-side twin of ReconcileObjectForward: where the object-forward materializes ONE
+// freshly-registered object across every matching binding, this materializes ONE freshly-
+// CREATED binding's desired ACTIVE per-object members across the whole scope — holding only
+// a SHARE advisory lock (never the EXCLUSIVE full-path lock) and no FOR UPDATE row-lock, and
+// doing NO delete-stale diff.
+//
+// WHY IT IS THE THROUGHPUT FIX. The create-path previously ran the FULL EXCLUSIVE
+// ReconcileBinding post-commit: it takes the per-binding EXCLUSIVE advisory lock + a
+// `SELECT … FOR UPDATE` on the binding row and does an O(scope) desired recompute WITH a
+// delete-stale diff (CurrentMembers read + cross-binding surviving-claims flush). That
+// EXCLUSIVE lock + delete-stale exist ONLY for the Role.Update fan-out / sweep, where a
+// concurrent re-materialization of the SAME binding must not race its own delete-stale. On
+// a mass-binding-create burst (a role grant-wave over an account / many subjects) those
+// serial O(scope) delete-stale recomputes do not keep up → grant materialization lags past
+// the client read-your-writes retry budget (transient 403 «lacks relation» on one's OWN
+// fresh grant). A create is PURELY additive — the binding is brand-new, so there is NOTHING
+// stale to delete — so the create-forward drops the delete-stale diff, the FOR UPDATE
+// row-lock, and the EXCLUSIVE advisory lock, taking only the SHARE lock.
+//
+// LOCK CHOICE — SHARE, not "no lock" (same rationale as ReconcileObjectForward, see the
+// file-level doc): SHARE ∥ SHARE do not conflict → N concurrent create-forwards never
+// serialize on each other (the throughput property), while SHARE ⊥ EXCLUSIVE → a create-
+// forward and a concurrent FULL pass of the SAME binding (Role.Update fan-out / sweep) take
+// turns, so the forward's FK-child `FOR KEY SHARE` INSERTs never cross the full path's
+// `SELECT … FOR UPDATE` on the parent access_bindings row (which would deadlock, 40P01),
+// and the full recompute never runs its delete-stale diff while a forward mid-writes.
+//
+// DELETE-STALE GUARD (create-only, D-4). The additive path only ADDS the binding's desired
+// ACTIVE members; it NEVER delete-stale. That is correct ONLY for a brand-NEW binding (a
+// create — no materialized members yet). A call on a binding that ALREADY has materialized
+// members (a replay create / a call on an existing binding) transparently delegates to the
+// FULL ReconcileBinding (EXCLUSIVE + delete-stale) so a now-unmatched grant is revoked. The
+// check is one indexed read (CurrentMembers); on the create hot-path it is empty → the pass
+// stays on the fast additive path (throughput intact).
+//
+// CORRECTNESS ENVELOPE (D-5). Forward is an OPTIMIZATION, not a replacement: the per-object
+// member-tuples are DURABLE in fga_outbox inside the forward writer-tx (ban #10) → the async
+// drainer applies them at-least-once even if the post-commit sync FGA write fails; the
+// periodic sweep (FULL ReconcileBinding) re-converges any member forward skipped. A
+// skipped/failed forward converges via (drainer + sweep). Operation.done does NOT wait for
+// tuple visibility (ban #9). The per-object verdict is SHARED with the full recompute
+// (desiredMemberForObject via desiredMembers), so the two paths derive BYTE-IDENTICAL tuples
+// (no over-/under-grant; idempotent forward + async-backstop overlap).
+func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID domain.AccessBindingID) error {
+	col := &syncFGACollector{}
+	// needsFull is set inside the peek below when the binding already has materialized
+	// members (a replay create / a call on an existing binding), which requires the FULL
+	// delete-stale diff the additive forward path deliberately omits (DELETE-STALE GUARD).
+	needsFull := false
+	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
+		// DELETE-STALE GUARD (create-only). Discriminate a true create (no members) from a
+		// replay / existing-binding call (has members) by ONE indexed read. On the create
+		// hot-path this is empty, so the extra cost is a single cheap SELECT in the same
+		// forward tx.
+		existing, err := s.CurrentMembers(ctx, bindingID)
+		if err != nil {
+			return fmt.Errorf("forward binding: current members %s: %w", bindingID, err)
+		}
+		if len(existing) > 0 {
+			needsFull = true
+			return nil // commit the read-only peek; run the FULL path below (fresh tx).
+		}
+		// SHARE advisory lock FIRST (never the EXCLUSIVE full-path lock). SHARE coexists with
+		// sibling create-forwards (throughput) but excludes a concurrent FULL recompute of
+		// the SAME binding — so the forward's FK `FOR KEY SHARE` child INSERTs never cross
+		// the full path's `SELECT … FOR UPDATE` on the parent access_bindings row (40P01).
+		if err := s.AcquireBindingLockShared(ctx, bindingID); err != nil {
+			return fmt.Errorf("forward binding: shared lock %s: %w", bindingID, err)
+		}
+		bs, ok, err := s.LoadBindingUnlocked(ctx, bindingID)
+		if err != nil {
+			return fmt.Errorf("forward binding: load %s: %w", bindingID, err)
+		}
+		if !ok || !bs.Active {
+			return nil // deleted / not ACTIVE — nothing to materialize.
+		}
+		// The binding's desired member set — SHARED with the FULL recompute
+		// (desiredMembers → desiredRuleMembers → desiredMemberForObject), so the forward and
+		// full paths derive BYTE-IDENTICAL tuples (equivalence; idempotency across overlap).
+		desired, err := r.desiredMembers(ctx, s, bs)
+		if err != nil {
+			return err
+		}
+		for _, d := range desired {
+			// Additive-only: materialize ONLY ACTIVE grants. A REJECTED containment verdict
+			// (cross-scope) — and its containment audit — is LEFT to the async FULL backstop
+			// (the additive path never writes a non-grant).
+			if d.Status != domain.VerificationActive {
+				continue
+			}
+			if err := r.materializeForwardMember(ctx, s, bs, d, col); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	// Replay / existing-binding call: the additive fast-path is unsafe (it cannot delete-
+	// stale). Run the FULL ReconcileBinding (its own tx, EXCLUSIVE lock + delete-stale diff)
+	// so a now-unmatched grant is synchronously revoked. Keeps the create hot-path additive.
+	if needsFull {
+		return r.ReconcileBinding(ctx, bindingID)
+	}
+	// AFTER commit only (a rollback returns early): apply the collected tuples to OpenFGA
+	// synchronously (idempotent read-delta), so the subject's per-object grant is visible
+	// without waiting for the async fga_outbox drain — the point of the fast-path. Best-
+	// effort: an error degrades to the durable async drainer (D-5 backstop).
+	r.applyAfterCommit(ctx, col)
+	return nil
+}
+
 // ReconcileObjectForward is the ADDITIVE forward fast-path used by the register
 // create-path (RegisterResource syncReconcile): it materializes ONLY the freshly-
 // registered object's per-object tuples for each binding whose selector NOW matches it,
