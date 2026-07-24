@@ -65,6 +65,7 @@ func (c Config) Validate() error {
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
+		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
 
 		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
 		// IAM data (user/SA records, session-revocation + token rows, the
@@ -89,6 +90,38 @@ func (c Config) Validate() error {
 	}
 
 	return errs
+}
+
+// validateProductionBootstrapMint refuses to start a production binary whose
+// bootstrap-admin token mint is ENABLED (the signing key is present, so the RPC
+// will actually issue tokens) but has NO caller allow-list.
+//
+// MintBootstrapToken returns a Hydra-signed cluster `system_admin` Bearer. It
+// carries no ReBAC gate by construction (it exists to obtain the FIRST token,
+// before any relation exists), so the ONLY thing standing between a caller and
+// full control-plane takeover is the client-certificate SPIFFE allow-list
+// enforced by authzguard.CallerPolicy. With that list empty the runtime already
+// denies everyone — but shipping an enabled-yet-uncallable mint is a
+// misconfiguration whose usual "fix" is to reopen the hole, so it fails at boot
+// with a message naming the setting (core rule #16: no WARN-and-continue guard).
+//
+// Scoped to the ENABLED mint: a deployment that never supplies a signing key does
+// not use the mint at all and boots unchanged.
+//
+// Only the PRESENCE of the key is read — never its value, and the value never
+// appears in the error (security.md).
+func (c Config) validateProductionBootstrapMint() error {
+	if !c.AuthN.BootstrapMint.Enabled() {
+		return nil
+	}
+	if len(c.AuthN.BootstrapMint.AllowedSANs()) > 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"production mode: authn.bootstrap-mint.allowed-client-sans is empty while the bootstrap mint is enabled (%s is set) — "+
+			"MintBootstrapToken issues a cluster system_admin token and must be restricted to explicit client-certificate SPIFFE SANs; "+
+			"set the allow-list or unset the signing key",
+		c.AuthN.BootstrapMint.ResolveSigningKeyEnv())
 }
 
 // validateMode ensures Mode is a known ENUM value.

@@ -257,10 +257,20 @@ func runServe(cfg config.Config) error {
 	//     (GatewayFrontedInternalRPCs) may ONLY be called by the api-gateway SA;
 	//     a direct call from any other module → DENY in prod (closes C1/C3 — a
 	//     compromised data-plane module cannot escalate via :9091).
+	//   - SAN-restricted: MintBootstrapToken (SANRestrictedInternalRPCs) admits ONLY
+	//     the client-certificate SPIFFE SANs an operator listed in
+	//     authn.bootstrap-mint.allowed-client-sans — enforced in EVERY mode, and an
+	//     empty list denies everyone (the cluster-admin mint has no default caller;
+	//     it is also unreachable via the api-gateway, which carries no REST route
+	//     for it). Config.Validate additionally refuses to boot a production binary
+	//     whose mint is enabled with an empty list.
 	// The fga-proxy writes (Register/Unregister/WriteCreatorTuple) are NOT in the
 	// gateway-only set and stay gated in-handler by RelationWriteGate (fga_writer)
 	// — their callers are vpc/compute/nlb module SAs, not the gateway.
-	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs())
+	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
+		WithSANAllowlist(map[string][]string{
+			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
+		})
 
 	// Per-RPC `system_viewer`-FLOOR on the internal READ-RPC set
 	// (authN+authZ enforced everywhere: read-RPC gate viewer-tier). For
@@ -368,7 +378,10 @@ func runServe(cfg config.Config) error {
 	//     per-user authZ. MUST run after UnaryCertIdentityExtract.
 	//  3. internalCallerPolicy — per-RPC caller policy: floor (verified module
 	//     cert on EVERY RPC) + gateway-only (privileged admin RPCs only from the
-	//     api-gateway SA). Prod fail-closed; dev no-op.
+	//     api-gateway SA) — prod fail-closed, dev no-op — PLUS the SAN-restricted
+	//     arm for the cluster-admin token mint, which admits only the explicitly
+	//     allow-listed client-certificate SPIFFE SANs and is enforced in EVERY
+	//     mode (an empty list denies everyone).
 	//  4. internalSystemViewerFloor — per-RPC `system_viewer`-floor
 	//     on the READ-RPC set (ReadFloorRPCs): the caller module-SA must hold
 	//     `system_viewer@cluster:cluster_kacho_root` (relation-tier Check beyond

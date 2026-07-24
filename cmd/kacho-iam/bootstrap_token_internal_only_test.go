@@ -6,11 +6,18 @@
 //
 //	on the PUBLIC (external) server it is NOT registered → Unimplemented
 //	   (an admin-token mint must NEVER appear on the external surface, ban #6);
-//	on the INTERNAL (:9091, mTLS-gated) server it IS registered → reachable
-//	   (the mТLS listener boundary is the gate — a non-mТLS caller never reaches
-//	   this handler because the RPC lives only on the client-cert-verified
-//	   internal listener; the listener's mТLS enforcement is covered by
-//	   serve_mtls_wiring_test.go).
+//	on the INTERNAL (:9091, mTLS-gated) server it IS registered → reachable.
+//
+// Registration is NOT the authorization gate. Reaching :9091 admits nobody by
+// itself: authzguard.CallerPolicy requires the caller's VERIFIED client
+// certificate SAN to be on the explicit allow-list
+// (authn.bootstrap-mint.allowed-client-sans), in every mode, with an empty list
+// denying everyone — see authzguard/caller_policy_bootstrap_mint_test.go. The
+// listener's mTLS enforcement itself is covered by serve_mtls_wiring_test.go,
+// and the absence of any gateway REST door by
+// gateway/internal/restmux/bootstrap_token_no_rest_route_test.go. This file pins
+// only the registration surface (ban #6): public → Unimplemented, internal →
+// reachable.
 //
 // Pure registration/transport test (bufconn, no DB). A use-case with no signing
 // key wired makes Execute fail closed (Unavailable) without touching any
@@ -51,9 +58,10 @@ func TestBootstrapToken_InternalOnly_NotOnExternalListener(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"MintBootstrapToken must NOT exist on the external listener (ban #6, IBT-06)")
 
-	// INTERNAL server: registered → reachable (NOT Unimplemented). The internal
-	// listener is mТLS-gated in production (IBT-07); a non-mТLS caller never gets
-	// this far because the RPC lives only here.
+	// INTERNAL server: registered → reachable (NOT Unimplemented). This bufconn
+	// carries no interceptor chain, so it measures REGISTRATION only — on a real
+	// :9091 the mTLS listener (IBT-07) plus the CallerPolicy SAN allow-list decide
+	// who may actually call it.
 	intConn := serveBufconn(t, func(s *grpc.Server) {
 		registerInternalServices(s, svcs, nil, "", nil)
 	})

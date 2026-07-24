@@ -95,8 +95,12 @@ type services struct {
 
 	// internalBootstrapTokenHandler — InternalBootstrapTokenService.MintBootstrapToken:
 	// non-interactive bootstrap RS256 token mint (#58). Internal-only (ban #6),
-	// registered on port 9091; the mTLS listener + gateway-fronted caller-policy
-	// are the gate (permission="<exempt>").
+	// registered on port 9091 ONLY, and reachable ONLY by a direct mTLS gRPC dial
+	// (no REST route on the api-gateway — there it would be credential-free).
+	// The gate is authzguard.CallerPolicy's explicit client-certificate SPIFFE
+	// allow-list (authn.bootstrap-mint.allowed-client-sans); permission="<exempt>"
+	// only means there is no ReBAC Check (no relation exists before the first
+	// token), NOT that authN is waived.
 	internalBootstrapTokenHandler *bootstraptoken.Handler
 
 	// relationStore — shared OpenFGA client. Always non-nil (composition root
@@ -405,8 +409,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	if bootstrapAudience == "" {
 		bootstrapAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
+	// SigningKeyPEM comes from authn.bootstrap-mint.signing-key-env (default
+	// KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM) — the SAME accessor Config.Validate
+	// uses to decide whether the mint is enabled, so the boot-guard and the
+	// runtime can never disagree about it. Empty → mint disabled (fail-closed).
 	bootstrapTokenH := bootstraptokenwire.Build(pool, bootstraptokenwire.BuildConfig{
-		SigningKeyPEM:     os.Getenv("KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM"),
+		SigningKeyPEM:     cfg.AuthN.BootstrapMint.ResolveSigningKeyPEM(),
 		HydraAdminURL:     cfg.AuthN.ResolveHydraAdminURL(),
 		HydraAdminToken:   os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
 		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),

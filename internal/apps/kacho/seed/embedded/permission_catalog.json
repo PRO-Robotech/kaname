@@ -2692,7 +2692,7 @@
       "object_type": "account",
       "from_request_field": "account_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/List",

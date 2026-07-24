@@ -14,6 +14,17 @@
 //     direct call from any other module (e.g. a compromised kacho-vpc) → DENY in
 //     prod (a data-plane module cannot escalate via :9091).
 //     dev → no-op.
+//  3. SAN-restricted — a small set of RPCs whose caller must appear on an
+//     EXPLICIT, operator-supplied allow-list of client-certificate SPIFFE SANs
+//     (WithSANAllowlist). Unlike arms 1-2 this arm is enforced in EVERY mode and
+//     an empty/absent allow-list denies EVERYONE (fail-closed: these RPCs have no
+//     default caller). Today: InternalBootstrapTokenService/MintBootstrapToken,
+//     which hands out a cluster `system_admin` Bearer and therefore cannot be
+//     gated by "any verified module cert" — a compromised data-plane module must
+//     not be able to mint cluster-admin — nor by a ReBAC relation (it exists to
+//     obtain the FIRST token, when no relation exists yet). The credential is the
+//     caller's verified certificate identity; network position is NOT a
+//     credential (security.md — "internal = trusted" is forbidden).
 //
 // WHY this replaces the former cert-bound ReBAC interceptor: the api-gateway
 // re-dials :9091 with ITS OWN client cert (SAN .../sa/kacho-api-gateway) and
@@ -31,6 +42,7 @@ package authzguard
 
 import (
 	"context"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -90,37 +102,104 @@ func GatewayFrontedInternalRPCs() []string {
 		// lazy-mirror / recovery flow.
 		"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 		"/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
-		// InternalBootstrapTokenService — non-interactive bootstrap token mint
-		// (#58). Gateway-fronted: only the api-gateway SA may dial :9091 for it
-		// (the operator/CI reaches it through the internal sub-mux). permission=
-		// "<exempt>" → no acr-floor requirement in the catalog, so the acr-floor
-		// passes; the mTLS listener + this caller-policy are the gate.
-		"/kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken",
+		// NOT here: InternalBootstrapTokenService/MintBootstrapToken. It has no
+		// REST route on the gateway at all (the mint would be credential-free
+		// there — see the proto / restmux comments), so the api-gateway SA is not
+		// one of its callers, and "is the gateway" must never be a licence to mint
+		// cluster-admin. It is SAN-restricted instead — see BootstrapMintFullMethod.
 	}
+}
+
+// BootstrapMintFullMethod — InternalBootstrapTokenService/MintBootstrapToken,
+// the SAN-restricted cluster-admin token mint (arm 3). Exported so the
+// composition root can key its allow-list without re-spelling the FQN.
+const BootstrapMintFullMethod = "/kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
+
+// SANRestrictedInternalRPCs returns the full-method set gated by arm 3 — an
+// explicit client-certificate SPIFFE SAN allow-list.
+//
+// The SET IS STATIC, deliberately independent of configuration: membership is a
+// property of the RPC, not of what an operator happened to configure. A
+// deployment that never supplies an allow-list must end up with the mint DENIED
+// to everyone, not silently downgraded to the "any verified module cert" floor —
+// a config omission must never open a cluster-admin mint.
+func SANRestrictedInternalRPCs() []string {
+	return []string{BootstrapMintFullMethod}
 }
 
 // CallerPolicy enforces the per-RPC caller policy on the internal listener.
 // Construct via NewCallerPolicy.
 type CallerPolicy struct {
 	// prodMode = production AuthN mode (cfg.AuthN.Mode.IsProduction()). dev-mode
-	// (false) is a no-op (insecure back-compat); production is fail-closed.
+	// (false) is a no-op for the floor / gateway-only arms (insecure
+	// back-compat); production is fail-closed. It does NOT relax the
+	// SAN-restricted arm.
 	prodMode bool
 	// gatewayOnly — full-method set restricted to the api-gateway SA.
 	gatewayOnly map[string]struct{}
+	// sanRestricted — full-method set gated by arm 3. STATIC
+	// (SANRestrictedInternalRPCs), so an unconfigured allow-list denies rather
+	// than silently falling back to the floor.
+	sanRestricted map[string]struct{}
+	// sanAllow — full-method → the EXACT client-certificate SPIFFE SANs allowed
+	// to call it. Only consulted for sanRestricted methods; a missing/empty entry
+	// denies everyone.
+	sanAllow map[string]map[string]struct{}
 }
 
 // NewCallerPolicy builds the caller policy. gatewayOnlyRPCs is the set of
 // full-method names restricted to the api-gateway SA (see
 // GatewayFrontedInternalRPCs). prodMode comes from cfg.AuthN.Mode.IsProduction().
+//
+// The arm-3 METHOD set is static (SANRestrictedInternalRPCs); WithSANAllowlist
+// only supplies WHICH certificate identities may call them. A policy built
+// without WithSANAllowlist therefore denies every caller of those methods.
 func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string) *CallerPolicy {
 	m := make(map[string]struct{}, len(gatewayOnlyRPCs))
 	for _, rpc := range gatewayOnlyRPCs {
 		m[rpc] = struct{}{}
 	}
-	return &CallerPolicy{prodMode: prodMode, gatewayOnly: m}
+	restricted := make(map[string]struct{})
+	for _, rpc := range SANRestrictedInternalRPCs() {
+		restricted[rpc] = struct{}{}
+	}
+	return &CallerPolicy{prodMode: prodMode, gatewayOnly: m, sanRestricted: restricted}
+}
+
+// WithSANAllowlist supplies the arm-3 allow-list: fullMethod → the exact
+// client-certificate SPIFFE SAN URIs permitted to call it. Callers whose verified
+// SAN is not listed are denied — in EVERY mode; a restricted method with no
+// entry (or an empty one) is denied to everyone (fail-closed: the mint has no
+// default caller). Exact URI match, not a service short-name — the ns AND the sa
+// are part of the identity.
+//
+// Blank entries are dropped so an accidentally empty config value
+// (`KACHO_IAM_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS=""` → [""]) can never
+// match a caller whose SAN failed to parse.
+func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolicy {
+	if len(perRPC) == 0 {
+		p.sanAllow = nil
+		return p
+	}
+	out := make(map[string]map[string]struct{}, len(perRPC))
+	for method, sans := range perRPC {
+		set := make(map[string]struct{}, len(sans))
+		for _, san := range sans {
+			if s := strings.TrimSpace(san); s != "" {
+				set[s] = struct{}{}
+			}
+		}
+		out[method] = set
+	}
+	p.sanAllow = out
+	return p
 }
 
 // allow returns nil iff the call may proceed past the policy for fullMethod:
+//   - SAN-restricted RPC (arm 3): the caller must present a VERIFIED client cert
+//     whose exact SPIFFE SAN is allow-listed → otherwise PermissionDenied, in
+//     EVERY mode. An empty/absent allow-list denies everyone. Evaluated FIRST and
+//     terminally: this arm never falls through to the mode-relaxed arms below.
 //   - no verified module cert: prod → PermissionDenied (floor fail-closed);
 //     dev → nil (insecure back-compat).
 //   - gateway-only RPC called by a non-gateway module: prod → PermissionDenied;
@@ -131,6 +210,21 @@ func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string) *CallerPolicy {
 // Message text is the verbatim, non-leaking "permission denied".
 func (p *CallerPolicy) allow(ctx context.Context, fullMethod string) error {
 	san, verified := grpcsrv.CertIdentityFromContext(ctx)
+
+	// Arm 3 — explicit per-RPC certificate-identity allow-list. Checked before
+	// everything else and terminal in both directions, so neither dev-mode nor
+	// the gateway-fronted set can widen it. An unconfigured allow-list leaves
+	// p.sanAllow[fullMethod] empty → deny.
+	if _, restricted := p.sanRestricted[fullMethod]; restricted {
+		if !verified || san == "" {
+			return status.Error(codes.PermissionDenied, "permission denied")
+		}
+		if _, listed := p.sanAllow[fullMethod][san]; !listed {
+			return status.Error(codes.PermissionDenied, "permission denied")
+		}
+		return nil
+	}
+
 	svc, ok := "", false
 	if verified && san != "" {
 		svc, ok = ServiceNameFromSAN(san)

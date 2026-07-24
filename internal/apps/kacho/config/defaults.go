@@ -77,6 +77,15 @@ func RegisterDefaults(v *viper.Viper) {
 	// поллит Operation.Get, чтобы его забрать. Grace-окно выдерживает это окно.
 	// Override — KACHO_IAM_USERTOKEN_REDACT_GRACE.
 	v.SetDefault("authn.usertoken-redact-grace", 120*time.Second)
+	// bootstrap-mint — the cluster-admin token mint (#58). The signing key lives
+	// in a k8s Secret, referenced BY ENV NAME here (never inlined in YAML). The
+	// caller allow-list defaults to EMPTY = nobody may mint: the mint has no
+	// default caller, so an operator must name the client-certificate SPIFFE SANs
+	// explicitly (and an ENABLED mint with an empty list refuses to boot in
+	// production — validate.go). Override —
+	// KACHO_IAM_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS (comma-separated).
+	v.SetDefault("authn.bootstrap-mint.signing-key-env", "KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM")
+	v.SetDefault("authn.bootstrap-mint.allowed-client-sans", []string{})
 
 	// conditions — ConditionsService evaluator recognition-cache tuning. Legacy
 	// env aliases KACHO_IAM_CONDITIONS_CACHE_SIZE / _CACHE_TTL_SECONDS (load.go).

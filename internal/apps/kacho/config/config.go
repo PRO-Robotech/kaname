@@ -5,6 +5,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -153,6 +155,75 @@ type AuthNConfig struct {
 	HooksHTTPEndpoint        string        `mapstructure:"hooks-http-endpoint"`
 	SAKeyRedactGrace         time.Duration `mapstructure:"sakey-redact-grace"`
 	UserTokenRedactGrace     time.Duration `mapstructure:"usertoken-redact-grace"`
+	// BootstrapMint — caller gate + key source for
+	// InternalBootstrapTokenService.MintBootstrapToken.
+	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`
+}
+
+// BootstrapMintConfig — authn.bootstrap-mint section: the non-interactive
+// cluster-admin token mint (#58).
+//
+// The mint hands out a Hydra-signed RS256 Bearer for a cluster `system_admin`
+// ServiceAccount. It cannot be gated by a ReBAC relation (it exists to obtain the
+// FIRST token, when no relation exists yet) and it must NOT be gated by network
+// position, so its credential is the CALLER'S CLIENT CERTIFICATE: only the SPIFFE
+// SANs listed here may call it, enforced on :9091 by authzguard.CallerPolicy.
+//
+// Two fail-closed layers:
+//   - runtime — an empty allow-list denies every caller (the mint has no default
+//     caller), in dev as well as production;
+//   - boot — an ENABLED mint (signing key present) with an empty allow-list
+//     REFUSES TO START in production (Validate), so the insecure combination
+//     cannot be reached by omission (core rule #16).
+type BootstrapMintConfig struct {
+	// SigningKeyEnv — name of the env var holding the bootstrap SA private key
+	// PEM (supplied from a k8s Secret; never in YAML). An EMPTY value in that
+	// var means the mint is DISABLED — the use-case fails closed with
+	// UNAVAILABLE and the boot-guard does not apply. Default:
+	// KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM.
+	SigningKeyEnv string `mapstructure:"signing-key-env"`
+	// AllowedClientSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
+	// call MintBootstrapToken (e.g.
+	// `spiffe://kacho.cloud/ns/kacho/sa/kacho-bootstrap-seeder`). Empty → nobody
+	// may mint. Env: comma-separated
+	// KACHO_IAM_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS.
+	AllowedClientSANs []string `mapstructure:"allowed-client-sans"`
+}
+
+// defaultBootstrapSigningKeyEnv — the env var the composition root has always
+// read the bootstrap SA key from.
+const defaultBootstrapSigningKeyEnv = "KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM"
+
+// ResolveSigningKeyEnv returns the env-var NAME holding the bootstrap signing
+// key, falling back to the documented default when unset.
+func (b BootstrapMintConfig) ResolveSigningKeyEnv() string {
+	if name := strings.TrimSpace(b.SigningKeyEnv); name != "" {
+		return name
+	}
+	return defaultBootstrapSigningKeyEnv
+}
+
+// ResolveSigningKeyPEM reads the bootstrap SA private key PEM from its env var.
+// Empty → the mint is disabled. Only os.Getenv is read (no other side-effects),
+// consistent with the other Resolve* methods; the VALUE is never logged or
+// echoed in an error (security.md).
+func (b BootstrapMintConfig) ResolveSigningKeyPEM() string {
+	return strings.TrimSpace(os.Getenv(b.ResolveSigningKeyEnv()))
+}
+
+// Enabled reports whether the mint is provisioned at all (signing key present).
+func (b BootstrapMintConfig) Enabled() bool { return b.ResolveSigningKeyPEM() != "" }
+
+// AllowedSANs returns the allow-list with blanks dropped — an empty result means
+// "deny everyone", which is exactly what CallerPolicy enforces.
+func (b BootstrapMintConfig) AllowedSANs() []string {
+	out := make([]string, 0, len(b.AllowedClientSANs))
+	for _, san := range b.AllowedClientSANs {
+		if s := strings.TrimSpace(san); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // schemaOptionsParam — URL-encoded libpq parameter `options=-c search_path=…`.
