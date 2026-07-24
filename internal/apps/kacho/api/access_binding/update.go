@@ -54,12 +54,12 @@ var abMutableFields = map[string]struct{}{
 // resource_type/resource_id/scope_ref names are kept mapped defensively so a stale
 // client still gets the immutable-switch text rather than a generic "unknown field".
 var abImmutableFields = map[string]string{
-	"role_id":       "role_id is immutable after AccessBinding.Create",
-	"roleId":        "role_id is immutable after AccessBinding.Create",
-	"subject_type":  "subject_type is immutable after AccessBinding.Create",
-	"subjectType":   "subject_type is immutable after AccessBinding.Create",
-	"subject_id":    "subject_id is immutable after AccessBinding.Create",
-	"subjectId":     "subject_id is immutable after AccessBinding.Create",
+	"role_id":       "roleId is immutable after AccessBinding.Create",
+	"roleId":        "roleId is immutable after AccessBinding.Create",
+	"subject_type":  "subjectType is immutable after AccessBinding.Create",
+	"subjectType":   "subjectType is immutable after AccessBinding.Create",
+	"subject_id":    "subjectId is immutable after AccessBinding.Create",
+	"subjectId":     "subjectId is immutable after AccessBinding.Create",
 	"subjects":      "subjects is immutable after AccessBinding.Create",
 	"scope_type":    "scopeType is immutable after AccessBinding.Create",
 	"scopeType":     "scopeType is immutable after AccessBinding.Create",

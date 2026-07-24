@@ -9,7 +9,7 @@ package account
 //   - unknown field           → sync InvalidArgument
 //   - hard-immutable
 //     `owner_user_id`         → sync InvalidArgument
-//                               "owner_user_id is immutable after Account.Create"
+//                               "ownerUserId is immutable after Account.Create"
 //   - mask пустой             → full-PATCH (mutable поля принимаются из body;
 //                               immutable из body silent-ignore)
 //   - mask содержит mutable   → применяется и валидируется

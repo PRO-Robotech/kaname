@@ -7,7 +7,7 @@ package user
 //
 // Покрывает новый публичный UpdateUser RPC (T3.3 D-1a):
 //   - T3.3-UPD-02: identity-поле (external_id) в update_mask → sync
-//     INVALID_ARGUMENT "external_id is immutable after User.Create"
+//     INVALID_ARGUMENT "externalId is immutable after User.Create"
 //     (первым стейтментом, до writer-tx); unknown-поле в mask → INVALID_ARGUMENT.
 //   - T3.3-UPD-01: happy — labels через mask; full-PATCH (пустой mask) применяет
 //     labels, immutable identity-поля из тела silently игнорируются.
@@ -305,7 +305,7 @@ func TestUpdateUser_T33UPD02_ExternalIDImmutable(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok, "want grpc status; got %v", err)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, err.Error(), "external_id is immutable after User.Create")
+	assert.Contains(t, err.Error(), "externalId is immutable after User.Create")
 }
 
 // T3.3-UPD-02 — unknown-поле в update_mask → sync INVALID_ARGUMENT.

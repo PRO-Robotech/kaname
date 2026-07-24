@@ -8,7 +8,8 @@
 //
 // Per-resource maps `<resource>MutableFields` + `<resource>ImmutableFields`
 // остаются package-level в каждом ресурсе (контекстные error-messages типа
-// `"owner_user_id is immutable after Account.Create"`)
+// `"ownerUserId is immutable after Account.Create"` — имя поля в тексте всегда
+// в wire-форме camelCase, см. immutable_message_camelcase_test.go)
 // — они конфигурация, не дубликат.
 package shared
 

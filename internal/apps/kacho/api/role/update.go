@@ -49,13 +49,13 @@ var roleMutableFields = map[string]struct{}{
 }
 
 var roleImmutableFields = map[string]string{
-	"account_id": "account_id is immutable after Role.Create",
-	"accountId":  "account_id is immutable after Role.Create",
-	"is_system":  "is_system is immutable after Role.Create",
-	"isSystem":   "is_system is immutable after Role.Create",
+	"account_id": "accountId is immutable after Role.Create",
+	"accountId":  "accountId is immutable after Role.Create",
+	"is_system":  "isSystem is immutable after Role.Create",
+	"isSystem":   "isSystem is immutable after Role.Create",
 	"id":         "id is immutable after Role.Create",
-	"created_at": "created_at is immutable after Role.Create",
-	"createdAt":  "created_at is immutable after Role.Create",
+	"created_at": "createdAt is immutable after Role.Create",
+	"createdAt":  "createdAt is immutable after Role.Create",
 	// permissions is the compiled/derived projection — not directly mutable.
 	"permissions": "permissions is immutable after Role.Create",
 }

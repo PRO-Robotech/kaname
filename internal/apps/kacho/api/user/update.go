@@ -8,7 +8,7 @@ package user
 // Единственное mutable поле User через этот Update — `labels` (tenant-facing
 // метки, делающие User label-selectable). Identity-поля hard-immutable:
 // `external_id` (IdP `sub`) и его camelCase-алиас — их наличие в update_mask →
-// sync INVALID_ARGUMENT "external_id is immutable after User.Create" (первым
+// sync INVALID_ARGUMENT "externalId is immutable after User.Create" (первым
 // стейтментом, до writer-tx). Мутация async → Operation (как все мутации).
 //
 // Изменение labels co-commit'ит reconcile-event на own-resource label-change в той
@@ -50,14 +50,14 @@ var userMutableFields = map[string]struct{}{
 // userImmutableFields — hard-immutable identity-поля: их наличие в update_mask →
 // INVALID_ARGUMENT с per-field сообщением (паритет с остальными ресурсами).
 var userImmutableFields = map[string]string{
-	"external_id": "external_id is immutable after User.Create",
-	"externalId":  "external_id is immutable after User.Create",
+	"external_id": "externalId is immutable after User.Create",
+	"externalId":  "externalId is immutable after User.Create",
 	"id":          "id is immutable after User.Create",
-	"account_id":  "account_id is immutable after User.Create",
-	"accountId":   "account_id is immutable after User.Create",
+	"account_id":  "accountId is immutable after User.Create",
+	"accountId":   "accountId is immutable after User.Create",
 	"email":       "email is immutable after User.Create",
-	"created_at":  "created_at is immutable after User.Create",
-	"createdAt":   "created_at is immutable after User.Create",
+	"created_at":  "createdAt is immutable after User.Create",
+	"createdAt":   "createdAt is immutable after User.Create",
 }
 
 type UpdateUserUseCase struct {

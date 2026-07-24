@@ -46,8 +46,8 @@ self-seeded per case (create_suite_project → {{_t31cProj}}) instead of read fr
 shared {{projectA1Id}} fixture. That fixture var could resolve to a PHANTOM project
 (an id whose IAM row never committed — ensure_project extracts metadata.projectId even
 from a Create Operation that finished WITH an error), so the cross-service peer-check
-compute DiskService.Create → iam project-resolve returned `Folder with id <id> not
-found` and every case cascaded RED. A freshly-created, op-poll-confirmed project is
+compute DiskService.Create → iam project-resolve returned `Project <id> not found`
+and every case cascaded RED. A freshly-created, op-poll-confirmed project is
 guaranteed to exist for the peer-check. Test-design: same as vpc file (state-transition,
 ECP, error-guessing). One thought per pm.test().
 """
@@ -237,7 +237,7 @@ def create_suite_project(suffix):
     to every case so each owns a project GUARANTEED to exist for the cross-service
     peer-check (compute → iam project-resolve). The op-poll asserts done + NO error, so
     a project that ever fails to materialise fails LOUDLY here (not as an opaque
-    downstream 'Folder with id <id> not found'). accountAId stays the shared-tenant
+    downstream 'Project <id> not found'). accountAId stays the shared-tenant
     anchor: the ARM_LABELS role is account-scoped on account:accountAId and containment
     matches resources whose parent_account_id == accountAId — a project under account-A
     satisfies it. Project.Create is authz-gated by editor@account:accountAId, which

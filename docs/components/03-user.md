@@ -210,7 +210,7 @@ grpcurl -plaintext -d '{
 | Email занят в Account (PENDING)           | `ALREADY_EXISTS`       | 409  | `User with email already invited`              |
 | Email невалиден                           | `INVALID_ARGUMENT`     | 400  | `Illegal argument email: invalid format`       |
 | Delete user, на которого ссылается binding| `FAILED_PRECONDITION`  | 412  | `user is referenced by access_bindings`        |
-| Update с `external_id` (через internal)   | `INVALID_ARGUMENT`     | 400  | `external_id is immutable after User.Create`   |
+| Update с `externalId` (через internal)    | `INVALID_ARGUMENT`     | 400  | `externalId is immutable after User.Create`    |
 
 ## Как воспроизвести локально
 

@@ -34,11 +34,11 @@ var groupMutableFields = map[string]struct{}{
 }
 
 var groupImmutableFields = map[string]string{
-	"account_id": "account_id is immutable after Group.Create",
-	"accountId":  "account_id is immutable after Group.Create",
+	"account_id": "accountId is immutable after Group.Create",
+	"accountId":  "accountId is immutable after Group.Create",
 	"id":         "id is immutable after Group.Create",
-	"created_at": "created_at is immutable after Group.Create",
-	"createdAt":  "created_at is immutable after Group.Create",
+	"created_at": "createdAt is immutable after Group.Create",
+	"createdAt":  "createdAt is immutable after Group.Create",
 }
 
 type UpdateGroupUseCase struct {

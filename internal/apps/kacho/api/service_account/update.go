@@ -36,11 +36,11 @@ var saMutableFields = map[string]struct{}{
 }
 
 var saImmutableFields = map[string]string{
-	"account_id": "account_id is immutable after ServiceAccount.Create",
-	"accountId":  "account_id is immutable after ServiceAccount.Create",
+	"account_id": "accountId is immutable after ServiceAccount.Create",
+	"accountId":  "accountId is immutable after ServiceAccount.Create",
 	"id":         "id is immutable after ServiceAccount.Create",
-	"created_at": "created_at is immutable after ServiceAccount.Create",
-	"createdAt":  "created_at is immutable after ServiceAccount.Create",
+	"created_at": "createdAt is immutable after ServiceAccount.Create",
+	"createdAt":  "createdAt is immutable after ServiceAccount.Create",
 }
 
 type UpdateServiceAccountUseCase struct {
