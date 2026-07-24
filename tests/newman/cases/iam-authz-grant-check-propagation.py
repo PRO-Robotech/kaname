@@ -714,7 +714,7 @@ CASES.append(Case(
             name="poll-fga-readiness-admin-del",
             subject_expr="'user:' + pm.environment.get('userAAAId')",
             object_expr="'iam_access_binding:' + pm.environment.get('_adminDel_abId')",
-            relation="editor",
+            relation="v_delete",
         ),
         # AAA deletes a binding whose subject is NOB, not AAA — proves admin authority,
         # not self-only. The readiness poll above guarantees the parent-tuple has
@@ -723,7 +723,7 @@ CASES.append(Case(
             name="aaa-deletes-foreign-subject-binding",
             method="DELETE",
             path="/iam/v1/accessBindings/{{_adminDel_abId}}",
-            auth="jwtAccountAdminA",
+            auth="jwtAccountAdminAStepUp",
             test_script=[
                 "pm.test('admin DELETE foreign-subject binding → 200', () => pm.expect(pm.response.code).to.eql(200));",
             ],
@@ -1045,13 +1045,13 @@ CASES.append(Case(
             name="poll-fga-readiness-revoke-del",
             subject_expr="'user:' + pm.environment.get('userAAAId')",
             object_expr="'iam_access_binding:' + pm.environment.get('_abDeleteChk_abId')",
-            relation="editor",
+            relation="v_delete",
         ),
         Step(
             name="delete-binding",
             method="DELETE",
             path="/iam/v1/accessBindings/{{_abDeleteChk_abId}}",
-            auth="jwtAccountAdminA",
+            auth="jwtAccountAdminAStepUp",
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.id", "_abDeleteChk_delOpId"),

@@ -50,6 +50,27 @@ CASES = []
 POLL_CAP = 30
 
 
+def _internal_url_override(path):
+    """Redirect this request to the api-gateway cluster-internal REST listener
+    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are served
+    ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design (ban #6).
+    gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
+    public port → "404 page not found" → JSONError on the first pm.response.json().
+    Mirrors label-revoke-iam.py::_internal_url_override. internalBaseUrl is injected at
+    runtime by the newman harness (--env-var); if unset (local dev without the internal-
+    rest port-forward) the step is skipped rather than hitting a spurious public 404."""
+    return [
+        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
+        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+        "if (!intBase) {",
+        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
+        "  pm.execution.setNextRequest(null);",
+        "} else {",
+        f"  pm.request.url = intBase + '{path}';",
+        "}",
+    ]
+
+
 def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
     """Self-polling Step body that waits for an IAM Operation to be done."""
     capture = ""
@@ -154,6 +175,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
         method="POST",
         path="/iam/v1/internal/iam:check",
         auth=auth,
+        pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
         body={"subjectId": subject, "relation": relation, "object": obj},
         test_script=[
             "const j = pm.response.json();",

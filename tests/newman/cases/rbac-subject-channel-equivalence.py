@@ -561,7 +561,7 @@ CASES.append(Case(
         # member gains access (poll — proves the group grant materialized).
         read_account_appears("member-reads", "jwtInvitee", "group member"),
         # non-member is denied — single-shot (steady-state, never granted; polling would mask a leak).
-        deny_account_singleshot("nonmember-denied", "jwtNoBindings", "group non-member"),
+        deny_account_singleshot("nonmember-denied", "jwtPureNoBindings", "group non-member"),
         *revoke_then_gone("teardown-nonmem", "chgNmAcb", "user:{{userINVId}}", "group-nonmember-case", "chgNmRevOp"),
     ],
 ))
@@ -628,7 +628,7 @@ CASES.append(Case(
         grant_view("grant-sa", SA_A, "chSaIsoAcb", "chSaIsoOp"),
         poll_op("chSaIsoOp", allow_already_exists=True),
         read_account_appears("sa-reads", "jwtSAA", "SA principal"),
-        deny_account_singleshot("user-not-inherits", "jwtNoBindings", "user does not inherit SA grant"),
+        deny_account_singleshot("user-not-inherits", "jwtPureNoBindings", "user does not inherit SA grant"),
         *revoke_then_gone("teardown-sa-iso", "chSaIsoAcb", "service_account:{{svaAId}}", "SA-isolation-case", "chSaIsoRevOp"),
     ],
 ))

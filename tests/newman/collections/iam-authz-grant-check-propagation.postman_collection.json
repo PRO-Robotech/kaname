@@ -944,7 +944,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"{{_poll_fga_readiness_admin_del_subj}}\", \"relation\": \"editor\", \"object\": \"{{_poll_fga_readiness_admin_del_obj}}\"}",
+              "raw": "{\"subjectId\": \"{{_poll_fga_readiness_admin_del_subj}}\", \"relation\": \"v_delete\", \"object\": \"{{_poll_fga_readiness_admin_del_obj}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1034,8 +1034,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
@@ -1890,7 +1890,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"{{_poll_fga_readiness_revoke_del_subj}}\", \"relation\": \"editor\", \"object\": \"{{_poll_fga_readiness_revoke_del_obj}}\"}",
+              "raw": "{\"subjectId\": \"{{_poll_fga_readiness_revoke_del_subj}}\", \"relation\": \"v_delete\", \"object\": \"{{_poll_fga_readiness_revoke_del_obj}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1980,8 +1980,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
