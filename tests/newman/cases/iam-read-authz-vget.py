@@ -131,6 +131,7 @@ CASES.append(Case(
                 "const pc = parseInt(pm.environment.get('_rdAuthzDelCount') || '0', 10);",
                 "if (!j.done && pc < 30) {",
                 "  pm.environment.set('_rdAuthzDelCount', String(pc + 1));",
+                "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */",
                 "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",

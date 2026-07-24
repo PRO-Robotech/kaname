@@ -396,7 +396,7 @@ CASES.append(Case(
                 "  const j = pm.response.json();",
                 "  if (pm.environment.get('_sysDelStarted') !== pm.info.requestName) { pm.environment.set('_sysDelCount','0'); pm.environment.set('_sysDelStarted', pm.info.requestName); }",
                 "  const pc = parseInt(pm.environment.get('_sysDelCount')||'0',10);",
-                f"  if (!j.done && pc < {POLL_CAP}) {{ pm.environment.set('_sysDelCount', String(pc+1)); const _d=Date.now(); while(Date.now()-_d<500){{}} pm.execution.setNextRequest(pm.info.requestName); return; }}",
+                f"  if (!j.done && pc < {POLL_CAP}) {{ pm.environment.set('_sysDelCount', String(pc+1)); const _d=Date.now(); while(Date.now()-_d<500){{}} const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 100) void 0; /* real inter-poll delay: cap 500 x 100ms ~= 50s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 "  pm.environment.unset('_sysDelCount'); pm.environment.unset('_sysDelStarted');",
                 "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                 "  pm.test('op.error FAILED_PRECONDITION (9)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",

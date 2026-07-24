@@ -542,7 +542,7 @@ CASES.append(Case(
             ],
             test_script=[
                 "const _rc = parseInt(pm.environment.get('_rgCount')||'0',10);",
-                f"if ([403,404].includes(pm.response.code) && _rc < 15) {{ pm.environment.set('_rgCount', String(_rc+1)); const _d=Date.now(); while(Date.now()-_d<400){{}} pm.execution.setNextRequest(pm.info.requestName); return; }}",
+                f"if ([403,404].includes(pm.response.code) && _rc < 15) {{ pm.environment.set('_rgCount', String(_rc+1)); const _d=Date.now(); while(Date.now()-_d<400){{}} const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 15 x 500ms ~= 7s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 "pm.environment.unset('_rgCount'); pm.environment.unset('_rgStarted');",
                 *assert_status(200),
                 "pm.test('re-grant is a NEW ACTIVE row (distinct id, ACTIVE)', () => {",

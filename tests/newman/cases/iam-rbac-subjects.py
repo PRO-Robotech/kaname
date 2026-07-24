@@ -882,6 +882,7 @@ CASES.append(Case(
                 "const ready = (pm.response.code === 200 && ids.indexOf(wantA) !== -1 && ids.indexOf(wantB) !== -1);",
                 f"if (!ready && ec < {FGA_POLL_CAP}) {{",
                 "  pm.environment.set('_expCount', String(ec + 1));",
+                "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 166) void 0; /* real inter-poll delay: cap 180 x 166ms ~= 29s budget (testing.md) */",
                 "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
@@ -1040,6 +1041,7 @@ CASES.append(Case(
                 # drainer as the ExpandAccess case, so it needs the wider budget for the worst case.
                 f"if (!(pm.response.code === 200 && j.allowed === true) && pc < {FGA_POLL_CAP}) {{",
                 "  pm.environment.set('_gmChkCount', String(pc + 1));",
+                "  const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 166) void 0; /* real inter-poll delay: cap 180 x 166ms ~= 29s budget (testing.md) */",
                 "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",

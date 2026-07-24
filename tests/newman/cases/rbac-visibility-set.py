@@ -114,6 +114,7 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA"):
             "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
             f"if (!j.done && pc < {POLL_CAP}) {{",
             "  pm.environment.set('_pollCount', String(pc + 1));",
+            "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
             "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
@@ -212,7 +213,7 @@ def preclean_account_loop(tag, next_step):
             test_script=[
                 "const j = pm.response.json();",
                 f"const c = parseInt(pm.environment.get('_{tag}AwaitCount') || '0', 10);",
-                f"if (!j.done && c < {POLL_CAP}) {{ pm.environment.set('_{tag}AwaitCount', String(c + 1)); pm.execution.setNextRequest(pm.info.requestName); return; }}",
+                f"if (!j.done && c < {POLL_CAP}) {{ pm.environment.set('_{tag}AwaitCount', String(c + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 f"pm.environment.unset('_{tag}AwaitCount'); pm.environment.unset('_{tag}AwaitStarted');",
                 f"pm.execution.setNextRequest('{list_step}');",
             ],

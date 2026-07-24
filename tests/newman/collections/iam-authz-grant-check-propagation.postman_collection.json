@@ -2133,6 +2133,7 @@
                   "const pc = parseInt(pm.environment.get('_probe_check_after_revoke_poll') || '0', 10);",
                   "if (!(pm.response.code === 200 && j.allowed !== true) && pc < 50) {",
                   "  pm.environment.set('_probe_check_after_revoke_poll', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",

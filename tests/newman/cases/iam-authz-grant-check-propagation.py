@@ -280,6 +280,7 @@ def poll_check_denied_step(name, subject_expr, object_expr, relation,
             # fails it — nothing is masked.
             f"if (!(pm.response.code === 200 && j.allowed !== true) && pc < {max_attempts}) {{",
             f"  pm.environment.set('{counter_var}', String(pc + 1));",
+            "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */",
             "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
