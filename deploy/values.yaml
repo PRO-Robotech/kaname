@@ -54,7 +54,8 @@ repository:
     maxConns: 50
     sslMode: disable
 authn:
-  mode: dev
+  # secure-by-default (core rule #16); dev — явный opt-in dev-профиля.
+  mode: production
 
 # extapi — внешние peer-зависимости сервиса (OpenFGA для authz-Check).
 # Auth-tier построен на Ory Kratos + Hydra.

@@ -53,7 +53,7 @@ data:
         password-from-env: KACHO_IAM_DB_PASSWORD
 
     authn:
-      mode: {{ default "dev" .Values.authn.mode | quote }}
+      mode: {{ default "production" .Values.authn.mode | quote }}
 
     extapi:
       def-dial-duration: 10s
