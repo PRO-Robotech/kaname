@@ -740,6 +740,7 @@ func runServe(cfg config.Config) error {
 	// exists / 400-cannot-delete; retry on 5xx; poison on validation_error).
 	// OpenFGA is required in production (composition root fails fast above
 	// when KACHO_IAM_OPENFGA_STORE_ID is empty) — the drainer always runs.
+	fgaDrainerLogger := logger.With(slog.String("component", "fga_outbox_drainer"))
 	fgaDrainer, derr := drainer.New[clients.FGAOutboxEvent](
 		pool,
 		drainer.Config{
@@ -751,21 +752,37 @@ func runServe(cfg config.Config) error {
 			BackoffMin:   1 * time.Second,
 			BackoffMax:   30 * time.Second,
 			ApplyTimeout: 5 * time.Second,
-			// ApplyConcurrency stays 1 (sequential). Unlike compute's register-only
-			// fga_outbox (WRITES only → commutative → ca424e4's N=16 is safe), iam's
-			// fga_outbox carries BOTH tuple WRITES (grant / label-register) AND DELETES
-			// (revoke / label-remove / delete-stale) of the SAME (user,relation,object).
-			// Those are NOT commutative — the drainer's ApplyConcurrency>1 does NOT
-			// preserve intra-batch order (see drainer.Config.ApplyConcurrency godoc), so
-			// a write+delete of one tuple in one claim-batch could commit delete-then-
-			// write → the tuple survives → an authz OVER-GRANT / cross-account leak
-			// (observed: authz-deny + iam-role foreign-Get 200-not-404 under a naive N=16).
-			// Speeding the revoke/membership drain safely needs an ORDER-PRESERVING
-			// (partition-by-object) concurrent drainer — tracked follow-up, not a naive N>1.
+			// Order-preserving concurrent drain. iam's fga_outbox carries BOTH tuple
+			// WRITES (grant / label-register) AND DELETES (revoke / label-remove /
+			// delete-stale) of the SAME (user,relation,object) — NOT commutative.
+			// ApplyConcurrency>1 alone does NOT preserve order (and the claim
+			// ORDER BY (attempt_count,id) splits a bumped WRITE and a fresh DELETE into
+			// different batches), so a naive N=16 let a DELETE apply before its
+			// predecessor WRITE → delete-before-write → the tuple survives the revoke →
+			// authz OVER-GRANT / cross-account leak (observed: authz-deny + iam-role
+			// foreign-Get 200-not-404). PartitionColumn makes the claim
+			// partition-head-only: a row is never claimed while a DELIVERABLE
+			// same-object predecessor with a smaller id is unsent, so per-object FIFO
+			// holds cross-batch AND cross-replica and at most one row per object is in
+			// flight — safe to raise the revoke/membership drain to N=16. Requires
+			// migration 0061's partial index ((payload->>'object'),id) WHERE sent_at IS
+			// NULL for the claim's NOT EXISTS. See drainer.Config.PartitionColumn.
+			ApplyConcurrency: 16,
+			PartitionColumn:  "payload->>'object'",
+			// Per-partition head-of-line wedge attribution: a persistently-transient
+			// object head blocks its successors until the peer recovers (temporary, by
+			// design — leak-safety over per-partition liveness). WedgeWarnAfter surfaces
+			// WHICH object is stuck, beyond the table-wide oldest-pending-age gauge.
+			WedgeWarnAfter: 60 * time.Second,
 		},
 		clients.DecodeFGAOutboxEvent,
 		clients.NewFGAApplier(svcs.relationStore),
-		logger.With(slog.String("component", "fga_outbox_drainer")),
+		fgaDrainerLogger,
+		drainer.WithWedgeObserver[clients.FGAOutboxEvent](func(partition string, age time.Duration) {
+			fgaDrainerLogger.Warn("fga_outbox partition wedged (head-of-line)",
+				slog.String("partition", partition),
+				slog.Duration("oldest_unsent_age", age))
+		}),
 	)
 	if derr != nil {
 		_ = listener.Close()
