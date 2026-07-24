@@ -751,6 +751,17 @@ func runServe(cfg config.Config) error {
 			BackoffMin:   1 * time.Second,
 			BackoffMax:   30 * time.Second,
 			ApplyTimeout: 5 * time.Second,
+			// ApplyConcurrency stays 1 (sequential). Unlike compute's register-only
+			// fga_outbox (WRITES only → commutative → ca424e4's N=16 is safe), iam's
+			// fga_outbox carries BOTH tuple WRITES (grant / label-register) AND DELETES
+			// (revoke / label-remove / delete-stale) of the SAME (user,relation,object).
+			// Those are NOT commutative — the drainer's ApplyConcurrency>1 does NOT
+			// preserve intra-batch order (see drainer.Config.ApplyConcurrency godoc), so
+			// a write+delete of one tuple in one claim-batch could commit delete-then-
+			// write → the tuple survives → an authz OVER-GRANT / cross-account leak
+			// (observed: authz-deny + iam-role foreign-Get 200-not-404 under a naive N=16).
+			// Speeding the revoke/membership drain safely needs an ORDER-PRESERVING
+			// (partition-by-object) concurrent drainer — tracked follow-up, not a naive N>1.
 		},
 		clients.DecodeFGAOutboxEvent,
 		clients.NewFGAApplier(svcs.relationStore),
