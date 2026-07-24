@@ -200,6 +200,19 @@ type ReconcileStore interface {
 	// mirror ⇒ PENDING_VERIFICATION.
 	GetMirrorObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
 
+	// GetIAMDirectObject returns the same-DB own-table projection (containment
+	// parents + labels) of ONE iam-native object (iam.project / iam.account + the
+	// content types user/serviceAccount/group/role/accessBinding). It is the
+	// iam-direct analogue of GetMirrorObject, used by the ADDITIVE forward fast-path
+	// for a brand-new iam-direct object — which lives in ITS OWN table, never the
+	// mirror. The projection stamps the SAME containment parents (parentAccount /
+	// parentProject) and labels the iam-direct match queries produce, so the shared
+	// per-object verdict (IsContainedIn / selectorMatchesObject / desiredMemberForObject)
+	// decides identically to the FULL path. ok=false when the type is not iam-direct
+	// or the row does not exist. Never PENDING (an iam object is in its own table the
+	// instant it exists) — same-DB read, no peer call (graph stays acyclic).
+	GetIAMDirectObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
+
 	// CurrentMembers returns the materialized members of a binding (the diff base).
 	CurrentMembers(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.TargetMember, error)
 

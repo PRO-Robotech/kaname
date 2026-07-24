@@ -32,6 +32,16 @@ import (
 // sync call closes the GET-after-create race the async drain would otherwise lose.
 // Implemented by reconcile.Reconciler. nil-safe (reconcile event + sweep backstop).
 type ObjectReconciler interface {
+	// ReconcileObjectForward is the ADDITIVE forward fast-path for the freshly-created
+	// service-account-AS-OBJECT (iam.serviceAccount): it materializes ONLY that new SA's
+	// per-object owner/admin tuples across the matching bindings under a SHARE advisory
+	// lock (no EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
+	// materialization lag under a parallel SA-create burst. It transparently delegates to
+	// the FULL ReconcileObject if the object already has members (delete-stale guard).
+	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
+	// delete-stale / audit / sweep), driven by the reconcile worker off the co-committed
+	// reconcile-outbox event, not the create hot-path.
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 }
 
@@ -151,19 +161,31 @@ func (u *CreateServiceAccountUseCase) doCreate(ctx context.Context, sa domain.Se
 	// closing the GET-after-create race the async event drain would otherwise lose
 	// under the flat model. Best-effort/non-fatal: the SA is durably created and the
 	// co-committed reconcile event + periodic sweep are the at-least-once backstop.
+	//
+	// IAM-FMB throughput fix: the sync post-commit materialization takes the ADDITIVE
+	// forward (ReconcileObjectForward, SHARE advisory lock, single-object — the SA is
+	// brand-new so there is NOTHING stale to delete) instead of the FULL EXCLUSIVE
+	// ReconcileObject, whose per-binding advisory lock + O(scope) recompute serialized on
+	// the SINGLE owner/account binding every service account of an account shares → the
+	// owner-tuple materialization lagged past the client read-your-writes retry budget
+	// under a parallel SA-create burst. The forward delegates to the FULL path on a
+	// re-materialization with existing members (delete-stale guard); the FULL
+	// ReconcileObject REMAINS the async at-least-once backstop, driven by the co-committed
+	// reconcile event.
 	u.reconcileObject(ctx, "iam.serviceAccount", string(created.ID))
 
 	return marshalSA(created)
 }
 
-// reconcileObject runs the post-commit synchronous per-object materialization
-// (nil-safe, non-fatal — logs and proceeds; the reconcile event + sweep retry).
+// reconcileObject runs the post-commit synchronous per-object materialization via the
+// ADDITIVE forward fast-path (nil-safe, non-fatal — logs and proceeds; the co-committed
+// reconcile event + periodic sweep are the at-least-once backstop).
 func (u *CreateServiceAccountUseCase) reconcileObject(ctx context.Context, objectType, objectID string) {
 	if u.reconciler == nil {
 		return
 	}
-	if rerr := u.reconciler.ReconcileObject(ctx, objectType, objectID); rerr != nil && u.logger != nil {
-		u.logger.Error("service_account create: object reconcile failed (event/sweep will retry)",
+	if rerr := u.reconciler.ReconcileObjectForward(ctx, objectType, objectID); rerr != nil && u.logger != nil {
+		u.logger.Error("service_account create: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}
 }

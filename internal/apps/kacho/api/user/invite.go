@@ -62,6 +62,17 @@ type InviteUserInput struct {
 // otherwise lose. Implemented by reconcile.Reconciler. nil-safe (the co-committed
 // reconcile event + periodic sweep are the at-least-once backstop).
 type ObjectReconciler interface {
+	// ReconcileObjectForward is the ADDITIVE forward fast-path for the invite-flow's
+	// freshly-created iam-native objects (iam.user + the project-scoped iam.accessBinding):
+	// it materializes ONLY that new object's per-object owner/admin tuples across the
+	// matching bindings under a SHARE advisory lock (no EXCLUSIVE / O(scope) recompute),
+	// the throughput fix for the owner-tuple materialization lag under a parallel
+	// invite burst. It transparently delegates to the FULL ReconcileObject if the object
+	// already has members (delete-stale guard).
+	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
+	// delete-stale / audit / sweep), driven by the reconcile worker off the co-committed
+	// reconcile-outbox event, not the invite hot-path.
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 	// ReconcileBinding materializes the invite-flow AccessBinding's OWN grant
 	// membership through the unified reconciler — the per-object verb-bearing v_*
@@ -372,14 +383,20 @@ func (uc *InviteUserUseCase) doInvite(
 	return marshalUser(user)
 }
 
-// reconcileObject runs the post-commit synchronous per-object materialization
-// (nil-safe, non-fatal — logs and proceeds; the reconcile event + sweep retry).
+// reconcileObject runs the post-commit synchronous per-object materialization via the
+// ADDITIVE forward fast-path (nil-safe, non-fatal — logs and proceeds; the co-committed
+// reconcile event + periodic sweep are the at-least-once backstop). Both invite-flow
+// objects it materializes (the brand-new iam.user + the project-scoped iam.accessBinding)
+// have NO prior members, so the forward path stays additive — the throughput hot-path —
+// instead of the FULL EXCLUSIVE ReconcileObject that serialized on the account's single
+// owner binding under a parallel invite burst. The FULL ReconcileObject REMAINS the async
+// at-least-once backstop, driven by the co-committed reconcile events emitted in doInvite.
 func (uc *InviteUserUseCase) reconcileObject(ctx context.Context, objectType, objectID string) {
 	if uc.reconciler == nil {
 		return
 	}
-	if rerr := uc.reconciler.ReconcileObject(ctx, objectType, objectID); rerr != nil && uc.logger != nil {
-		uc.logger.Error("invite user: object reconcile failed (event/sweep will retry)",
+	if rerr := uc.reconciler.ReconcileObjectForward(ctx, objectType, objectID); rerr != nil && uc.logger != nil {
+		uc.logger.Error("invite user: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}
 }

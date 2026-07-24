@@ -41,6 +41,7 @@ type fakeStore struct {
 	active        bool
 	selectors     []domain.RuleSelector
 	mirror        map[string][]domain.MirrorObject // dotted type → objects (MatchSelector source)
+	iamDirect     map[string][]domain.MirrorObject // dotted iam.* type → own-table objects (iam-direct feed)
 	current       []domain.TargetMember
 	upserts       []domain.TargetMember
 	deletes       []string // memberKey of deleted members
@@ -61,7 +62,12 @@ type fakeStore struct {
 	// globally-consistent (sorted ASC) acquisition order.
 	bindingsForObject []domain.AccessBindingID
 	selectorBindings  []domain.AccessBindingID
-	lockOrder         []domain.AccessBindingID
+	// iamDirectSelectorBindings is the iam-direct fast-path source
+	// (IAMDirectSelectorBindingsMatchingObject). Kept SEPARATE from selectorBindings
+	// so a forward pass over an iam.* object exercises the iam-direct branch (own-table
+	// getter + iam-direct fan-out) without disturbing the mirror-fed forward tests.
+	iamDirectSelectorBindings []domain.AccessBindingID
+	lockOrder                 []domain.AccessBindingID
 }
 
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
@@ -118,7 +124,15 @@ func (f *fakeStore) MatchSelector(ctx context.Context, types []string, ml map[st
 }
 
 func (f *fakeStore) MatchIAMDirect(ctx context.Context, types []string, ml map[string]string) ([]domain.MirrorObject, error) {
-	return nil, nil
+	var out []domain.MirrorObject
+	for _, t := range types {
+		for _, o := range f.iamDirect[t] {
+			if o.MatchesLabels(ml) {
+				out = append(out, o)
+			}
+		}
+	}
+	return out, nil
 }
 
 // MatchAllInScope models the LOOSEST valid superset: it returns EVERY seeded object of the
@@ -150,17 +164,48 @@ func (f *fakeStore) MatchByIDs(ctx context.Context, types, ids []string) ([]doma
 	return out, nil
 }
 
+// MatchAllInScopeIAMDirect models the LOOSEST valid superset for the iam-direct feed:
+// every seeded object of the types, ignoring scope (the reconciler's IsContainedIn
+// re-verify is the authoritative containment gate — parity with MatchAllInScope).
 func (f *fakeStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
-	return nil, nil
+	var out []domain.MirrorObject
+	for _, t := range types {
+		out = append(out, f.iamDirect[t]...)
+	}
+	return out, nil
 }
 
 func (f *fakeStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string) ([]domain.MirrorObject, error) {
-	return nil, nil
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	var out []domain.MirrorObject
+	for _, t := range types {
+		for _, o := range f.iamDirect[t] {
+			if _, ok := want[o.ObjectID]; ok {
+				out = append(out, o)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) GetMirrorObject(ctx context.Context, ot, oid string) (domain.MirrorObject, bool, error) {
 	// Search the seeded mirror for the single object (forward fast-path source).
 	for _, o := range f.mirror[ot] {
+		if o.ObjectID == oid {
+			return o, true, nil
+		}
+	}
+	return domain.MirrorObject{}, false, nil
+}
+
+// GetIAMDirectObject is the iam-direct analogue of GetMirrorObject: it returns the
+// seeded own-table projection (parents + labels) for one iam.* object. The forward
+// fast-path uses it for a brand-new iam-direct object (which never lives in the mirror).
+func (f *fakeStore) GetIAMDirectObject(ctx context.Context, ot, oid string) (domain.MirrorObject, bool, error) {
+	for _, o := range f.iamDirect[ot] {
 		if o.ObjectID == oid {
 			return o, true, nil
 		}
@@ -178,7 +223,7 @@ func (f *fakeStore) SelectorBindingsMatchingObject(ctx context.Context, ot, oid 
 	return f.selectorBindings, nil
 }
 func (f *fakeStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Context, ot, oid string) ([]domain.AccessBindingID, error) {
-	return nil, nil
+	return f.iamDirectSelectorBindings, nil
 }
 func (f *fakeStore) UpsertMember(ctx context.Context, m domain.TargetMember) error {
 	f.upserts = append(f.upserts, m)

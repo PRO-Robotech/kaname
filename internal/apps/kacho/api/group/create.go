@@ -33,6 +33,16 @@ import (
 // materialization path the worker drives). nil-safe: when unwired the co-committed
 // reconcile event + periodic sweep still materialize it, just not synchronously.
 type ObjectReconciler interface {
+	// ReconcileObjectForward is the ADDITIVE forward fast-path for the freshly-created
+	// group-AS-OBJECT (iam.group): it materializes ONLY that new group's per-object
+	// owner/admin tuples across the matching bindings under a SHARE advisory lock (no
+	// EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
+	// materialization lag under a parallel group-create burst. It transparently delegates
+	// to the FULL ReconcileObject if the object already has members (delete-stale guard).
+	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
+	// delete-stale / audit / sweep), driven by the reconcile worker off the co-committed
+	// reconcile-outbox event, not the create hot-path.
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 }
 
@@ -153,19 +163,30 @@ func (u *CreateGroupUseCase) doCreate(ctx context.Context, g domain.Group, actor
 	// under the flat model. Best-effort/non-fatal: the group is durably created and
 	// the co-committed reconcile event + periodic sweep are the at-least-once
 	// backstop. nil-safe.
+	//
+	// IAM-FMB throughput fix: the sync post-commit materialization takes the ADDITIVE
+	// forward (ReconcileObjectForward, SHARE advisory lock, single-object — the group is
+	// brand-new so there is NOTHING stale to delete) instead of the FULL EXCLUSIVE
+	// ReconcileObject, whose per-binding advisory lock + O(scope) recompute serialized on
+	// the SINGLE owner/account binding every group of an account shares → the owner-tuple
+	// materialization lagged past the client read-your-writes retry budget under a parallel
+	// group-create burst. The forward delegates to the FULL path on a re-materialization
+	// with existing members (delete-stale guard); the FULL ReconcileObject REMAINS the
+	// async at-least-once backstop, driven by the co-committed reconcile event.
 	u.reconcileObject(ctx, "iam.group", string(created.ID))
 
 	return marshalGroup(created)
 }
 
-// reconcileObject runs the post-commit synchronous per-object materialization
-// (nil-safe, non-fatal — logs and proceeds; the reconcile event + sweep retry).
+// reconcileObject runs the post-commit synchronous per-object materialization via the
+// ADDITIVE forward fast-path (nil-safe, non-fatal — logs and proceeds; the co-committed
+// reconcile event + periodic sweep are the at-least-once backstop).
 func (u *CreateGroupUseCase) reconcileObject(ctx context.Context, objectType, objectID string) {
 	if u.reconciler == nil {
 		return
 	}
-	if rerr := u.reconciler.ReconcileObject(ctx, objectType, objectID); rerr != nil && u.logger != nil {
-		u.logger.Error("group create: object reconcile failed (event/sweep will retry)",
+	if rerr := u.reconciler.ReconcileObjectForward(ctx, objectType, objectID); rerr != nil && u.logger != nil {
+		u.logger.Error("group create: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}
 }

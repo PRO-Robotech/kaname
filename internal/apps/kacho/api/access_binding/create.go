@@ -68,6 +68,16 @@ type SelectorReconciler interface {
 	// ReconcileBinding is the FULL EXCLUSIVE path (Role.Update fan-out + sweep backstop);
 	// still consumed by the reconcile machinery, not by the create hot-path.
 	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
+	// ReconcileObjectForward is the ADDITIVE forward fast-path for the freshly-created
+	// binding-AS-OBJECT (iam.accessBinding): it materializes ONLY that new object's
+	// per-object owner/admin tuples across the matching bindings under a SHARE advisory
+	// lock (no EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
+	// materialization lag under a parallel create burst. It transparently delegates to the
+	// FULL ReconcileObject if the object already has members (delete-stale guard).
+	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
+	// delete-stale / audit / sweep); still driven by the reconcile worker off the
+	// co-committed reconcile-outbox event, not by the create hot-path.
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 }
 
@@ -405,9 +415,20 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// would otherwise lose under the flat model. Distinct from ReconcileBinding above
 	// (which materializes THIS binding's own grant membership). Best-effort/non-fatal:
 	// the binding is durably created; the reconcile event + periodic sweep backstop.
+	//
+	// IAM-FMB throughput fix: the create-path takes the ADDITIVE forward
+	// (ReconcileObjectForward, SHARE advisory lock, single-object — the binding is
+	// brand-new so there is NOTHING stale to delete) instead of the FULL EXCLUSIVE
+	// ReconcileObject, whose per-binding advisory lock + O(scope) recompute serialized on
+	// the SINGLE owner/account binding every access_binding of an account shares → the
+	// owner-tuple materialization lagged past the client read-your-writes retry budget
+	// (transient 403 on GET of the binding one just created) under a parallel create
+	// burst. The forward transparently delegates to the FULL path if the object already
+	// has members (delete-stale guard); the FULL ReconcileObject REMAINS the async
+	// at-least-once backstop, driven by the co-committed EmitReconcileEvent above.
 	if u.reconciler != nil {
-		if rerr := u.reconciler.ReconcileObject(ctx, "iam.accessBinding", string(created.ID)); rerr != nil && u.logger != nil {
-			u.logger.Error("access_binding create: object reconcile failed (event/sweep will retry)",
+		if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.accessBinding", string(created.ID)); rerr != nil && u.logger != nil {
+			u.logger.Error("access_binding create: object forward reconcile failed (event/sweep will retry)",
 				"binding_id", string(created.ID), "err", rerr)
 		}
 	}

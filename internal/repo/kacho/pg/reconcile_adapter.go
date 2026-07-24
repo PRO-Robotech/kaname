@@ -503,6 +503,60 @@ func (s *reconcileStore) GetMirrorObject(ctx context.Context, objectType, object
 	return mirrorRowToDomain(row), true, nil
 }
 
+// GetIAMDirectObject returns the same-DB own-table projection (containment parents +
+// labels) of ONE iam-native object — the iam-direct analogue of GetMirrorObject used by
+// the ADDITIVE forward fast-path (ReconcileObjectForward) for a brand-new iam.project /
+// iam.account / iam content object, which lives in its OWN table (never the mirror).
+//
+// It reuses the SAME per-type read plan (iamDirectScanSpecs: table + parentAccountExpr /
+// parentProjectExpr + optional join) the anchor/names/labels iam-direct match queries use,
+// so the stamped containment parents are BYTE-IDENTICAL to what iamDirectQuery /
+// MatchIAMDirect produce → the shared IsContainedIn / selectorMatchesObject verdict decides
+// the same way the FULL path would. It ADDITIONALLY selects the own-table `labels` column
+// (migration 0041 — every iam-native table carries it) so the forward path's ARM_LABELS
+// re-check (selectorMatchesObject → MatchesLabels) is a faithful in-Go mirror of the SQL
+// `labels @> match_labels` probe IAMDirectSelectorBindingsMatchingObject ran, with no drift.
+//
+// All identifiers below are fixed literals from the closed spec map (never user input); the
+// single bound $1 carries the object id, so the interpolation is injection-safe. ok=false
+// when the type is not iam-direct (spec absent) or the row does not exist (pgx.ErrNoRows).
+func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error) {
+	spec, ok := iamDirectScanSpecs[objectType]
+	if !ok {
+		// Not an iam-direct materializable type — nothing to project (defensive; the
+		// forward path only routes iam-direct types here).
+		return domain.MirrorObject{}, false, nil
+	}
+	q := "SELECT o.id, " + spec.parentAccountExpr + ", " + spec.parentProjectExpr + ", o.labels" +
+		" FROM " + spec.table + " o"
+	if spec.join != "" {
+		q += " " + spec.join
+	}
+	q += " WHERE o.id = $1"
+	var (
+		id, parentAccount, parentProject string
+		labelsJSON                       []byte
+	)
+	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccount, &parentProject, &labelsJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.MirrorObject{}, false, nil
+		}
+		return domain.MirrorObject{}, false, fmt.Errorf("reconcile: get iam-direct object %s:%s: %w", spec.objectType, objectID, err)
+	}
+	obj := domain.MirrorObject{
+		ObjectType:      spec.objectType,
+		ObjectID:        id,
+		ParentAccountID: parentAccount,
+		ParentProjectID: parentProject,
+	}
+	if len(labelsJSON) > 0 {
+		if err := json.Unmarshal(labelsJSON, &obj.Labels); err != nil {
+			return domain.MirrorObject{}, false, fmt.Errorf("reconcile: unmarshal iam-direct labels %s:%s: %w", spec.objectType, objectID, err)
+		}
+	}
+	return obj, true, nil
+}
+
 // CurrentMembers returns the materialized members (diff base) inside the tx.
 func (s *reconcileStore) CurrentMembers(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.TargetMember, error) {
 	rows, err := target_members.ListByBindingTx(ctx, s.tx, string(bindingID))

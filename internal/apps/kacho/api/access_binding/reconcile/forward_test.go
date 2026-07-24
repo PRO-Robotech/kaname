@@ -82,6 +82,159 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 	assert.Empty(t, f.audits, "forward never audits (async full backstop owns REJECTED)")
 }
 
+// TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLock —
+// the iam-direct twin of the mirror-fed fast-path (sub-phase IAM-FMB throughput fix for
+// iam.accessBinding / iam.project owner materialization). A brand-new iam-native object
+// (here iam.accessBinding created inside an account with an owner `*.*` binding) is
+// materialized ADDITIVELY: the owner's full owner verb-set (v_* + admin tier) is emitted
+// on iam_access_binding:<id> under the SHARE advisory lock ONLY (f.locks==0), reading the
+// object from its OWN table (GetIAMDirectObject) and the matching bindings from the
+// iam-direct fan-out (IAMDirectSelectorBindingsMatchingObject) — NOT the FULL EXCLUSIVE
+// ReconcileObject the create-path used before (which serialized on the single owner
+// binding's advisory lock under a create burst).
+//
+// (a) SHARE-lock, single-object; (b) BYTE-IDENTICAL owner verb-set to the FULL path
+// (v_get/v_list/v_create/v_update/v_delete + admin). RED before the iam-direct-aware
+// forward: ReconcileObjectForward delegated every iam-direct type straight to the FULL
+// ReconcileObject → EXCLUSIVE lock (f.locks>0).
+func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLock(t *testing.T) {
+	// Owner-shape selector: full CRUD over iam.accessBinding (delete ⇒ admin tier).
+	fp := domain.Rule{
+		Module: "iam", Resources: []string{"accessBinding"},
+		Verbs: []string{"get", "list", "create", "update", "delete"},
+	}.Fingerprint()
+	f := &fakeStore{
+		scope:       domain.ScopeAnchor{Type: "account", ID: "acc-1"},
+		subjectType: "user", subjectID: "usr-owner", active: true,
+		selectors: []domain.RuleSelector{{
+			Arm: domain.ArmAnchor, RuleFP: fp,
+			ObjectTypes: []string{"iam.accessBinding"},
+			Verbs:       []string{"get", "list", "create", "update", "delete"},
+		}},
+		// The freshly-created binding-OBJECT lives in the iam-direct feed (own table),
+		// contained in account acc-1 (parentAccount).
+		iamDirect: map[string][]domain.MirrorObject{
+			"iam.accessBinding": {
+				{ObjectType: "iam.accessBinding", ObjectID: "acb-new", ParentAccountID: "acc-1"},
+			},
+		},
+		// The iam-direct fast-path source returns the owner binding.
+		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-owner"},
+	}
+	rec := New(fakeRunner{s: f}, nil)
+	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.accessBinding", "acb-new"))
+
+	// (a) NO EXCLUSIVE advisory lock — additive iam-direct forward takes only SHARE.
+	assert.Equal(t, 0, f.locks, "iam-direct forward must NOT take the EXCLUSIVE advisory lock (throughput)")
+	assert.GreaterOrEqual(t, f.sharedLocks, 1, "iam-direct forward takes the SHARE advisory lock")
+	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "iam-direct forward reads the binding via the UNLOCKED load")
+
+	// Exactly the ONE registered object is materialized ACTIVE.
+	require.Len(t, f.upserts, 1, "only the registered iam-direct object materialized")
+	assert.Equal(t, "acb-new", f.upserts[0].ObjectID)
+	assert.Equal(t, "iam.accessBinding", f.upserts[0].ObjectType)
+	assert.Equal(t, domain.VerificationActive, f.upserts[0].VerificationStatus)
+
+	// (b) BYTE-IDENTICAL owner verb-set to the FULL path (shared ruleObjectTuples).
+	w := allWrites(f)
+	for _, v := range []string{"v_get", "v_list", "v_create", "v_update", "v_delete"} {
+		assert.True(t, hasTuple(w, v, "iam_access_binding:acb-new"), "%s on the registered access_binding", v)
+	}
+	assert.True(t, hasTuple(w, "admin", "iam_access_binding:acb-new"), "admin tier on the registered access_binding (owner)")
+	require.NotEmpty(t, f.recorded, "forward co-commits the emitted tuples into the ledger")
+	// Additive-only: nothing revoked/deleted/audited.
+	assert.Empty(t, f.tdeletes, "iam-direct forward never revokes")
+	assert.Empty(t, f.deletes, "iam-direct forward never deletes a member")
+	assert.Empty(t, f.audits, "iam-direct forward never audits (async full backstop owns REJECTED)")
+}
+
+// TestReconcileObjectForward_IAMDirect_ForeignScope_NoOverGrant — an iam-direct object
+// whose containment parent is a FOREIGN account is NOT granted by the additive path
+// (IsContainedIn re-verify rejects it): no tuple, no member, no audit. The async full
+// backstop owns the REJECTED member + containment audit.
+func TestReconcileObjectForward_IAMDirect_ForeignScope_NoOverGrant(t *testing.T) {
+	fp := domain.Rule{
+		Module: "iam", Resources: []string{"accessBinding"},
+		Verbs: []string{"get", "list", "create", "update", "delete"},
+	}.Fingerprint()
+	f := &fakeStore{
+		scope:       domain.ScopeAnchor{Type: "account", ID: "acc-1"},
+		subjectType: "user", subjectID: "usr-owner", active: true,
+		selectors: []domain.RuleSelector{{
+			Arm: domain.ArmAnchor, RuleFP: fp,
+			ObjectTypes: []string{"iam.accessBinding"},
+			Verbs:       []string{"get", "list", "create", "update", "delete"},
+		}},
+		iamDirect: map[string][]domain.MirrorObject{
+			"iam.accessBinding": {
+				// contained in a DIFFERENT account → not under the owner's scope.
+				{ObjectType: "iam.accessBinding", ObjectID: "acb-foreign", ParentAccountID: "acc-OTHER"},
+			},
+		},
+		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-owner"},
+	}
+	rec := New(fakeRunner{s: f}, nil)
+	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.accessBinding", "acb-foreign"))
+
+	assert.Empty(t, f.upserts, "additive iam-direct forward does NOT write a REJECTED member")
+	assert.Empty(t, allWrites(f), "foreign-scope iam-direct object gets NO tuple")
+	assert.Empty(t, f.audits, "forward defers the containment audit to the async full backstop")
+	assert.Equal(t, 0, f.locks, "still no EXCLUSIVE advisory lock")
+}
+
+// TestReconcileObjectForward_IAMDirect_ReRegister_DelegatesToFull_DeleteStale — the
+// DELETE-STALE guard for the iam-direct feed. A re-register / label-change (the object
+// ALREADY has materialized members) must route to the FULL ReconcileObject so a
+// now-unmatched grant is REVOKED (delete-stale) — the additive forward path never revokes.
+// Discriminated by BindingsForObject (non-empty ⇒ full path, EXCLUSIVE lock).
+//
+// Setup: an ARM_LABELS iam.project rule (team=a) whose member p-flip is CURRENTLY
+// materialized ACTIVE, but p-flip's own-table label has FLIPPED to team=b. The full
+// recompute must drop it (no longer matches) and revoke its ledger tuple.
+func TestReconcileObjectForward_IAMDirect_ReRegister_DelegatesToFull_DeleteStale(t *testing.T) {
+	fp := domain.Rule{
+		Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"},
+		MatchLabels: map[string]string{"team": "a"},
+	}.Fingerprint()
+	f := &fakeStore{
+		scope:       domain.ScopeAnchor{Type: "account", ID: "acc-1"},
+		subjectType: "user", subjectID: "usr-1", active: true,
+		selectors: []domain.RuleSelector{{
+			Arm: domain.ArmLabels, RuleFP: fp, ObjectTypes: []string{"iam.project"},
+			MatchLabels: map[string]string{"team": "a"}, Verbs: []string{"get"},
+		}},
+		// p-flip's label has FLIPPED to team=b → no longer matches the team=a selector.
+		iamDirect: map[string][]domain.MirrorObject{
+			"iam.project": {
+				{ObjectType: "iam.project", ObjectID: "p-flip", ParentProjectID: "p-flip", ParentAccountID: "acc-1", Labels: map[string]string{"team": "b"}},
+			},
+		},
+		// Already materialized ACTIVE (from when it was team=a) → a RE-REGISTER, not a create.
+		current: []domain.TargetMember{
+			{BindingID: "acb-1", RuleFP: fp, ObjectType: "iam.project", ObjectID: "p-flip", VerificationStatus: domain.VerificationActive},
+		},
+		ledger: []domain.MembershipTuple{
+			{User: "user:usr-1", Relation: "v_get", Object: "project:p-flip"},
+			{User: "user:usr-1", Relation: "viewer", Object: "project:p-flip"},
+		},
+		// BindingsForObject non-empty ⇒ the discriminator routes to the FULL path.
+		bindingsForObject: []domain.AccessBindingID{"acb-1"},
+	}
+	rec := New(fakeRunner{s: f}, nil)
+	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.project", "p-flip"))
+
+	// Routed to the FULL path: EXCLUSIVE advisory lock taken (delete-stale serialization).
+	assert.Greater(t, f.locks, 0, "iam-direct re-register must route to the FULL ReconcileObject (EXCLUSIVE lock, delete-stale)")
+	// The now-unmatched grant is REVOKED (the revoke additive-forward would have missed).
+	var revoked []domain.MembershipTuple
+	for _, batch := range f.tdeletes {
+		revoked = append(revoked, batch...)
+	}
+	assert.True(t, hasTuple(revoked, "v_get", "project:p-flip"),
+		"iam-direct label-flip revoke must STICK via the full delete-stale diff")
+	assert.Contains(t, f.deletes, memberKey("iam.project", "p-flip"), "stale iam-direct member deleted")
+}
+
 // TestReconcileObjectForward_ForeignScope_SkipsNoTuple — a matched-but-foreign object
 // (label/name arm can match cross-scope) is NOT granted by the additive path: no tuple,
 // no member, no audit. The async full backstop owns the REJECTED member + containment

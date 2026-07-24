@@ -226,15 +226,29 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 // T31 label-revoke `post-revoke-deny` regression). The create hot-path (new resources
 // under load) has no prior members → stays on the fast additive path (throughput intact).
 //
-// iam-direct objects (iam.project / iam.account / iam content) are NOT registered over
-// the cross-service RegisterResource edge, so the forward path is a mirror-fed concern.
-// If ever called for an iam-direct type it transparently delegates to the full path
-// (correctness over speed — that path is low-volume and needs the iam-direct feed +
-// delete-stale semantics the forward path intentionally omits).
+// iam-direct objects (iam.project / iam.account + iam content) are NOT registered over
+// the cross-service RegisterResource edge — they arrive on the iam-native create-path
+// (Project/AccessBinding/Role/... Create emits a reconcile event for its OWN object).
+// The forward path is iam-direct-AWARE (sub-phase IAM-FMB, throughput fix for the
+// iam.accessBinding / iam.project owner materialization): a brand-NEW iam-direct object
+// is materialized ADDITIVELY (SHARE lock, single-object) EXACTLY like a mirror-fed one,
+// reading its own-table projection (GetIAMDirectObject) and the matching bindings from
+// the iam-direct fan-out (IAMDirectSelectorBindingsMatchingObject). Before this the
+// create-path used the FULL EXCLUSIVE ReconcileObject, whose per-binding advisory lock +
+// O(scope) recompute serialized on the SINGLE owner/account binding every resource of an
+// account shares → owner-tuple materialization lag past the client read-your-writes retry
+// budget (transient 403 on one's OWN fresh grant). The per-object verdict / tuple emission
+// (forwardObjectForBinding → desiredMemberForObject → ruleObjectTuples) is FEED-AGNOSTIC and
+// SHARED with the FULL path, so the two derive BYTE-IDENTICAL tuples (no over-/under-grant).
+//
+// The full ReconcileObject REMAINS the async at-least-once backstop for BOTH feeds
+// (delete-stale / REJECTED-containment audit / PENDING / sweep), driven by the co-committed
+// reconcile-outbox event; forward is purely the happy-path accelerator.
 func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, objectID string) error {
-	if domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
-		return r.ReconcileObject(ctx, objectType, objectID)
-	}
+	// Feed classifier: an iam.* object lives in ITS OWN table (iam-direct, never PENDING);
+	// every other selectable family (compute/vpc/loadbalancer/...) is mirror-fed. The
+	// object getter + the fast-path fan-out differ per feed; everything else is shared.
+	iamDirect := domain.FeedSourceForType(objectType) == domain.FeedIAMDirect
 	col := &syncFGACollector{}
 	// needsFull is set inside the peek below when the object already has materialized
 	// members (a RE-REGISTER / label-UPDATE), which requires the FULL delete-stale diff
@@ -243,10 +257,12 @@ func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, obj
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
 		// DELETE-STALE GUARD (regression fix — T31 label-revoke `post-revoke-deny`). The
 		// additive forward path only ADDS the object's tuples; it NEVER revokes. That is
-		// correct ONLY for a brand-NEW object (a create — nothing stale to remove). But
-		// RegisterResource is ALSO called on a label UPDATE, and removing a grant-matching
-		// label must REVOKE the now-unmatched grant — a DELETE-STALE the forward path
-		// cannot do. Discriminate by whether the object ALREADY has materialized members:
+		// correct ONLY for a brand-NEW object (a create — nothing stale to remove). But the
+		// object may ALSO be re-materialized on a label UPDATE (mirror-fed RegisterResource
+		// re-call OR iam-direct Project/AccessBinding.Update label change), and removing a
+		// grant-matching label must REVOKE the now-unmatched grant — a DELETE-STALE the
+		// forward path cannot do. Discriminate by whether the object ALREADY has materialized
+		// members (feed-agnostic — members are keyed by object regardless of feed):
 		//   - none  ⇒ create ⇒ fast additive forward (the throughput hot-path);
 		//   - some  ⇒ re-register/update ⇒ bail to the FULL ReconcileObject (delete-stale).
 		// The check is one indexed read (target_members by object); on the create hot-path
@@ -259,26 +275,50 @@ func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, obj
 			needsFull = true
 			return nil // commit the read-only peek; run the FULL path below (fresh tx).
 		}
-		// The registered object, with its containment parents (parent_project_id +
-		// the account resolved through the project→account join) and labels — the
-		// SAME same-DB projection the full path's IsContainedIn / arm match consume.
-		obj, ok, err := s.GetMirrorObject(ctx, objectType, objectID)
+		// The registered object's same-DB projection — containment parents (parent_project_id
+		// + the account resolved through the project→account join) and labels — the SAME
+		// projection the full path's IsContainedIn / arm match consume. Read from the mirror
+		// (consumer-owned feed) or the iam-native own table (iam-direct feed).
+		var (
+			obj domain.MirrorObject
+			ok  bool
+		)
+		if iamDirect {
+			obj, ok, err = s.GetIAMDirectObject(ctx, objectType, objectID)
+		} else {
+			obj, ok, err = s.GetMirrorObject(ctx, objectType, objectID)
+		}
 		if err != nil {
-			return fmt.Errorf("forward: get mirror object %s:%s: %w", objectType, objectID, err)
+			return fmt.Errorf("forward: get object %s:%s: %w", objectType, objectID, err)
 		}
 		if !ok {
-			// Not (yet) in the mirror — nothing to materialize on the fast-path. The
-			// register writer-tx UPSERTs the mirror row BEFORE this post-commit call, so
-			// in the create-path this is present; a stray call (mirror not landed / raced
-			// delete) simply defers to the async backstop.
+			// Not (yet) present in its source (mirror not landed / iam row raced a delete) —
+			// nothing to materialize on the fast-path. The register / create writer-tx lands
+			// the source row BEFORE this post-commit call, so in the create-path this is
+			// present; a stray call simply defers to the async backstop.
 			return nil
 		}
-		// Scope-narrowed candidate bindings whose selector matches this object,
-		// INCLUDING bindings with no member row yet (the brand-new-object case). This is
-		// the SAME bounded fast-path source the full ReconcileObject uses; its ANCHOR arm
-		// is already pushed-down to the containing bindings (owner + project-admin), so the
-		// forward fan-out is O(containing bindings), not O(all bindings of the type).
-		matching, err := s.SelectorBindingsMatchingObject(ctx, objectType, objectID)
+		// Candidate bindings whose selector matches this object, INCLUDING bindings with no
+		// member row yet (the brand-new-object case). This is the SAME fast-path source the
+		// full ReconcileObject uses (feed-agnostic verdict downstream). NOTE (doc-truthfulness,
+		// db-review finding A): the two feeds narrow scope differently — the MIRROR-fed
+		// SelectorBindingsMatchingObject pushes the containment predicate (b.resource_id =
+		// parent_account) into the JOIN, so its ANCHOR arm is O(containing bindings); the
+		// IAM-DIRECT IAMDirectSelectorBindingsMatchingObject anchor arm is currently
+		// UN-narrowed (matches every active anchor binding of the type system-wide), so its
+		// fan-out is O(anchor bindings of the type across all accounts). Correctness is
+		// unaffected — the per-binding IsContainedIn re-verify (ruleObjectTuples path) is
+		// authoritative and rejects foreign-scope candidates (unit ForeignScope + integration
+		// scope-boundary test) — but it is an O(N-accounts) hot-path cost at tenant scale.
+		// This is PRE-EXISTING (the full ReconcileObject uses the same fan-out), not a
+		// regression of this fast-path; pushing the containment predicate into the iam-direct
+		// anchor arm (mirroring the mirror-fed branch) is a tracked follow-up optimization.
+		var matching []domain.AccessBindingID
+		if iamDirect {
+			matching, err = s.IAMDirectSelectorBindingsMatchingObject(ctx, objectType, objectID)
+		} else {
+			matching, err = s.SelectorBindingsMatchingObject(ctx, objectType, objectID)
+		}
 		if err != nil {
 			return fmt.Errorf("forward: selector bindings matching object %s:%s: %w", objectType, objectID, err)
 		}

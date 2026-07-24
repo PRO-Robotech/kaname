@@ -97,13 +97,21 @@ func (g *fakeGroupCreateGroupWriter) RemoveMember(context.Context, domain.GroupI
 	return assertNotCalled("group.RemoveMember")
 }
 
-// recordingObjectReconciler captures every ReconcileObject call.
+// recordingObjectReconciler captures ReconcileObject (FULL) and ReconcileObjectForward
+// (ADDITIVE fast-path) calls in SEPARATE slices so the test can pin that the create
+// hot-path takes the FORWARD path (throughput fix) and NOT the FULL EXCLUSIVE path.
 type recordingObjectReconciler struct {
-	calls []struct{ objectType, objectID string }
+	calls        []struct{ objectType, objectID string } // FULL ReconcileObject
+	forwardCalls []struct{ objectType, objectID string } // ADDITIVE ReconcileObjectForward
 }
 
 func (r *recordingObjectReconciler) ReconcileObject(_ context.Context, objectType, objectID string) error {
 	r.calls = append(r.calls, struct{ objectType, objectID string }{objectType, objectID})
+	return nil
+}
+
+func (r *recordingObjectReconciler) ReconcileObjectForward(_ context.Context, objectType, objectID string) error {
+	r.forwardCalls = append(r.forwardCalls, struct{ objectType, objectID string }{objectType, objectID})
 	return nil
 }
 
@@ -128,9 +136,13 @@ func TestGroupCreate_SyncReconcilesObject(t *testing.T) {
 	require.Len(t, w.reconcileEvents, 1)
 	assert.Equal(t, "iam.group", w.reconcileEvents[0].objectType)
 
-	// The fix: a SYNCHRONOUS ReconcileObject is invoked post-commit so the owner/
-	// account-admin per-object tuple is materialized by the time Operation is done.
-	require.Len(t, rec.calls, 1, "group Create must synchronously ReconcileObject post-commit")
-	assert.Equal(t, "iam.group", rec.calls[0].objectType)
-	assert.Equal(t, "grp00000000000000abcd", rec.calls[0].objectID)
+	// IAM-FMB throughput fix: the create hot-path takes the ADDITIVE forward fast-path
+	// (SHARE lock, single-object) so the owner/account-admin per-object tuple is
+	// materialized by the time Operation is done WITHOUT serializing on the account's
+	// single owner binding under a parallel create burst. It must NOT take the FULL
+	// EXCLUSIVE ReconcileObject on this path (that remains the async at-least-once backstop).
+	require.Len(t, rec.forwardCalls, 1, "group Create must synchronously ReconcileObjectForward post-commit")
+	assert.Equal(t, "iam.group", rec.forwardCalls[0].objectType)
+	assert.Equal(t, "grp00000000000000abcd", rec.forwardCalls[0].objectID)
+	assert.Empty(t, rec.calls, "create hot-path must NOT take the FULL EXCLUSIVE ReconcileObject (forward only)")
 }
