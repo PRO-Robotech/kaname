@@ -18435,6 +18435,14 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _rvc = parseInt(pm.environment.get('_w12RevokeRetry') || '0', 10);",
+                  "if (pm.response.code === 403 && _rvc < 20) {",
+                  "  pm.environment.set('_w12RevokeRetry', String(_rvc + 1));",
+                  "  const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_w12RevokeRetry');",
                   "pm.test('revoke accepted (200/202)', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
                   "const j = pm.response.json();",
                   "if (j && j.id) pm.environment.set('opId', j.id);"

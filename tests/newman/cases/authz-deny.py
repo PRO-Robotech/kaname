@@ -849,6 +849,25 @@ CASES.append(Case(
             path="/iam/v1/accessBindings/{{w12RevokeBindingId}}",
             auth="jwtAccountAdminA",
             test_script=[
+                # Read-your-writes over the DELETE gate's own relation. AccessBinding
+                # Delete is gated on `v_delete` @ iam_access_binding:<id> (permission
+                # catalog), and that tuple for the just-created binding materializes
+                # eventually-consistent (writer-tx → fga_outbox → drainer → OpenFGA).
+                # The grant above is seconds old, so the first DELETE can land inside
+                # that window and come back 403 — which then leaves INV granted and
+                # cascades into a foreign suite (iam-authz-grant-check-propagation's
+                # `stranger-inv-on-accountA` sees a still-granted INV and gets 200
+                # instead of 403). Bounded-retry the SELF revoke of our OWN fresh
+                # binding (20 x 500ms ~= 10s); the real assertion still runs once the
+                # budget is spent, so a genuine deny fails honestly (testing.md).
+                "const _rvc = parseInt(pm.environment.get('_w12RevokeRetry') || '0', 10);",
+                "if (pm.response.code === 403 && _rvc < 20) {",
+                "  pm.environment.set('_w12RevokeRetry', String(_rvc + 1));",
+                "  const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0;",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_w12RevokeRetry');",
                 "pm.test('revoke accepted (200/202)', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
                 "const j = pm.response.json();",
                 "if (j && j.id) pm.environment.set('opId', j.id);",
