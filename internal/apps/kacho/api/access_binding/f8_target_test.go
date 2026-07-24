@@ -11,6 +11,8 @@ package access_binding
 // Pure parse-path + domain unit tests (no Docker).
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -132,4 +134,38 @@ func TestAB_IAM_1_29_TargetDigestOrderIndependent(t *testing.T) {
 	c := domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "compute.instance", ID: "ins-2"}}}
 	assert.NotEqual(t, a.Digest(), c.Digest(), "different set → different digest")
 	assert.NotEqual(t, "all", a.Digest())
+}
+
+// TestAB_F8_TargetResources_Cardinality — the per-object target set is BOUNDED on the
+// REQUEST path (first statement, before any Operation is minted, rejected — never
+// clamped, api-conventions.md). Without the bound one Create can carry an arbitrary
+// number of ResourceRefs into a synchronous writer-tx whose reconciler intersects
+// them with every rule-matched object via the linear AccessTarget.Contains.
+func TestAB_F8_TargetResources_Cardinality(t *testing.T) {
+	mk := func(n int) *iamv1.AccessTarget {
+		refs := make([]*iamv1.ResourceRef, 0, n)
+		for i := 0; i < n; i++ {
+			refs = append(refs, &iamv1.ResourceRef{Type: "compute.instance", Id: "ins-" + strconv.Itoa(i)})
+		}
+		return &iamv1.AccessTarget{
+			Target: &iamv1.AccessTarget_Resources{Resources: &iamv1.AccessTargetResources{Resources: refs}},
+		}
+	}
+
+	t.Run("at the bound → accepted", func(t *testing.T) {
+		tgt, err := targetFromProto(mk(domain.MaxTargetResourcesPerBinding))
+		require.NoError(t, err)
+		assert.Len(t, tgt.Resources, domain.MaxTargetResourcesPerBinding)
+	})
+
+	t.Run("over the bound → sync INVALID_ARGUMENT with the exact contract text", func(t *testing.T) {
+		_, err := targetFromProto(mk(domain.MaxTargetResourcesPerBinding + 1))
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Equal(t,
+			fmt.Sprintf("Illegal argument target.resources (must be 1..%d)", domain.MaxTargetResourcesPerBinding),
+			st.Message())
+	})
 }

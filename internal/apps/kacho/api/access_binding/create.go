@@ -155,20 +155,27 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	if err := b.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
-	// F9 gates 2 & 3 (IAM-1-24/25): IsRoleAssignable + RoleCoversType — SYNC, before
-	// any Operation is minted (Operation.error reserved for truly-async FGA
-	// tuple-emission) and before requireGrantAuthority (an anchor-read would else mask
-	// a structural reject as PermissionDenied).
-	if err := u.validateStructuralGates(ctx, b); err != nil {
+	// Grant-authority on the binding's scope — AUTHZ FIRST, before ANY read of an
+	// object the caller may not own. This RPC is `permission = "<exempt>"` in proto
+	// (the api-gateway runs no per-RPC Check for it), so this handler is the ONLY
+	// gate: a structural pre-check running first would let any authenticated
+	// principal probe foreign role / project ids and tell them apart by the
+	// distinguishable reject (absent role vs present-but-not-assignable vs denied) —
+	// a cross-tenant existence + metadata oracle. Masking a structural reject as
+	// PermissionDenied for an unauthorized caller is the DESIRED least-info outcome.
+	//
+	// It doubles as the group-amplification guard: a GROUP subject grants the role to
+	// every member, so an admin/editor-tier binding with a GROUP subject must be
+	// authored by a grant-authority holder on the scope. Enforced for EVERY Create,
+	// so the guard holds by construction.
+	if err := u.requireGrantAuthority(ctx, string(b.ResourceType), string(b.ResourceID)); err != nil {
 		return nil, err
 	}
-	// Grant-authority on the binding's scope (group-amplification guard): a GROUP
-	// subject grants the role to every member, so an
-	// admin/editor-tier binding with a GROUP subject must be authored by a
-	// grant-authority holder on the scope. requireGrantAuthority is enforced for
-	// EVERY Create (so the guard holds by construction), but assert the intent
-	// explicitly for the amplifying case so the invariant is local + testable.
-	if err := u.requireGrantAuthority(ctx, string(b.ResourceType), string(b.ResourceID)); err != nil {
+	// F9 gates 2 & 3 (IAM-1-24/25): IsRoleAssignable + RoleCoversType — SYNC, before
+	// any Operation is minted (Operation.error reserved for truly-async FGA
+	// tuple-emission) and AFTER the authority gate above (they read the role + the
+	// scope project).
+	if err := u.validateStructuralGates(ctx, b); err != nil {
 		return nil, err
 	}
 

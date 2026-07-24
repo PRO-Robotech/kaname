@@ -13,9 +13,9 @@
 // `fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)` was NOT a
 // gRPC status, so the worker degraded it to codes.Internal "internal worker error"
 // with NO log line — the reason the outage was undiagnosable. This locks:
-//   1. the op error carries codes.Unavailable (not Internal / Unknown),
-//   2. the wire message is opaque (no dial/URL/host text leak), and
-//   3. the raw cause is logged at ERROR (observability).
+//  1. the op error carries codes.Unavailable (not Internal / Unknown),
+//  2. the wire message is opaque (no dial/URL/host text leak), and
+//  3. the raw cause is logged at ERROR (observability).
 package sa_keys
 
 import (

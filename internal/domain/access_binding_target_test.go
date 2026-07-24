@@ -9,7 +9,9 @@ package domain
 // so a per-object target never expands to MatchAllInScope).
 
 import (
+	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -81,5 +83,34 @@ func TestAccessTarget_ResourceIDsForTypes(t *testing.T) {
 	// AllInScope carries no per-object ids.
 	if got := (AccessTarget{AllInScope: true}).ResourceIDsForTypes([]string{"compute.instance"}); got != nil {
 		t.Errorf("AllInScope ResourceIDsForTypes = %v, want nil", got)
+	}
+}
+
+// TestAccessTarget_Validate_ResourceCardinality — the per-object target set is
+// BOUNDED (anti-DoS + tractable materialization), mirroring MaxSubjectsPerBinding.
+// The reconciler intersects every rule-matched object with the target via the linear
+// Contains, and the whole materialization runs inside ONE synchronous create writer-tx
+// under an advisory lock — an unbounded resources[] turns that into |matched|×|target|
+// string comparisons plus an unbounded JSONB row.
+func TestAccessTarget_Validate_ResourceCardinality(t *testing.T) {
+	mk := func(n int) AccessTarget {
+		out := AccessTarget{Resources: make([]ResourceRef, 0, n)}
+		for i := 0; i < n; i++ {
+			out.Resources = append(out.Resources, ResourceRef{
+				Type: "compute.instance", ID: "ins-" + strconv.Itoa(i),
+			})
+		}
+		return out
+	}
+	if err := mk(MaxTargetResourcesPerBinding).Validate(); err != nil {
+		t.Fatalf("target with exactly %d resources must validate: %v", MaxTargetResourcesPerBinding, err)
+	}
+	err := mk(MaxTargetResourcesPerBinding + 1).Validate()
+	if err == nil {
+		t.Fatalf("target with %d resources must be rejected", MaxTargetResourcesPerBinding+1)
+	}
+	want := fmt.Sprintf("Illegal argument target.resources (must be 1..%d)", MaxTargetResourcesPerBinding)
+	if err.Error() != want {
+		t.Errorf("Validate() message = %q, want %q", err.Error(), want)
 	}
 }

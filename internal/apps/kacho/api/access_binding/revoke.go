@@ -16,6 +16,11 @@ package access_binding
 // The tuple-removal is byte-symmetric to Delete: it revokes the PERSISTED
 // emitted-set (access_binding_emitted_tuples), not a re-derive from the binding's
 // CURRENT role, so a Role.Update between grant and revoke cannot orphan tuples.
+// "The SAME writer-tx" only holds because that tx opens with the binding's EXCLUSIVE
+// advisory lock (see doRevoke): a concurrent reconcile/forward pass takes the SHARE
+// sibling of that lock, so it can never append to the ledger between the snapshot and
+// the commit — which no path would ever reclaim, a REVOKED binding being skipped by
+// every reconcile route.
 // Post-commit the same set is removed from OpenFGA synchronously (latency-parity
 // with grant); the in-tx EmitRelationDelete + drainer remain the at-least-once
 // backstop. Because revoked rows carry revoked_at, the partial active-grant UNIQUE
@@ -140,14 +145,24 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 			_ = w.Rollback(ctx)
 		}
 	}()
-	// Read the binding within the writer-tx for the event dimensions.
-	binding, err := w.AccessBindings().Get(ctx, id)
-	if err != nil {
+	// Take the binding's EXCLUSIVE xact advisory lock as the FIRST statement of the
+	// writer-tx — the SAME pg_advisory_xact_lock(hashtext(binding_id)) key the
+	// reconciler uses (reconcile_adapter.go AcquireBindingLock / …Shared). Without
+	// it the revoke conflicts with NOTHING: a ReconcileBindingForward pass holds only
+	// a SHARE lock, so it can commit a NEW member + ledger row (and write its FGA
+	// tuple post-commit) inside the window between this tx's ledger snapshot and its
+	// commit. That tuple would be absent from the delete-set, and since a REVOKED
+	// binding short-circuits `!bs.Active` in reconcileBinding AND in both forward
+	// paths, NOTHING would ever reclaim it — the revoked subject keeps that object's
+	// verbs forever. EXCLUSIVE ⊥ SHARE makes the two txs strictly serial in either
+	// direction: an in-flight forward pass commits before the snapshot is taken, and
+	// one that starts later re-reads the status and no-ops (ban #10 — DB-level
+	// serialization, not a software check-then-act).
+	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// SYMMETRIC revoke from the PERSISTED emitted-set (byte-symmetric to what was
-	// emitted at grant / last reconcile) — NOT a re-derive from the CURRENT role.
-	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
+	// Read the binding within the writer-tx for the event dimensions.
+	binding, err := w.AccessBindings().Get(ctx, id)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
@@ -165,6 +180,15 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	// Atomic CAS soft-revoke honoring deletion_protection + status='ACTIVE'
 	// (RevokeGuarded). 0 rows → mapped FailedPrecondition/NotFound.
 	revoked, err := w.AccessBindingsW().RevokeGuarded(ctx, id, domain.UserID(revokeActor))
+	if err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	// SYMMETRIC revoke from the PERSISTED emitted-set (byte-symmetric to what was
+	// emitted at grant / last reconcile) — NOT a re-derive from the CURRENT role.
+	// Read AFTER the CAS so the snapshot is taken with the row already REVOKED:
+	// defense-in-depth on top of the advisory lock above, so no ledger row added
+	// while the binding was still ACTIVE can fall outside the delete-set.
+	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}

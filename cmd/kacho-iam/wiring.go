@@ -275,8 +275,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
 	// F11 (IAM-1-32): the unified List — viewer ∪ v_list push-down (same
-	// RelationQueries floor as the other AB reads).
+	// RelationQueries floor as the other AB reads) PLUS the D-9 cluster-admin
+	// super-gate (RelationStore), without which a cluster-admin — who holds no
+	// per-object tuple on iam_access_binding — would get an empty page here while
+	// every sibling read returns the full set.
 	abList := accessbindingapp.NewListUseCase(kachoRepo).
+		WithRelationStore(relationStore).
 		WithRelationQueries(relationStore)
 	abListBySub := accessbindingapp.NewListBySubjectUseCase(kachoRepo)
 	abListByAcc := accessbindingapp.NewListByAccountUseCase(kachoRepo).

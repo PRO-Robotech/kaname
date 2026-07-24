@@ -213,6 +213,11 @@ func checkText(pgErr *pgconn.PgError) string {
 		return "Illegal argument display_name: length must be <=128"
 	case "users_external_id_check":
 		return "Illegal argument external_id: length must be 1..256"
+	case "access_bindings_target_resources_card_ck":
+		// DB backstop for domain.MaxTargetResourcesPerBinding — the API rejects the
+		// same input sync, so this text only surfaces for a writer that bypassed the
+		// use-case. Kept byte-identical to the sync reject (contract tone).
+		return "Illegal argument target.resources (must be 1..256)"
 	}
 	// Unmapped CHECK — generic InvalidArgument text; never leak pgErr.Message
 	// (it embeds the constraint expression/name → schema reconnaissance).

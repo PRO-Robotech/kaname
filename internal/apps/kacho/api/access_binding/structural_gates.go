@@ -4,17 +4,32 @@
 package access_binding
 
 // structural_gates.go — redesign-2026 F9 (IAM-1-24/25/26): the 3 SYNC structural
-// gates of AccessBinding.Create, run as FIRST statements before any Operation is
-// minted (Operation.error is reserved for truly-async FGA per-object tuple-emission
+// gates of AccessBinding.Create, all run before any Operation is minted
+// (Operation.error is reserved for truly-async FGA per-object tuple-emission
 // failures). The gates are a pre-check with NO TOCTOU — they read the role's
 // immutable scope + rules, not the state of other bindings:
 //
 //   1. scope well-formedness — a malformed scope id → INVALID_ARGUMENT
-//      "invalid access binding scope id '<x>'".
+//      "invalid access binding scope id '<x>'". STATELESS, so it runs as the first
+//      statement of Execute (before domain.Validate).
 //   2. IsRoleAssignable — the role's definition tier must be compatible with the
 //      scope anchor → actionable FAILED_PRECONDITION otherwise.
 //   3. RoleCoversType — every per-object target type must be covered by the role's
 //      authored rules → actionable FAILED_PRECONDITION otherwise.
+//
+// ORDERING (security, not cosmetics): gates 2 & 3 READ objects the caller may not
+// own (the role; and the scope project for the hierarchy-down resolution), so
+// Execute runs them AFTER requireGrantAuthority. The RPC is `permission =
+// "<exempt>"` in proto — the gateway performs no per-RPC Check — so running them
+// first would hand any authenticated principal a cross-tenant oracle: absent role →
+// "Role <id> not found", present-but-mis-tiered → the actionable definitionTier
+// text, otherwise → PermissionDenied.
+//
+// LEAST-INFO (gate 2): even for an AUTHORIZED caller the actionable text is emitted
+// only when the role is legitimately visible in the scope's account tree (or is a
+// system catalog role). A role of another account is structurally never assignable
+// here, so it collapses to the byte-identical "Role <id> not found" of the absent
+// branch — parity with RoleService.Get's hide-existence contract (role/get.go).
 
 import (
 	"context"
@@ -69,6 +84,19 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 		return err
 	}
 	if !assignable {
+		// Least-info: the actionable text discloses the role's EXISTENCE and its
+		// definitionTier. Emit it only when the role is legitimately visible from this
+		// scope (system catalog role, or a role of the scope's own account tree);
+		// otherwise collapse to the absent-role text, byte-identical to the branch
+		// above, so a foreign account's role cannot be distinguished from a
+		// non-existent one (parity with RoleService.Get's hide-existence contract).
+		visible, verr := u.roleVisibleOnScope(ctx, rd, role, b)
+		if verr != nil {
+			return verr
+		}
+		if !visible {
+			return status.Errorf(codes.FailedPrecondition, "Role %s not found", b.RoleID)
+		}
 		tier := roleTierDotted(role)
 		scope := domain.ScopeTypeToDotted(string(b.ResourceType))
 		return status.Errorf(codes.FailedPrecondition,
@@ -126,15 +154,89 @@ func (u *CreateAccessBindingUseCase) roleAssignableOnScope(ctx context.Context, 
 	if b.ResourceType != "project" || domain.ScopeGroupOf(role) != domain.RoleScopeGroupAccount {
 		return false, nil
 	}
-	prj, err := rd.Projects().Get(ctx, domain.ProjectID(b.ResourceID))
+	scopeAccount, err := u.scopeOwningAccountID(ctx, rd, b)
+	if err != nil {
+		return false, err
+	}
+	// An unresolved owning account ("") collapses to the strict predicate inside
+	// IsRoleAssignableInAccount → not assignable (fail-closed; no over-grant).
+	return domain.IsRoleAssignableInAccount(role, string(b.ResourceType), b.ResourceID, scopeAccount), nil
+}
+
+// roleVisibleOnScope reports whether the role is one this scope's administrator may
+// legitimately see, and therefore whether the actionable IsRoleAssignable text may
+// name it. It is a STRUCTURAL containment test (no extra FGA round-trip):
+//
+//   - a SYSTEM role is the tenant-wide catalog floor — visible to everyone;
+//   - on the cluster anchor the caller has already passed requireGrantAuthority on
+//     `cluster:…`, i.e. is a cluster-level administrator — everything is visible;
+//   - otherwise the role must live in the SAME account tree as the scope anchor
+//     (own account, or a project of that account).
+//
+// (A role bound on its OWN project never reaches here — that is exactly the case
+// IsRoleAssignable admits.) It is consulted ONLY on the not-assignable reject path,
+// so its two same-DB reads never touch the happy path.
+func (u *CreateAccessBindingUseCase) roleVisibleOnScope(ctx context.Context, rd Reader, role domain.Role, b domain.AccessBinding) (bool, error) {
+	if role.IsSystem {
+		return true, nil
+	}
+	if b.ResourceType == "cluster" {
+		return true, nil
+	}
+	scopeAccount, err := u.scopeOwningAccountID(ctx, rd, b)
+	if err != nil {
+		return false, err
+	}
+	if scopeAccount == "" {
+		return false, nil // unresolvable scope → least-info (hide)
+	}
+	roleAccount, err := u.roleOwningAccountID(ctx, rd, role)
+	if err != nil {
+		return false, err
+	}
+	return roleAccount != "" && roleAccount == scopeAccount, nil
+}
+
+// scopeOwningAccountID resolves the account that OWNS the binding's scope anchor:
+// an account anchor is itself, a project anchor resolves through its account_id, and
+// any other anchor (cluster / cross-service) has none (""). A well-formed-but-absent
+// project yields "" — callers treat that as fail-closed.
+func (u *CreateAccessBindingUseCase) scopeOwningAccountID(ctx context.Context, rd Reader, b domain.AccessBinding) (string, error) {
+	switch b.ResourceType {
+	case "account":
+		return b.ResourceID, nil
+	case "project":
+		prj, err := rd.Projects().Get(ctx, domain.ProjectID(b.ResourceID))
+		if err != nil {
+			if stderrors.Is(err, iamerr.ErrNotFound) {
+				return "", nil
+			}
+			return "", shared.MapRepoErr(err)
+		}
+		return string(prj.AccountID), nil
+	default:
+		return "", nil
+	}
+}
+
+// roleOwningAccountID resolves the account that OWNS a custom role: an account-tier
+// role carries it directly, a project-tier role resolves it through its project. A
+// system role has none (""). Used only by roleVisibleOnScope.
+func (u *CreateAccessBindingUseCase) roleOwningAccountID(ctx context.Context, rd Reader, role domain.Role) (string, error) {
+	if role.AccountID != "" {
+		return string(role.AccountID), nil
+	}
+	if role.ProjectID == "" {
+		return "", nil
+	}
+	prj, err := rd.Projects().Get(ctx, role.ProjectID)
 	if err != nil {
 		if stderrors.Is(err, iamerr.ErrNotFound) {
-			// Cannot confirm nesting → not assignable (fail-closed; no over-grant).
-			return false, nil
+			return "", nil
 		}
-		return false, shared.MapRepoErr(err)
+		return "", shared.MapRepoErr(err)
 	}
-	return domain.IsRoleAssignableInAccount(role, string(b.ResourceType), b.ResourceID, string(prj.AccountID)), nil
+	return string(prj.AccountID), nil
 }
 
 // validateScopeID checks the scope-anchor id is well-formed for its tier (IAM-1-26,

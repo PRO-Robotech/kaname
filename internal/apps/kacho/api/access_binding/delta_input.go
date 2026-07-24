@@ -42,6 +42,17 @@ func targetFromProto(t *iamv1.AccessTarget) (domain.AccessTarget, error) {
 		if len(refs) == 0 {
 			return domain.AccessTarget{}, status.Error(codes.InvalidArgument, targetRequiredMsg)
 		}
+		// Cardinality bound BEFORE the slice is allocated and each element scanned —
+		// rejected, never clamped (api-conventions.md). The reconciler intersects the
+		// target with every rule-matched object through the LINEAR
+		// AccessTarget.Contains, inside the synchronous create writer-tx holding the
+		// binding advisory lock, and re-runs it for every object created cluster-wide;
+		// an unbounded set turns that into a self-inflicted O(n²) plus an unbounded
+		// JSONB row. Mirrors the subjects[] discipline (domain.MaxSubjectsPerBinding).
+		if len(refs) > domain.MaxTargetResourcesPerBinding {
+			return domain.AccessTarget{}, status.Errorf(codes.InvalidArgument,
+				"Illegal argument target.resources (must be 1..%d)", domain.MaxTargetResourcesPerBinding)
+		}
 		out := make([]domain.ResourceRef, 0, len(refs))
 		for _, r := range refs {
 			if !domain.ValidTargetType(r.GetType()) {

@@ -170,6 +170,18 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 			_ = w.Rollback(ctx)
 		}
 	}()
+	// Take the binding's EXCLUSIVE xact advisory lock FIRST — the same
+	// pg_advisory_xact_lock(hashtext(binding_id)) key the reconciler uses
+	// (reconcile_adapter.go AcquireBindingLock / …Shared). A concurrent
+	// ReconcileBindingForward pass holds only a SHARE lock and would otherwise not
+	// conflict at all: it could commit a NEW ledger row (and write its FGA tuple
+	// post-commit) after the snapshot below, leaving that tuple live in OpenFGA with
+	// no ledger row to reclaim it (the FK CASCADE removes the row, the reconciler
+	// skips the now-absent binding). EXCLUSIVE ⊥ SHARE serializes the two txs in
+	// either direction (ban #10) — the same critical section revoke.go takes.
+	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
 	// Read the binding's subject_id within the writer TX before deletion,
 	// so we can emit the outbox row atomically.
 	deletedBinding, err := w.AccessBindings().Get(ctx, id)

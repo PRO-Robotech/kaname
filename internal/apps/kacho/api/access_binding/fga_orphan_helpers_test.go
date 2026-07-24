@@ -125,6 +125,7 @@ func (w *fakeABWtr) ReplaceEmittedTuples(_ context.Context, id domain.AccessBind
 // order (deterministic; the real pg repo orders by relation,object,fga_user —
 // both are valid for the set-based symmetric-revoke contract).
 func (rd *fakeABRdr) SelectEmittedTuples(_ context.Context, id domain.AccessBindingID) ([]ab_repo.RelationTuple, error) {
+	rd.repo.recordTxOp("select_emitted_tuples:" + string(id))
 	rd.repo.mu.Lock()
 	defer rd.repo.mu.Unlock()
 	if set := rd.repo.emittedTuples[id]; set != nil {

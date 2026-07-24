@@ -351,6 +351,12 @@ type ListFilter struct {
 	// empty slice lists nothing. nil disables the constraint (admin/unfiltered
 	// paths do not use List).
 	VisibleIDs []string
+	// IncludeRevoked — default false hides status='REVOKED' rows (F10 soft-revoke
+	// retains the row). Parity with ListByAccount/ListByRole: a revoked grant is
+	// no longer a grant, so the unified read must not return it next to live ones
+	// (a re-grant of the same 5-tuple would otherwise show up twice). true returns
+	// the retained rows too (audit-retention read).
+	IncludeRevoked bool
 }
 
 // ListByRoleFilter — params for ListByRole. IncludeRevoked

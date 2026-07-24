@@ -24,14 +24,24 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // newListHandler builds a Handler whose ONLY wired use-case is the unified List,
-// backed by the given repo + FGA queries stub.
+// backed by the given repo + FGA queries stub. No RelationStore → the D-9
+// cluster-admin super-gate is unwired (nil-safe) and only the per-object floor runs.
 func newListHandler(repo *abFakeRepo, fga *abQueriesStub) *Handler {
 	h := &Handler{}
 	return h.WithList(NewListUseCase(repo).WithRelationQueries(fga))
+}
+
+// newListHandlerWithStore builds the unified-List Handler with BOTH the per-object
+// floor (RelationQueries) and the cluster-admin super-gate (RelationStore) wired —
+// the production shape (wiring.go).
+func newListHandlerWithStore(repo *abFakeRepo, fga *abQueriesStub, rs clients.RelationStore) *Handler {
+	h := &Handler{}
+	return h.WithList(NewListUseCase(repo).WithRelationStore(rs).WithRelationQueries(fga))
 }
 
 // IAM-1-32: garbage page_token → INVALID_ARGUMENT, and the FGA floor is NOT consulted
@@ -128,6 +138,55 @@ func TestABList_IAM_1_32_AnonEmpty_FGAErrorUnavailable(t *testing.T) {
 		require.Error(t, err)
 		st, _ := status.FromError(err)
 		assert.Equal(t, codes.Unavailable, st.Code(), "FGA error fails closed to UNAVAILABLE, never an unfiltered leak")
+	})
+}
+
+// IAM-1-32 / D-9: a cluster super-admin holds NO per-object viewer/v_list tuple on
+// iam_access_binding (the access-cascade is contracted — see helpers.go
+// requireGrantAuthority Path 0), so a purely per-object visibility push-down hands
+// them an EMPTY page while every sibling read (Get / ListByScope / ListByAccount /
+// ListByRole) short-circuits on requireGrantAuthority and returns the full set. The
+// unified List must carry the same super-gate: the page is UNFILTERED (VisibleIDs
+// push-down dropped, not an empty slice) while the declarative predicates still apply.
+func TestABList_IAM_1_32_ClusterAdminUnfiltered(t *testing.T) {
+	repo := newABFakeRepo("usr_o", "acc_l32f", "", "rol_v", "kacho.view", nil)
+	acbA := domain.AccessBinding{ID: "acb00000000000000ca1", ResourceType: "account", ResourceID: "acc_l32f", SubjectID: "usr_a"}
+	acbB := domain.AccessBinding{ID: "acb00000000000000ca2", ResourceType: "account", ResourceID: "acc_l32f", SubjectID: "usr_b"}
+	seedABListByScope(repo, []domain.AccessBinding{acbA, acbB})
+
+	t.Run("cluster-admin without per-object tuples sees the whole page", func(t *testing.T) {
+		fga := newABQueriesStub() // ZERO viewer / v_list tuples — the post-contraction shape
+		h := newListHandlerWithStore(repo, fga, onlyClusterAdmin())
+
+		resp, err := h.List(clusterAdminCtx("usr_root"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"acb00000000000000ca1", "acb00000000000000ca2"}, respIDs(resp),
+			"cluster-admin must enumerate every binding (parity with ListByScope Path 0)")
+		assert.Nil(t, repo.lastListFilter.VisibleIDs,
+			"the per-object push-down must be DROPPED (nil), not an empty allow-list")
+	})
+
+	t.Run("cluster-admin keeps the declarative predicates", func(t *testing.T) {
+		fga := newABQueriesStub()
+		h := newListHandlerWithStore(repo, fga, onlyClusterAdmin())
+
+		resp, err := h.List(clusterAdminCtx("usr_root"), &iamv1.ListAccessBindingsRequest{
+			PageSize: 100, Filter: `subject="usr_b"`,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"acb00000000000000ca2"}, respIDs(resp),
+			"the super-gate lifts VISIBILITY only — the subject= predicate still narrows")
+	})
+
+	t.Run("non-cluster-admin with zero tuples still gets an empty page", func(t *testing.T) {
+		fga := newABQueriesStub()
+		// grants nothing at all — neither the cluster super-relation nor per-object tuples.
+		h := newListHandlerWithStore(repo, fga, &scopedFGA{allow: map[string]bool{}})
+
+		resp, err := h.List(clusterAdminCtx("usr_nobody"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+		require.NoError(t, err)
+		assert.Empty(t, resp.GetAccessBindings(),
+			"the super-gate must be ADDITIVE — an ordinary caller keeps the per-object floor")
 	})
 }
 

@@ -42,6 +42,16 @@ type AccessTarget struct {
 	Resources  []ResourceRef // per-object grant (mutually exclusive with AllInScope)
 }
 
+// MaxTargetResourcesPerBinding — hard upper bound on target.resources[]. Anti-DoS
+// + tractable per-object materialization: the reconciler intersects every
+// rule-matched object with the target through the LINEAR AccessTarget.Contains,
+// inside ONE synchronous create writer-tx holding the binding advisory lock, and
+// re-runs it for every object created cluster-wide (forwardObjectForBinding). An
+// unbounded set therefore costs |matched|×|target| comparisons on a hot path plus an
+// unbounded JSONB row. 0 < n ≤ 256 enforced sync (INVALID_ARGUMENT), mirroring
+// MaxSubjectsPerBinding.
+const MaxTargetResourcesPerBinding = 256
+
 // IsEmpty reports whether neither arm is set (no explicit selection). An empty
 // target is treated as AllInScope for storage/digest, but the public Create RPC
 // rejects it (target REQUIRED).
@@ -55,6 +65,9 @@ func (t AccessTarget) IsEmpty() bool {
 func (t AccessTarget) Validate() error {
 	if t.AllInScope && len(t.Resources) > 0 {
 		return fmt.Errorf("Illegal argument target (allInScope and resources are mutually exclusive)")
+	}
+	if len(t.Resources) > MaxTargetResourcesPerBinding {
+		return fmt.Errorf("Illegal argument target.resources (must be 1..%d)", MaxTargetResourcesPerBinding)
 	}
 	var errs error
 	for i, r := range t.Resources {

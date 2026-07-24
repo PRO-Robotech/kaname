@@ -360,6 +360,27 @@ type abFakeRepo struct {
 	// round-trip is order-stable without an unordered Go-map shuffle. A plain
 	// `map[tuple]struct{}` iterates in random order ⇒ require.Equal flakes/fails.
 	emittedTuples map[domain.AccessBindingID]*orderedTupleSet
+	// txOps — ordered trace of the writer-tx port calls that carry a DB-level
+	// serialization contract (advisory-lock / ledger-read / status-CAS). Lets a
+	// unit test pin the ORDER those statements are issued in, which is what makes
+	// the revoke critical-section race-free (ban #10) — see revoke_test.go.
+	txOps []string
+}
+
+// recordTxOp appends one writer-tx port call to the ordered trace.
+func (r *abFakeRepo) recordTxOp(op string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.txOps = append(r.txOps, op)
+}
+
+// txOpTrace returns a copy of the recorded writer-tx port-call order.
+func (r *abFakeRepo) txOpTrace() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.txOps))
+	copy(out, r.txOps)
+	return out
 }
 
 // AddUser — test helper. Registers a User id with its home account so the fake
@@ -524,7 +545,10 @@ func (w *abFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserToke
 func (w *abFakeWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *abFakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *abFakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *abFakeWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
+func (w *abFakeWriter) AdvisoryXactLock(_ context.Context, key string) error {
+	w.repo.recordTxOp("advisory_xact_lock:" + key)
+	return nil
+}
 
 // fakeAcctRdr — account Reader; returns Account with the configured owner.
 type fakeAcctRdr struct{ repo *abFakeRepo }
@@ -595,7 +619,10 @@ func (r *fakeRoleRdr) Get(_ context.Context, id domain.RoleID) (domain.Role, err
 			Rules:       r.repo.roleRules,
 		}, nil
 	}
-	return domain.Role{}, stderrors.New("role not found in fake")
+	// Fidelity with the real pg role repo (role_repo.go): an absent role is the
+	// canonical wrapped ErrNotFound with the contract text, so use-case gates that
+	// branch on iamerr.ErrNotFound behave as they do in production.
+	return domain.Role{}, iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id)
 }
 func (r *fakeRoleRdr) GetWithVersion(ctx context.Context, id domain.RoleID) (domain.Role, string, error) {
 	role, err := r.Get(ctx, id)
@@ -812,6 +839,7 @@ func (w *fakeABWtr) DeleteGuarded(_ context.Context, id domain.AccessBindingID) 
 }
 
 func (w *fakeABWtr) RevokeGuarded(_ context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
+	w.repo.recordTxOp("revoke_guarded:" + string(id))
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
 	if w.repo.ab == nil || w.repo.ab.ID != id {

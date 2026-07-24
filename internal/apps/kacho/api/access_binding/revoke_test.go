@@ -108,3 +108,58 @@ func TestAccessBinding_Revoke_Unprotected_SoftRevoke_OpDone(t *testing.T) {
 	require.NotNil(t, repo.ab.RevokedAt, "revoked_at stamped")
 	require.NotNil(t, repo.ab.RevokedByUserID, "revoked_by retained (audit)")
 }
+
+// IAM-1-28 critical-section (ban #10 — DB-level serialization, not a software
+// check-then-act): the soft-revoke writer-tx MUST take the binding's EXCLUSIVE
+// xact advisory lock — the same hashtext(binding_id) key the reconciler's
+// AcquireBindingLock / AcquireBindingLockShared use — as its FIRST statement, and
+// read the emitted-tuple ledger only INSIDE that critical section, after the
+// ACTIVE→REVOKED CAS.
+//
+// Why the order is the contract (not cosmetics): a concurrent
+// ReconcileBindingForward pass holds only a SHARE lock, so with no lock on the
+// revoke side the two txs do not conflict at all. The forward pass then commits a
+// NEW ledger row (+ writes its FGA tuple post-commit) in the window between the
+// revoke's ledger snapshot and its commit — that tuple is absent from the revoke's
+// delete-set, and since a REVOKED binding short-circuits `!bs.Active` in both
+// reconcileBinding and both forward paths, NOTHING ever reclaims it: the revoked
+// subject keeps that object's verbs forever. Taking the EXCLUSIVE lock first makes
+// the two txs strictly serial in either direction (forward-then-revoke ⇒ the new
+// row is in the snapshot; revoke-then-forward ⇒ the forward re-reads status and
+// no-ops).
+func TestAccessBinding_Revoke_TakesExclusiveBindingLockBeforeLedgerRead(t *testing.T) {
+	const ownerID, accountID, roleID = "usr_acct_owner", "acc_rev_lock", "rol_viewer_test_001"
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	id := seedAccountBinding(repo, accountID, roleID, false)
+
+	uc := NewRevokeAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
+	op, err := uc.Execute(newOwnerContext(ownerID), id)
+	require.NoError(t, err)
+	require.NotNil(t, op)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, operations.Wait(waitCtx))
+
+	trace := repo.txOpTrace()
+	require.NotEmpty(t, trace, "the revoke writer-tx must issue serialization statements")
+	assert.Equal(t, "advisory_xact_lock:"+string(id), trace[0],
+		"the EXCLUSIVE binding advisory lock must be the FIRST statement of the revoke writer-tx "+
+			"(same hashtext(binding_id) key as the reconciler's AcquireBindingLock)")
+
+	idxOf := func(op string) int {
+		for i, got := range trace {
+			if got == op {
+				return i
+			}
+		}
+		return -1
+	}
+	cas := idxOf("revoke_guarded:" + string(id))
+	ledger := idxOf("select_emitted_tuples:" + string(id))
+	require.GreaterOrEqual(t, cas, 0, "the status CAS must run")
+	require.GreaterOrEqual(t, ledger, 0, "the emitted-tuple ledger must be read")
+	assert.Greater(t, ledger, cas,
+		"the ledger snapshot must be taken AFTER the ACTIVE→REVOKED CAS, so it can never miss "+
+			"a row a racing forward pass added before the status flipped")
+}

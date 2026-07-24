@@ -92,7 +92,10 @@ func TestCreate_ScopeEnforcement_ListCreateParity(t *testing.T) {
 	assert.Equal(t, 1, bindingCount(t, ctx, repo, accustom, "account", string(accA)))
 
 	// foreign account-role (NOT assignable) → SYNC FAILED_PRECONDITION (F9 gate 2,
-	// first statement, before the Operation is minted).
+	// before the Operation is minted). LEAST-INFO: the role belongs to ANOTHER
+	// account, so the reject is the byte-identical not-found text of an absent role —
+	// naming its definitionTier would disclose the existence + tier of a role the
+	// caller cannot read (parity with RoleService.Get's hide-existence contract).
 	_, err = create.Execute(callerCtx, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: bcustom, ResourceType: "account", ResourceID: string(accA),
@@ -102,8 +105,9 @@ func TestCreate_ScopeEnforcement_ListCreateParity(t *testing.T) {
 	stBad, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.FailedPrecondition, stBad.Code(), "mis-scoped → FAILED_PRECONDITION (sync)")
-	assert.Contains(t, stBad.Message(), string(bcustom))
-	assert.Contains(t, stBad.Message(), "not assignable")
+	assert.Equal(t, "Role "+string(bcustom)+" not found", stBad.Message(),
+		"a foreign-account role is indistinguishable from an absent one")
+	assert.NotContains(t, stBad.Message(), "definitionTier")
 	assert.Equal(t, 0, bindingCount(t, ctx, repo, bcustom, "account", string(accA)),
 		"no binding written for mis-scoped role")
 }

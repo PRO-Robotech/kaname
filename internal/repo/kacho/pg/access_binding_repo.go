@@ -109,6 +109,12 @@ func (r *abReader) GetForUpdate(ctx context.Context, id domain.AccessBindingID) 
 // (created_at, id) ASC. A non-nil VisibleIDs (incl. empty) constrains
 // `id = ANY($n)`; nil disables it. The page_token decode is the authoritative
 // format backstop (garbage → InvalidArgument), independent of the handler pre-check.
+//
+// IncludeRevoked defaults to FALSE: F10 soft-revoke RETAINS the row with
+// status='REVOKED', so without the predicate a revoked grant would be listed next to
+// live ones — and because the active-grant partial UNIQUE keys on revoked_at, an
+// identical re-grant produces a SECOND row, i.e. one grant shown twice. Parity with
+// ListByAccount / ListByRole, whose default already hides them.
 func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
 	pageSize := int64(f.PageSize)
 	if pageSize <= 0 {
@@ -137,6 +143,11 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 	}
 	if f.ScopeID != "" {
 		addEq("resource_id", f.ScopeID)
+	}
+	// Argument-free predicate (like ListByAccount/ListByRole) — appending it does not
+	// disturb argIdx.
+	if !f.IncludeRevoked {
+		conditions = append(conditions, "status <> 'REVOKED'")
 	}
 	if f.VisibleIDs != nil {
 		conditions = append(conditions, fmt.Sprintf("id = ANY($%d)", argIdx))
