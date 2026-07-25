@@ -72,8 +72,13 @@ func TestSyncFGA_ReadAfterWrite_AccountCreate_OwnerCheckImmediately(t *testing.T
 	creator := mustSeedUser(t, ctx, pool, "syncacc")
 	createUC := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
 
+	// ownerUserId° is OUTPUT-ONLY, derived from the authenticated caller (F1): supplying
+	// it in the Create body — even the caller's own id — is a sync INVALID_ARGUMENT. The
+	// account owner is therefore `creator`, by virtue of octx, not by a body field. (These
+	// fixtures used to pass it explicitly; the mismatch stayed invisible while this whole
+	// suite silently skipped itself for want of its authorization-model file.)
 	octx := asUser(ctx, creator)
-	op, err := createUC.Execute(octx, domain.Account{Name: "syncfga-acc-own", OwnerUserID: creator})
+	op, err := createUC.Execute(octx, domain.Account{Name: "syncfga-acc-own"})
 	require.NoError(t, err)
 	require.NotNil(t, op)
 
@@ -116,7 +121,7 @@ func TestSyncFGA_ReadAfterWrite_BindingAndGroupCreate_OwnerCheckImmediately(t *t
 	// (1) Account create — establishes the owner-binding whose `*.*` ARM_ANCHOR is the
 	// materialization source for the iam-content objects created below.
 	accCreate := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
-	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-bg", OwnerUserID: creator})
+	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-bg"})
 	require.NoError(t, err)
 	require.Nil(t, awaitOp(t, ctx, opsRepo, accOp.ID).Error, "Account.Create must succeed")
 	accID := newestAccountByOwner(t, ctx, repo, creator, "syncfga-acc-bg")
@@ -181,7 +186,7 @@ func TestSyncFGA_ReadAfterWrite_ProjectCreate_OwnerCheckImmediately(t *testing.T
 	// (1) Account create — establishes the owner-binding whose `*.*` ARM_ANCHOR is the
 	// materialization source for the project created below.
 	accCreate := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
-	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-prj", OwnerUserID: creator})
+	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-prj"})
 	require.NoError(t, err)
 	require.Nil(t, awaitOp(t, ctx, opsRepo, accOp.ID).Error, "Account.Create must succeed")
 	accID := newestAccountByOwner(t, ctx, repo, creator, "syncfga-acc-prj")
@@ -235,7 +240,7 @@ func TestSyncFGA_ReadAfterWrite_SystemViewGrantToPeer_OwnerViewerCheckImmediatel
 	// (1) Account create — establishes the owner-binding (ROLE_OWNER `*.*.*` ARM_ANCHOR
 	// over the full materializable set incl. iam.accessBinding) reconciled with sync-FGA.
 	accCreate := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
-	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-view", OwnerUserID: owner})
+	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-view"})
 	require.NoError(t, err)
 	require.Nil(t, awaitOp(t, ctx, opsRepo, accOp.ID).Error, "Account.Create must succeed")
 	accID := newestAccountByOwner(t, ctx, repo, owner, "syncfga-acc-view")
@@ -303,7 +308,7 @@ func TestSyncFGA_ReadAfterWrite_PopulatedAccount_OwnerViewerCheckImmediately(t *
 	octx := asUser(ctx, owner)
 
 	accCreate := accountapp.NewCreateAccountUseCase(repo, opsRepo).WithReconciler(rec)
-	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-pop", OwnerUserID: owner})
+	accOp, err := accCreate.Execute(octx, domain.Account{Name: "syncfga-acc-pop"})
 	require.NoError(t, err)
 	require.Nil(t, awaitOp(t, ctx, opsRepo, accOp.ID).Error, "Account.Create must succeed")
 	accID := newestAccountByOwner(t, ctx, repo, owner, "syncfga-acc-pop")

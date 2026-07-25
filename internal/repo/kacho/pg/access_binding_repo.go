@@ -1255,6 +1255,53 @@ func (r *abReader) SelectEmittedTuples(ctx context.Context, bindingID domain.Acc
 	return out, nil
 }
 
+// SelectTuplesClaimedByOtherActiveBindings returns the subset of `tuples` that some
+// OTHER *ACTIVE* binding also records in the emitted-tuple ledger — the tuples a
+// revoke of excludeBinding must NOT strip from OpenFGA (an OpenFGA tuple is not
+// refcounted, the ledger is keyed per binding; see the ReaderIface doc).
+//
+// ONE query for the whole candidate set: the triples are shipped as three parallel
+// arrays and unnested into a join against the ledger, so the probe costs one
+// round-trip regardless of set size (the reconciler's per-tuple EXISTS twin predates
+// this). DISTINCT because several other bindings may claim the same tuple. Zero
+// rows ⇒ nil (nothing survives ⇒ the whole set is revoked).
+func (r *abReader) SelectTuplesClaimedByOtherActiveBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
+	if len(tuples) == 0 {
+		return nil, nil
+	}
+	users := make([]string, len(tuples))
+	relations := make([]string, len(tuples))
+	objects := make([]string, len(tuples))
+	for i, t := range tuples {
+		users[i], relations[i], objects[i] = t.User, t.Relation, t.Object
+	}
+	rows, err := r.tx.Query(ctx,
+		`SELECT DISTINCT c.fga_user, c.relation, c.object
+		   FROM unnest($2::text[], $3::text[], $4::text[]) AS c(fga_user, relation, object)
+		   JOIN access_binding_emitted_tuples et
+		     ON et.fga_user = c.fga_user AND et.relation = c.relation AND et.object = c.object
+		   JOIN access_bindings ab ON ab.id = et.binding_id
+		  WHERE et.binding_id <> $1
+		    AND ab.status = 'ACTIVE'`,
+		string(excludeBinding), users, relations, objects)
+	if err != nil {
+		return nil, mapErr(err, "", string(excludeBinding))
+	}
+	defer rows.Close()
+	var out []access_binding.RelationTuple
+	for rows.Next() {
+		var t access_binding.RelationTuple
+		if err := rows.Scan(&t.User, &t.Relation, &t.Object); err != nil {
+			return nil, mapErr(err, "", string(excludeBinding))
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "", string(excludeBinding))
+	}
+	return out, nil
+}
+
 // ListActiveByRole returns every non-revoked (PENDING/ACTIVE) binding of a role
 // (Role.Update reconcile fan-out). The set is bounded by the active
 // bindings of the SINGLE mutated role. Ordered (created_at, id) ASC for

@@ -70,6 +70,26 @@ type ReaderIface interface {
 	// caller's tx. Zero rows ⇒ empty slice (nil).
 	SelectEmittedTuplesBySource(ctx context.Context, bindingID domain.AccessBindingID, source string) ([]RelationTuple, error)
 
+	// SelectTuplesClaimedByOtherActiveBindings returns the SUBSET of `tuples` that is
+	// ALSO recorded in the emitted-tuple ledger of an ACTIVE binding OTHER than
+	// excludeBinding — i.e. the tuples a revoke of excludeBinding MUST leave alone.
+	//
+	// WHY IT EXISTS. The ledger PK is per binding (binding_id, fga_user, relation,
+	// object), while an OpenFGA tuple is NOT refcounted: two bindings of the SAME
+	// subject on the SAME scope hold TWO ledger rows for ONE live tuple. Replaying a
+	// binding's own ledger set verbatim onto OpenFGA therefore deletes access another
+	// ACTIVE binding still grants (silent access-loss, and self-sustaining — the
+	// ledger is read as the mirror of OpenFGA, so no reconcile pass re-writes it).
+	// Delete/Revoke subtract this set so a shared tuple is removed only when the LAST
+	// ACTIVE claimant releases it — the same rule the reconciler already applies
+	// internally (reconcile.ReconcileStore.TuplesStillClaimedByOtherBindings).
+	//
+	// The join requires the other binding to be ACTIVE: a REVOKED/expired binding
+	// does not keep a tuple alive. Read on the caller's tx (the revoke runs it inside
+	// its own writer-tx, so the answer is consistent with the delete it guards).
+	// Empty `tuples` ⇒ empty result, no query.
+	SelectTuplesClaimedByOtherActiveBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []RelationTuple) ([]RelationTuple, error)
+
 	// ListActiveByRole returns every NON-revoked (PENDING/ACTIVE) binding that
 	// references roleID. Used by the Role.Update reconcile fan-out: when
 	// a role's permissions change, every active binding of that role must have its

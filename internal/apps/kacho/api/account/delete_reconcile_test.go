@@ -213,6 +213,12 @@ func (delABReader) ListByAccount(context.Context, domain.AccountID, access_bindi
 func (delABReader) SelectEmittedTuplesBySource(context.Context, domain.AccessBindingID, string) ([]access_binding.RelationTuple, error) {
 	return nil, nil
 }
+
+// The account teardown fixture holds no sibling binding, so nothing survives a
+// per-binding revoke here.
+func (delABReader) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
+	return nil, nil
+}
 func (delABReader) ListActiveByRole(context.Context, domain.RoleID) ([]domain.AccessBinding, error) {
 	return nil, nil
 }

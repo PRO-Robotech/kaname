@@ -134,6 +134,25 @@ func idempotentDeleteReply(body string) bool {
 	return strings.Contains(low, "cannot delete a tuple") && strings.Contains(low, "not exist")
 }
 
+// deleteRejectedAsAbsent reports whether a DELETE request was rejected because at
+// least one of its tuples is already gone.
+//
+// It is the caller's job to only ask this about a DELETE (the shared reply trailer
+// names BOTH directions and cannot discriminate; the leading clause can, and
+// idempotentDeleteReply keys on it). The error message carries the capped reply body
+// verbatim ("openfga write: bad request: <body>"), so the same pinned vocabulary that
+// classifies a single-tuple reply classifies a batch one.
+//
+// WHY IT MATTERS. OpenFGA's write is TRANSACTIONAL: such a batch applied NOTHING and —
+// unlike a 409 conflict — replaying it VERBATIM can never succeed, because the absent
+// tuple stays absent. Left unclassified, a revoke burned its whole retry budget on a
+// request that was impossible by construction while its still-live tuples survived.
+// The resolution is to decompose the batch into single-tuple deletes (writeOrDelete),
+// where "already absent" is a sound idempotent success per tuple.
+func deleteRejectedAsAbsent(err error) bool {
+	return err != nil && idempotentDeleteReply(err.Error())
+}
+
 // readWriteReply interprets ONE OpenFGA /write reply.
 //
 //	200                            → nil

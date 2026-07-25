@@ -13,10 +13,13 @@ package access_binding
 //     rows AND no orphan binding state.
 //   - The revoked tuple set is the PERSISTED emitted-set
 //     (access_binding_emitted_tuples — F3/#178), read via
-//     `w.AccessBindings().SelectEmittedTuples(id)`. This makes the revoke
-//     byte-symmetric to what was actually emitted at grant / last reconcile,
-//     even if the binding's role permissions changed in between (re-deriving
-//     from the CURRENT role would orphan the originally-granted tuples).
+//     `w.AccessBindings().SelectEmittedTuples(id)`, MINUS the tuples another
+//     ACTIVE binding still claims (partitionRevokeSet — revoke_set.go). Reading
+//     the ledger instead of re-deriving keeps the revoke faithful to what was
+//     actually emitted at grant / last reconcile even if the binding's role
+//     permissions changed in between (a re-derive would orphan the originally-
+//     granted tuples); subtracting the surviving claims keeps it from deleting a
+//     non-refcounted OpenFGA tuple that a sibling ACTIVE binding also grants.
 //
 // Синхронный revoke (паритет латентности с grant):
 //   - После commit writer-tx тот же persisted emitted-set удаляется из OpenFGA
@@ -26,7 +29,8 @@ package access_binding
 //     fga_outbox drain. In-tx EmitRelationDelete + drainer остаются at-least-once
 //     backstop; DeleteTuples идемпотентен (отсутствующий tuple ⇒ success), поэтому
 //     повторное удаление дренером — no-op. Удаляется ровно тот же набор, что и
-//     async-путь, так что cross-binding-поведение не меняется — только тайминг.
+//     async-путь (оба — emitted-set МИНУС всё, что ещё держит другая ACTIVE-привязка),
+//     так что sync/async различаются только таймингом.
 
 import (
 	"context"
@@ -193,12 +197,27 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// (Role.Update) between grant and revoke; re-deriving would emit
 	// EmitRelationDelete on the NEW tuple set and orphan the originally-granted
 	// ones (standing privilege). access_binding_emitted_tuples records exactly
-	// what was emitted at grant / last reconcile, so deleting that set is
-	// byte-symmetric to what is live in OpenFGA. Read on THIS writer-tx BEFORE the
-	// binding DELETE (the FK ON DELETE CASCADE drops the ledger rows on delete).
+	// what THIS binding emitted at grant / last reconcile — the candidate revoke-set,
+	// narrowed just below by whatever another ACTIVE binding still claims. Read on THIS
+	// writer-tx BEFORE the binding DELETE (the FK ON DELETE CASCADE drops the ledger
+	// rows on delete).
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
+	}
+	// CROSS-BINDING SHARED TUPLES (access-loss fix). The ledger is keyed PER binding
+	// while an OpenFGA tuple is not refcounted, so replaying `stored` verbatim would
+	// delete access ANOTHER ACTIVE binding of the same subject still grants — and
+	// nothing would ever re-write it (the ledger is read as the mirror of the store).
+	// Subtract the tuples another ACTIVE binding still claims; the rest is this
+	// binding's true revoke-set (see revoke_set.go).
+	revokeTuples, retained, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
+	if err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	if len(retained) > 0 && u.logger != nil {
+		u.logger.Info("access_binding delete: tuples retained — still granted by another ACTIVE binding",
+			"binding_id", string(id), "retained_count", len(retained), "revoked_count", len(revokeTuples))
 	}
 
 	// RBAC explicit-model 2026 P6 (C-04): atomic CAS backstop against TOCTOU —
@@ -209,8 +228,11 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 		return nil, shared.MapRepoErr(err)
 	}
 	// Atomic revoke emit-in-tx. Tx rollback ⇒ neither the binding row is
-	// gone NOR is the outbox row visible to drainer.
-	if err := w.AccessBindingsW().EmitRelationDelete(ctx, stored); err != nil {
+	// gone NOR is the outbox row visible to drainer. The at-least-once async
+	// backstop carries the SAME cross-binding-filtered set as the sync removal
+	// below — otherwise the drainer would strip a still-claimed tuple seconds
+	// after the sync path correctly kept it.
+	if err := w.AccessBindingsW().EmitRelationDelete(ctx, revokeTuples); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	// Emit subject_change_outbox row in the same TX as the deletion: a rollback
@@ -261,10 +283,10 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// no-op. nil-safe: при unwired RelationStore остается только async-путь.
 	// Best-effort/non-fatal: binding уже удален durable, ошибку логируем — backstop
 	// сходит за идемпотентный повтор.
-	if u.relations != nil && len(stored) > 0 {
-		if derr := u.syncRemoveTuples(ctx, toClientTuples(stored)); derr != nil && u.logger != nil {
+	if u.relations != nil && len(revokeTuples) > 0 {
+		if derr := u.syncRemoveTuples(ctx, toClientTuples(revokeTuples)); derr != nil && u.logger != nil {
 			u.logger.Warn("access_binding delete: synchronous FGA tuple-removal failed after retries; async drain will backstop",
-				"binding_id", string(id), "tuple_count", len(stored), "err", derr)
+				"binding_id", string(id), "tuple_count", len(revokeTuples), "err", derr)
 		}
 	}
 

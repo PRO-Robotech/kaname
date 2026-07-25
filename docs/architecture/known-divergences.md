@@ -124,28 +124,36 @@ lower layer, so `disable` is fine" escape hatch, matching the gRPC-listener gate
 
 ---
 
-## 4. FGA authorization-model gates skip unless the canonical DSL is resolvable (CI residual)
+## 4. FGA authorization-model gates — RESOLVED (canonical DSL restored in-repo)
 
 **Convention** (hard-rule #12): security-relevant tests must be green, not
 silently skipped. The FGA model-drift gate (`internal/authzmap/fga_model_drift_test.go`)
 and the real-OpenFGA tuple-emission proof (`internal/testsupport/fgatest`) prove the
 emitter/catalog match the canonical `fga_model.fga` DSL.
 
-**Residual**: both resolve the canonical DSL by (r3) trying a sibling `kacho-proto`
-checkout **then** the pinned `kacho-proto` Go-module directory
-(`go list -m -f {{.Dir}}`). In the standalone Go-test CI lanes `kacho-proto` is a
-module, and the `.fga` file is **not currently shipped inside that module**, so the
-DSL is unresolvable and both gates still `t.Skip`. r3 added an env-gated hard-fail:
-with `KACHO_IAM_REQUIRE_FGA_MODEL=1` the absence becomes `t.Fatal` (refusing to skip
-a security gate) — verified locally — so CI can enforce non-skip **the moment** the
-model ships in the pinned module.
+**What was wrong**: both resolved the canonical DSL through a sibling `kacho-proto`
+checkout or the pinned `kacho-proto` Go-module directory — neither of which exists
+after the polyrepo→monorepo consolidation, and the `.fga` file itself was not
+carried over. The DSL was therefore unresolvable **on every run**, so both gates
+`t.Skip`-ed themselves while the package still reported `ok`. The only surviving
+copy of the model was the DSL embedded in the openfga-bootstrap Helm ConfigMap,
+which nothing compared against the Go tables. The drift this hid was real: five
+compute object types (`compute_host_group`, `compute_gpu_cluster`,
+`compute_placement_group`, `compute_reserved_instance_pool`, `compute_host_type`)
+and one type with no service at all (`vpc_anycast_address_pool`) were declared
+grantable and verb-bearing while the enforced model never declared them.
 
-**Convergence path (cross-repo, out of kacho-iam scope)**: ship
-`proto/kacho/cloud/iam/v1/fga_model.fga` inside the `kacho-proto` module (so the
-module-dir resolution finds it), then set `KACHO_IAM_REQUIRE_FGA_MODEL=1` (and, for
-the real-FGA proof, provision the `openfga/cli` image) in the Go-test CI jobs. Until
-then the gates degrade to a documented skip locally/offline rather than a silent
-no-op with no way to enforce.
+**Resolution**: the canonical model now lives in-repo at
+`proto/kacho/cloud/iam/v1/fga_model.fga` (seeded byte-for-byte from the ConfigMap,
+so the enforced model did not change when the file was restored). It is the single
+source; the ConfigMap is GENERATED from it by `make openfga-model-json`, and
+`internal/authzmap/fga_model_configmap_identity_test.go` pins both generated blocks
+to it — the byte-identical DSL copy and, more importantly, the pre-transformed
+`model.json` the bootstrap Job actually applies. Resolution is a plain walk-up to
+the module root; **the absence of the model is now a hard failure, and there is no
+environment opt-out** (`KACHO_IAM_REQUIRE_FGA_MODEL` is gone). The gate also runs
+in the reverse direction: a type in the enforced model that no catalog knows about,
+or one that carries `v_*` outside the grantable catalog, fails the build.
 
 ---
 

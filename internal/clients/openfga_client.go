@@ -39,8 +39,12 @@ type RelationStore interface {
 	// retryable, а не как «уже применено».
 	WriteTuples(ctx context.Context, tuples []RelationTuple) error
 
-	// DeleteTuples атомарно удаляет batch tuples (idempotent: missing = success;
-	// 409 — как у WriteTuples, retryable, не success).
+	// DeleteTuples удаляет batch tuples. Idempotent НА УРОВНЕ НАБОРА: постусловие —
+	// «ни одного из этих tuple в сторе нет». Batch применяется транзакционно, но если
+	// OpenFGA отверг его из-за уже отсутствующего tuple (частый исход частичного дренажа
+	// fga_outbox — транзакционный replay такого запроса не пройдет НИКОГДА), адаптер
+	// разбивает набор на однокортежные удаления, где «уже нет» — корректный успех.
+	// Конкурентный transactional abort (409) — как у WriteTuples: retryable, не success.
 	DeleteTuples(ctx context.Context, tuples []RelationTuple) error
 }
 
@@ -260,7 +264,7 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 			idempotent = idempotentWriteReply
 		}
 	}
-	return applyWithConflictRetry(ctx, func(ctx context.Context) error {
+	err := applyWithConflictRetry(ctx, func(ctx context.Context) error {
 		// Bound EVERY attempt to the configured WriteTimeout (default 1s):
 		// http.DefaultClient has no Timeout, so an OpenFGA that accepts the
 		// TCP connection but stops responding (GC pause / overload / half-open
@@ -282,6 +286,42 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 		defer resp.Body.Close()
 		return readWriteReply(resp, idempotent)
 	})
+	if err == nil || write || len(tuples) == 1 || !deleteRejectedAsAbsent(err) {
+		return err
+	}
+	// A DELETE batch rejected because ≥1 of its tuples is already gone. OpenFGA's write
+	// is TRANSACTIONAL, so nothing was removed, and — unlike a 409 conflict — replaying
+	// the identical request can NEVER succeed: the absent tuple stays absent. Because
+	// the async fga_outbox drainer applies the SAME revoke rows ONE AT A TIME, "one of
+	// them is already gone" is the ordinary outcome of a partial drain, not an exotic
+	// one; before this the access_binding revoke burned its six bounded retries (~3s of
+	// worker time) on an impossible request every single time and left the batch's
+	// still-live tuples standing until the drainer caught up.
+	//
+	// Decompose instead of widening the shortcut: "already absent" proves the caller's
+	// post-condition only for a request carrying exactly ONE tuple (for a batch it
+	// proves the OTHERS did not land), so re-issue each tuple as its own single-tuple
+	// delete — precisely the shape the drainer uses, where that reading is sound.
+	return c.deleteEachTuple(ctx, tuples)
+}
+
+// deleteEachTuple re-issues every tuple of a rejected delete batch as its OWN
+// single-tuple request, where an already-absent tuple degrades to the idempotent
+// success the adapter contract promises.
+//
+// It does NOT stop at the first failure: a revoke must remove as much as it can (every
+// tuple removed is access denied, the fail-safe direction), and the tuples are
+// independent once the batch is decomposed. The FIRST genuine error is returned so the
+// caller still sees the failure and its retry / durable fga_outbox backstop still runs.
+func (c *OpenFGAHTTPClient) deleteEachTuple(ctx context.Context, tuples []RelationTuple) error {
+	var firstErr error
+	for i := range tuples {
+		// len==1 ⇒ the single-tuple idempotent path; no further decomposition (no recursion).
+		if err := c.writeOrDelete(ctx, tuples[i:i+1], false); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 var _ RelationStore = (*OpenFGAHTTPClient)(nil)

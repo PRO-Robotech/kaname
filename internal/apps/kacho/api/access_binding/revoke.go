@@ -13,9 +13,11 @@ package access_binding
 //     removed in the same writer-tx, so access is denied once the Operation is
 //     done — the two paths differ only in row-retention, not in access outcome.
 //
-// The tuple-removal is byte-symmetric to Delete: it revokes the PERSISTED
-// emitted-set (access_binding_emitted_tuples), not a re-derive from the binding's
-// CURRENT role, so a Role.Update between grant and revoke cannot orphan tuples.
+// The tuple-removal is identical to Delete: it revokes the PERSISTED emitted-set
+// (access_binding_emitted_tuples) MINUS whatever another ACTIVE binding still claims
+// (partitionRevokeSet), not a re-derive from the binding's CURRENT role — so a
+// Role.Update between grant and revoke cannot orphan tuples, and a sibling ACTIVE
+// binding's access is never stripped along with this one's.
 // "The SAME writer-tx" only holds because that tx opens with the binding's EXCLUSIVE
 // advisory lock (see doRevoke): a concurrent reconcile/forward pass takes the SHARE
 // sibling of that lock, so it can never append to the ledger between the snapshot and
@@ -183,8 +185,8 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// SYMMETRIC revoke from the PERSISTED emitted-set (byte-symmetric to what was
-	// emitted at grant / last reconcile) — NOT a re-derive from the CURRENT role.
+	// SYMMETRIC revoke from the PERSISTED emitted-set (what THIS binding emitted at
+	// grant / last reconcile) — NOT a re-derive from the CURRENT role.
 	// Read AFTER the CAS so the snapshot is taken with the row already REVOKED:
 	// defense-in-depth on top of the advisory lock above, so no ledger row added
 	// while the binding was still ACTIVE can fall outside the delete-set.
@@ -192,8 +194,21 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// Atomic revoke emit-in-tx (same writer-tx as the status transition).
-	if err := w.AccessBindingsW().EmitRelationDelete(ctx, stored); err != nil {
+	// CROSS-BINDING SHARED TUPLES (access-loss fix, mirror of Delete): the ledger is
+	// per-binding while an OpenFGA tuple is not refcounted, so subtract the tuples
+	// another ACTIVE binding still claims — a soft revoke must not strip access a
+	// sibling ACTIVE binding independently grants (see revoke_set.go).
+	revokeTuples, retained, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
+	if err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	if len(retained) > 0 && u.logger != nil {
+		u.logger.Info("access_binding revoke: tuples retained — still granted by another ACTIVE binding",
+			"binding_id", string(id), "retained_count", len(retained), "revoked_count", len(revokeTuples))
+	}
+	// Atomic revoke emit-in-tx (same writer-tx as the status transition). Carries the
+	// SAME cross-binding-filtered set as the post-commit sync removal below.
+	if err := w.AccessBindingsW().EmitRelationDelete(ctx, revokeTuples); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	// Subject-change outbox (authz-cache invalidation — access removed).
@@ -229,10 +244,10 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	// materialization, so deny is observable by the time the Operation is done.
 	// Idempotent (missing tuple ⇒ success); async EmitRelationDelete backstops.
 	// nil-safe / best-effort: the binding is already durably REVOKED.
-	if u.relations != nil && len(stored) > 0 {
-		if derr := u.syncRemoveTuples(ctx, toClientTuples(stored)); derr != nil && u.logger != nil {
+	if u.relations != nil && len(revokeTuples) > 0 {
+		if derr := u.syncRemoveTuples(ctx, toClientTuples(revokeTuples)); derr != nil && u.logger != nil {
 			u.logger.Warn("access_binding revoke: synchronous FGA tuple-removal failed after retries; async drain will backstop",
-				"binding_id", string(id), "tuple_count", len(stored), "err", derr)
+				"binding_id", string(id), "tuple_count", len(revokeTuples), "err", derr)
 		}
 	}
 

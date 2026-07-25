@@ -42,7 +42,6 @@
   Account/Project/AccessBinding для нового identity либо активация PENDING-invite.
 - **SAKeyService** выдает Class A static service-account-ключи через OAuth2
   client-credentials Ory Hydra.
-- **jwks-rotator** — отдельный бинарник, ротирующий OIDC JWKS-ключи подписи в БД.
 
 **Что делает:**
 

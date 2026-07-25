@@ -238,6 +238,11 @@ func (r *strictDupABReader) CountActiveByRole(context.Context, domain.RoleID) (i
 func (r *strictDupABReader) SelectEmittedTuplesBySource(context.Context, domain.AccessBindingID, string) ([]repoab.RelationTuple, error) {
 	return nil, nil
 }
+
+// No sibling binding claims anything in this fixture (strict-create duplicate path).
+func (r *strictDupABReader) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []repoab.RelationTuple) ([]repoab.RelationTuple, error) {
+	return nil, nil
+}
 func (r *strictDupABReader) ListByRole(context.Context, domain.RoleID, repoab.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }

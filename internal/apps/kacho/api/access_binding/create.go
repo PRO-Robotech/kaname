@@ -68,13 +68,22 @@ type SelectorReconciler interface {
 	// ReconcileBinding is the FULL EXCLUSIVE path (Role.Update fan-out + sweep backstop);
 	// still consumed by the reconcile machinery, not by the create hot-path.
 	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
-	// ReconcileObjectForward is the ADDITIVE forward fast-path for the freshly-created
+	// ReconcileObjectForwardNew is the ADDITIVE forward fast-path for the freshly-created
 	// binding-AS-OBJECT (iam.accessBinding): it materializes ONLY that new object's
 	// per-object owner/admin tuples across the matching bindings under a SHARE advisory
 	// lock (no EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
-	// materialization lag under a parallel create burst. It transparently delegates to the
-	// FULL ReconcileObject if the object already has members (delete-stale guard).
-	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+	// materialization lag under a parallel create burst.
+	//
+	// The …New variant asserts what only this call site knows: the object id was minted
+	// in the writer-tx that has just committed, so it never existed before and carries
+	// nothing stale. That matters because the SIBLING pass above
+	// (ReconcileBindingForward) may already have written a member row ON THIS VERY
+	// OBJECT — an anchor/`*.*` role in scope covers iam.accessBinding, i.e. the row just
+	// created — and the plain ReconcileObjectForward reads such rows as "this object
+	// existed before" and falls back to the FULL EXCLUSIVE ReconcileObject, the very
+	// serialization this fast-path exists to avoid (measured: account-admin verbs ~67s
+	// after create). The delete-stale guard is untouched for every other caller.
+	ReconcileObjectForwardNew(ctx context.Context, objectType, objectID string) error
 	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
 	// delete-stale / audit / sweep); still driven by the reconcile worker off the
 	// co-committed reconcile-outbox event, not by the create hot-path.
@@ -414,27 +423,33 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 		}
 	}
 
-	// rbac-contract-a-fix (forward-mat, C-01b): SYNCHRONOUSLY materialize the
+	// rbac-contract-a-fix (forward-mat, C-01b): materialize, right after commit, the
 	// per-object access of every binding (owner `*.*`, account-admin) whose selector
-	// matches the NEW access_binding OBJECT (iam.accessBinding), so its admin/v_*
-	// tuple is observable when the Operation reports done — closing the GET-after-
-	// create race the async event drain (the co-committed EmitReconcileEvent above)
-	// would otherwise lose under the flat model. Distinct from ReconcileBinding above
-	// (which materializes THIS binding's own grant membership). Best-effort/non-fatal:
-	// the binding is durably created; the reconcile event + periodic sweep backstop.
+	// matches the NEW access_binding OBJECT (iam.accessBinding) — SHORTENING the window
+	// in which a GET of the just-created binding is not yet authorized under the flat
+	// model. It does NOT close that window and is NOT waited on: materialization is
+	// eventually-consistent and Operation.done means the binding row is DURABLE, never
+	// that its tuples are visible (ban #9); an immediate reader converges via bounded
+	// client-retry, and the co-committed EmitReconcileEvent + periodic sweep are the
+	// at-least-once backstop. Distinct from ReconcileBindingForward above (which
+	// materializes THIS binding's own grant membership). Best-effort/non-fatal.
 	//
-	// IAM-FMB throughput fix: the create-path takes the ADDITIVE forward
-	// (ReconcileObjectForward, SHARE advisory lock, single-object — the binding is
-	// brand-new so there is NOTHING stale to delete) instead of the FULL EXCLUSIVE
-	// ReconcileObject, whose per-binding advisory lock + O(scope) recompute serialized on
-	// the SINGLE owner/account binding every access_binding of an account shares → the
-	// owner-tuple materialization lagged past the client read-your-writes retry budget
-	// (transient 403 on GET of the binding one just created) under a parallel create
-	// burst. The forward transparently delegates to the FULL path if the object already
-	// has members (delete-stale guard); the FULL ReconcileObject REMAINS the async
-	// at-least-once backstop, driven by the co-committed EmitReconcileEvent above.
+	// IAM-FMB throughput fix: the create-path takes the ADDITIVE forward with the
+	// PROVEN-NEW signal (ReconcileObjectForwardNew, SHARE advisory lock, single-object)
+	// instead of the FULL EXCLUSIVE ReconcileObject, whose per-binding advisory lock +
+	// O(scope) recompute serialized on the SINGLE owner/account binding every
+	// access_binding of an account shares. The …New variant matters because the sibling
+	// ReconcileBindingForward above has, moments earlier, written a member row ON THIS
+	// VERY OBJECT (an anchor/`*.*` role in scope covers iam.accessBinding — the row just
+	// created), which the plain forward's delete-stale guard reads as "already existed"
+	// and bounces onto the FULL path: measured against the Read API, the subject's own
+	// tuples landed in ~3s while the scope parent-pointer took ~61s and the
+	// account-admin's per-object verbs ~67s, against a 25s client poll budget. The id was
+	// minted in the tx that just committed, so nothing stale can exist on it. The FULL
+	// ReconcileObject REMAINS the async at-least-once backstop (delete-stale / audit /
+	// PENDING), driven by the co-committed EmitReconcileEvent above.
 	if u.reconciler != nil {
-		if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.accessBinding", string(created.ID)); rerr != nil && u.logger != nil {
+		if rerr := u.reconciler.ReconcileObjectForwardNew(ctx, "iam.accessBinding", string(created.ID)); rerr != nil && u.logger != nil {
 			u.logger.Error("access_binding create: object forward reconcile failed (event/sweep will retry)",
 				"binding_id", string(created.ID), "err", rerr)
 		}

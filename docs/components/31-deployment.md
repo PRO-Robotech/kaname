@@ -14,7 +14,6 @@ helm-chart, config + секреты, миграции и порядок запу
 |---|---|
 | `kacho-iam` | gRPC API-сервер (`serve`) — основной процесс Deployment'а |
 | `kacho-migrator` | CLI миграций БД (`up`/`down`/`status`/`create`), запускается init-контейнером |
-| `jwks-rotator` | ротация OIDC JWKS-ключей подписи (`once`/`daemon`), отдельный scheduled-job |
 
 `kacho-iam` обслуживает только `serve` — миграции вынесены в отдельный
 `kacho-migrator` (cmd-binary не смешивает обязанности). Попытка
@@ -75,8 +74,6 @@ flowchart TB
         Hydra[Ory Hydra] -- token/refresh-hook :9092 --> IAM
         IAM -- admin API: JWKS --> Hydra
         Migrate[initContainer kacho-migrator] -. goose up .-> PG
-        JWKS[jwks-rotator job] -. rotate keys .-> PG
-        JWKS -. publish JWKS .-> Hydra
         Prom[Prometheus] -- scrape :9095 --> IAM
     end
 ```
@@ -257,21 +254,30 @@ kacho-migrator down
 KACHO_IAM_DB_PASSWORD=secret kacho-migrator up
 ```
 
-## JWKS-ротация
+## JWKS: ротации НЕТ — iam не владеет ключом подписи
 
-`jwks-rotator` — отдельный бинарник для ротации ключей подписи OIDC JWKS
-(хранятся зашифрованными в БД, публичная часть публикуется в Hydra). Запускается
-как scheduled-job:
+Ротатора в iam нет, и заводить его не нужно: **iam не чеканит токены и не
+верифицирует их своим ключом**.
 
-```bash
-jwks-rotator once      # один цикл ротации (для CronJob-тика)
-jwks-rotator daemon    # long-running, daily-tick с jitter
-```
+- **Издатель/подписант — Ory Hydra.** Единственная подпись внутри iam — RFC 7523
+  `client_assertion` (ES256), и подписывается она **предъявленным** SA-ключом
+  (либо env-ключом OAuth-клиента для anonymous/bootstrap). Сам `access_token`
+  выпускает Hydra (`client_credentials` + `private_key_jwt`).
+- **Верификация — по JWKS Hydra.** `internal/handler/jwksproxyhttp` (:9097)
+  отдаёт **байт-в-байт зеркало публичного JWKS Hydra** и намеренно никогда не
+  отдаёт собственные `kacho-*` kid — такой kid гарантированно не совпал бы и
+  зарезал бы каждый pull.
 
-Конфигурируется теми же ENV, что `kacho-iam serve`
-(`KACHO_IAM_DB_URL`/`KACHO_IAM_DB_PASSWORD`/`KACHO_IAM_JWKS_ENC_KEY`/
-`KACHO_IAM_HYDRA_ADMIN_TOKEN`/`KACHO_IAM_JWKS_ROTATION_DAYS`). HA-safe:
-внутри `Rotate` — per-alg advisory-lock, параллельные поды безопасны.
+Историческая таблица `kacho_iam.oidc_jwks_keys` осталась от дизайна ДО перехода
+на проксирование: приватная половина писалась зашифрованной и **ни разу не
+расшифровывалась ни в одном prod-пути**, а в Hydra публиковалась только
+**публичная** половина, которой подписать ничего нельзя. Вместе с ней снят
+CronJob `kacho-iam-jwks-rotator` (он к тому же звал несуществующий subcommand
+`kacho-iam jwks rotate` и падал в 100% запусков).
+
+`KACHO_IAM_JWKS_ENC_KEY` пока остаётся обязательным в production-режиме —
+его требует boot-guard `config.validateProductionAuthNSecrets`.
+
 
 ## Порядок запуска
 
@@ -326,7 +332,7 @@ grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.clo
 ## Ссылки на код
 
 - `cmd/kacho-iam/{main,serve,wiring,env,grpc_register,hooks_mux,subject_change_wiring}.go`
-- `cmd/migrator/main.go`, `cmd/jwks-rotator/main.go`
+- `cmd/migrator/main.go`
 - `internal/apps/kacho/config/`
 - `internal/migrations/0001_initial.sql`
 - `deploy/Chart.yaml`, `deploy/values.yaml`, `deploy/templates/`

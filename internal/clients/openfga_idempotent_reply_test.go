@@ -158,17 +158,31 @@ func TestWriteTuples_MultiTupleBatch_AlreadyExists_IsNotSuccess(t *testing.T) {
 	}
 }
 
-// TestDeleteTuples_MultiTupleBatch_CannotDelete_IsNotSuccess — the revoke mirror:
-// a rejected multi-tuple delete removed NOTHING, so the still-live tuples must
-// not be reported as revoked (that would be a silent over-grant).
-func TestDeleteTuples_MultiTupleBatch_CannotDelete_IsNotSuccess(t *testing.T) {
+// TestDeleteTuples_MultiTupleBatch_CannotDelete_ReducedToSingleTupleDeletes — the
+// revoke mirror of the batch rule, and the point where the two directions part.
+//
+// The invariant is unchanged: a tuple that is still live must never be reported as
+// revoked. What changed is HOW the client honours it. A rejected multi-tuple delete
+// removed NOTHING and, unlike a 409, replaying it verbatim can never succeed (the
+// absent tuple stays absent), so simply surfacing the error left the batch's live
+// tuples standing and burned the revoke's whole retry budget. The client now reduces
+// such a batch to SINGLE-tuple deletes, where "already absent" is a sound per-tuple
+// success — so every tuple in the batch is genuinely dealt with.
+//
+// Here the stub answers "already absent" to EVERY request, so after decomposition
+// every tuple's post-condition provably holds and success is correct. That the live
+// ones are actually removed — the assertion this test cannot make against a stateless
+// stub — is locked on the observable in
+// openfga_delete_batch_test.go:TestDeleteTuples_BatchWithAnAlreadyAbsentTuple_StillRemovesTheLiveOnes,
+// together with the control that a genuine (non-absent) rejection still errors.
+func TestDeleteTuples_MultiTupleBatch_CannotDelete_ReducedToSingleTupleDeletes(t *testing.T) {
 	c := replyClient(badRequestServer(t, liveMissingDeleteBody))
 	err := c.DeleteTuples(context.Background(), []clients.RelationTuple{
 		{User: "user:u1", Relation: "v_get", Object: "doc:d1"},
 		{User: "user:u1", Relation: "v_list", Object: "doc:d1"},
 	})
-	if err == nil {
-		t.Fatalf("a rejected MULTI-tuple delete removed nothing — the surviving tuples must not be reported as revoked")
+	if err != nil {
+		t.Fatalf("a delete batch every tuple of which is already absent must converge, not fail forever: %v", err)
 	}
 }
 

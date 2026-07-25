@@ -245,6 +245,45 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 // (delete-stale / REJECTED-containment audit / PENDING / sweep), driven by the co-committed
 // reconcile-outbox event; forward is purely the happy-path accelerator.
 func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, objectID string) error {
+	return r.reconcileObjectForward(ctx, objectType, objectID, false /* newness not proven — keep the delete-stale guard */)
+}
+
+// ReconcileObjectForwardNew is ReconcileObjectForward for an object the caller can PROVE
+// is brand-new: its id was minted in the caller's writer-tx and that tx has just
+// committed, so the object never existed before this call.
+//
+// WHAT IT CHANGES — exactly one thing: the delete-stale guard below is skipped. Nothing
+// else differs (same object projection, same fan-out, same per-object verdict, same
+// additive materialization, same async backstop).
+//
+// WHY IT IS NEEDED (create-path starvation, measured against the Read API). A create can
+// materialize members ON ITS OWN OBJECT before this pass runs — AccessBinding.Create's
+// ReconcileBindingForward materializes the new binding's own grant, and an anchor/`*.*`
+// role in scope covers iam.accessBinding, i.e. the very row just created. The guard then
+// finds a non-empty member set and routes the object to the FULL EXCLUSIVE
+// ReconcileObject. Since every access_binding of an account shares the single
+// account-admin binding, those full passes queue on one advisory lock and the
+// account-admin's per-object verbs arrived ~67s after the create — far past a client's
+// read-your-writes budget. Reordering the two passes only moves the starvation to the
+// other one; the guard needs the fact only the create-path holds: the object is NEW.
+//
+// WHY IT IS SAFE. The guard exists so a RE-REGISTER / label-UPDATE revokes a
+// now-unmatched grant (delete-stale, the T31 label-revoke regression) — it protects
+// against STALE state. A never-before-existing id has none by construction: every member
+// row on it was written seconds earlier by this same create, from the same role/selector
+// facts this pass re-derives. The FULL ReconcileObject remains the at-least-once backstop
+// (co-committed reconcile event + sweep) for delete-stale, REJECTED-containment audit and
+// PENDING re-verify, exactly as for the ordinary forward.
+//
+// It does NOT gate Operation.done on tuple visibility (ban #9): materialization stays
+// eventually-consistent, this only keeps it on the fast path.
+func (r *Reconciler) ReconcileObjectForwardNew(ctx context.Context, objectType, objectID string) error {
+	return r.reconcileObjectForward(ctx, objectType, objectID, true /* proven-new — nothing stale can exist */)
+}
+
+// reconcileObjectForward is the shared implementation of the two entry points above;
+// knownNew lifts the delete-stale guard (see ReconcileObjectForwardNew).
+func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, objectID string, knownNew bool) error {
 	// Feed classifier: an iam.* object lives in ITS OWN table (iam-direct, never PENDING);
 	// every other selectable family (compute/vpc/loadbalancer/...) is mirror-fed. The
 	// object getter + the fast-path fan-out differ per feed; everything else is shared.
@@ -267,13 +306,21 @@ func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, obj
 		//   - some  ⇒ re-register/update ⇒ bail to the FULL ReconcileObject (delete-stale).
 		// The check is one indexed read (target_members by object); on the create hot-path
 		// it is empty, so the extra cost is a single cheap SELECT in the same forward tx.
-		existing, err := s.BindingsForObject(ctx, objectType, objectID)
-		if err != nil {
-			return fmt.Errorf("forward: bindings for object %s:%s: %w", objectType, objectID, err)
-		}
-		if len(existing) > 0 {
-			needsFull = true
-			return nil // commit the read-only peek; run the FULL path below (fresh tx).
+		//
+		// SKIPPED for a PROVEN-NEW object (ReconcileObjectForwardNew): a never-before-
+		// existing id can carry nothing stale, and the members it DOES carry were written
+		// seconds ago by the same create — reading them would bounce the create-path onto
+		// the FULL EXCLUSIVE recompute it is trying to avoid (see the doc above). The
+		// query is skipped rather than its result ignored: it is a pure cost then.
+		if !knownNew {
+			existing, err := s.BindingsForObject(ctx, objectType, objectID)
+			if err != nil {
+				return fmt.Errorf("forward: bindings for object %s:%s: %w", objectType, objectID, err)
+			}
+			if len(existing) > 0 {
+				needsFull = true
+				return nil // commit the read-only peek; run the FULL path below (fresh tx).
+			}
 		}
 		// The registered object's same-DB projection — containment parents (parent_project_id
 		// + the account resolved through the project→account join) and labels — the SAME
@@ -282,6 +329,7 @@ func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, obj
 		var (
 			obj domain.MirrorObject
 			ok  bool
+			err error
 		)
 		if iamDirect {
 			obj, ok, err = s.GetIAMDirectObject(ctx, objectType, objectID)

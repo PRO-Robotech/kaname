@@ -370,6 +370,12 @@ type abFakeRepo struct {
 	// round-trip is order-stable without an unordered Go-map shuffle. A plain
 	// `map[tuple]struct{}` iterates in random order ⇒ require.Equal flakes/fails.
 	emittedTuples map[domain.AccessBindingID]*orderedTupleSet
+	// claimedByOthers — the tuples some OTHER *ACTIVE* binding also recorded in its
+	// own ledger row (the emitted-tuple ledger is keyed per binding, an OpenFGA
+	// tuple is not refcounted). Backs the fake
+	// SelectTuplesClaimedByOtherActiveBindings probe; seeded per test via
+	// seedTuplesClaimedByOtherActiveBindings. Empty ⇒ nothing else claims anything.
+	claimedByOthers []ab_repo.RelationTuple
 	// txOps — ordered trace of the writer-tx port calls that carry a DB-level
 	// serialization contract (advisory-lock / ledger-read / status-CAS). Lets a
 	// unit test pin the ORDER those statements are issued in, which is what makes

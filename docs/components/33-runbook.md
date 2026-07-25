@@ -133,41 +133,44 @@ kubectl -n kacho exec deploy/postgres -- \
    Admin-tooling может вызвать тот же `InternalUserService.UpsertFromIdentity`
    напрямую на `:9091`.
 
-## P2 — JWKS rotation сломала подпись токенов
+## P2 — 401 / `unknown kid` на всех JWT
 
-OIDC JWKS-ключи подписи живут в `kacho_iam.oidc_jwks_keys`; ротацию выполняет
-отдельный бинарь `jwks-rotator` (`once` — один цикл из CronJob; `daemon` —
-tick ~1h со случайным сдвигом). Активный ключ — строка с `current = true`. Issuer токенов —
-Ory Hydra; api-gateway валидирует JWT по опубликованному JWKS.
+**Сначала главное: iam НЕ владеет ключом подписи и ничего не ротирует.** Издатель
+и подписант токенов — **Ory Hydra**. iam лишь отдаёт **байт-в-байт зеркало
+публичного JWKS Hydra** на cluster-internal `:9097`
+(`internal/handler/jwksproxyhttp`), а api-gateway валидирует JWT по нему. Поэтому
+`unknown kid` — это всегда рассинхрон с **Hydra**, а не «сломавшаяся ротация iam».
+
+Таблица `kacho_iam.oidc_jwks_keys` — исторический артефакт дизайна ДО перехода на
+проксирование: её приватная половина никогда не расшифровывалась ни в одном
+prod-пути, ничего ею не подписывается и не верифицируется. Она может быть пустой —
+это норма, НЕ причина инцидента. CronJob-ротатор снят как вестигиальный.
 
 **Симптомы:**
-- api-gateway отдает 401 на все JWT после цикла ротации.
-- В логах валидации — `unknown kid` / signature mismatch.
+- api-gateway отдаёт 401 на все JWT; в логах валидации — `unknown kid` / signature mismatch.
 
 **Диагностика:**
 
 ```bash
-# Текущий активный ключ присутствует?
-kubectl -n kacho exec deploy/postgres -- psql -c "
-SELECT kid, alg, current, rotated_at, expires_at
-FROM kacho_iam.oidc_jwks_keys
-ORDER BY created_at DESC LIMIT 5;
-"
+# 1. Что реально отдаёт Hydra (источник истины по kid'ам)?
+kubectl -n kacho exec deploy/kacho-umbrella-hydra -- \
+  wget -qO- http://127.0.0.1:4444/.well-known/jwks.json | jq '.keys[].kid'
 
-# CronJob/daemon отработал?
-kubectl -n kacho logs job/kacho-iam-jwks-rotator --tail=100 2>/dev/null \
-  || kubectl -n kacho logs -l app=kacho-iam-jwks-rotator --tail=100
+# 2. Что отдаёт зеркало iam (:9097)? kid'ы обязаны СОВПАДАТЬ с п.1.
+kubectl -n kacho exec deploy/kacho-iam -- \
+  wget -qO- --no-check-certificate https://127.0.0.1:9097/.well-known/jwks.json | jq '.keys[].kid'
 ```
 
 **Действия:**
 
-1. **Нет строки `current = true`** → ротация прервалась между «вставить новый»
-   и «промотировать». Перезапустить один цикл: `jwks-rotator once`
-   (внутри `Rotate` — advisory xact-lock per-alg, параллельные pod'ы безопасны).
-2. **Ключ есть, но gateway его не видит** → api-gateway кеширует JWKS;
-   рестартнуть gateway-pod, чтобы сбросить кеш.
-3. **Hydra issuer недоступен** → токены не минтятся вовсе; восстановить Hydra,
-   далее повторить логин.
+1. **kid'ы в п.1 и п.2 совпадают, а gateway всё равно 401** → gateway кеширует
+   JWKS; рестартнуть gateway-pod, чтобы сбросить кеш.
+2. **Зеркало (п.2) отдаёт 502** → это fail-closed: Hydra недоступна/отдаёт не-200,
+   а кеш холодный. Чинить Hydra; зеркало восстановится само (TTL 5m).
+3. **Зеркало отдаёт `kacho-*` kid** → регресс: в verify-path просочился
+   собственный keystore iam вместо зеркала Hydra. Такой kid не совпадёт никогда.
+4. **Hydra недоступна** → токены не выпускаются вовсе; восстановить Hydra, далее
+   повторить логин.
 
 ## P3 — Миграции не применились / pod не стартует
 

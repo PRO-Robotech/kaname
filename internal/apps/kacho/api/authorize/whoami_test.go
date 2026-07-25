@@ -171,6 +171,9 @@ func (r *fakeABRdr) CountActiveByRole(context.Context, domain.RoleID) (int, erro
 func (r *fakeABRdr) SelectEmittedTuplesBySource(context.Context, domain.AccessBindingID, string) ([]access_binding.RelationTuple, error) {
 	return nil, nil
 }
+func (r *fakeABRdr) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
+	return nil, nil
+}
 func (r *fakeABRdr) ListByRole(context.Context, domain.RoleID, access_binding.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
