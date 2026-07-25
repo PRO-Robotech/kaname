@@ -11,9 +11,24 @@
 #   ./scripts/run.sh --service disk --bail # прерывать после первого fail
 #   ./scripts/run.sh --delay 100           # задержка между запросами (ms)
 #
+# Exit-код: 0 ТОЛЬКО если каждая ожидаемая коллекция произвела отчёт И в нём
+# assertions.failed==0 И собственный exit-код newman==0 (плюс coverage-гейт ниже).
+# Вердикт выводится из СОДЕРЖИМОГО отчётов (out/<stem>.json + out/<stem>.rc), а не
+# из факта запуска. Сводка печатается ВСЕГДА, в том числе на красном — её потеря и
+# породила прежний `| tee … || true`, который глотал код возврата newman.
+#
+# Ожидаемый набор для вердикта НЕ дублируется списком: это объединение
+#   (a) реально сгенерированных collections/*.json — ровно то, что грейдит
+#       scripts/assert-suites-green.sh (каждый комментарий ниже требует «MUST run
+#       here, else the gate reports <x>(no-report)»); коллекция, которую run.sh
+#       забыл прогнать, становится MISSING → красный, а не молчаливый пропуск;
+#   (b) stem'ов, для которых run_one написал out/<stem>.rc — так «run.sh зовёт
+#       коллекцию, которой gen.py не сгенерировал» тоже ловится как MISSING.
+#
 # Outputs:
 #   out/<resource>.json — newman JSON reporter (для агрегации)
 #   out/<resource>.cli  — newman cli-вывод
+#   out/<resource>.rc   — exit-код newman конкретной коллекции
 #   out/summary.txt     — итоговая сводка
 #
 # Требует: api-gateway доступен по baseUrl из env (локально — port-forward на 18080);
@@ -46,32 +61,75 @@ done
 ENV="environments/local.postman_environment.json"
 [[ -f "$ENV" ]] || { echo "missing env: $ENV"; exit 1; }
 
+# run_one — прогон одной коллекции. Пишет out/<res>.json|.cli|.rc.
 run_one() {
   local res="$1"
   local col="collections/${res}.postman_collection.json"
   if [[ ! -f "$col" ]]; then
-    echo "[skip] $res — нет коллекции"
+    # Ожидаемая коллекция не сгенерирована = молчаливая потеря покрытия, не skip:
+    # .rc-маркер вводит stem в набор вердикта → MISSING → красный.
+    echo "[missing] ${res} — нет коллекции ${col}"
+    echo "missing" > "out/${res}.rc"
     return 0
   fi
   echo "===== ${res} ====="
+  # Берём PIPESTATUS[0] (newman), а НЕ статус tee и НЕ `|| true`: проглоченный код
+  # возврата newman = ложный GREEN при красных проверках.
+  set +e
   newman run "$col" \
     -e "$ENV" \
     --delay-request "$DELAY" \
     $BAIL \
     --reporters cli,json \
     --reporter-json-export "out/${res}.json" \
-    ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee "out/${res}.cli" || true
+    ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee "out/${res}.cli"
+  local rc=${PIPESTATUS[0]}
+  set -e
+  echo "$rc" > "out/${res}.rc"
+  return 0
+}
+
+# aggregate_verdict — чистый вердикт ПО ОТЧЁТАМ. Печатает таблицу и возвращает 1,
+# если у любого stem: нет out/<stem>.json (MISSING), assertions.failed>0 или rc!=0.
+aggregate_verdict() {
+  local out_dir="$1"; shift
+  local bad=0 stem json rcfile rc total failed requests
+  printf "%-38s %10s %10s %10s %8s\n" "RESOURCE" "ASSERT" "FAILED" "REQUESTS" "RC"
+  for stem in "$@"; do
+    json="${out_dir}/${stem}.json"
+    rcfile="${out_dir}/${stem}.rc"
+    rc="n/a"
+    [[ -f "$rcfile" ]] && rc="$(cat "$rcfile")"
+    if [[ ! -f "$json" ]]; then
+      printf "%-38s %10s %10s %10s %8s\n" "$stem" "-" "-" "-" "MISSING"
+      bad=1
+      continue
+    fi
+    total=0; failed=0; requests=0
+    read -r total failed requests < <(
+      jq -r '"\(.run.stats.assertions.total) \(.run.stats.assertions.failed) \(.run.stats.requests.total)"' \
+        "$json" 2>/dev/null || echo "0 0 0"
+    )
+    [[ "$total" =~ ^[0-9]+$ ]]    || total=0
+    [[ "$failed" =~ ^[0-9]+$ ]]   || failed=0
+    [[ "$requests" =~ ^[0-9]+$ ]] || requests=0
+    printf "%-38s %10s %10s %10s %8s\n" "$stem" "$total" "$failed" "$requests" "$rc"
+    if [[ "$failed" -gt 0 ]]; then bad=1; fi
+    if [[ "$rc" != "0" ]];    then bad=1; fi
+  done
+  return "$bad"
 }
 
 
 # Start from a clean out/ — a stale reporter JSON from an earlier run (or one
 # accidentally committed to git) would otherwise be picked up by the summary
-# loop below and resurface as a phantom suite with frozen pass/fail numbers
-# (this is exactly how `authz-deny-rerun` — a 511-failure ghost — leaked into
-# the newman-e2e gate). out/ is .gitignore'd; this rm is the belt to that
-# suspenders.
-rm -rf out
+# below and resurface as a phantom suite with frozen pass/fail numbers (this is
+# exactly how `authz-deny-rerun` — a 511-failure ghost — leaked into the
+# newman-e2e gate). out/ is .gitignore'd; this rm is the belt to that suspenders.
+# Targeted rm (not `rm -rf out`) so an out/suite.log already opened by
+# deploy/scripts/newman-parallel.sh is not unlinked from under it.
 mkdir -p out
+rm -f out/*.json out/*.cli out/*.rc out/summary.txt out/coverage.txt 2>/dev/null || true
 
 if [[ -n "$SERVICE" ]]; then
   # Pre-run reseed for jit-pending suite to ensure seed rows are PENDING.
@@ -202,18 +260,38 @@ else
   run_one "rbac-visibility-set"
 fi
 
+# ─── Verdict ──────────────────────────────────────────────────────────────
+# Набор вердикта = сгенерированные коллекции ∪ stem'ы, для которых run_one оставил
+# .rc. Дублировать здесь список прогона не нужно (и нечему разъезжаться): коллекция,
+# которую этот скрипт забыл прогнать, не имеет отчёта → MISSING → красный.
+stems=()
+if [[ -n "$SERVICE" ]]; then
+  stems=("$SERVICE")
+else
+  while IFS= read -r s; do
+    [[ -n "$s" ]] && stems+=("$s")
+  done < <(
+    {
+      for f in collections/*.postman_collection.json; do
+        [[ -e "$f" ]] && basename "$f" .postman_collection.json
+      done
+      for f in out/*.rc; do
+        [[ -e "$f" ]] && basename "$f" .rc
+      done
+    } | sort -u
+  )
+fi
+
 echo
 echo "===== Summary ====="
-{
-  printf "%-22s %10s %10s %10s\n" "RESOURCE" "ASSERT" "FAILED" "REQUESTS"
-  for f in out/*.json; do
-    [[ -f "$f" ]] || continue
-    name=$(basename "$f" .json)
-    stats=$(jq -r '"\(.run.stats.assertions.total) \(.run.stats.assertions.failed) \(.run.stats.requests.total)"' "$f" 2>/dev/null || echo "0 0 0")
-    set -- $stats
-    printf "%-22s %10s %10s %10s\n" "$name" "$1" "$2" "$3"
-  done
-} | tee out/summary.txt
+SUITE_FAIL=0
+# pipefail прокидывает ненулевой вердикт сквозь tee — печать сводки сохранена.
+if aggregate_verdict "out" "${stems[@]}" | tee out/summary.txt; then
+  echo "OK: все iam-коллекции зелёные."
+else
+  SUITE_FAIL=1
+  echo "FAIL: одна или несколько iam-коллекций провалены / отсутствуют (см. таблицу выше)." >&2
+fi
 
 # ─── Coverage gate ───────────────────────────────────────────────────────
 # After running all newman collections, summarise RPC→case-id coverage by
@@ -221,16 +299,32 @@ echo "===== Summary ====="
 # COVERAGE_MIN is set AND coverage% drops below it (set this in CI to enforce a
 # floor).
 #
-# The .proto live ONLY in kacho-proto (proto is centralized; there is no in-repo
-# proto/ dir). COVERAGE_PROTO_GLOB overrides the glob so CI can point it at the
-# kacho-proto sibling checkout (absolute path); the default is kept as a local-dev
-# convenience for a checkout that vendors a sibling kacho-proto alongside this repo.
+# The .proto live at the MONOREPO ROOT (<root>/proto/kacho/cloud/<domain>/v1) — this
+# suite sits at <root>/services/iam/tests/newman, so the default glob is four levels
+# up. The previous default (`../../../kacho-proto/proto/…`) addressed the polyrepo
+# layout where kacho-proto was a sibling CHECKOUT; in the monorepo it resolves to
+# services/kacho-proto/… which does not exist → coverage.py exits 2 ("no RPCs
+# discovered") → the whole iam suite went red with zero failing assertions.
+# Both layouts are supported: the first glob that actually matches .proto files wins,
+# so a standalone/polyrepo checkout with a sibling kacho-proto still resolves.
+# COVERAGE_PROTO_GLOB overrides both (CI may pass an absolute path).
 if command -v python3 >/dev/null 2>&1 && [ -f scripts/coverage.py ]; then
   echo
   echo "===== coverage ====="
   COV_MIN="${COVERAGE_MIN:-0}"
+  PROTO_GLOB="${COVERAGE_PROTO_GLOB:-}"
+  if [ -z "$PROTO_GLOB" ]; then
+    for _cand in \
+      '../../../../proto/kacho/cloud/iam/v1/*.proto' \
+      '../../../kacho-proto/proto/kacho/cloud/iam/v1/*.proto'; do
+      # shellcheck disable=SC2086
+      if compgen -G "$_cand" >/dev/null 2>&1; then PROTO_GLOB="$_cand"; break; fi
+    done
+    PROTO_GLOB="${PROTO_GLOB:-../../../../proto/kacho/cloud/iam/v1/*.proto}"
+  fi
+  echo "proto-glob: $PROTO_GLOB"
   if python3 scripts/coverage.py \
-       --proto-glob "${COVERAGE_PROTO_GLOB:-../../../kacho-proto/proto/kacho/cloud/iam/v1/*.proto}" \
+       --proto-glob "$PROTO_GLOB" \
        --collections-glob 'collections/*.postman_collection.json' \
        --min "$COV_MIN" | tee out/coverage.txt; then
     :
@@ -239,4 +333,5 @@ if command -v python3 >/dev/null 2>&1 && [ -f scripts/coverage.py ]; then
   fi
 fi
 
+if [ "$SUITE_FAIL" -ne 0 ]; then exit 1; fi
 exit "${COVERAGE_FAIL:-0}"
