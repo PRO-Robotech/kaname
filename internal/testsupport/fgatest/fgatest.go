@@ -5,8 +5,8 @@
 // integration tests (mirrors internal/repo/kacho/pg.NewTestPostgres for Postgres).
 //
 // New(t) spins a real openfga/openfga server in a testcontainer, transforms the
-// canonical fga_model.fga (single source of truth in the sibling kacho-proto
-// checkout) into the JSON the WriteAuthorizationModel API accepts via the
+// canonical fga_model.fga (single source of truth, in-repo at
+// proto/kacho/cloud/iam/v1/) into the JSON the WriteAuthorizationModel API accepts via the
 // openfga/cli image, loads it, and returns the PRODUCTION clients.OpenFGAHTTPClient
 // pointed at the running server. Use-case integration tests therefore exercise the
 // SAME Check / ListObjects code path that runs in production — no in-memory stub.
@@ -29,7 +29,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -72,9 +71,9 @@ func New(t *testing.T) *Harness {
 // NewFromModelJSON spins a real OpenFGA server and loads the given
 // authorization-model JSON (an OpenFGA WriteAuthorizationModel body) instead of
 // transforming the canonical fga_model.fga. Use it to exercise the DEPLOYED model
-// (the openfga-bootstrap ConfigMap `model.json` block) with real Check/Write when
-// the sibling canonical .fga is not on disk (monorepo checkout). Skipped under
-// -short.
+// (the openfga-bootstrap ConfigMap `model.json` block) with real Check/Write —
+// i.e. to prove the artifact the bootstrap Job actually applies behaves as the
+// canonical DSL says it should. Skipped under -short.
 func NewFromModelJSON(t *testing.T, modelJSON []byte) *Harness {
 	t.Helper()
 	if testing.Short() {
@@ -160,53 +159,46 @@ func (h *Harness) post(t *testing.T, path string, body any) map[string]any {
 	return out
 }
 
-// fgaModelRelPath — location of the canonical model inside the kacho-proto tree
-// (shared by the sibling checkout and the Go-module directory).
+// fgaModelRelPath — the canonical authorization model, relative to the monorepo
+// root. Single source of truth (see services/iam/internal/authzmap/
+// fga_model_drift_test.go); the openfga-bootstrap ConfigMap is generated from it.
 const fgaModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
 
-// fgaModelPath resolves the canonical fga_model.fga (single source of truth). It
-// tries a sibling kacho-proto checkout (workspace-dev layout) then the pinned
-// kacho-proto Go-module directory (standalone-CI layout). When neither resolves,
-// setting KACHO_IAM_REQUIRE_FGA_MODEL=1 turns the absence into a hard failure so
-// the real-FGA authorization proof cannot SILENTLY skip in a pipeline; without
-// the flag it degrades to a documented skip for offline local runs.
+// fgaModelPath resolves the canonical fga_model.fga. Its absence is a HARD
+// FAILURE, not a skip: this harness exists to prove authorization behaviour
+// against the real model, and a proof that quietly does not run is worth nothing.
+// (Docker-less and -short lanes have their own explicit skips; those are about
+// the environment, this is about the source of truth being present.)
 func fgaModelPath(t *testing.T) string {
 	t.Helper()
 	if p, ok := resolveFGAModel(); ok {
 		return p
 	}
-	const msg = "canonical fga_model.fga not found (no kacho-proto sibling and not in the pinned module) — real-FGA proof cannot run"
-	if os.Getenv("KACHO_IAM_REQUIRE_FGA_MODEL") != "" {
-		t.Fatal(msg + " [KACHO_IAM_REQUIRE_FGA_MODEL set: refusing to skip a security proof]")
-	}
-	t.Skip(msg)
+	t.Fatalf("canonical authorization model %s not found walking up from the test's "+
+		"working directory — the real-FGA proof has no model to load. Restore the file; "+
+		"never let this degrade to a skip.", fgaModelRelPath)
 	return ""
 }
 
-// resolveFGAModel returns the canonical model path and whether it was found,
-// trying the sibling checkout then the pinned kacho-proto module directory.
+// resolveFGAModel walks up from the working directory to the monorepo root and
+// returns the canonical model path.
 func resolveFGAModel() (string, bool) {
-	if wd, err := os.Getwd(); err == nil {
-		dir := wd
-		for i := 0; i < 12; i++ {
-			cand := filepath.Join(dir, fgaModelRelPath)
-			if _, statErr := os.Stat(cand); statErr == nil {
-				return cand, true
-			}
-			dir = filepath.Dir(dir)
-		}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", false
 	}
-	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
-		"github.com/PRO-Robotech/kacho").Output()
-	if err == nil {
-		if modDir := strings.TrimSpace(string(out)); modDir != "" {
-			cand := filepath.Join(modDir, fgaModelRelPath)
-			if _, statErr := os.Stat(cand); statErr == nil {
-				return cand, true
-			}
+	dir := wd
+	for {
+		cand := filepath.Join(dir, fgaModelRelPath)
+		if _, statErr := os.Stat(cand); statErr == nil {
+			return cand, true
 		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
 	}
-	return "", false
 }
 
 // transformModelToJSON shells out to the openfga/cli image to transform the
@@ -215,7 +207,7 @@ func resolveFGAModel() (string, bool) {
 func transformModelToJSON(t *testing.T, fgaPath string) []byte {
 	t.Helper()
 	// fgaPath is resolved by fgaModelPath: a fixed relative walk to the canonical
-	// kacho-proto fga_model.fga, never attacker-controlled. Test-only helper.
+	// in-repo fga_model.fga, never attacker-controlled. Test-only helper.
 	dsl, err := os.ReadFile(fgaPath) // #nosec G304 -- test-only, fixed canonical path (fgaModelPath)
 	require.NoError(t, err)
 	dockerHost := os.Getenv("DOCKER_HOST")

@@ -84,7 +84,7 @@ var storageTypes = []string{"storage_volume", "storage_image", "storage_snapshot
 // DIRECT v_* verb-set — so the storage-emitted project owner-tuple is a valid FGA
 // write (no dead-letter poison) and the reconciler can materialize owner access.
 func TestStorageModel_DefinesTypesAndProjectRelation(t *testing.T) {
-	dsl := registryModelBlock(t) // whole model.fga DSL block (helper name is historical)
+	dsl := modelDSL(t) // canonical model DSL (single source of truth)
 	proj := regexp.MustCompile(`(?m)^\s*define project:\s*\[project\]`)
 	verbs := []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
 
@@ -130,7 +130,6 @@ func TestStorageModel_ProjectTuple_OpenFGACheck(t *testing.T) {
 	ctx := context.Background()
 
 	for _, ty := range storageTypes {
-		ty := ty
 		t.Run(ty, func(t *testing.T) {
 			obj := ty + ":res-71test"
 

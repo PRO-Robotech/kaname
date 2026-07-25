@@ -5,9 +5,7 @@ package authzmap_test
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,62 +28,29 @@ import (
 // Fix: every `v_*` on registry_registry / registry_repository now derives from
 // `owner` (a per-OBJECT computed relation, NOT a hierarchy cascade — no O(mirror)
 // recompute, consistent with the flat model's `editor: this or admin`). This test
-// parses the deployed model DSL (the openfga-bootstrap ConfigMap `model.fga` block,
-// which is the source of truth after the polyrepo→monorepo migration lost the
-// canonical fga_model.fga) and asserts the derivation exists, so a future edit that
-// re-dangles `owner` fails here rather than silently 404-ing every registry owner.
+// parses the CANONICAL model DSL (proto/kacho/cloud/iam/v1/fga_model.fga — the
+// single source the openfga-bootstrap ConfigMap is generated from, see
+// fga_model_configmap_identity_test.go) and asserts the derivation exists, so a
+// future edit that re-dangles `owner` fails here rather than silently 404-ing
+// every registry owner.
 
-// findConfigMap walks up from CWD to the repo root and returns the openfga-bootstrap
-// model-stub ConfigMap path.
+// findConfigMap returns the openfga-bootstrap model-stub ConfigMap path. It is
+// used only where the DEPLOYED artifact itself is under test (the pre-transformed
+// `model.json` the bootstrap Job applies); DSL assertions read the canonical file
+// via modelDSL instead. A missing ConfigMap is a hard failure, not a skip.
 func findConfigMap(t *testing.T) string {
 	t.Helper()
-	const rel = "deploy/helm/umbrella/charts/openfga-bootstrap/templates/openfga-model-stub-configmap.yaml"
-	dir, err := os.Getwd()
-	require.NoError(t, err)
-	for {
-		cand := filepath.Join(dir, rel)
-		if _, err := os.Stat(cand); err == nil {
-			return cand
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Skipf("openfga model-stub ConfigMap not found walking up from CWD (rel=%s) — cannot run registry owner-derivation lock", rel)
-		}
-		dir = parent
-	}
+	return configMapPath(t)
 }
 
-// registryModelBlock returns the `model.fga` DSL block, de-indented, from the
-// ConfigMap.
-func registryModelBlock(t *testing.T) string {
+// modelDSL returns the canonical authorization-model DSL. Single source of truth
+// (fga_model_drift_test.go); the ConfigMap copy is generated from it and pinned
+// byte-identical by fga_model_configmap_identity_test.go.
+func modelDSL(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile(findConfigMap(t))
+	raw, err := os.ReadFile(canonicalModelPath(t))
 	require.NoError(t, err)
-	lines := strings.Split(string(raw), "\n")
-	var out []string
-	inBlock := false
-	for _, l := range lines {
-		if strings.TrimRight(l, " ") == "  model.fga: |-" {
-			inBlock = true
-			continue
-		}
-		if inBlock {
-			if strings.TrimRight(l, " ") == "  model.json: |-" ||
-				strings.HasPrefix(strings.TrimSpace(l), "# Pre-transformed") {
-				break
-			}
-			if strings.TrimSpace(l) == "" {
-				out = append(out, "")
-				continue
-			}
-			if strings.HasPrefix(l, "    ") {
-				out = append(out, l[4:])
-				continue
-			}
-			break
-		}
-	}
-	return strings.Join(out, "\n")
+	return string(raw)
 }
 
 // typeRelations returns the DSL body (`relations` section) of `type <name>` up to
@@ -102,7 +67,7 @@ func typeBody(t *testing.T, dsl, typeName string) string {
 // registry object-types derives from `owner`, so the registry owner/creator holds
 // the full CRUD verb-set (esp. v_create → CreateRepository) on their own resource.
 func TestRegistryModel_OwnerDerivesVerbs(t *testing.T) {
-	dsl := registryModelBlock(t)
+	dsl := modelDSL(t)
 	verbs := []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
 	for _, ty := range []string{"registry_registry", "registry_repository"} {
 		body := typeBody(t, dsl, ty)

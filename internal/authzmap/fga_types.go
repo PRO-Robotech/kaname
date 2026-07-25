@@ -9,9 +9,13 @@
 // anchor instead, and the returned ok is false when the pair is unknown
 // — the caller falls back to the scope-anchor.
 //
-// Extending this table requires updating `fga_model.fga` in lockstep
-// (kacho-proto). The table is intentionally a closed enumeration: an
-// unknown pair must NOT silently land as an arbitrary FGA type.
+// Extending this table requires declaring the type in the canonical
+// authorization model `proto/kacho/cloud/iam/v1/fga_model.fga` in lockstep, and
+// regenerating the openfga-bootstrap ConfigMap from it (`make
+// openfga-model-json` in deploy/). The unconditional drift-gate
+// (fga_model_drift_test.go) fails the build on any divergence, in either
+// direction. The table is intentionally a closed enumeration: an unknown pair
+// must NOT silently land as an arbitrary FGA type.
 package authzmap
 
 import (
@@ -146,36 +150,23 @@ func TypeHasVerbRelations(fgaType string) bool {
 // tier-carrying hierarchy ancestors (admin/editor/viewer write-authz anchors,
 // D-7); verb-bearing status is additive on top, not a replacement.
 var verbBearingTypes = map[string]bool{
-	"compute_instance": true,
-	"compute_disk":     true,
-	"compute_image":    true,
-	"compute_snapshot": true,
-	// compute placement / capacity / data-protection resources — each is a
-	// first-class by-id authz object (its Get/Update/Delete scope_extractor
-	// anchors on the object itself, per kacho-proto per-resource object_type),
-	// so the canonical model defines the full closed v_* set on each. host_type
-	// is read-only at the service layer (Get/List only) but still verb-bearing
-	// in the model (uniform v_* across resource types; read-only-ness is enforced
-	// by the absence of mutating RPCs, not by omitting model relations).
-	"compute_host_group":             true,
-	"compute_gpu_cluster":            true,
-	"compute_placement_group":        true,
-	"compute_reserved_instance_pool": true,
-	"compute_host_type":              true,
-	"vpc_network":                    true,
-	"vpc_subnet":                     true,
-	"vpc_address":                    true,
-	"vpc_security_group":             true,
-	"vpc_route_table":                true,
-	"vpc_gateway":                    true,
-	"vpc_network_interface":          true,
-	"vpc_address_pool":               true,
-	"vpc_anycast_address_pool":       true,
-	"nlb_network_load_balancer":      true,
-	"nlb_target_group":               true,
-	"nlb_listener":                   true,
-	"registry_registry":              true,
-	"registry_repository":            true,
+	"compute_instance":          true,
+	"compute_disk":              true,
+	"compute_image":             true,
+	"compute_snapshot":          true,
+	"vpc_network":               true,
+	"vpc_subnet":                true,
+	"vpc_address":               true,
+	"vpc_security_group":        true,
+	"vpc_route_table":           true,
+	"vpc_gateway":               true,
+	"vpc_network_interface":     true,
+	"vpc_address_pool":          true,
+	"nlb_network_load_balancer": true,
+	"nlb_target_group":          true,
+	"nlb_listener":              true,
+	"registry_registry":         true,
+	"registry_repository":       true,
 	// storage (kacho-storage) — Volume/Snapshot/Image per-object authz objects.
 	// Verb-bearing so the reconciler materializes per-object v_* for the creator's
 	// project binding — the model type + these Go tables + knownModules("storage")
@@ -244,25 +235,16 @@ var objectTypes = map[string]string{
 	"compute.disk":     "compute_disk",
 	"compute.image":    "compute_image",
 	"compute.snapshot": "compute_snapshot",
-	// compute placement / capacity / data-protection resources (kacho-proto
-	// per-resource object_type). Each is a verb-bearing by-id authz object
-	// (see verbBearingTypes above).
-	"compute.hostGroup":            "compute_host_group",
-	"compute.gpuCluster":           "compute_gpu_cluster",
-	"compute.placementGroup":       "compute_placement_group",
-	"compute.reservedInstancePool": "compute_reserved_instance_pool",
-	"compute.hostType":             "compute_host_type",
 
 	// vpc
-	"vpc.network":            "vpc_network",
-	"vpc.subnet":             "vpc_subnet",
-	"vpc.address":            "vpc_address",
-	"vpc.securityGroup":      "vpc_security_group",
-	"vpc.routeTable":         "vpc_route_table",
-	"vpc.gateway":            "vpc_gateway",
-	"vpc.networkInterface":   "vpc_network_interface",
-	"vpc.addressPool":        "vpc_address_pool",
-	"vpc.anycastAddressPool": "vpc_anycast_address_pool",
+	"vpc.network":          "vpc_network",
+	"vpc.subnet":           "vpc_subnet",
+	"vpc.address":          "vpc_address",
+	"vpc.securityGroup":    "vpc_security_group",
+	"vpc.routeTable":       "vpc_route_table",
+	"vpc.gateway":          "vpc_gateway",
+	"vpc.networkInterface": "vpc_network_interface",
+	"vpc.addressPool":      "vpc_address_pool",
 
 	// load balancer (kacho-nlb)
 	"loadbalancer.networkLoadBalancers": "nlb_network_load_balancer",

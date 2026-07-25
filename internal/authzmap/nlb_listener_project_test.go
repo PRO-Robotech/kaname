@@ -29,7 +29,7 @@ import (
 // emitter↔model mismatch. Fix = add `define project: [project]` (Contract-A
 // direct-relation, parity with nlb_network_load_balancer at the same tier).
 func TestNlbListenerModel_DefinesProjectRelation(t *testing.T) {
-	dsl := registryModelBlock(t) // whole model.fga DSL block (not registry-specific)
+	dsl := modelDSL(t) // canonical model DSL (single source of truth)
 	body := typeBody(t, dsl, "nlb_listener")
 	re := regexp.MustCompile(`(?m)^\s*define project:\s*\[project\]`)
 	require.Truef(t, re.MatchString(body),

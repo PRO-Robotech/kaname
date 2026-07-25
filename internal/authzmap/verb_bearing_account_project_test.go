@@ -36,22 +36,26 @@ func TestVerbBearing_AccountProjectAreVerbBearing(t *testing.T) {
 
 // Regression: every leaf resource type stays verb-bearing — the flip must not
 // disturb the existing mappings (no loss of v_* emission anywhere).
+//
+// The leaf set is DERIVED from authzmap.Catalog() (the grantable closed table)
+// minus the two hierarchy ancestors, not hand-listed: a literal list silently
+// omits whatever it was not updated for (this one had never learned about
+// registry.* or storage.*) and simultaneously keeps asserting types that were
+// removed from the table.
 func TestVerbBearing_LeafTypesStillVerbBearing(t *testing.T) {
-	leaf := []string{
-		"compute_instance", "compute_disk", "compute_image", "compute_snapshot",
-		"compute_disk_placement_group", "compute_host_group", "compute_filesystem",
-		"compute_gpu_cluster", "compute_placement_group", "compute_reserved_instance_pool",
-		"compute_snapshot_schedule", "compute_host_type",
-		"vpc_network", "vpc_subnet", "vpc_address", "vpc_security_group",
-		"vpc_route_table", "vpc_gateway", "vpc_network_interface", "vpc_address_pool",
-		"nlb_network_load_balancer", "nlb_target_group", "nlb_listener",
-		"iam_user", "iam_service_account", "iam_group", "iam_role",
-		"iam_access_binding", "iam_condition",
-	}
-	for _, ft := range leaf {
+	hierarchy := map[string]bool{"account": true, "project": true}
+	var checked int
+	for _, e := range authzmap.Catalog() {
+		ft, ok := authzmap.ObjectType(e.Module, e.Resource)
+		require.Truef(t, ok, "Catalog() yielded %s.%s but ObjectType does not resolve it", e.Module, e.Resource)
+		if hierarchy[ft] {
+			continue
+		}
 		require.Truef(t, authzmap.TypeHasVerbRelations(ft),
 			"regression: leaf type %q must remain verb-bearing", ft)
+		checked++
 	}
+	require.NotZero(t, checked, "no leaf resource types found in the grantable catalog")
 }
 
 // An unknown FGA type must never be reported as verb-bearing (closed set).
