@@ -247,6 +247,15 @@ func runServe(cfg config.Config) error {
 		}
 	}
 
+	// Самоотчёт о security-posture: ПОСЛЕ boot-guard'ов (cfg.Validate() в main,
+	// mtlsCfg.Validate() и production-гейт обоих gRPC-листенеров выше — конфиг
+	// уже ПРИНЯТ процессом) и ДО подъёма листенеров. authz_check — факт проводки
+	// PDP-бэкенда (iam гейтит свои RPC внутренними floor'ами поверх relation-store,
+	// а не чужим Check). Production-posture гейт обязан утверждать на этом
+	// наблюдаемом факте, а не на хранимом конфиге (см. observability.BootPosture).
+	observability.LogBootPosture(logger,
+		bootPosture(cfg, mtlsCfg, openfgaClient != nil && openfgaClient.Endpoint != ""))
+
 	// Per-RPC CALLER policy for the internal listener (audit C1/C3/H3/M1). iam
 	// does NOT re-ReBAC the end user here — the api-gateway is the platform's
 	// single authZ front door (it validates the JWT and runs per-user ReBAC via
