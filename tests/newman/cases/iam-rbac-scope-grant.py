@@ -218,7 +218,12 @@ def create_rules_role_steps(role_var, rules, name_suffix):
 
 
 def bind_role_steps(role_var, bind_op_var, name_suffix):
-    """AccessBindingService.Create all_in_scope @ accountA for userNOB + op-poll."""
+    """AccessBindingService.Create all_in_scope @ accountA for userNOB + op-poll.
+
+    The binding id is captured (not just the operation id) so revoke_binding_steps can
+    take it back — see there for why leaving it behind is a cross-suite leak.
+    """
+    acb_var = f"{bind_op_var}Acb"
     return [
         Step(
             name=f"bind-{name_suffix}",
@@ -236,6 +241,7 @@ def bind_role_steps(role_var, bind_op_var, name_suffix):
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.id", bind_op_var),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", acb_var),
             ],
         ),
         Step(
@@ -244,6 +250,64 @@ def bind_role_steps(role_var, bind_op_var, name_suffix):
             path=f"/operations/{{{{{bind_op_var}}}}}",
             auth="jwtAccountAdminA",
             test_script=poll_op_done(bind_op_var),
+        ),
+    ]
+
+
+def revoke_binding_steps(bind_op_var, name_suffix):
+    """Take the grant back — this case grants a SHARED fixture subject on the SHARED account.
+
+    `userNOBId` is the platform's designated NO-GRANT subject: the vpc AUTHZ-*-LS-*-NOB and
+    iam IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY leak-guards all assert "NOB sees nothing".
+    Every run of this suite bound a compute.instance role to NOB on {{accountAId}} and never
+    revoked it, so NOB became legitimately authorized and stayed that way — permanently, and
+    for every OTHER suite. (That is the pollution the shared known-RED whitelist attributes to
+    kacho-iam#276; the whitelist is not a licence to keep producing it.)
+
+    Same discipline as the binding teardown in iam-rbac-subjects: 403 is a propagation window,
+    NOT a terminal state — retry past it, and let a persistent denial fail honestly rather than
+    silently leave the grant standing. The custom ROLE this case creates is left in place: a
+    role with no binding grants nothing, and role ids are runId-scoped.
+    """
+    acb_var = f"{bind_op_var}Acb"
+    return [
+        poll_request_until_status(
+            name=f"revoke-{name_suffix}",
+            method="DELETE",
+            path="/iam/v1/accessBindings/{{" + acb_var + "}}",
+            auth="jwtAccountAdminA",
+            expect_code=200,
+            retry_on=(403,),
+            test_script=[
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"pm.environment.unset('_{acb_var}RevOp');",
+                "pm.test('teardown: NOB grant revoked (200) or already gone (404) — a persistent 403 leaves the "
+                "no-grant leak-guard subject authorized for every later suite', "
+                "() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                f"if (pm.response.code === 200 && j && j.id) pm.environment.set('_{acb_var}RevOp', j.id);",
+            ],
+        ),
+        Step(
+            name=f"revoke-await-{name_suffix}",
+            method="GET",
+            path="/operations/{{_" + acb_var + "RevOp}}",
+            auth="jwtAccountAdminA",
+            pre_script=[
+                f"if (pm.environment.get('_{acb_var}RevStarted') !== pm.info.requestName) {{ pm.environment.set('_{acb_var}RevCount', '0'); pm.environment.set('_{acb_var}RevStarted', pm.info.requestName); }}",
+            ],
+            test_script=[
+                f"if (!pm.environment.get('_{acb_var}RevOp')) {{ return; }}",
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"const c = parseInt(pm.environment.get('_{acb_var}RevCount') || '0', 10);",
+                f"if (j && !j.done && c < {POLL_CAP}) {{",
+                f"  pm.environment.set('_{acb_var}RevCount', String(c + 1));",
+                "  const _rd = Date.now(); while (Date.now() - _rd < 500) void 0;",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                f"pm.environment.unset('_{acb_var}RevCount'); pm.environment.unset('_{acb_var}RevStarted');",
+                "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+            ],
         ),
     ]
 
@@ -302,6 +366,9 @@ CASES.append(Case(
             obj="scope_grant:account|{{accountAId}}|iam_role",
             expect_allowed=False,
         ),
+        # Give the grant back: userNOB is the shared no-grant leak-guard subject and this
+        # binding lives in the SHARED account (see revoke_binding_steps).
+        *revoke_binding_steps("_sgBindAOp", "admin"),
     ],
 ))
 
@@ -364,5 +431,6 @@ CASES.append(Case(
             obj="scope_grant:account|{{accountAId}}|compute_instance",
             expect_allowed=False,
         ),
+        *revoke_binding_steps("_sgBindGCOp", "getcreate"),
     ],
 ))

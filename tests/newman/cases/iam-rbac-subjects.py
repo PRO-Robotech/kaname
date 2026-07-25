@@ -205,16 +205,115 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
 
 
 def teardown_delete(acb_var, auth="jwtAccountAdminA"):
-    """Best-effort revoke so re-runs don't trip strict-create active-grant UNIQUE."""
-    return Step(
-        name=f"teardown-{acb_var}",
+    """RELIABLE revoke: retry PAST the 403 propagation window, then AWAIT the revoke op.
+
+    WHY NOT best-effort (this helper used to accept 403 and move on): the binding is
+    created by jwtAccountAdminA, but the admin's `v_delete` on that fresh
+    iam_access_binding OBJECT materialises via fga_outbox a beat after Create→done. Under
+    load the DELETE lands inside that window, answers 403 — and the old assertion
+    `oneOf([200, 404, 403])` DECLARED THAT A SUCCESS. The revoke never happened, so the
+    binding stayed ACTIVE in the SHARED account past the end of the run: the next run's vpc
+    /iam leak-guards then saw a subject that "has no access binding" but is nonetheless
+    allowed (the grant hangs off the group/subject this suite left behind). Accepting a
+    transient denial as cleanup is exactly the failure mode testing.md calls out for
+    preclean-revoke ("ретраить DELETE на 403 до успеха, не fire-forget").
+
+    Terminal states are 200 (revoked) and 404 (already gone) — 403 is NOT terminal: if it
+    persists past the retry budget the assertion fails HONESTLY (a cleanup that cannot run
+    is a finding, not something to swallow). The revoke is async, so the second step awaits
+    the Operation — without it the case can end while the revoke is still in flight and the
+    binding is still ACTIVE for the next suite.
+    """
+    op_var = f"_{acb_var}RevOp"
+    return [
+        poll_request_until_status(
+            name=f"teardown-{acb_var}",
+            method="DELETE",
+            path="/iam/v1/accessBindings/{{" + acb_var + "}}",
+            auth=auth,
+            expect_code=200,
+            retry_on=(403,),
+            test_script=[
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"pm.environment.unset('{op_var}');",
+                "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', "
+                "() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                f"if (pm.response.code === 200 && j && j.id) pm.environment.set('{op_var}', j.id);",
+            ],
+        ),
+        Step(
+            name=f"teardown-await-{acb_var}",
+            method="GET",
+            path="/operations/{{" + op_var + "}}",
+            auth=auth,
+            pre_script=[
+                f"if (pm.environment.get('_{op_var}Started') !== pm.info.requestName) {{ pm.environment.set('_{op_var}Count', '0'); pm.environment.set('_{op_var}Started', pm.info.requestName); }}",
+            ],
+            test_script=[
+                # Nothing to await when the DELETE reported 404 (already revoked).
+                f"if (!pm.environment.get('{op_var}')) {{ return; }}",
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"const c = parseInt(pm.environment.get('_{op_var}Count') || '0', 10);",
+                f"if (j && !j.done && c < {POLL_CAP}) {{",
+                f"  pm.environment.set('_{op_var}Count', String(c + 1));",
+                "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                f"pm.environment.unset('_{op_var}Count'); pm.environment.unset('_{op_var}Started');",
+                "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+            ],
+        ),
+    ]
+
+
+def teardown_group(group_var, member_vars=(), auth="jwtAccountAdminA"):
+    """Leave NO trace in the SHARED account: drop the membership, then the group itself.
+
+    THE LEAK THIS CLOSES (proven on the live stand, not deduced): subject userAAB holds no
+    AccessBinding on account A at all, yet InternalIAMService.Check answers allowed — the
+    sole carrier is the group `rbac-e31-grp-*` that THIS suite creates in the SHARED
+    {{accountAId}}, adds {{userAABId}} to, and binds ROLE_VIEW on. The group and its
+    membership were never removed, so every run left one more standing viewer path for a
+    shared fixture subject; the vpc AUTHZ-*-LS-OWN-AAB leak-guards (which model AAB as
+    account-B-only) then fail deterministically on the NEXT run — five of them did, while
+    the run before the group existed had zero. Cross-suite pollution, not EC lag.
+
+    Order is dependency-driven: the caller revokes the BINDING first (teardown_delete),
+    then this removes the members, then the group. RemoveMember/Delete are idempotent by
+    contract, and both are retried past the fresh-object 403 window like every other
+    mutation here — a cleanup that silently accepts a denial is what created the leak.
+    """
+    steps = []
+    for i, mv in enumerate(member_vars):
+        steps.append(poll_request_until_status(
+            name=f"teardown-unmember-{group_var}-{i}",
+            method="POST",
+            path="/iam/v1/groups/{{" + group_var + "}}:removeMember",
+            body={"memberType": "user", "memberId": "{{" + mv + "}}"},
+            auth=auth,
+            expect_code=200,
+            retry_on=(403,),
+            test_script=[
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"pm.test('teardown: {mv} removed from the group (idempotent)', "
+                "() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+            ],
+        ))
+    steps.append(poll_request_until_status(
+        name=f"teardown-group-{group_var}",
         method="DELETE",
-        path="/iam/v1/accessBindings/{{" + acb_var + "}}",
+        path="/iam/v1/groups/{{" + group_var + "}}",
         auth=auth,
+        expect_code=200,
+        retry_on=(403,),
         test_script=[
-            "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+            "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+            "pm.test('teardown: group deleted (200) or already gone (404) — a surviving group in the SHARED account is a cross-suite grant carrier', "
+            "() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
         ],
-    )
+    ))
+    return steps
 
 
 def mint_user(env_var, ext, auth="jwtAccountAdminA"):
@@ -386,7 +485,12 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        teardown_delete("e30AcbId"),
+        # Leave nothing behind in the SHARED account: revoke the binding (awaited), then
+        # drop the group it was bound to. The group has no members here, but a group that
+        # OUTLIVES its case is still a standing subject in {{accountAId}} that a later
+        # binding (this suite's or another's) can attach to.
+        *teardown_delete("e30AcbId"),
+        *teardown_group("e30GroupId"),
     ],
 ))
 
@@ -543,7 +647,7 @@ CASES.append(Case(
                 # (asserted above). The removed enum is no longer part of the contract.
             ],
         ),
-        teardown_delete("e34NewAcbId"),
+        *teardown_delete("e34NewAcbId"),
     ],
 ))
 
@@ -614,7 +718,7 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        teardown_delete("e34LegAcbId"),
+        *teardown_delete("e34LegAcbId"),
     ],
 ))
 
@@ -682,7 +786,7 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        teardown_delete("e33AcbId"),
+        *teardown_delete("e33AcbId"),
     ],
 ))
 
@@ -904,7 +1008,14 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        teardown_delete("e31AcbId"),
+        # FULL teardown — this case is the proven source of the cross-suite leak: it puts
+        # the SHARED fixture users AAA/AAB into a group in the SHARED account and binds
+        # ROLE_VIEW (`*.*` read/list) to it. Revoking only the binding (and doing even that
+        # best-effort) left AAB with account-A viewer via the group userset for every
+        # subsequent run. Binding first (it references the group), then membership, then the
+        # group itself.
+        *teardown_delete("e31AcbId"),
+        *teardown_group("e31GroupId", ("userAAAId", "userAABId")),
     ],
 ))
 
@@ -1055,7 +1166,12 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        teardown_delete("gmGrantAcbId"),
+        # Same full teardown as the ExpandAccess case — this one, too, grants a SHARED
+        # fixture subject (userAAB) account-A viewer through a group in the SHARED account.
+        # The probe above PROVES the access is live; leaving it live after the case is what
+        # made "AAB has no binding yet Check says allowed" true for every later suite.
+        *teardown_delete("gmGrantAcbId"),
+        *teardown_group("gmGrantGroupId", ("userAABId",)),
     ],
 ))
 
