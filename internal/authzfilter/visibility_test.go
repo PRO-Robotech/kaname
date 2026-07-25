@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,10 +22,17 @@ import (
 type fakeChecker struct {
 	granted map[string]bool
 	err     error
+	// sleep — artificial per-Check latency (models a loaded OpenFGA), so a test
+	// can observe fan-out depth rather than guess at it.
+	sleep time.Duration
 
 	mu     sync.Mutex
 	asked  []string // every (relation, object) pair asked, in completion order
 	nCalls atomic.Int64
+	// inFlight/maxInFlight — observed concurrency, so a test can PROVE the
+	// fan-out stays bounded instead of trusting the constant.
+	inFlight    int
+	maxInFlight int
 }
 
 func newFakeChecker(granted ...string) *fakeChecker {
@@ -35,9 +43,30 @@ func newFakeChecker(granted ...string) *fakeChecker {
 	return &fakeChecker{granted: g}
 }
 
-func (f *fakeChecker) CheckWithContext(_ context.Context, _, relation, object string,
+func (f *fakeChecker) CheckWithContext(ctx context.Context, _, relation, object string,
 	_ map[string]any) (bool, error) {
 	f.nCalls.Add(1)
+
+	f.mu.Lock()
+	f.inFlight++
+	if f.inFlight > f.maxInFlight {
+		f.maxInFlight = f.inFlight
+	}
+	sleep := f.sleep
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.inFlight--
+		f.mu.Unlock()
+	}()
+
+	if sleep > 0 {
+		select {
+		case <-time.After(sleep):
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
 	if f.err != nil {
 		return false, f.err
 	}
@@ -45,6 +74,13 @@ func (f *fakeChecker) CheckWithContext(_ context.Context, _, relation, object st
 	f.asked = append(f.asked, relation+"|"+object)
 	f.mu.Unlock()
 	return f.granted[relation+"|"+object], nil
+}
+
+// observedMaxInFlight — peak concurrency seen by the stub.
+func (f *fakeChecker) observedMaxInFlight() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.maxInFlight
 }
 
 func (f *fakeChecker) askedSet() map[string]bool {

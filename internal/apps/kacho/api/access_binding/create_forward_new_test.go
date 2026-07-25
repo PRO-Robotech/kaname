@@ -56,6 +56,29 @@ func (r *recordingReconciler) trace() []string {
 	return out
 }
 
+// awaitTrace waits (bounded) for `want` to appear in the trace and returns the trace
+// as it stood at that moment — or the final trace if the wait elapsed. The create-path
+// materialization passes are DETACHED from the operation worker (shared.GoPostCommit,
+// so Operation.done is not gated on them, ban #9), which means operations.Wait no
+// longer implies they have run. Polling for the expected call keeps the assertion
+// deterministic without weakening it: a pass that never runs still fails, on the
+// unchanged assertions below.
+func (r *recordingReconciler) awaitTrace(want string, budget time.Duration) []string {
+	deadline := time.Now().Add(budget)
+	for {
+		calls := r.trace()
+		for _, c := range calls {
+			if c == want {
+				return calls
+			}
+		}
+		if time.Now().After(deadline) {
+			return calls
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (r *recordingReconciler) ReconcileBindingForward(_ context.Context, id domain.AccessBindingID) error {
 	r.record("binding_forward:" + string(id))
 	return nil
@@ -119,7 +142,7 @@ func TestCreateAccessBinding_ObjectPass_UsesProvenNewEntryPoint(t *testing.T) {
 	id := string(repo.lastInsertedID())
 	require.NotEmpty(t, id)
 
-	calls := rec.trace()
+	calls := rec.awaitTrace("object_forward_new:iam.accessBinding:"+id, 5*time.Second)
 	assert.Contains(t, calls, "object_forward_new:iam.accessBinding:"+id,
 		"the create-path must declare the binding-object PROVEN-NEW, so the delete-stale guard "+
 			"cannot mistake this same create's member rows for pre-existing state")

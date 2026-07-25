@@ -74,15 +74,50 @@ var abImmutableFields = map[string]string{
 	"id":            "id is immutable after AccessBinding.Create",
 }
 
+// ObjectForwardReconciler — narrow post-commit port: re-materialize the per-object
+// access of ONE iam-native object across the bindings whose selectors match it.
+//
+// Deliberately NOT the package's SelectorReconciler (create.go): that port carries the
+// binding-membership passes and the proven-new object entry point, none of which this
+// path may use — a label-clear on an EXISTING binding must go through the guard-bearing
+// forward (see doUpdate). It declares only the one method this path calls; the FULL
+// ReconcileObject is driven by the reconcile worker off the co-committed event, never
+// through here. Implemented by reconcile.Reconciler (the SAME single materialization
+// path the reconcile worker and the cross-service RegisterResource drive). nil-safe:
+// when unwired, the co-committed reconcile event + the periodic sweep remain the
+// at-least-once backstop.
+type ObjectForwardReconciler interface {
+	// ReconcileObjectForward is the ADDITIVE forward fast-path for one object: it
+	// materializes ONLY that object's per-object tuples across the matching bindings
+	// under a SHARE advisory lock (no EXCLUSIVE / O(scope) recompute). It transparently
+	// delegates to the FULL ReconcileObject when the object already has members
+	// (delete-stale guard) — which is the branch a REVOCATION takes.
+	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+}
+
 type UpdateAccessBindingUseCase struct {
 	repo      Repo
 	opsRepo   operations.Repo
 	relations clients.RelationStore
-	logger    *slog.Logger
+	// Optional post-commit per-object materializer. A LABEL change flips iam-direct
+	// selector membership, so the object must be re-materialized; nil-safe, the
+	// co-committed reconcile event + periodic sweep remain the backstop.
+	reconciler ObjectForwardReconciler
+	logger     *slog.Logger
 }
 
 func NewUpdateAccessBindingUseCase(r Repo, opsRepo operations.Repo) *UpdateAccessBindingUseCase {
 	return &UpdateAccessBindingUseCase{repo: r, opsRepo: opsRepo}
+}
+
+// WithObjectReconciler wires the post-commit per-object materializer used on a LABEL
+// change (parity with the cross-service RegisterResource re-register path — see
+// doUpdate). Optional; nil keeps the queue-only behaviour. It takes no logger on
+// purpose: WithRelationStore already supplies one, and a second setter carrying it
+// would silently nil it whenever the two are wired in the other order.
+func (u *UpdateAccessBindingUseCase) WithObjectReconciler(r ObjectForwardReconciler) *UpdateAccessBindingUseCase {
+	u.reconciler = r
+	return u
 }
 
 // WithRelationStore wires the OpenFGA RelationStore used by requireGrantAuthority
@@ -159,6 +194,34 @@ func (u *UpdateAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	return &op, nil
 }
 
+// doUpdate applies the mutation in one writer-tx and, when the change can flip
+// iam-direct selector membership (a LABEL change), re-materializes the object.
+//
+// WHY THE IN-PROCESS PASS. iam.accessBinding is label-selectable (feed_registry.go), and
+// the iam-direct matcher probes `kacho_iam.access_bindings.labels` — so a binding is
+// itself an OBJECT another binding's ARM_LABELS selector may match, and clearing a
+// matching label is a REVOCATION of that other grant. Its cross-service twin gets that
+// for free: vpc/compute/nlb re-call InternalIAMService.RegisterResource on a label
+// update, and RegisterResource runs ReconcileObjectForward in-process — the forward's
+// delete-stale guard sees the object already has members, hands it to the FULL
+// ReconcileObject, and the stale grant dies there. The iam-native path had no such pass:
+// it enqueued a resource_reconcile_outbox event and returned, which made revoke latency
+// the DEPTH OF THE GLOBAL RECONCILE QUEUE. That queue is strictly FIFO and drained by a
+// single worker at ~5 events/s, each event a FULL O(scope) recompute, while the e2e
+// suite produces 5-8 events/s — so it runs a multi-minute backlog. Measured on the stand
+// for the sibling iam.project path: the label-clear event was enqueued at 19:59:18.97 and
+// drained at 20:06:49.82 (7m30s); the tuple survived until the 30s periodic sweep reached
+// that binding at 20:00:23, 65s after the clear, long past any client budget.
+//
+// NOT the create-path's entry point. create.go deliberately uses ReconcileObjectForwardNew,
+// which SKIPS the delete-stale guard because the id was minted in the tx that just
+// committed — precisely the branch that cannot revoke. An existing binding must take the
+// guard-bearing ReconcileObjectForward.
+//
+// OFF THE done-PATH (ban #9). The pass is scheduled detached: Operation.done reports that
+// the binding row is durable, never that its tuples converged. The co-committed reconcile
+// event above and the periodic sweep stay the at-least-once backstop, so this changes WHEN
+// the revoke is observed, not WHETHER it happens.
 func (u *UpdateAccessBindingUseCase) doUpdate(ctx context.Context, id domain.AccessBindingID, applyDP, deletionProtection, labelsChanged bool, labels domain.Labels) (*anypb.Any, error) {
 	updated, err := shared.DoWithWriteTx(ctx, u.repo,
 		func(ctx context.Context, w Writer) (domain.AccessBinding, error) {
@@ -191,6 +254,20 @@ func (u *UpdateAccessBindingUseCase) doUpdate(ctx context.Context, id domain.Acc
 		})
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
+	}
+	// Label change ⇒ selector membership may have flipped ⇒ re-materialize this ONE
+	// object now instead of waiting out the FIFO reconcile queue (see the doc above).
+	// ReconcileObjectForward is the same entry point the cross-service register path
+	// uses: its delete-stale guard finds the existing members and delegates to the FULL
+	// ReconcileObject, which is what actually revokes a now-unmatched grant.
+	if labelsChanged && u.reconciler != nil {
+		oid := string(id)
+		shared.GoPostCommit(ctx, u.logger, "access binding label re-materialization", func(ctx context.Context) {
+			if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.accessBinding", oid); rerr != nil && u.logger != nil {
+				u.logger.Error("access binding update: label re-materialization failed (reconcile event + sweep will retry)",
+					"access_binding_id", oid, "err", rerr)
+			}
+		})
 	}
 	return marshalAB(updated)
 }

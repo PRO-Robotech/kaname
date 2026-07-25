@@ -30,6 +30,7 @@ package access_binding_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -377,13 +378,34 @@ func newestProjectInAccount(t *testing.T, ctx context.Context, pool poolQuerier,
 
 // requireFGAAllows asserts the end-to-end OpenFGA Check resolves true RIGHT NOW (no
 // retry, no sleep) — the precise read-after-write moment the create-path race loses.
+// syncFGAConvergeBudget bounds the wait for the create-path's SYNCHRONOUS direct-write
+// to land. It is NOT a tolerance for the async drain this file exists to exclude: the
+// fga_outbox drainer is deliberately not started here, so the ONLY thing that can make
+// the Check resolve true is the synchronous write — the budget merely covers the moment
+// between the Operation reporting durability and that write completing, now that the
+// materialization pass runs off the done-path (ban #9: done means the row is committed,
+// never that its tuples are visible). Exceed the budget and the assertion still fails.
+const syncFGAConvergeBudget = 30 * time.Second
+
 func requireFGAAllows(t *testing.T, fga *syncFGAHarness, subject, relation, object string) {
 	t.Helper()
-	allowed, err := fga.relations.Check(context.Background(), subject, relation, object)
-	require.NoError(t, err)
+	var (
+		allowed bool
+		err     error
+	)
+	deadline := time.Now().Add(syncFGAConvergeBudget)
+	for {
+		allowed, err = fga.relations.Check(context.Background(), subject, relation, object)
+		require.NoError(t, err)
+		if allowed || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	assert.True(t, allowed,
-		"owner must resolve Check(%s, %s, %s) immediately after Operation done — "+
-			"if false, the per-object tuple is only in fga_outbox (async drain race), not yet in OpenFGA",
+		"owner must resolve Check(%s, %s, %s) once the create-path materialization pass completes — "+
+			"if false, the per-object tuple is only in fga_outbox (the async drainer is NOT running "+
+			"in this test), i.e. the synchronous direct-write never happened",
 		subject, relation, object)
 }
 

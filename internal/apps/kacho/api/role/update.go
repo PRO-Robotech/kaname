@@ -9,6 +9,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"google.golang.org/grpc/codes"
@@ -74,6 +75,13 @@ type UpdateRoleUseCase struct {
 	// (the fan-out + the bounded-limit guard). nil-safe (unit tests of the
 	// non-rules paths leave it unwired; the periodic sweep also re-converges).
 	membership RulesMembershipFanout
+	// objects — post-commit per-object materializer for the role AS AN OBJECT
+	// (iam.role). Distinct from `membership` above: that one re-materializes what the
+	// role's RULES grant over other objects, this one re-materializes who may reach
+	// THIS role after its OWN labels changed. nil-safe; the co-committed reconcile
+	// event + periodic sweep remain the backstop.
+	objects ObjectReconciler
+	logger  *slog.Logger
 }
 
 func NewUpdateRoleUseCase(r Repo, opsRepo operations.Repo) *UpdateRoleUseCase {
@@ -90,6 +98,16 @@ func (u *UpdateRoleUseCase) WithTupleReconciler(r TupleReconciler) *UpdateRoleUs
 // bound-check + post-commit per-binding reconcile). nil-safe.
 func (u *UpdateRoleUseCase) WithMembershipFanout(m RulesMembershipFanout) *UpdateRoleUseCase {
 	u.membership = m
+	return u
+}
+
+// WithObjectReconciler wires the post-commit per-object materializer used on an
+// own-resource LABEL change (parity with the cross-service RegisterResource re-register
+// path — see doUpdate). Optional; nil keeps the queue-only behaviour. The logger is
+// used only to report a failed pass (the durable event + sweep still re-converge).
+func (u *UpdateRoleUseCase) WithObjectReconciler(r ObjectReconciler, logger *slog.Logger) *UpdateRoleUseCase {
+	u.objects = r
+	u.logger = logger
 	return u
 }
 
@@ -297,6 +315,42 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 		})
 	if err != nil {
 		return nil, err
+	}
+
+	// OWN-RESOURCE label change ⇒ who may reach THIS role may have flipped ⇒
+	// re-materialize this ONE object now instead of waiting out the FIFO reconcile
+	// queue. iam.role is label-selectable, so clearing a label an ARM_LABELS grant
+	// matches is a REVOCATION. The cross-service twin gets that for free: vpc/compute/
+	// nlb re-call InternalIAMService.RegisterResource on a label update, and
+	// RegisterResource runs ReconcileObjectForward in-process — the forward's
+	// delete-stale guard sees the object already has members, hands it to the FULL
+	// ReconcileObject, and the stale grant dies there. The iam-native path had no such
+	// pass: it enqueued a resource_reconcile_outbox event and returned, which made
+	// revoke latency the DEPTH OF THE GLOBAL RECONCILE QUEUE — strictly FIFO, one
+	// worker at ~5 events/s each doing a FULL O(scope) recompute, against an e2e suite
+	// producing 5-8 events/s, i.e. a multi-minute backlog. Measured on the stand for
+	// the sibling iam.project path: the label-clear event was enqueued at 19:59:18.97
+	// and drained at 20:06:49.82 (7m30s); the tuple survived until the 30s periodic
+	// sweep reached that binding at 20:00:23, 65s after the clear.
+	//
+	// Distinct from the rules fan-out below: that one re-materializes what this role
+	// GRANTS over other objects, this one re-materializes access TO the role object.
+	// It is scheduled BEFORE the rules fan-out on purpose — a mask carrying both
+	// "rules" and "labels" must not let a failing rules fan-out (which returns early)
+	// suppress the label revoke acceleration; the writer-tx is already committed here.
+	//
+	// OFF THE done-PATH (ban #9): scheduled detached, because Operation.done reports
+	// that the role row is durable, never that its tuples converged. The co-committed
+	// reconcile event and the periodic sweep stay the at-least-once backstop, so this
+	// changes WHEN the revoke is observed, not WHETHER it happens.
+	if slices.Contains(changed, "labels") && u.objects != nil {
+		id := string(updated.ID)
+		shared.GoPostCommit(ctx, u.logger, "role label re-materialization", func(ctx context.Context) {
+			if rerr := u.objects.ReconcileObjectForward(ctx, "iam.role", id); rerr != nil && u.logger != nil {
+				u.logger.Error("role update: label re-materialization failed (reconcile event + sweep will retry)",
+					"role_id", id, "err", rerr)
+			}
+		})
 	}
 
 	// Membership fan-out: after the rules change + selector-sync committed,

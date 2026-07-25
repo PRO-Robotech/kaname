@@ -139,7 +139,16 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		WithRelationStore(relationStore, logger).
 		WithReconciler(rsabReconciler)
 	accountUpdate := accountapp.NewUpdateAccountUseCase(kachoRepo, opsRepo).
-		WithRelationStore(relationStore, logger)
+		WithRelationStore(relationStore, logger).
+		// A LABEL change flips iam-direct selector membership, so removing a label an
+		// ARM_LABELS grant matches is a REVOCATION. The cross-service twin already gets
+		// this: vpc/compute/nlb re-call RegisterResource on a label update and that runs
+		// the object-forward in-process (its delete-stale guard hands an object with
+		// existing members to the FULL recompute, which strips the stale tuples). Without
+		// the same wiring here, the iam-native path had only the co-committed reconcile
+		// event, so revoke latency became the depth of the FIFO reconcile queue —
+		// measured 7m30s of queue plus a 65s sweep before the tuple died.
+		WithObjectReconciler(rsabReconciler)
 	accountDelete := accountapp.NewDeleteAccountUseCase(kachoRepo, opsRepo)
 	accountGet := accountapp.NewGetAccountUseCase(kachoRepo).WithRelationStore(relationStore)
 	accountList := accountapp.NewListAccountsUseCase(kachoRepo).WithRelationStore(relationStore)
@@ -158,7 +167,16 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		// after the Operation reports done does not race the async fga_outbox drain (403).
 		WithObjectReconciler(rsabReconciler)
 	projectUpdate := projectapp.NewUpdateProjectUseCase(kachoRepo, opsRepo).
-		WithRelationStore(relationStore, logger)
+		WithRelationStore(relationStore, logger).
+		// A LABEL change flips iam-direct selector membership, so removing a label an
+		// ARM_LABELS grant matches is a REVOCATION. The cross-service twin already gets
+		// this: vpc/compute/nlb re-call RegisterResource on a label update and that runs
+		// the object-forward in-process (its delete-stale guard hands an object with
+		// existing members to the FULL recompute, which strips the stale tuples). Without
+		// the same wiring here, the iam-native path had only the co-committed reconcile
+		// event, so revoke latency became the depth of the FIFO reconcile queue —
+		// measured 7m30s of queue plus a 65s sweep before the tuple died.
+		WithObjectReconciler(rsabReconciler)
 	projectDelete := projectapp.NewDeleteProjectUseCase(kachoRepo, opsRepo)
 	projectGet := projectapp.NewGetProjectUseCase(kachoRepo).WithRelationStore(relationStore)
 	projectList := projectapp.NewListProjectsUseCase(kachoRepo).WithRelationStore(relationStore)
@@ -168,7 +186,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	// UserService + InternalUserService.
 	userGet := userapp.NewGetUserUseCase(kachoRepo).WithRelationStore(relationStore)
 	userList := userapp.NewListUsersUseCase(kachoRepo).WithRelationStore(relationStore)
-	userUpdate := userapp.NewUpdateUserUseCase(kachoRepo, opsRepo)
+	userUpdate := userapp.NewUpdateUserUseCase(kachoRepo, opsRepo).
+		// Same revoke-latency fix as accountUpdate above: iam.user is label-selectable,
+		// so a label clear is a REVOCATION, and without the in-process object-forward it
+		// waited out the FIFO reconcile queue (measured 7m30s + a 65s sweep) instead of
+		// converging in-process the way the cross-service RegisterResource path does.
+		WithObjectReconciler(rsabReconciler, logger)
 	userDelete := userapp.NewDeleteUserUseCase(kachoRepo, opsRepo)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
@@ -186,7 +209,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	saCreate := serviceaccountapp.NewCreateServiceAccountUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)
-	saUpdate := serviceaccountapp.NewUpdateServiceAccountUseCase(kachoRepo, opsRepo)
+	saUpdate := serviceaccountapp.NewUpdateServiceAccountUseCase(kachoRepo, opsRepo).
+		// Same revoke-latency fix as accountUpdate above: iam.serviceAccount is
+		// label-selectable, so a label clear is a REVOCATION, and without the in-process
+		// object-forward it waited out the FIFO reconcile queue (measured 7m30s + a 65s
+		// sweep) instead of converging in-process the way the cross-service
+		// RegisterResource path does.
+		WithObjectReconciler(rsabReconciler, logger)
 	saDelete := serviceaccountapp.NewDeleteServiceAccountUseCase(kachoRepo, opsRepo)
 	saGet := serviceaccountapp.NewGetServiceAccountUseCase(kachoRepo).WithRelationStore(relationStore)
 	saList := serviceaccountapp.NewListServiceAccountsUseCase(kachoRepo).WithRelationStore(relationStore)
@@ -197,7 +226,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	groupCreate := groupapp.NewCreateGroupUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)
-	groupUpdate := groupapp.NewUpdateGroupUseCase(kachoRepo, opsRepo)
+	groupUpdate := groupapp.NewUpdateGroupUseCase(kachoRepo, opsRepo).
+		// Same revoke-latency fix as accountUpdate above: iam.group is label-selectable,
+		// so a label clear is a REVOCATION. Group.Update was the last path with NEITHER
+		// half — no co-committed reconcile event and no in-process object-forward — so a
+		// revoke converged only when the 30s periodic sweep happened to reach the binding.
+		// The event (added in doUpdate) is the at-least-once backstop; this wiring adds the
+		// accelerator the cross-service RegisterResource path runs in-process, without
+		// which revoke latency is the depth of the FIFO reconcile queue (measured 7m30s).
+		WithObjectReconciler(rsabReconciler, logger)
 	groupDelete := groupapp.NewDeleteGroupUseCase(kachoRepo, opsRepo)
 	groupGet := groupapp.NewGetGroupUseCase(kachoRepo).WithRelationStore(relationStore)
 	groupList := groupapp.NewListGroupsUseCase(kachoRepo).WithRelationStore(relationStore)
@@ -227,7 +264,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	// with the Account.Create owner auto-binding materialization).
 	roleUpdate := roleapp.NewUpdateRoleUseCase(kachoRepo, opsRepo).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
-		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kachoRepo, rsabReconciler))
+		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kachoRepo, rsabReconciler)).
+		// Same revoke-latency fix as accountUpdate above, for the role AS AN OBJECT
+		// (iam.role is label-selectable, so clearing one of the ROLE's own labels is a
+		// REVOCATION of access TO the role — orthogonal to the rules fan-out wired
+		// above, which covers what the role GRANTS). Without the in-process
+		// object-forward it waited out the FIFO reconcile queue (measured 7m30s + a 65s
+		// sweep) instead of converging in-process the way the cross-service
+		// RegisterResource path does.
+		WithObjectReconciler(rsabReconciler, logger)
 	roleDelete := roleapp.NewDeleteRoleUseCase(kachoRepo, opsRepo)
 	// roleGet — D-1 fix: system roles are served to all (catalog floor, exempt);
 	// CUSTOM roles enforce per-object via the SAME FGA v_list set as List
@@ -261,9 +306,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 	abRevoke := accessbindingapp.NewRevokeAccessBindingUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger)
 	// Update — P6 (C-03): clear deletion_protection so a protected binding can be
-	// deleted. Same grant-authority gate as Create/Delete.
+	// deleted. Same grant-authority gate as Create/Delete. WithObjectReconciler adds the
+	// post-commit label re-materialization: iam.accessBinding is label-selectable, so
+	// clearing a label an ARM_LABELS grant matches is a REVOCATION, and without an
+	// in-process pass its latency is the depth of the FIFO reconcile queue (one worker,
+	// ~5 events/s of FULL O(scope) recomputes — measured 7m30s enqueue→drain on the
+	// sibling iam.project path). The co-committed reconcile event stays the backstop.
 	abUpdate := accessbindingapp.NewUpdateAccessBindingUseCase(kachoRepo, opsRepo).
-		WithRelationStore(relationStore, logger)
+		WithRelationStore(relationStore, logger).
+		WithObjectReconciler(rsabReconciler)
 	// D-6 (T3.3): the AB read RPCs union the existing self/granted floor with the
 	// label-selector visibility (viewer ∪ v_list on iam_access_binding). relationStore
 	// (the concrete OpenFGA client) satisfies BOTH RelationStore (Check) and
