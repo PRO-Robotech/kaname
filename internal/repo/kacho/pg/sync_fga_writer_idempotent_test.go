@@ -95,7 +95,7 @@ func (s *idempotentFGAStore) DeleteTuples(context.Context, []clients.RelationTup
 	return nil
 }
 
-func (s *idempotentFGAStore) ReadTuples(_ context.Context, subjectFilter, relationFilter, objectFilter string, _ int, _ string) ([]clients.ConditionalTuple, string, error) {
+func (s *idempotentFGAStore) ReadTuplesStrong(_ context.Context, subjectFilter, relationFilter, objectFilter string, _ int, _ string) ([]clients.ConditionalTuple, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reads++

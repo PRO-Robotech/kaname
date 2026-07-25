@@ -7,12 +7,9 @@
 package clients
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 )
 
 type fgaWireTupleKeyWithCondition struct {
@@ -73,32 +70,33 @@ func (c *OpenFGAHTTPClient) WriteConditionalTuples(ctx context.Context, writes, 
 		}{TupleKeys: dk}
 	}
 	body, _ := json.Marshal(r)
-	cctx, cancel := context.WithTimeout(ctx, c.writeTimeout())
-	defer cancel()
-	resp, err := c.do(cctx, "POST",
-		fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID), body)
-	if err != nil {
-		return fmt.Errorf("openfga write: %w", err)
+	// Idempotent replay applies ONLY to a request carrying exactly ONE tuple in ONE
+	// direction. OpenFGA's write is TRANSACTIONAL — a rejected request applies NONE
+	// of its tuples — so "already exists" / "does not exist" equals "the desired
+	// post-condition holds" only when that one tuple WAS the whole request. For a
+	// MIXED batch (writes AND deletes) the write-duplicate marker would additionally
+	// swallow the un-applied deletes: a revoke reported as applied while the tuple
+	// survives (over-grant). For a multi-tuple single-direction batch it would lose
+	// the siblings that never landed.
+	var idempotent func(string) bool
+	switch {
+	case len(writes) == 1 && len(deletes) == 0:
+		idempotent = idempotentWriteReply
+	case len(deletes) == 1 && len(writes) == 0:
+		idempotent = idempotentDeleteReply
 	}
-	defer resp.Body.Close()
-	// Idempotent: 200 success; 400 with already-exists treated as success
-	// (caller-side dedup via idempotency_key).
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
-	if resp.StatusCode == http.StatusBadRequest {
-		// Read body (capped) briefly; if it contains "already_exists" or
-		// "cannot_delete" the write is idempotent. Cap via io.LimitReader like
-		// the sibling read path (openfga_list.go) so a misbehaving OpenFGA cannot
-		// spike memory / bloat the error+log line with a multi-KB body.
-		buf := new(bytes.Buffer)
-		_, _ = buf.ReadFrom(io.LimitReader(resp.Body, maxErrBodyBytes))
-		s := buf.String()
-		if bytes.Contains([]byte(s), []byte("already_exists")) ||
-			bytes.Contains([]byte(s), []byte("cannot_delete")) {
-			return nil
+	// Retry while OpenFGA aborts the transaction on a concurrent-write conflict
+	// (409 — nothing applied, safe to replay; see openfga_conflict.go). Each
+	// attempt carries its own WriteTimeout deadline.
+	return applyWithConflictRetry(ctx, func(ctx context.Context) error {
+		cctx, cancel := context.WithTimeout(ctx, c.writeTimeout())
+		defer cancel()
+		resp, err := c.do(cctx, "POST",
+			fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID), body)
+		if err != nil {
+			return fmt.Errorf("openfga write: %w", err)
 		}
-		return fmt.Errorf("openfga write: bad request: %s", s)
-	}
-	return fmt.Errorf("openfga write: status %d", resp.StatusCode)
+		defer resp.Body.Close()
+		return readWriteReply(resp, idempotent)
+	})
 }

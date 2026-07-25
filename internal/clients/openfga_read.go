@@ -19,6 +19,9 @@ type fgaWireReadRequest struct {
 	TupleKey          *fgaWireTupleKey `json:"tuple_key,omitempty"`
 	PageSize          int              `json:"page_size,omitempty"`
 	ContinuationToken string           `json:"continuation_token,omitempty"`
+	// Consistency — OpenFGA read-consistency preference. Empty ⇒ omitted ⇒
+	// OpenFGA default (MINIMIZE_LATENCY, replica/cache-eligible).
+	Consistency string `json:"consistency,omitempty"`
 }
 
 type fgaWireReadResponse struct {
@@ -30,8 +33,29 @@ type fgaWireReadResponse struct {
 	ContinuationToken string `json:"continuation_token"`
 }
 
-// ReadTuples — see RelationQueries.
+// ReadTuples — see RelationQueries. OpenFGA's default (MINIMIZE_LATENCY)
+// consistency: replica/cache-eligible, fine for a plain listing.
 func (c *OpenFGAHTTPClient) ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]ConditionalTuple, string, error) {
+	return c.readTuples(ctx, subjectFilter, relationFilter, objectFilter, pageSize, pageToken, "")
+}
+
+// ReadTuplesStrong is ReadTuples at HIGHER_CONSISTENCY — a strong read that
+// bypasses replica lag / cache.
+//
+// Required by any read-MODIFY-write loop over the tuple store (the sync writer's
+// read-then-write-delta, reconcile_adapter.go): such a loop terminates only
+// because each already-exists rejection proves the racing writer committed a
+// tuple our NEXT read will see, so the missing set strictly shrinks. Under
+// OpenFGA HA (values.prod runs replicaCount>1 over one Postgres) a
+// MINIMIZE_LATENCY read may serve a stale snapshot that does NOT show the
+// racer's commit — the missing set then never shrinks and the loop burns its
+// whole budget before abandoning the object. Mirrors ListObjects, which already
+// always asks for HIGHER_CONSISTENCY.
+func (c *OpenFGAHTTPClient) ReadTuplesStrong(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]ConditionalTuple, string, error) {
+	return c.readTuples(ctx, subjectFilter, relationFilter, objectFilter, pageSize, pageToken, consistencyHigherConsistency)
+}
+
+func (c *OpenFGAHTTPClient) readTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken, consistency string) ([]ConditionalTuple, string, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return nil, "", ErrNotConfigured
 	}
@@ -44,6 +68,7 @@ func (c *OpenFGAHTTPClient) ReadTuples(ctx context.Context, subjectFilter, relat
 	req := fgaWireReadRequest{
 		PageSize:          pageSize,
 		ContinuationToken: pageToken,
+		Consistency:       consistency,
 	}
 	if subjectFilter != "" || relationFilter != "" || objectFilter != "" {
 		req.TupleKey = &fgaWireTupleKey{

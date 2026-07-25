@@ -273,7 +273,10 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 
 // syncRemoveBaseDelay / syncRemoveMaxAttempts — параметры bounded retry синхронного
 // revoke. Worker-ctx detached (без deadline запроса), поэтому общий бюджет ретраев
-// (~3s при экспоненте 100ms→max 1s) не блокирует запрос — он давно вернул Operation.
+// (~3s при экспоненте 100ms→max 1s; в патологическом случае непрекращающегося
+// OpenFGA-конфликта транспорт добавляет свой jittered conflict-retry внутри каждой
+// попытки — см. clients.applyWithConflictRetry) не блокирует запрос — он давно
+// вернул Operation.
 const (
 	syncRemoveBaseDelay   = 100 * time.Millisecond
 	syncRemoveMaxAttempts = 6

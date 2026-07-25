@@ -31,10 +31,16 @@ type RelationStore interface {
 	// Check выполняет authorization check.
 	Check(ctx context.Context, subject, relation, object string) (allowed bool, err error)
 
-	// WriteTuples атомарно записывает batch tuples (idempotent: 409 = success).
+	// WriteTuples атомарно записывает batch tuples. Idempotent: уже существующий
+	// tuple (400 already_exists) = success. Конкурентный transactional abort
+	// (409) — НЕ success: ничего не записано; транспорт повторяет его с jitter'ом
+	// и, если конфликт пережил бюджет, возвращает ErrWriteConflict (см.
+	// openfga_conflict.go), который вызывающий обязан классифицировать как
+	// retryable, а не как «уже применено».
 	WriteTuples(ctx context.Context, tuples []RelationTuple) error
 
-	// DeleteTuples атомарно удаляет batch tuples (idempotent: missing = success).
+	// DeleteTuples атомарно удаляет batch tuples (idempotent: missing = success;
+	// 409 — как у WriteTuples, retryable, не success).
 	DeleteTuples(ctx context.Context, tuples []RelationTuple) error
 }
 
@@ -208,6 +214,10 @@ func (c *OpenFGAHTTPClient) writeOrDeleteChunked(ctx context.Context, tuples []R
 	return nil
 }
 
+// writeOrDelete applies ONE ≤maxTuplesPerWriteRequest batch, retrying while
+// OpenFGA aborts the transaction on a concurrent-write conflict (409 — nothing
+// applied, safe to replay; see openfga_conflict.go). Every attempt carries its
+// own WriteTimeout deadline.
 func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []RelationTuple, write bool) error {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return ErrNotConfigured
@@ -230,52 +240,48 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 		}{TupleKeys: keys}
 	}
 	body, _ := json.Marshal(r)
-	// Bound the write/delete request to the configured WriteTimeout (default
-	// 1s): http.DefaultClient has no Timeout, so an OpenFGA that accepts the
-	// TCP connection but stops responding (GC pause / overload / half-open TCP
-	// after a partition) would otherwise hang the calling goroutine forever —
-	// especially harmful for the detached, deadline-less access_binding
-	// revoke retry loop (delete.go syncRemoveTuples), which has no caller-side
-	// deadline to fall back on. Mirrors the sibling Check / WriteConditionalTuples
-	// paths, which are already time-bounded.
-	cctx, cancel := context.WithTimeout(ctx, c.writeTimeout())
-	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
-		fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID),
-		bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("openfga write: %w", err)
-	}
-	defer resp.Body.Close()
-	// Idempotent: 200 = success. On 400 we MUST read the body so the FGA error
-	// vocabulary (already_exists / cannot_delete) reaches the caller —
-	// otherwise a bare "status 400" is mis-classified as a permanent poison by
-	// fga_applier.classifyFGA*Err (mirrors WriteConditionalTuples).
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
-	if resp.StatusCode == http.StatusBadRequest {
-		// Cap the 400-body read (io.LimitReader) like the sibling read paths
-		// (openfga_list.go) so a misbehaving OpenFGA cannot spike memory / bloat
-		// the error+log line with a multi-KB body. The idempotent markers
-		// (already_exists / cannot_delete) appear within the first bytes.
-		buf := new(bytes.Buffer)
-		_, _ = buf.ReadFrom(io.LimitReader(resp.Body, maxErrBodyBytes))
-		s := buf.String()
-		// Idempotent replay: writing a tuple that already exists, or deleting
-		// one that no longer exists, is a success at the adapter — the desired
-		// post-condition already holds.
-		if write && bytes.Contains([]byte(s), []byte("already_exists")) {
-			return nil
+	// Idempotent replay: writing a tuple that already exists, or deleting one that
+	// no longer exists, is a success at the adapter — the desired post-condition
+	// already holds. On 400 we MUST read the body so this FGA vocabulary reaches
+	// the caller — otherwise a bare "status 400" is mis-classified as a permanent
+	// poison by fga_applier.classifyFGA*Err.
+	//
+	// SINGLE-TUPLE ONLY. OpenFGA's write is TRANSACTIONAL: a rejected request
+	// applies NONE of its tuples. So "this tuple already exists" equals "the
+	// desired post-condition holds" ONLY when the request carried exactly that one
+	// tuple (the fga_outbox drainer's row-per-tuple shape, the hierarchy-tuple and
+	// creator-tuple writers). For a BATCH the same reply means the OTHER tuples did
+	// not land — reporting success would silently lose them and rob the sync
+	// writer of the read-delta reconciliation that completes the grant.
+	var idempotent func(string) bool
+	if len(tuples) == 1 {
+		idempotent = idempotentDeleteReply
+		if write {
+			idempotent = idempotentWriteReply
 		}
-		if !write && bytes.Contains([]byte(s), []byte("cannot_delete")) {
-			return nil
-		}
-		return fmt.Errorf("openfga write: bad request: %s", s)
 	}
-	return fmt.Errorf("openfga write: status %d", resp.StatusCode)
+	return applyWithConflictRetry(ctx, func(ctx context.Context) error {
+		// Bound EVERY attempt to the configured WriteTimeout (default 1s):
+		// http.DefaultClient has no Timeout, so an OpenFGA that accepts the
+		// TCP connection but stops responding (GC pause / overload / half-open
+		// TCP after a partition) would otherwise hang the calling goroutine
+		// forever — especially harmful for the detached, deadline-less
+		// access_binding revoke retry loop (delete.go syncRemoveTuples), which
+		// has no caller-side deadline to fall back on. Mirrors the sibling
+		// Check / WriteConditionalTuples paths, which are already time-bounded.
+		cctx, cancel := context.WithTimeout(ctx, c.writeTimeout())
+		defer cancel()
+		req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
+			fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID),
+			bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("openfga write: %w", err)
+		}
+		defer resp.Body.Close()
+		return readWriteReply(resp, idempotent)
+	})
 }
 
 var _ RelationStore = (*OpenFGAHTTPClient)(nil)

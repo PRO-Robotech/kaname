@@ -18,17 +18,26 @@
 //
 //	"already_exists" on write    → ErrAlreadyApplied   (HTTP 400 idempotent)
 //	"cannot_delete" on delete    → ErrAlreadyApplied   (HTTP 400 idempotent)
+//	ErrWriteConflict (HTTP 409)  → propagated raw      (transient — see below)
 //	other 400 / "validation_…"   → ErrPermanent        (bad tuple shape, retry futile)
 //	5xx, network drop, timeout   → propagated raw      (transient — drainer retries)
 //	unknown event_type           → ErrPermanent        (caller-side bug, retry futile)
 //
-// Why text-pattern matching and not a typed error: the underlying
-// OpenFGAHTTPClient currently surfaces FGA replies as fmt.Errorf strings
-// ("openfga write: status 400: …" / "openfga write: bad request: …"). Until
-// that adapter is reworked to return typed errors, sniffing the substring is
-// the only reliable way to distinguish idempotent-already-applied from a
-// genuine poison or transient. Test coverage in fga_applier_test.go pins
-// the exact wire strings we depend on.
+// The 409 transactional abort is emphatically NOT ErrAlreadyApplied: the aborted
+// transaction applied NOTHING, so marking the row sent_at would silently drop the
+// tuple and leave a permanent authz gap. It is not permanent either — the retry
+// is what resolves it. (The transport already absorbs the common case with a
+// short jittered retry, so a conflict reaching the applier means the racer is
+// still active and the outbox backoff is the right next step.)
+//
+// Why text-pattern matching for the 400-class: the underlying OpenFGAHTTPClient
+// surfaces those FGA replies as fmt.Errorf strings ("openfga write: status 400: …"
+// / "openfga write: bad request: …"). Until that adapter returns a typed error for
+// each 400 sub-case, sniffing the substring is the only reliable way to
+// distinguish idempotent-already-applied from a genuine poison or transient. Test
+// coverage in fga_applier_test.go pins the exact wire strings we depend on. The
+// CONFLICT class is already typed (ErrWriteConflict) and is matched with
+// errors.Is, not by text.
 package clients
 
 import (
@@ -107,6 +116,11 @@ func classifyFGAWriteErr(err error) error {
 	}
 	msg := err.Error()
 	switch {
+	case IsWriteConflict(err):
+		// Transactional abort: NOTHING was applied. Explicit branch (before the
+		// permanent-marker scan) so the conflict can never be mistaken for either
+		// an idempotent success — which would drop the tuple — or a poison.
+		return err
 	case containsAny(msg, "already_exists", "already exists"):
 		// Wrap with %w so errors.Is(out, ErrAlreadyApplied) ≡ true while
 		// preserving the original error text for observability/logs.
@@ -128,6 +142,9 @@ func classifyFGADeleteErr(err error) error {
 	}
 	msg := err.Error()
 	switch {
+	case IsWriteConflict(err):
+		// Transactional abort: the tuple is still there. Retry (see the write twin).
+		return err
 	case containsAny(msg, "cannot_delete", "does not exist", "not_found", "not found"):
 		return fmt.Errorf("%w: fga delete reports tuple absent: %s", drainer.ErrAlreadyApplied, msg)
 	case isFGAPermanentMsg(msg):
