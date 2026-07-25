@@ -14,8 +14,8 @@ import (
 )
 
 // Hydra-mirrored JWKS fixtures. The whole point of the proxy is that the served
-// kids are Hydra's ACTUAL signing kids — never iam's own `kacho-*` oidc_jwks_keys
-// kids (which would be a guaranteed kid-miss / fail-closed reject of every pull).
+// kids are Hydra's ACTUAL signing kids — never a `kacho-*` kid of iam's own (iam
+// has no keyset; such a kid would be a guaranteed kid-miss / fail-closed reject).
 const (
 	hydraJWKS1 = `{"keys":[{"kty":"RSA","use":"sig","kid":"hydra-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"}]}`
 	hydraJWKS2 = `{"keys":[{"kty":"RSA","use":"sig","kid":"hydra-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"},{"kty":"RSA","use":"sig","kid":"hydra-kid-2","alg":"RS256","n":"ZZZdefff","e":"AQAB"}]}`

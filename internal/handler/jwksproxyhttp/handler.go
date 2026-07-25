@@ -8,9 +8,9 @@
 // verification keys fetched from iam instead of dialing Hydra directly. Hydra stays
 // the token issuer/signer (iam mints NOTHING) — so iam serves a BYTE-IDENTICAL
 // mirror of Hydra's JWKS: the served `kid`/`alg` are Hydra's ACTUAL signing kids.
-// It never serves iam's own `oidc_jwks_keys` `kacho-*` kids (that store is
-// vestigial and OUT of the verify path — its rotator CronJob has since been
-// removed outright, and nothing decrypts the stored private half); a
+// It never serves a `kacho-*` kid of iam's own: iam HAS no keyset. The rotator
+// CronJob was removed (713f7e1) and the `oidc_jwks_keys` store it wrote was
+// dropped (migration 0065) — nothing ever decrypted the stored private half. A
 // `kacho-*` kid would be a guaranteed kid-miss → fail-closed reject of every pull.
 //
 // Fail-closed. A cold cache + an unavailable Hydra (network error / non-200 / empty

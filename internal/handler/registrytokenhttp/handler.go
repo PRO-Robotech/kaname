@@ -14,7 +14,7 @@
 // reverse-proxy of Hydra's public JWKS at GET /.well-known/jwks.json on the :9097
 // jwks-proxy listener, package internal/handler/jwksproxyhttp), NOT from this
 // external `/iam/token` listener. The mirror keeps the served kids equal to Hydra's
-// real signing kids; iam never serves its own oidc_jwks_keys kacho-* kids. This
+// real signing kids; iam has no keyset of its own to serve (it mints nothing). This
 // `/iam/token` mux therefore carries no JWKS endpoint of its own.
 //
 // Endpoint:

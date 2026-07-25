@@ -11,12 +11,14 @@
 // Operation, done=true). The earlier per-jti synthetic-jti write was inert — a
 // synthetic jti can never match the target's real live-token jti.
 //
-// GetJWKSStatus — admin observability over oidc_jwks_keys: per-alg current key
-// id, age, and a rotation-overdue flag. Read-only; never serialises the
-// encrypted private key (infra-sensitive material stays internal).
+// GetJWKSStatus — reports a permanently EMPTY keyset: iam owns no signing keys
+// (it mints nothing; Hydra is the issuer and signer). The `oidc_jwks_keys`
+// store it used to read was dropped in migration 0065. Kept because the RPC is
+// a published, buf-breaking-gated wire contract — see the method docstring.
 //
-// Both were advertised (caller_policy + permission_catalog) but Unimplemented
-// before this fix — an advertised-but-Unimplemented RPC is a contract gap.
+// ForceLogout was advertised (caller_policy + permission_catalog) but
+// Unimplemented before this fix — an advertised-but-Unimplemented RPC is a
+// contract gap.
 package internal_iam
 
 import (
@@ -30,7 +32,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
@@ -62,12 +63,6 @@ type sessionRevoker interface {
 // Defined locally to keep the use-case free of a repo/pg import; must match the
 // pg-side session taxonomy + audit_outbox_event_type CHECK.
 const eventSessionForceLogout = "iam.session.force_logout"
-
-// jwksStatusReader — narrow read port for GetJWKSStatus. Implemented by
-// *repo/kacho/pg.OIDCJwksKeyRepo (ListCurrent).
-type jwksStatusReader interface {
-	ListCurrent(ctx context.Context) ([]domain.OIDCJwksKey, error)
-}
 
 // WithSessionRevoker — attaches the session-revocation writer used by
 // ForceLogout. Composition-root only (cmd/kacho-iam/wiring.go).
@@ -113,14 +108,6 @@ func (h *Handler) requireSystemAdmin(ctx context.Context) error {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	return nil
-}
-
-// WithJWKSStatus — attaches the JWKS read port + the configured rotation
-// interval used by GetJWKSStatus.
-func (h *Handler) WithJWKSStatus(r jwksStatusReader, rotationInterval time.Duration) *Handler {
-	h.jwksReader = r
-	h.jwksRotation = rotationInterval
-	return h
 }
 
 // ForceLogout — record a user-level revoke-all cutoff for the target subject so
@@ -190,34 +177,26 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	return shared.OperationToProto(&op), nil
 }
 
-// GetJWKSStatus — per-alg status of the current signing keys.
-func (h *Handler) GetJWKSStatus(ctx context.Context, _ *emptypb.Empty) (*iamv1.JWKSStatusResponse, error) {
-	if h.jwksReader == nil {
-		return nil, status.Error(codes.Unavailable, "jwks status reader not configured")
-	}
-	keys, err := h.jwksReader.ListCurrent(ctx)
-	if err != nil {
-		return nil, status.Error(codes.Internal, "jwks status lookup failed")
-	}
-
-	intervalDays := safeconv.ClampNonNegInt32(int64(h.jwksRotation / (24 * time.Hour)))
-	now := time.Now().UTC()
-
-	resp := &iamv1.JWKSStatusResponse{}
-	for _, k := range keys {
-		// ClampNonNegInt32 also floors a future-dated key (negative age) at 0.
-		ageDays := safeconv.ClampNonNegInt32(int64(now.Sub(k.CreatedAt) / (24 * time.Hour)))
-		alg := &iamv1.JWKSAlgStatus{
-			Alg:                  string(k.Alg),
-			CurrentKid:           k.KID,
-			CurrentAgeDays:       ageDays,
-			RotationIntervalDays: intervalDays,
-			RotationOverdue:      intervalDays > 0 && ageDays >= intervalDays,
-		}
-		if !k.CreatedAt.IsZero() {
-			alg.CurrentCreatedAt = shared.TimestampProto(k.CreatedAt)
-		}
-		resp.Algorithms = append(resp.Algorithms, alg)
-	}
-	return resp, nil
+// GetJWKSStatus — reports iam's signing-key rotation status, which is
+// permanently EMPTY: iam owns no signing keyset.
+//
+// iam mints nothing. Its only signature is over an assertion signed with the
+// caller's OWN presented credential, and the access token itself is issued by
+// Hydra. The public keyset iam serves on :9097 is a byte-identical short-TTL
+// MIRROR of Hydra's — Hydra stays the issuer and the signer; iam proxies, it
+// does not mint. So there is no per-alg "current key" for iam to report and
+// nothing for it to rotate.
+//
+// The backing `oidc_jwks_keys` store was therefore dropped (migration 0065):
+// its only writers (InsertBootstrap / Rotate) lost their last caller when the
+// nightly rotation was retired (713f7e1), and it held zero rows on a fully
+// working stand — the whole platform authenticates with that store empty.
+//
+// This RPC is retained rather than deleted because it is a PUBLISHED wire
+// contract: `buf breaking` (FILE rules, vs main) rejects deleting the RPC and
+// its two messages, so retirement is a deliberate contract change, not a
+// cleanup. Returning an empty algorithm set is exactly what the RPC already
+// returned when it read the empty table — callers observe no change.
+func (h *Handler) GetJWKSStatus(_ context.Context, _ *emptypb.Empty) (*iamv1.JWKSStatusResponse, error) {
+	return &iamv1.JWKSStatusResponse{}, nil
 }

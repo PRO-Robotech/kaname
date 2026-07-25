@@ -135,17 +135,20 @@ func (c Config) validateMode() error {
 }
 
 // validateProductionAuthNSecrets requires the AuthN secrets the binary needs to
-// authenticate the Ory hooks and decrypt JWKS private keys. In dev mode these
-// may legitimately be empty (the hook handlers accept calls without a Bearer,
-// and the JWKS rotator is not run); in any production mode a missing secret is a
-// boot-time misconfiguration that would otherwise only surface as a runtime
-// fail-closed (availability risk).
+// authenticate the Ory hooks. In dev mode these may legitimately be empty (the
+// hook handlers accept calls without a Bearer); in any production mode a missing
+// secret is a boot-time misconfiguration that would otherwise only surface as a
+// runtime fail-closed (availability risk).
+//
+// The JWKS encryption key is still demanded here even though nothing decrypts
+// with it any more: its store (oidc_jwks_keys) was dropped in migration 0065 and
+// its rotator in 713f7e1. The requirement is KEPT deliberately — relaxing it
+// changes production start-up behaviour and is a separate decision.
 //
 // Secrets resolve from the YAML field OR the ENV indirection
 // (hook-shared-secret-env / jwks-encryption-key-hex-env) — the same precedence
-// the composition root uses (cmd/kacho-iam/hooks_mux.go,
-// cmd/jwks-rotator/main.go). Only os.Getenv is read (no other side-effects),
-// consistent with the Resolve* methods.
+// the composition root uses (cmd/kacho-iam/hooks_mux.go). Only os.Getenv is read
+// (no other side-effects), consistent with the Resolve* methods.
 //
 // Errors name WHICH setting is missing — never the secret value (security.md).
 //

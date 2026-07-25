@@ -58,13 +58,6 @@ func OwnerRoleRules() Rules {
 	return Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}
 }
 
-// JWKS-supported algs (migration 0014 oidc_jwks_keys_alg_check).
-const (
-	JWKSAlgRS256 = "RS256"
-	JWKSAlgES256 = "ES256"
-	JWKSAlgEdDSA = "EdDSA"
-)
-
 // Condition expressions whitelist (migration 0012
 // access_binding_conditions_expression_whitelist_ck).
 const (

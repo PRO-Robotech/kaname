@@ -544,7 +544,7 @@ func runServe(cfg config.Config) error {
 	// caching reverse-proxy of Hydra's PUBLIC JWKS. The data-plane (kacho-registry)
 	// fetches its verification keys from iam here instead of dialing Hydra directly;
 	// Hydra stays the token issuer/signer (iam mints NOTHING — the served kids are
-	// Hydra's actual signing kids, never iam's own oidc_jwks_keys kacho-* kids).
+	// Hydra's actual signing kids; iam has no keyset of its own).
 	// Served ONLY on the kacho-iam-internal Service (never external, ban #6; the
 	// Service wiring lives in kacho-deploy) over ONE-WAY server-TLS. The route is
 	// UNAUTHENTICATED-BY-DESIGN (public OIDC verification keys) — a conscious,

@@ -44,6 +44,13 @@ func (c AuthNConfig) ResolveHookSharedSecret() string {
 // Source: authn.jwks-encryption-key-hex directly, or the ENV variable named
 // by authn.jwks-encryption-key-hex-env (default KACHO_IAM_JWKS_ENC_KEY).
 // The key must be exactly 32 bytes (256 bit); otherwise error.
+//
+// NOTE: nothing encrypts or decrypts with this key any more — its only consumer
+// was the oidc_jwks_keys store, dropped in migration 0065. The sole remaining
+// caller is validateProductionAuthNSecrets, which still requires the key to be
+// present and well-formed at boot. Whether that requirement should itself be
+// retired is a separate decision: dropping it here would change production
+// start-up behaviour.
 func (c AuthNConfig) ResolveJWKSEncryptionKey() ([]byte, error) {
 	raw := c.JWKSEncryptionKeyHex
 	if raw == "" {
@@ -156,7 +163,7 @@ func (c AuthNConfig) ResolveHydraTokenURL() string {
 // http://kacho-umbrella-hydra-public.<ns>.svc:4444/.well-known/jwks.json), then the
 // derived `<issuer>/.well-known/jwks.json` (back-compat). Hydra remains the signer;
 // iam serves a byte-identical mirror so the served kids are Hydra's real signing
-// kids (never iam's own kacho-* oidc_jwks_keys kids). Only the network target
+// kids (iam has no keyset of its own — it mints nothing). Only the network target
 // differs — the `iss` of a verified token stays the external Hydra issuer.
 func (c AuthNConfig) ResolveHydraJWKSURL() string {
 	if v := strings.TrimSpace(c.HydraJWKSURL); v != "" {
@@ -177,15 +184,6 @@ func (c AuthNConfig) SessionRevocationsCacheTTL() time.Duration {
 		s = 5
 	}
 	return time.Duration(s) * time.Second
-}
-
-// JWKSRotationDuration — JWKS key TTL (default 90 days).
-func (c AuthNConfig) JWKSRotationDuration() time.Duration {
-	d := c.JWKSRotationDays
-	if d <= 0 {
-		d = 90
-	}
-	return time.Duration(d) * 24 * time.Hour
 }
 
 // HooksHTTPListenAddress — normalised listen-addr for the webhook HTTP

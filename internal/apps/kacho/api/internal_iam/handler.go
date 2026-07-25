@@ -20,7 +20,6 @@ import (
 	stderrors "errors"
 	"log/slog"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -106,11 +105,6 @@ type Handler struct {
 	// fails closed Unavailable. Shares the session_revocations table with the
 	// user-logout Revoke path and the refresh-hook reader.
 	sessionRevoker sessionRevoker
-
-	// jwksReader + jwksRotation — read port + configured rotation interval for
-	// GetJWKSStatus. nil reader → the RPC fails closed Unavailable.
-	jwksReader   jwksStatusReader
-	jwksRotation time.Duration
 
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate for the
 	// privileged admin RPCs (ForceLogout). nil → fail-closed (the gate denies).

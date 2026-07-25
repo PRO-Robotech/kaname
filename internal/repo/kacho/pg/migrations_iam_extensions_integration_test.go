@@ -13,7 +13,6 @@ package pg_test
 // - clusters singleton: 1 row seeded; second INSERT → SQLSTATE 23514.
 // - multi-scope Role CHECK + partial UNIQUE per scope.
 // - access_bindings status / condition_id / expires_at / granted_by_user_id present.
-// - oidc_jwks_keys: partial UNIQUE on (alg) WHERE current=true; different alg coexists.
 //
 // Запуск: `go test -tags=integration ./internal/repo/kacho/pg/... -run Kac127 -race`.
 // Skip с `-short`.
@@ -109,7 +108,6 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		"service_account_oauth_clients",
 		"audit_outbox",
 		"session_revocations",
-		"oidc_jwks_keys",
 	} {
 		var exists bool
 		err := db.QueryRowContext(ctx, `
@@ -119,6 +117,23 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 			)`, table).Scan(&exists)
 		require.NoError(t, err)
 		assert.True(t, exists, "table kacho_iam.%s must exist", table)
+	}
+
+	// Retired tables — must NOT come back. 0065 drops the signing-key store:
+	// iam owns no keyset (it mints nothing; Hydra is the issuer and signer),
+	// the table's only writers died with the nightly rotation (713f7e1), and it
+	// held zero rows on a fully working stand.
+	for _, table := range []string{
+		"oidc_jwks_keys",
+	} {
+		var exists bool
+		err := db.QueryRowContext(ctx, `
+			SELECT EXISTS(
+			 SELECT 1 FROM information_schema.tables
+			 WHERE table_schema = 'kacho_iam' AND table_name = $1
+			)`, table).Scan(&exists)
+		require.NoError(t, err)
+		assert.False(t, exists, "retired table kacho_iam.%s must be gone", table)
 	}
 
 	// Verify new columns on extended tables.
@@ -194,7 +209,7 @@ func TestIamExt_Migrations_6_1_RoundTripDownUp(t *testing.T) {
 
 	// Verify tables are gone.
 	for _, table := range []string{
-		"clusters", "oidc_jwks_keys",
+		"clusters",
 		"audit_outbox",
 	} {
 		var exists bool
@@ -210,9 +225,10 @@ func TestIamExt_Migrations_6_1_RoundTripDownUp(t *testing.T) {
 	// Up again — re-apply the squashed baseline.
 	require.NoError(t, goose.Up(db, "."))
 
-	// Verify tables back.
+	// Verify tables back. oidc_jwks_keys is NOT in this set: 0065 retires it,
+	// so a full Down-to-0 + Up round-trip must leave it dropped.
 	for _, table := range []string{
-		"clusters", "oidc_jwks_keys",
+		"clusters",
 		"audit_outbox",
 	} {
 		var exists bool
@@ -329,52 +345,6 @@ func TestIamExt_Migrations_6_5_0_AccessBindingStatusDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "NO", isNullable, "access_bindings.status must be NOT NULL")
 	assert.Contains(t, columnDefault, "ACTIVE", "default must be 'ACTIVE'")
-}
-
-// ── 6.12.4 — oidc_jwks_keys: partial UNIQUE per alg; different alg coexists.
-func TestIamExt_Migrations_6_12_4_JwksMultiAlgCoexist(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	db := setupKac127TestDB(t)
-	ctx := context.Background()
-
-	// Bootstrap первой row для ES256.
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO kacho_iam.oidc_jwks_keys
-		 (kid, alg, current, expires_at, public_key_pem, private_key_pem_encrypted)
-		VALUES
-		 ('jwk-es256-bootstrap-001', 'ES256', true,
-		 now() + INTERVAL '90 days',
-		 'pub-pem-es256', E'\\x6573323536')`)
-	require.NoError(t, err, "bootstrap ES256 current key must succeed")
-
-	// Insert RS256 current=true: different alg → partial UNIQUE не препятствует.
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO kacho_iam.oidc_jwks_keys
-		 (kid, alg, current, expires_at, public_key_pem, private_key_pem_encrypted)
-		VALUES
-		 ('jwk-rs256-bootstrap-001', 'RS256', true,
-		 now() + INTERVAL '90 days',
-		 'pub-pem-rs256', E'\\x7273323536')`)
-	require.NoError(t, err, "RS256 current=true coexists with ES256 current=true")
-
-	// Попытка вставить вторую ES256 current=true — ловит partial UNIQUE.
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO kacho_iam.oidc_jwks_keys
-		 (kid, alg, current, expires_at, public_key_pem, private_key_pem_encrypted)
-		VALUES
-		 ('jwk-es256-duplicate-001', 'ES256', true,
-		 now() + INTERVAL '90 days',
-		 'pub-pem-es256-dup', E'\\x6464')`)
-	require.Error(t, err, "second ES256 current=true must violate partial UNIQUE")
-	assert.Contains(t, err.Error(), "23505", "expected UNIQUE violation 23505")
-
-	var currentCount int
-	require.NoError(t, db.QueryRowContext(ctx,
-		"SELECT count(*) FROM kacho_iam.oidc_jwks_keys WHERE current=true").Scan(&currentCount))
-	assert.Equal(t, 2, currentCount, "exactly 2 current rows (one per alg)")
 }
 
 // JIT eligibility CHECK tests removed: the access_bindings_jit_eligibility

@@ -7,8 +7,8 @@ package internal_iam
 // GetJWKSStatus. До этого фикса оба метода были advertised (caller_policy +
 // permission_catalog), но Unimplemented. ForceLogout — admin force-logout,
 // который ДОЛЖЕН записывать session-revocation для целевого subject (тот же
-// writer, что и user-logout Revoke). GetJWKSStatus — admin observability над
-// oidc_jwks_keys.
+// writer, что и user-logout Revoke). GetJWKSStatus — теперь всегда пустой
+// keyset: iam не владеет ключами подписи (см. блок тестов ниже).
 
 import (
 	"context"
@@ -145,56 +145,42 @@ func TestForceLogout_NotWired_Unavailable(t *testing.T) {
 	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
-// fakeJWKSReader — in-memory jwksStatusReader port.
-type fakeJWKSReader struct {
-	keys []domain.OIDCJwksKey
-	err  error
-}
+// ── GetJWKSStatus — iam owns no signing keyset ────────────────────────────
+//
+// kacho-iam mints nothing: the only signature it produces is over an assertion
+// signed with the caller's OWN presented credential, and the token itself is
+// issued by Hydra. The `oidc_jwks_keys` store that once backed this RPC was
+// dropped (migration 0065) — its only writers (InsertBootstrap / Rotate) lost
+// their last caller when the nightly rotation was retired (713f7e1), and the
+// table carried zero rows on a fully working stand.
+//
+// The RPC itself is a PUBLISHED wire contract (`buf breaking` FILE-rules gate it
+// against main), so it is retained and answers truthfully: iam has no keyset,
+// therefore no algorithms. That is byte-identical to what it already returned
+// against the empty table — no observable behaviour change for any caller.
 
-func (f *fakeJWKSReader) ListCurrent(_ context.Context) ([]domain.OIDCJwksKey, error) {
-	return f.keys, f.err
-}
-
-func TestGetJWKSStatus_ReportsCurrentKeys(t *testing.T) {
-	created := time.Now().UTC().Add(-100 * 24 * time.Hour) // 100 days old → overdue at 90d
-	rec := &fakeJWKSReader{keys: []domain.OIDCJwksKey{
-		{KID: "kid-rs", Alg: domain.JWKSAlgRS256Domain, Current: true, CreatedAt: created},
-	}}
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithJWKSStatus(rec, 90*24*time.Hour)
-
-	resp, err := h.GetJWKSStatus(context.Background(), &emptypb.Empty{})
-	require.NoError(t, err)
-	require.Len(t, resp.GetAlgorithms(), 1)
-	a := resp.GetAlgorithms()[0]
-	assert.Equal(t, "RS256", a.GetAlg())
-	assert.Equal(t, "kid-rs", a.GetCurrentKid())
-	assert.Equal(t, int32(90), a.GetRotationIntervalDays())
-	assert.GreaterOrEqual(t, a.GetCurrentAgeDays(), int32(99))
-	assert.True(t, a.GetRotationOverdue(), "100d-old key with 90d interval is overdue")
-}
-
-func TestGetJWKSStatus_NotWired_Unavailable(t *testing.T) {
+// TestGetJWKSStatus_ReportsNoAlgorithms — the RPC succeeds and reports an empty
+// algorithm set, with NO store wired and nothing to wire. Previously a handler
+// without a JWKS reader failed closed with Unavailable; there is no longer a
+// reader to be absent.
+func TestGetJWKSStatus_ReportsNoAlgorithms(t *testing.T) {
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil)
-	_, err := h.GetJWKSStatus(context.Background(), &emptypb.Empty{})
-	require.Equal(t, codes.Unavailable, status.Code(err))
-}
-
-// Wave T conformance: CurrentCreatedAt in the JWKS status response must be
-// truncated to whole seconds (api-conventions; DB stores microseconds).
-func TestGetJWKSStatus_TruncatesCurrentCreatedAtToSeconds(t *testing.T) {
-	created := time.Date(2026, 6, 16, 10, 20, 30, 123456789, time.UTC)
-	rec := &fakeJWKSReader{keys: []domain.OIDCJwksKey{
-		{KID: "kid-es", Alg: domain.JWKSAlgES256Domain, Current: true, CreatedAt: created},
-	}}
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithJWKSStatus(rec, 90*24*time.Hour)
 
 	resp, err := h.GetJWKSStatus(context.Background(), &emptypb.Empty{})
+	require.NoError(t, err, "iam owns no keyset — reporting that is not an error")
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.GetAlgorithms(),
+		"iam mints nothing and stores no keys — it can only report an empty keyset")
+}
+
+// TestGetJWKSStatus_NeverUnavailable — regression lock on the observable code.
+// The old handler returned Unavailable ("jwks status reader not configured")
+// whenever the reader port was nil. With the store gone that branch must not
+// come back: a nil-everything handler still answers OK.
+func TestGetJWKSStatus_NeverUnavailable(t *testing.T) {
+	h := NewHandler(NewLookupSubjectUseCase(nil), nil)
+
+	_, err := h.GetJWKSStatus(context.Background(), &emptypb.Empty{})
 	require.NoError(t, err)
-	require.Len(t, resp.GetAlgorithms(), 1)
-	ts := resp.GetAlgorithms()[0].GetCurrentCreatedAt()
-	require.NotNil(t, ts)
-	assert.Zero(t, ts.AsTime().Nanosecond(), "CurrentCreatedAt sub-second leaked")
-	assert.True(t, ts.AsTime().Equal(created.Truncate(time.Second)))
+	assert.NotEqual(t, codes.Unavailable, status.Code(err))
 }

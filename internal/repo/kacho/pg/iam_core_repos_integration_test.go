@@ -16,7 +16,6 @@ package pg_test
 // - TestIamExt_SAOAuthClient_Happy / DuplicateHydra / FKMissing / RestrictDelete
 // - TestIamExt_JIT_Happy / DurationOver8h
 // - TestIamExt_OutboxAtomicity_Commit / Rollback
-// - TestIamExt_JWKS_CTERotation / Bootstrap / DuplicateCurrentRaw / MultiAlg
 // - TestIamExt_Bootstrap_UserNotFound / Happy / Idempotent / Concurrent
 //
 // Запуск: `go test ./internal/repo/kacho/pg/... -run TestIamExtRepos -race`.
@@ -25,13 +24,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -553,235 +550,6 @@ func TestIamExtRepos_6_11_1b_OutboxAtomic_Rollback(t *testing.T) {
 		`SELECT count(*) FROM audit_outbox WHERE id=$1`, evtID).Scan(&auditCount))
 	assert.Equal(t, 0, roleCount)
 	assert.Equal(t, 0, auditCount)
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// OIDC JWKS rotation
-// ────────────────────────────────────────────────────────────────────────────
-
-func TestIamExtRepos_6_12_1_JWKS_CTERotation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
-	ctx, pool := kac127Setup(t)
-	repo := kachopg.NewOIDCJwksKeyRepo(pool)
-
-	// Bootstrap first key.
-	tx := mustBeginTx(t, ctx, pool)
-	_, err := repo.InsertBootstrap(ctx, tx, domain.OIDCJwksKey{
-		KID:                    "jwk_es256_v1",
-		Alg:                    domain.JWKSAlgES256Domain,
-		Current:                true,
-		ExpiresAt:              time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM:           "-----BEGIN PUBLIC KEY-----\nv1\n-----END PUBLIC KEY-----\n",
-		PrivateKeyPEMEncrypted: []byte("enc-v1-bytes"),
-	})
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit(ctx))
-
-	// CTE rotation: old.current→false, new.current→true in single statement.
-	tx2 := mustBeginTx(t, ctx, pool)
-	out, err := repo.Rotate(ctx, tx2, domain.OIDCJwksKey{
-		KID:                    "jwk_es256_v2",
-		Alg:                    domain.JWKSAlgES256Domain,
-		Current:                true,
-		ExpiresAt:              time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM:           "-----BEGIN PUBLIC KEY-----\nv2\n-----END PUBLIC KEY-----\n",
-		PrivateKeyPEMEncrypted: []byte("enc-v2-bytes"),
-	})
-	require.NoError(t, err)
-	require.NoError(t, tx2.Commit(ctx))
-	assert.Equal(t, "jwk_es256_v2", out.KID)
-	assert.True(t, out.Current)
-	assert.Nil(t, out.RotatedAt)
-
-	// Verify: count(*)=2; only v2 current; v1 has rotated_at.
-	var totalCount, currCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM oidc_jwks_keys WHERE alg='ES256'`).Scan(&totalCount))
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM oidc_jwks_keys WHERE alg='ES256' AND current=true`).Scan(&currCount))
-	assert.Equal(t, 2, totalCount)
-	assert.Equal(t, 1, currCount)
-}
-
-func TestIamExtRepos_6_12_2_JWKS_DuplicateRawInsert_PartialUniqueViolation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
-	ctx, pool := kac127Setup(t)
-	repo := kachopg.NewOIDCJwksKeyRepo(pool)
-
-	tx := mustBeginTx(t, ctx, pool)
-	_, err := repo.InsertBootstrap(ctx, tx, domain.OIDCJwksKey{
-		KID:                    "jwk_es256_v1_dup",
-		Alg:                    domain.JWKSAlgES256Domain,
-		Current:                true,
-		ExpiresAt:              time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM:           "v1",
-		PrivateKeyPEMEncrypted: []byte("v1-enc"),
-	})
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit(ctx))
-
-	// Raw INSERT of second current=true (without CTE) → partial UNIQUE violation 23505.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO oidc_jwks_keys (kid, alg, current, rotated_at, expires_at,
-		 public_key_pem, private_key_pem_encrypted)
-		VALUES ('jwk_es256_v2_raw', 'ES256', true, NULL, $1, 'v2', $2)`,
-		time.Now().Add(90*24*time.Hour), []byte("v2-enc"))
-	require.Error(t, err)
-	assertSQLState(t, err, "23505")
-}
-
-func TestIamExtRepos_6_12_4_JWKS_MultiAlg_Coexist(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
-	ctx, pool := kac127Setup(t)
-	repo := kachopg.NewOIDCJwksKeyRepo(pool)
-
-	tx := mustBeginTx(t, ctx, pool)
-	_, err := repo.InsertBootstrap(ctx, tx, domain.OIDCJwksKey{
-		KID: "jwk_es256_multi", Alg: domain.JWKSAlgES256Domain, Current: true,
-		ExpiresAt:    time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM: "es-pub", PrivateKeyPEMEncrypted: []byte("es-enc"),
-	})
-	require.NoError(t, err)
-	_, err = repo.InsertBootstrap(ctx, tx, domain.OIDCJwksKey{
-		KID: "jwk_rs256_multi", Alg: domain.JWKSAlgRS256Domain, Current: true,
-		ExpiresAt:    time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM: "rs-pub", PrivateKeyPEMEncrypted: []byte("rs-enc"),
-	})
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit(ctx))
-
-	// Both current=true coexist (UNIQUE is per-alg).
-	rows, err := pool.Query(ctx,
-		`SELECT alg, count(*) FROM oidc_jwks_keys WHERE current=true GROUP BY alg ORDER BY alg`)
-	require.NoError(t, err)
-	defer rows.Close()
-	algs := map[string]int{}
-	for rows.Next() {
-		var alg string
-		var cnt int
-		require.NoError(t, rows.Scan(&alg, &cnt))
-		algs[alg] = cnt
-	}
-	assert.Equal(t, 1, algs["ES256"])
-	assert.Equal(t, 1, algs["RS256"])
-}
-
-// TestIamExt_JWKS_Rotate_NoCurrentKey_FailsPrecondition — guard CTE гарантирует,
-// что Rotate без current-row отдает ErrFailedPrecondition.
-func TestIamExtRepos_6_12_5_JWKS_Rotate_NoCurrentKey_FailsPrecondition(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
-	ctx, pool := kac127Setup(t)
-	repo := kachopg.NewOIDCJwksKeyRepo(pool)
-
-	// Пустая таблица для alg=ES256 → Rotate должен FailedPrecondition'нуть.
-	tx := mustBeginTx(t, ctx, pool)
-	_, err := repo.Rotate(ctx, tx, domain.OIDCJwksKey{
-		KID:                    "jwk_rotate_no_current",
-		Alg:                    domain.JWKSAlgES256Domain,
-		Current:                true,
-		ExpiresAt:              time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM:           "no-current-pub",
-		PrivateKeyPEMEncrypted: []byte("no-current-enc"),
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, iamerr.ErrFailedPrecondition),
-		"expected ErrFailedPrecondition for empty initial state, got %v", err)
-	assert.Contains(t, err.Error(), "InsertBootstrap",
-		"error message must hint at InsertBootstrap")
-
-	// Verify: row НЕ создан (guard блокирует INSERT).
-	var count int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM oidc_jwks_keys WHERE kid='jwk_rotate_no_current'`).Scan(&count))
-	assert.Equal(t, 0, count, "Rotate must NOT insert when no current key exists")
-}
-
-// Concurrent JWKS rotation — data-integrity invariant под per-alg advisory lock.
-//
-// Rotate использует `pg_advisory_xact_lock(hashtext(
-// 'jwks_rotate_' || alg))` для сериализации concurrent ротаций per-alg.
-//
-// Гарантия — партиальный UNIQUE INDEX `(alg) WHERE current=true` остается
-// валиден на каждом commit: end-state ровно ОДНА current=true row per alg
-// (≠ "1 winner": сериализация дает cascading rotation, каждая TX демотирует
-// предыдущую и вставляет свою — но в каждый момент времени current=true
-// сохраняется в единственном экземпляре). Тест проверяет:
-// - все ротации завершились без ошибок гонки (advisory lock сериализует);
-// - end-state: count(current=true WHERE alg=X) == 1;
-// - end-state: совокупное число rows для alg == N + 1 (bootstrap + N rotations).
-//
-// "Only first wins" семантика требует CAS-on-from_kid extension API
-// (out of scope here; tracked as design enhancement).
-func TestIamExtRepos_6_12_1_JWKS_ConcurrentRotation_OneWinner(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
-	ctx, pool := kac127Setup(t)
-	repo := kachopg.NewOIDCJwksKeyRepo(pool)
-
-	// Bootstrap.
-	tx := mustBeginTx(t, ctx, pool)
-	_, err := repo.InsertBootstrap(ctx, tx, domain.OIDCJwksKey{
-		KID: "jwk_race_v1", Alg: domain.JWKSAlgES256Domain, Current: true,
-		ExpiresAt:    time.Now().Add(90 * 24 * time.Hour),
-		PublicKeyPEM: "v1", PrivateKeyPEMEncrypted: []byte("e1"),
-	})
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit(ctx))
-
-	// 10 goroutines race a rotation.
-	const N = 10
-	var wg sync.WaitGroup
-	var committed int32
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			itx, err := pool.Begin(ctx)
-			if err != nil {
-				return
-			}
-			defer func() { _ = itx.Rollback(ctx) }()
-			_, err = repo.Rotate(ctx, itx, domain.OIDCJwksKey{
-				KID:                    fmt.Sprintf("jwk_race_v2_%d", i),
-				Alg:                    domain.JWKSAlgES256Domain,
-				Current:                true,
-				ExpiresAt:              time.Now().Add(90 * 24 * time.Hour),
-				PublicKeyPEM:           "v2",
-				PrivateKeyPEMEncrypted: []byte("e2"),
-			})
-			if err != nil {
-				return
-			}
-			if err := itx.Commit(ctx); err == nil {
-				atomic.AddInt32(&committed, 1)
-			}
-		}()
-	}
-	wg.Wait()
-
-	// Data-integrity: ровно одна current=true row per alg (партиальный UNIQUE).
-	var currCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM oidc_jwks_keys WHERE alg='ES256' AND current=true`).Scan(&currCount))
-	assert.Equal(t, 1, currCount, "partial UNIQUE invariant: exactly 1 current row per alg")
-
-	// Serialization: хотя бы одна ротация успешна (advisory lock не блокирует
-	// все), и общее число rows = bootstrap + успешные ротации (история сохранена).
-	c := atomic.LoadInt32(&committed)
-	assert.GreaterOrEqual(t, c, int32(1), "at least 1 rotation committed (lock is non-deadlocking)")
-	var totalCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM oidc_jwks_keys WHERE alg='ES256'`).Scan(&totalCount))
-	assert.Equal(t, int(c)+1, totalCount, "total rows = bootstrap (1) + committed rotations")
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -125,9 +125,11 @@ type PostgresConfig struct {
 //	HookSharedSecret      — Bearer-token Hydra uses to authenticate calls to
 //	                        token_hook/refresh_hook. If empty — accepted
 //	                        without auth (dev mode only).
-//	JWKSEncryptionKeyHex  — 32-byte AES-GCM key in hex (64 chars) used to
-//	                        encrypt private_key_pem_encrypted in the DB.
-//	JWKSRotationDays      — key TTL in days (default 90).
+//	JWKSEncryptionKeyHex  — 32-byte AES-GCM key in hex (64 chars). It no longer
+//	                        encrypts anything (the oidc_jwks_keys store it was
+//	                        minted for was dropped in migration 0065), but the
+//	                        production boot guard still REQUIRES it — see
+//	                        validateProductionAuthNSecrets.
 //	SessionRevocationsTTLSec — session_revocations cache TTL (default 5s).
 //	HooksHTTPEndpoint     — HTTP listener for webhooks from Hydra/Kratos.
 //	                        Default `tcp://0.0.0.0:9092` (separate port from
@@ -150,7 +152,6 @@ type AuthNConfig struct {
 	HookSharedSecretEnv      string        `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex     string        `mapstructure:"jwks-encryption-key-hex"`
 	JWKSEncryptionKeyHexEnv  string        `mapstructure:"jwks-encryption-key-hex-env"`
-	JWKSRotationDays         int           `mapstructure:"jwks-rotation-days"`
 	SessionRevocationsTTLSec int           `mapstructure:"session-revocations-cache-ttl-seconds"`
 	HooksHTTPEndpoint        string        `mapstructure:"hooks-http-endpoint"`
 	SAKeyRedactGrace         time.Duration `mapstructure:"sakey-redact-grace"`
