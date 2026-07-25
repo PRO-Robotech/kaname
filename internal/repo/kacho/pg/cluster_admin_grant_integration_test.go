@@ -76,7 +76,11 @@ func seedRevokedClusterAdmin(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	require.NoError(t, err, "seed revoked cluster_admin_grants row")
 }
 
-// countActiveAdmins — single-row SELECT, для assertions.
+// countActiveAdmins — TOTAL active grants, every subject_type included.
+//
+// This is the exact population the last-admin guard counts, so tests that
+// exercise D-6 assert on THIS number — including the bootstrap-SA grant that
+// migration 0058 seeds into every database (see bootstrapSeedSubject).
 func countActiveAdmins(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
 	t.Helper()
 	var n int
@@ -86,22 +90,100 @@ func countActiveAdmins(t *testing.T, ctx context.Context, pool *pgxpool.Pool) in
 	return n
 }
 
+// countActiveUserAdmins — active grants of subject_type='user', i.e. exactly
+// the rows a test seeds itself / the Writer creates (Writer.Grant hard-codes
+// 'user'). Use this when the assertion is about the SUT's own rows ("the
+// idempotent second Grant created no extra row") rather than about the
+// cluster-wide admin population — it stays exact (never `>= n`) while being
+// blind to the migration-seeded service_account grant.
+func countActiveUserAdmins(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
+		  WHERE granted_until IS NULL AND subject_type = 'user'`).
+		Scan(&n))
+	return n
+}
+
+// countActiveAdminsForSubject — active grants held by ONE subject. The
+// per-subject invariant ("at most one active grant per subject", partial
+// UNIQUE) is what most repo tests actually mean by "exactly one row".
+func countActiveAdminsForSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subjectID string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_id = $1 AND granted_until IS NULL`, subjectID).
+		Scan(&n))
+	return n
+}
+
+// bootstrapSeedSubject — id of the bootstrap-admin ServiceAccount that
+// migration 0058 seeds a permanent cluster system_admin grant for. Asserts the
+// singleton (exactly one service_account grant) so a future migration adding a
+// second system principal fails here loudly instead of silently skewing the
+// counts below.
+func bootstrapSeedSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
+	t.Helper()
+	rows, err := pool.Query(ctx,
+		`SELECT subject_id FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_type = 'service_account' AND granted_until IS NULL`)
+	require.NoError(t, err)
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		require.NoError(t, rows.Scan(&id))
+		ids = append(ids, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, ids, 1, "migration 0058 seeds exactly one bootstrap-SA cluster admin grant")
+	return ids[0]
+}
+
+// decommissionBootstrapSeedGrant — revokes the migration-seeded bootstrap-SA
+// grant so that the user grants a test seeds are the ONLY active ones.
+//
+// Required by every D-6 (last-admin) test: the guard counts ALL active grants,
+// and RevokeAdmin can only ever revoke subject_type='user' rows, so while the
+// 0058 seed is active the "one active grant left" state is unreachable through
+// the RPC (see TestRevoke_LastUserAdmin_BootstrapSAKeepsClusterAdministrable,
+// which pins that production behaviour). Revoking — not deleting — the row
+// models the real decommission path (same granted_until lifecycle column) and
+// keeps the history row intact.
+func decommissionBootstrapSeedGrant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	tag, err := pool.Exec(ctx,
+		`UPDATE kacho_iam.cluster_admin_grants
+		    SET granted_until = now()
+		  WHERE subject_type = 'service_account' AND granted_until IS NULL`)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected(),
+		"exactly one seeded service_account grant must be decommissioned")
+}
+
 func countOutboxByEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool, eventType string) int {
 	t.Helper()
 	var n int
 	// Count ONLY the cluster-admin grant/revoke tuples these tests emit — they
-	// all carry relation `system_admin` (object `cluster:cluster_kacho_root` via
-	// fgaTuplesGrantSystemAdmin). An allowlist on the relation is robust against
-	// every migration-seeded tuple in a fresh DB, which use DIFFERENT relations:
-	// 0009 `fga_writer`@iam_fgaproxy:system, and 0010 (operator) +
-	// 0014 (reader SAs) `system_viewer`@cluster:cluster_kacho_root. A prior
-	// object-blocklist (`object NOT IN (…, 'cluster:cluster_kacho_root')`) wrongly
-	// excluded the test's OWN system_admin grants too (they share that object),
-	// so the assertions counted 0 — fixed by discriminating on relation, not object.
+	// all carry relation `system_admin` AND a `user:<id>` subject (object
+	// `cluster:cluster_kacho_root` via fgaTuplesGrantSystemAdmin). Discriminating
+	// on relation alone is no longer enough: migration 0058 seeds a
+	// `system_admin` tuple of its own for the bootstrap ServiceAccount
+	// (`service_account:<sva>` on the same object), so the subject-prefix
+	// predicate is what keeps these counts exact. The other migration-seeded
+	// tuples use DIFFERENT relations and are excluded by the relation predicate:
+	// 0009 `fga_writer`@iam_fgaproxy:system, 0010 (operator) + 0014 (reader SAs)
+	// `system_viewer`@cluster:cluster_kacho_root. A prior object-blocklist
+	// (`object NOT IN (…, 'cluster:cluster_kacho_root')`) wrongly excluded the
+	// test's OWN system_admin grants too (they share that object), so the
+	// assertions counted 0 — hence discriminating on relation+user, not object.
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.fga_outbox
 		  WHERE event_type = $1
-		    AND payload->>'relation' = 'system_admin'`,
+		    AND payload->>'relation' = 'system_admin'
+		    AND payload->>'user' LIKE 'user:%'`,
 		eventType).Scan(&n))
 	return n
 }
@@ -143,8 +225,8 @@ func TestGrant_Idempotent(t *testing.T) {
 	require.False(t, created2, "second Grant must return created=false (idempotent)")
 	require.Equal(t, g1.ID, g2.ID, "idempotent grant must return existing id")
 
-	// Exactly one active row.
-	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
+	// Exactly one active user row — the second Grant added none.
+	require.Equal(t, 1, countActiveUserAdmins(t, ctx, pool))
 }
 
 // ── TestGrant_ConcurrentSameSubject ─────────────────────────────────────────
@@ -221,8 +303,8 @@ func TestGrant_ConcurrentSameSubject(t *testing.T) {
 		require.Equal(t, winnerIDs[0], id, "loser must return winner's id (idempotent)")
 	}
 
-	// Exactly one row in DB.
-	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
+	// Exactly one user row in DB — 9 losers wrote nothing.
+	require.Equal(t, 1, countActiveUserAdmins(t, ctx, pool))
 }
 
 func drainChan(ch <-chan domain.ClusterAdminGrantID) []domain.ClusterAdminGrantID {
@@ -245,9 +327,13 @@ func TestRevoke_LastAdmin_Sequential(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// Setup: ONE admin only.
+	// Setup: ONE active grant in the whole table. The migration-seeded
+	// bootstrap-SA grant is decommissioned first — the guard counts EVERY
+	// active grant, so "S1 is the last admin" is only true once no system
+	// principal holds one either.
 	s1 := mustSeedUser(t, ctx, pool, "s1")
 	caller := mustSeedUser(t, ctx, pool, "caller") // separate principal to avoid self-revoke
+	decommissionBootstrapSeedGrant(t, ctx, pool)
 	seedClusterAdmin(t, ctx, pool, s1)
 	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
 
@@ -263,6 +349,62 @@ func TestRevoke_LastAdmin_Sequential(t *testing.T) {
 
 	// State unchanged: row still active.
 	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
+}
+
+// ── TestRevoke_LastUserAdmin_BootstrapSAKeepsClusterAdministrable ────────────
+//
+// Post-0058 semantics of the D-6 last-admin guard, pinned deliberately.
+//
+// The guard counts EVERY active grant, and since migration 0058 every database
+// permanently carries one: the bootstrap-admin ServiceAccount's cluster
+// system_admin grant. Revoke only ever targets `subject_type='user'` rows (SQL
+// WHERE + the use-case's "only 'user' supported" validation), so that seeded
+// row can never be revoked through this path.
+//
+// Consequences, both asserted here:
+//   - revoking the LAST USER admin now SUCCEEDS (count 2 > 1) — a human-free
+//     admin population is reachable, whereas before 0058 it was refused;
+//   - the invariant D-6 actually defends — "the cluster never reaches zero
+//     active admins", i.e. never locks itself out — still holds, because the
+//     bootstrap SA (the non-interactive recovery principal that mints tokens
+//     for any subject) remains an active admin.
+//
+// ErrLastAdmin therefore stays reachable only once the seeded grant is
+// decommissioned (TestRevoke_LastAdmin_Sequential covers that state); the guard
+// remains a correct fail-safe backstop, not dead code.
+func TestRevoke_LastUserAdmin_BootstrapSAKeepsClusterAdministrable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// The ONLY user admin, on top of the untouched 0058 seed.
+	only := mustSeedUser(t, ctx, pool, "only")
+	caller := mustSeedUser(t, ctx, pool, "caller") // separate principal — not a self-revoke
+	seedClusterAdmin(t, ctx, pool, only)
+	seedSubject := bootstrapSeedSubject(t, ctx, pool)
+	require.Equal(t, 1, countActiveUserAdmins(t, ctx, pool))
+	require.Equal(t, 2, countActiveAdmins(t, ctx, pool), "user admin + bootstrap-SA grant")
+
+	w := kachopg.NewClusterAdminGrantWriter(pool)
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	g, rerr := w.Revoke(ctx, tx, domain.SubjectID(only), string(caller))
+	require.NoError(t, rerr,
+		"the last USER admin is revocable — the bootstrap-SA grant satisfies count>1")
+	require.NoError(t, tx.Commit(ctx))
+	require.False(t, g.IsActive())
+
+	// Zero human admins left — but the cluster still has an admin (never zero).
+	require.Equal(t, 0, countActiveUserAdmins(t, ctx, pool))
+	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
+	require.Equal(t, 1, countActiveAdminsForSubject(t, ctx, pool, seedSubject),
+		"the bootstrap-SA grant is untouched and keeps the cluster administrable")
 }
 
 // ── TestRevoke_ConcurrentLastAdmin ───────────────────────────────────────────
@@ -284,6 +426,9 @@ func TestRevoke_ConcurrentLastAdmin(t *testing.T) {
 
 	s1 := mustSeedUser(t, ctx, pool, "s1")
 	s2 := mustSeedUser(t, ctx, pool, "s2")
+	// Decommission the 0058 seed so the guard's count reflects S1+S2 only —
+	// otherwise BOTH revokes see count=3 and succeed (no ErrLastAdmin).
+	decommissionBootstrapSeedGrant(t, ctx, pool)
 	seedClusterAdmin(t, ctx, pool, s1)
 	seedClusterAdmin(t, ctx, pool, s2)
 	require.Equal(t, 2, countActiveAdmins(t, ctx, pool))
@@ -395,6 +540,9 @@ func TestRevoke_ConcurrentLastAdmin_WriteSkew(t *testing.T) {
 
 	s1 := mustSeedUser(t, ctx, pool, "s1")
 	s2 := mustSeedUser(t, ctx, pool, "s2")
+	// Decommission the 0058 seed — the write-skew this test forces is only
+	// observable when S1+S2 are the entire active-admin population.
+	decommissionBootstrapSeedGrant(t, ctx, pool)
 	seedClusterAdmin(t, ctx, pool, s1)
 	seedClusterAdmin(t, ctx, pool, s2)
 	require.Equal(t, 2, countActiveAdmins(t, ctx, pool))
@@ -487,7 +635,7 @@ func TestRevoke_Self(t *testing.T) {
 	other := mustSeedUser(t, ctx, pool, "other")
 	seedClusterAdmin(t, ctx, pool, s)
 	seedClusterAdmin(t, ctx, pool, other)
-	require.Equal(t, 2, countActiveAdmins(t, ctx, pool))
+	require.Equal(t, 2, countActiveUserAdmins(t, ctx, pool))
 
 	w := kachopg.NewClusterAdminGrantWriter(pool)
 
@@ -501,7 +649,7 @@ func TestRevoke_Self(t *testing.T) {
 		"self-revoke must return ErrSelfRevoke, got %v", rerr)
 
 	// State unchanged.
-	require.Equal(t, 2, countActiveAdmins(t, ctx, pool))
+	require.Equal(t, 2, countActiveUserAdmins(t, ctx, pool))
 }
 
 // ── TestRevoke_NotAdmin ──────────────────────────────────────────────────────
@@ -700,11 +848,12 @@ func TestList_JoinsUsers(t *testing.T) {
 	seedClusterAdmin(t, ctx, pool, a2)
 	seedRevokedClusterAdmin(t, ctx, pool, revoked)
 
+	seedSubject := bootstrapSeedSubject(t, ctx, pool)
+
 	r := kachopg.NewClusterAdminGrantReader(pool)
 
 	entries, err := r.ListActive(ctx)
 	require.NoError(t, err)
-	require.Len(t, entries, 2, "List must return only active admins")
 
 	// Build by-subject map for stable assertion.
 	bySubject := map[string]domain.ClusterAdminEntry{}
@@ -713,10 +862,25 @@ func TestList_JoinsUsers(t *testing.T) {
 	}
 	require.Contains(t, bySubject, string(a1))
 	require.Contains(t, bySubject, string(a2))
-	require.NotContains(t, bySubject, string(revoked))
+	require.NotContains(t, bySubject, string(revoked),
+		"revoked grants must never appear in ListActive")
 
-	// Denormalised user fields populated (mustSeedUser sets email/display_name).
-	for _, e := range entries {
+	// The reader returns the WHOLE active-admin population — the two user
+	// admins seeded here plus the bootstrap ServiceAccount that migration 0058
+	// grants cluster system_admin to. Assert both halves exactly, so a third
+	// unexpected row still fails the test.
+	require.Len(t, entries, 3, "two seeded user admins + the bootstrap-SA grant")
+	require.Contains(t, bySubject, seedSubject, "bootstrap-SA grant must be listed")
+	require.Equal(t, string(domain.GrantSubjectTypeServiceAccount),
+		bySubject[seedSubject].SubjectType,
+		"the bootstrap-SA row must keep its service_account subject_type")
+
+	// Denormalised user fields populated (mustSeedUser sets email/display_name)
+	// for the USER-typed rows. The service_account row has no users-row to JOIN,
+	// so its email/display_name are legitimately empty (LEFT JOIN).
+	for _, id := range []string{string(a1), string(a2)} {
+		e := bySubject[id]
+		require.Equal(t, string(domain.GrantSubjectTypeUser), e.SubjectType)
 		require.NotEmpty(t, e.SubjectEmail, "subject_email must be JOINed from users")
 		require.NotEmpty(t, e.SubjectDisplayName, "subject_display_name must be JOINed")
 	}
@@ -773,7 +937,7 @@ func TestGrant_OpenFGAOutage(t *testing.T) {
 	require.NoError(t, tx.Commit(ctx))
 
 	// Verify both rows visible (TX committed independent of any OpenFGA RPC).
-	require.Equal(t, 1, countActiveAdmins(t, ctx, pool))
+	require.Equal(t, 1, countActiveUserAdmins(t, ctx, pool))
 	require.Equal(t, 1, countOutboxByEvent(t, ctx, pool, "fga.tuple.write"))
 }
 
@@ -826,7 +990,11 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 	require.NoError(t, emit.EmitDeleteTx(ctx, tx2, fgaTuplesGrantSystemAdmin(string(target))))
 	require.NoError(t, tx2.Commit(ctx))
 	require.False(t, g2.IsActive())
-	require.Equal(t, 0, countActiveAdmins(t, ctx, pool)-1) // other is still active, target revoked
+	// Target is revoked; `other` (the second admin seeded above) stays active.
+	require.Equal(t, 0, countActiveAdminsForSubject(t, ctx, pool, string(target)),
+		"revoked target must have no active row")
+	require.Equal(t, 1, countActiveAdminsForSubject(t, ctx, pool, string(other)),
+		"the other admin must be untouched by the revoke")
 
 	// — Step 3: Re-Grant (triggers Reactivate path) ——
 	tx3, err := pool.Begin(ctx)
@@ -849,12 +1017,8 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 
 	// — Invariants ————————————————————————————————————
 	// (a) Exactly one active row for target.
-	var targetActive int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
-		   WHERE subject_id = $1 AND granted_until IS NULL`,
-		string(target)).Scan(&targetActive))
-	require.Equal(t, 1, targetActive, "exactly one active row for target after reactivation")
+	require.Equal(t, 1, countActiveAdminsForSubject(t, ctx, pool, string(target)),
+		"exactly one active row for target after reactivation")
 
 	// (b) ListActive shows target.
 	r := kachopg.NewClusterAdminGrantReader(pool)

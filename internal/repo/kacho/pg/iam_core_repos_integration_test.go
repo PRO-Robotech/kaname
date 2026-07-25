@@ -802,10 +802,14 @@ func TestIamExtRepos_6_10_3_Bootstrap_UserNotFound_GracefulSkip(t *testing.T) {
 	assert.True(t, res.Skipped)
 	assert.Equal(t, "user not registered", res.SkipReason)
 
+	// granted_by='bootstrap' is also carried by the ServiceAccount grant that
+	// migration 0058 seeds, so scope the assertion to the rows RunBootstrapAdmin
+	// itself can write (it hard-codes subject_type='user').
 	var cagCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM cluster_admin_grants WHERE granted_by='bootstrap'`).Scan(&cagCount))
-	assert.Equal(t, 0, cagCount)
+		`SELECT count(*) FROM cluster_admin_grants
+		  WHERE granted_by='bootstrap' AND subject_type='user'`).Scan(&cagCount))
+	assert.Equal(t, 0, cagCount, "graceful skip must write no bootstrap user grant")
 }
 
 func TestIamExtRepos_6_10_1_Bootstrap_Happy(t *testing.T) {

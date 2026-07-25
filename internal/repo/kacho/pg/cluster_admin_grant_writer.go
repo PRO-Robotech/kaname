@@ -137,6 +137,18 @@ func (w *ClusterAdminGrantWriter) Grant(
 // last-admin `count(*)` guard cannot be defeated by a concurrent revoke of a
 // DISTINCT admin (write-skew — see revokeSerializeLockKey). The lock
 // auto-releases at COMMIT/ROLLBACK.
+//
+// Reach of guard 2 since migration 0058: the count spans EVERY active grant,
+// including the permanent one the migration seeds for the bootstrap-admin
+// ServiceAccount, while this UPDATE only ever targets `subject_type='user'`
+// rows. So on a stock database the last USER admin IS revocable (count 2 > 1)
+// and ErrLastAdmin only fires once that seeded grant has been decommissioned.
+// That is intended: the invariant D-6 defends is "the cluster never reaches
+// zero admins / locks itself out", and the bootstrap SA is exactly the
+// non-interactive recovery principal that keeps it administrable. The guard
+// stays as the fail-safe for a cluster whose bootstrap SA is gone — do not
+// "fix" it by narrowing the count to user rows, which would re-introduce a
+// refusal that protects nothing.
 func (w *ClusterAdminGrantWriter) Revoke(
 	ctx context.Context, txh service.Tx,
 	subject domain.SubjectID, principalID string,

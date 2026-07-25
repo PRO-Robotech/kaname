@@ -123,6 +123,46 @@ func seedClusterAdmin(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sub
 	require.NoError(t, err, "seed cluster_admin_grants row")
 }
 
+// bootstrapSeedSubject returns the id of the bootstrap-admin ServiceAccount
+// that migration 0058 seeds a permanent cluster system_admin grant for, and
+// asserts that grant is the only service_account one (singleton by design).
+func bootstrapSeedSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
+	t.Helper()
+	rows, err := pool.Query(ctx,
+		`SELECT subject_id FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_type = 'service_account' AND granted_until IS NULL`)
+	require.NoError(t, err)
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		require.NoError(t, rows.Scan(&id))
+		ids = append(ids, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, ids, 1, "migration 0058 seeds exactly one bootstrap-SA cluster admin grant")
+	return ids[0]
+}
+
+// decommissionBootstrapSeedGrant revokes the migration-seeded bootstrap-SA
+// grant so a user grant can become the LAST active grant in the table.
+//
+// The last-admin guard counts every active grant regardless of subject_type,
+// while RevokeAdmin only ever revokes subject_type='user' rows — so while the
+// 0058 seed is active, "revoking the last admin" is unreachable through the
+// RPC. Tests for that guard must first model a cluster whose bootstrap SA has
+// been decommissioned (revoked, not deleted — the real lifecycle path).
+func decommissionBootstrapSeedGrant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	tag, err := pool.Exec(ctx,
+		`UPDATE kacho_iam.cluster_admin_grants
+		    SET granted_until = now()
+		  WHERE subject_type = 'service_account' AND granted_until IS NULL`)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected(),
+		"exactly one seeded service_account grant must be decommissioned")
+}
+
 // seedRevokedClusterAdmin inserts a history row with granted_until set.
 func seedRevokedClusterAdmin(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subject domain.UserID) {
 	t.Helper()

@@ -350,9 +350,14 @@ func TestCluster_6_08a_RevokeAdmin_LastAdmin(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// ONE admin only.
+	// ONE active grant in the whole table: the migration-seeded bootstrap-SA
+	// grant is decommissioned first, because the last-admin guard counts EVERY
+	// active grant — with the seed intact, `admin` is not the last one and the
+	// revoke legitimately succeeds (pinned by the repo-level
+	// TestRevoke_LastUserAdmin_BootstrapSAKeepsClusterAdministrable).
 	admin := mustSeedUser(t, ctx, pool, "admin")
 	caller := mustSeedUser(t, ctx, pool, "caller") // separate caller to avoid self-revoke
+	decommissionBootstrapSeedGrant(t, ctx, pool)
 	seedClusterAdmin(t, ctx, pool, admin)
 
 	h := buildHandler(t, dsn)
@@ -478,22 +483,43 @@ func TestCluster_6_11_ListAdmins(t *testing.T) {
 	seedClusterAdmin(t, ctx, pool, a1)
 	seedClusterAdmin(t, ctx, pool, a2)
 	seedRevokedClusterAdmin(t, ctx, pool, revoked)
+	seedSubject := bootstrapSeedSubject(t, ctx, pool)
 
 	h := buildHandler(t, dsn)
 
 	resp, err := h.ListAdmins(ctx, &iamv1.ListClusterAdminsRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Len(t, resp.GetAdmins(), 2, "only active admins must be returned")
 
-	subjectIDs := map[string]bool{}
+	bySubject := map[string]*iamv1.ClusterAdminEntry{}
 	for _, e := range resp.GetAdmins() {
-		subjectIDs[e.GetSubjectId()] = true
+		bySubject[e.GetSubjectId()] = e
+	}
+	require.NotContains(t, bySubject, string(revoked),
+		"only active admins must be returned")
+
+	// The response is the whole active-admin population: the two user admins
+	// seeded here plus the bootstrap ServiceAccount granted cluster
+	// system_admin by migration 0058. Assert both halves exactly.
+	require.Len(t, resp.GetAdmins(), 3, "two seeded user admins + the bootstrap-SA grant")
+	require.Contains(t, bySubject, string(a1))
+	require.Contains(t, bySubject, string(a2))
+	require.Contains(t, bySubject, seedSubject, "bootstrap-SA grant must be listed")
+
+	for _, id := range []string{string(a1), string(a2)} {
+		e := bySubject[id]
+		require.Equal(t, iamv1.ClusterGrantSubjectType_USER, e.GetSubjectType())
 		require.NotEmpty(t, e.GetSubjectEmail(), "subject_email must be populated")
 	}
-	require.True(t, subjectIDs[string(a1)])
-	require.True(t, subjectIDs[string(a2)])
-	require.False(t, subjectIDs[string(revoked)])
+
+	// The ServiceAccount grant must be reported AS a service account: the entry
+	// carries the stored subject_type, never a hard-coded USER. Mis-typing it
+	// would tell an operator that `sva…` is a human user.
+	sa := bySubject[seedSubject]
+	require.Equal(t, iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT, sa.GetSubjectType(),
+		"service_account grant must not be reported as USER")
+	require.Empty(t, sa.GetSubjectEmail(),
+		"a ServiceAccount has no users-row to denormalise an email from")
 }
 
 // ── GrantAdmin user not in DB ──────────────────────────────────────

@@ -145,9 +145,12 @@ func TestRunBootstrapAdmin_UserAbsent_GracefulSkip_NoRows(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// fga_outbox carries baseline rows seeded by SEC-C / SEC-L migrations
-	// (0009 / 0010); the skip must add NONE on top of that baseline.
-	var outboxBefore int
+	// Both tables carry baseline rows seeded by migrations — fga_outbox from
+	// SEC-C / SEC-L (0009 / 0010), and cluster_admin_grants from 0058, which
+	// seeds the bootstrap-admin ServiceAccount's cluster system_admin grant.
+	// The skip must add NONE on top of that baseline, so assert the delta.
+	var grantsBefore, outboxBefore int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM cluster_admin_grants`).Scan(&grantsBefore))
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM fga_outbox`).Scan(&outboxBefore))
 
 	res, err := seed.RunBootstrapAdmin(ctx, pool, slog.Default(),
@@ -156,11 +159,19 @@ func TestRunBootstrapAdmin_UserAbsent_GracefulSkip_NoRows(t *testing.T) {
 	assert.True(t, res.Skipped)
 	assert.Equal(t, "user not registered", res.SkipReason)
 
-	var grants, outboxAfter int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM cluster_admin_grants`).Scan(&grants))
+	var grantsAfter, outboxAfter int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM cluster_admin_grants`).Scan(&grantsAfter))
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM fga_outbox`).Scan(&outboxAfter))
-	assert.Zero(t, grants, "no grant when user absent")
+	assert.Equal(t, grantsBefore, grantsAfter, "no new grant when user absent")
 	assert.Equal(t, outboxBefore, outboxAfter, "no new fga_outbox row when user absent")
+
+	// And specifically: no user-subject grant at all — RunBootstrapAdmin only
+	// ever writes subject_type='user', so this stays exact regardless of which
+	// system principals the migrations seed.
+	var userGrants int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM cluster_admin_grants WHERE subject_type='user'`).Scan(&userGrants))
+	assert.Zero(t, userGrants, "no user grant when the bootstrap user is absent")
 }
 
 func TestRunBootstrapAdmin_Idempotent_NoDuplicate(t *testing.T) {

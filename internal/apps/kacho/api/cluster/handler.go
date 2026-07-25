@@ -107,10 +107,27 @@ func clusterToProto(c domain.Cluster) *iamv1.Cluster {
 	}
 }
 
+// clusterGrantSubjectTypeToProto maps the stored `subject_type` to the wire
+// enum. It used to be hard-coded to USER — harmless while every row was a user
+// grant, but migration 0058 seeds a cluster system_admin grant for the
+// bootstrap-admin ServiceAccount, which ListAdmins then reported as a human
+// USER holding an `sva…` id. An unrecognised value stays UNSPECIFIED rather
+// than claiming a type the row does not carry.
+func clusterGrantSubjectTypeToProto(subjectType string) iamv1.ClusterGrantSubjectType {
+	switch domain.GrantSubjectType(subjectType) {
+	case domain.GrantSubjectTypeUser:
+		return iamv1.ClusterGrantSubjectType_USER
+	case domain.GrantSubjectTypeServiceAccount:
+		return iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT
+	default:
+		return iamv1.ClusterGrantSubjectType_CLUSTER_GRANT_SUBJECT_TYPE_UNSPECIFIED
+	}
+}
+
 func clusterAdminEntryToProto(e domain.ClusterAdminEntry) *iamv1.ClusterAdminEntry {
 	return &iamv1.ClusterAdminEntry{
 		ClusterAdminGrantId: e.ClusterAdminGrantID,
-		SubjectType:         iamv1.ClusterGrantSubjectType_USER,
+		SubjectType:         clusterGrantSubjectTypeToProto(e.SubjectType),
 		SubjectId:           e.SubjectID,
 		SubjectEmail:        e.SubjectEmail,
 		GrantedByUserId:     e.GrantedByUserID,
