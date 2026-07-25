@@ -11,8 +11,10 @@ package role
 //     They are NOT subject to the per-object filter — RoleService.Get stays
 //     <exempt> in proto so a system-role Get always passes the interceptor.
 //   - CUSTOM roles are tenant-secret. Get enforces per-object via the SAME FGA
-//     ListObjects(subject,"viewer","iam_role") set that drives RoleService.List
-//     (read==enforce, single source of truth — resolveVisibleRoleIDs). The
+//     `viewer ∪ v_list` question that drives RoleService.List (read==enforce,
+//     single source of truth — resolveVisibleRoleIDs), asked DIRECTLY on the one
+//     role being read rather than by membership in a server-capped ListObjects
+//     enumeration (internal/authzfilter). The
 //     `viewer` tier cascades from the account tier so a role's creator /
 //     account-admin resolves their own roles; a custom role the caller has no
 //     viewer grant on (incl. a foreign account's role) → NOT_FOUND "Role <id> not
@@ -83,14 +85,12 @@ func (u *GetRoleUseCase) Execute(ctx context.Context, id domain.RoleID) (domain.
 	// id ∉ set → NOT_FOUND (no existence leak); FGA error/nil port → Unavailable
 	// (fail-closed). The role body is returned ONLY when the caller is granted.
 	principal := operations.PrincipalFromContext(ctx)
-	visible, err := resolveVisibleRoleIDs(ctx, u.relationQueries, principal)
+	visible, err := resolveVisibleRoleIDs(ctx, u.relationQueries, principal, []string{string(id)})
 	if err != nil {
 		return domain.Role{}, err // already a fail-closed Unavailable status
 	}
-	for _, vid := range visible {
-		if vid == string(id) {
-			return out, nil
-		}
+	if visible[string(id)] {
+		return out, nil
 	}
 	// Ungranted custom role: same NOT_FOUND text as a non-existent role — the
 	// caller cannot distinguish "exists but not yours" from "does not exist".

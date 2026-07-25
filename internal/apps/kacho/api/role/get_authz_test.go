@@ -87,14 +87,39 @@ func TestGetRole_D1_GrantedCustom_Served(t *testing.T) {
 	require.Equal(t, "rol0000000000000cst1", string(got.ID))
 	require.Len(t, got.Rules, 1)
 	// custom Get enforces via the SAME viewer ∪ v_list union as List
-	// (read==enforce) — the owner resolves `viewer` via the account-tier
-	// cascade; a v_list-only selector grant resolves `v_list`.
+	// (read==enforce) — the owner resolves `viewer` via the account-tier cascade.
+	// The union is now evaluated PER OBJECT and short-circuits: `v_list` is asked
+	// only for what `viewer` denied, so a viewer-granted role costs one Check.
+	// The v_list arm of the union is locked by the sibling case below.
 	require.GreaterOrEqual(t, fga.relations["viewer"], 1,
 		"custom Get must consult the `viewer` tier relation (account-tier cascade)")
-	require.GreaterOrEqual(t, fga.relations["v_list"], 1,
-		"custom Get must ALSO consult the `v_list` verb relation (object-only selector grant, union)")
 	require.Equal(t, "iam_role", fga.lastObjType)
 	require.Equal(t, "user:usr-u1", fga.lastSubject)
+}
+
+// v_list arm of the union: a role granted ONLY the object-only `v_list` selector
+// tuple (no viewer cascade) is still served by Get — read==enforce parity with
+// List, which surfaces exactly such a grant (list_vlist_union_test.go).
+func TestGetRole_D1_VListOnlyGrantedCustom_Served(t *testing.T) {
+	repo := newRoleListFakeRepo()
+	repo.roles["rol0000000000000cst2"] = domain.Role{
+		ID:        domain.RoleID("rol0000000000000cst2"),
+		Name:      domain.RoleName("selector-only"),
+		IsSystem:  false,
+		AccountID: domain.AccountID("acc-A"),
+		Rules:     domain.Rules{{Module: "vpc", Resources: []string{"address"}, Verbs: []string{"get"}}},
+		CreatedAt: time.Now().UTC(),
+	}
+
+	fga := newRoleUnionFGAStub()
+	fga.set("v_list", "user:usr-u1", []string{"rol0000000000000cst2"}) // NO viewer
+
+	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst2"))
+	require.NoError(t, err, "a v_list-only selector grant must serve Get (union, read==enforce)")
+	require.Equal(t, "rol0000000000000cst2", string(got.ID))
+	require.GreaterOrEqual(t, fga.calls["v_list"], 1,
+		"the v_list arm of the union must be consulted when viewer denies")
 }
 
 // ungranted custom: caller has NO v_list grant → NOT_FOUND, and the body

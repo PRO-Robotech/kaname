@@ -7,8 +7,12 @@ package group
 // account/project/service_account/role List): результат фильтруется через UNION
 // FGA-отношений
 //
-//	visible(iam_group) = ListObjects(subj,"viewer","iam_group")
-//	                   ∪ ListObjects(subj,"v_list","iam_group")
+//	visible(id) = Check(subj,"viewer","iam_group:"+id)
+//	            ∨ Check(subj,"v_list","iam_group:"+id)
+//
+// спрашиваемых для групп СТРАНИЦЫ (страница читается курсором из своей БД
+// ПЕРВОЙ). Прежняя форма — «перечислить всё видимое и пересечь» — молча резалась
+// server-side пределом OpenFGA ListObjects (см. internal/authzfilter).
 //
 //   - ветка viewer — группы, на которые принципал держит viewer-tier (account-admin
 //     резолвит viewer на каждую группу своего аккаунта через account-tier cascade);
@@ -29,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -67,7 +72,7 @@ func (u *ListGroupsUseCase) Execute(ctx context.Context, f repogroup.ListFilter)
 	if err != nil {
 		return nil, "", err
 	}
-	visible, err := u.visibleGroupIDs(ctx, principal)
+	visible, err := u.visibleGroupIDs(ctx, principal, groupIDsOf(out))
 	if err != nil {
 		return nil, "", err
 	}
@@ -80,9 +85,15 @@ func (u *ListGroupsUseCase) Execute(ctx context.Context, f repogroup.ListFilter)
 	return filtered, next, nil
 }
 
-// visibleGroupIDs — UNION FGA viewer ∪ v_list на iam_group. Fail-closed: nil-порт
-// или FGA-ошибка на любой relation → Unavailable.
-func (u *ListGroupsUseCase) visibleGroupIDs(ctx context.Context, principal operations.Principal) (map[string]bool, error) {
+// visibleGroupIDs — UNION FGA viewer ∪ v_list на iam_group, спрашиваемый ПРЯМО
+// по каждому объекту СТРАНИЦЫ. Прежняя форма (ListObjects — «перечисли все
+// видимые группы») молча резалась server-side пределом OpenFGA (1000 объектов
+// типа в сторе, без continuation-token), из-за чего собственная группа тенанта
+// выпадала из выдачи навсегда; предикат тот же, изменилась только форма вопроса
+// (см. package-doc internal/authzfilter).
+//
+// Fail-closed: nil-порт или FGA-ошибка на любом объекте → Unavailable.
+func (u *ListGroupsUseCase) visibleGroupIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
 	if u.relationQueries == nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
@@ -90,17 +101,20 @@ func (u *ListGroupsUseCase) visibleGroupIDs(ctx context.Context, principal opera
 	if subject == "" {
 		return map[string]bool{}, nil
 	}
-	visible := map[string]bool{}
-	for _, relation := range []string{"viewer", "v_list"} {
-		ids, err := u.relationQueries.ListObjects(ctx, subject, relation, "iam_group", nil, 0)
-		if err != nil {
-			return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
-		}
-		for _, id := range ids {
-			visible[id] = true
-		}
+	visible, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, "iam_group", ids)
+	if err != nil {
+		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	return visible, nil
+}
+
+// groupIDsOf проецирует страницу групп в голые id.
+func groupIDsOf(rows []domain.Group) []string {
+	out := make([]string, 0, len(rows))
+	for _, g := range rows {
+		out = append(out, string(g.ID))
+	}
+	return out
 }
 
 func (u *ListGroupsUseCase) list(ctx context.Context, f repogroup.ListFilter) ([]domain.Group, string, error) {

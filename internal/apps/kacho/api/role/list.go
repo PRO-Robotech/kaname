@@ -9,18 +9,16 @@ package role
 //   - System roles (is_system) are the tenant-wide reference floor — every
 //     authenticated principal sees them (RoleService.Get is <exempt>). They are
 //     NOT subject to the per-object filter.
-//   - CUSTOM roles are filtered per-object via the UNION of FGA
-//     ListObjects(subject, "viewer", "iam_role") ∪ ListObjects(subject, "v_list",
-//     "iam_role") — parity with account/project List. The `viewer` tier on
+//   - CUSTOM roles are filtered per-object via the UNION of the FGA `viewer` and
+//     `v_list` relations on iam_role, asked DIRECTLY for the roles ON THE PAGE —
+//     parity with account/project List. The `viewer` tier on
 //     iam_role cascades from the ACCOUNT tier (account.admin→editor→viewer), so a
 //     role's creator / account-admin resolves visibility on every role
 //     hierarchy-linked to their account; the `v_list` branch surfaces an
 //     OBJECT-ONLY selector grant (`iam_role:<id> # v_list @ subj`, no viewer
 //     cascade) — the see-in-selector-without-content path. A foreign account
-//     resolves neither (no existence leak). The visible-id set is pushed into the
-//     repo `WHERE (is_system OR id = ANY(...))` (ListFilter.VisibleIDs) so keyset
-//     pagination is dense over the filtered set, and the SAME resolver
-//     backs RoleService.Get so List == Get for custom roles (read==enforce).
+//     resolves neither (no existence leak). The SAME resolver backs
+//     RoleService.Get so List == Get for custom roles (read==enforce).
 //
 //     Design-B (flat-authz verb-bearing complete): v_* are DECOUPLED from the tier
 //     relations (no viewer ⊇ v_list union in the FGA model), so a v_list-only
@@ -28,6 +26,17 @@ package role
 //     such a grant from its grantee; the viewer ∪ v_list union surfaces it while
 //     content (v_get) stays gated. The owner sees their own role via the viewer
 //     branch (account-tier cascade).
+//
+// Order is load-bearing: the page is read from the iam database by cursor FIRST,
+// and only the CUSTOM roles it yields are then checked. The reverse order
+// ("enumerate every visible role, then narrow the SQL to that id-set") hit
+// OpenFGA's hard ListObjects bound (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default
+// 1000, no continuation token) and made a tenant's own custom roles vanish once
+// the store held more iam_role objects than the cap — see the
+// internal/authzfilter package doc. Side effect: a page may come back SHORT
+// (some rows filtered out), which is normal for cursor pagination —
+// next_page_token is derived from the last row EXAMINED, so a full walk still
+// skips nothing.
 //
 // f.AccountID (set by the handler from req.account_id) scopes the catalog
 // to system + that Account's custom roles at the SQL layer.
@@ -42,6 +51,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -51,8 +61,9 @@ import (
 
 type ListRolesUseCase struct {
 	repo Repo
-	// relationQueries — FGA ListObjects port resolving the principal's `viewer`
-	// (readable-role) set on iam_role. When nil the use-case fails closed.
+	// relationQueries — FGA port resolving the principal's `viewer ∪ v_list`
+	// visibility on the iam_role objects of a page. When nil the use-case fails
+	// closed.
 	relationQueries clients.RelationQueries
 }
 
@@ -60,9 +71,9 @@ func NewListRolesUseCase(r Repo) *ListRolesUseCase {
 	return &ListRolesUseCase{repo: r}
 }
 
-// WithRelationStore wires the FGA ListObjects client used to resolve the
-// principal's readable-role (`viewer` tier) set on iam_role. Mirrors
-// ListAccountsUseCase / ListProjectsUseCase (which already filter by `viewer`).
+// WithRelationStore wires the FGA client used to resolve the principal's
+// readable-role visibility on iam_role. Mirrors ListAccountsUseCase /
+// ListProjectsUseCase.
 func (u *ListRolesUseCase) WithRelationStore(relations clients.RelationQueries) *ListRolesUseCase {
 	u.relationQueries = relations
 	return u
@@ -76,16 +87,17 @@ func (u *ListRolesUseCase) Execute(ctx context.Context, f reporole.ListFilter) (
 	}
 	principal := operations.PrincipalFromContext(ctx)
 
-	// Resolve the principal's per-object visible custom-role id set (fail-closed).
-	// System roles bypass this set in the repo (catalog floor). The SAME resolver
-	// backs RoleService.Get's custom-role enforcement, so List-visibility ==
-	// Get-success for custom roles (read==enforce — single source of truth).
-	visible, err := resolveVisibleRoleIDs(ctx, u.relationQueries, principal)
-	if err != nil {
-		return nil, "", err
+	// Unwired FGA port → fail closed BEFORE touching the database: no visibility
+	// is resolvable at all, so the page could only be served unfiltered (a catalog
+	// leak) or discarded. This is NOT the grant-state short-circuit the pagination
+	// convention orders after format validation — page_size/page_token are already
+	// validated by the handler (and re-validated by the repo on the served path).
+	if u.relationQueries == nil {
+		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
-	f.VisibleIDs = visible
 
+	// Page FIRST, per-object visibility SECOND (see the file doc for why the
+	// reverse order was unsound).
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
 		return nil, "", shared.MapRepoErr(err)
@@ -96,13 +108,40 @@ func (u *ListRolesUseCase) Execute(ctx context.Context, f reporole.ListFilter) (
 	if err != nil {
 		return nil, "", shared.MapRepoErr(err)
 	}
+
+	// Resolve visibility for the CUSTOM roles on this page. System roles are the
+	// tenant-wide catalog floor and bypass the filter entirely; a page carrying
+	// only system roles costs no FGA call at all.
+	visible, err := resolveVisibleRoleIDs(ctx, u.relationQueries, principal, customRoleIDs(out))
+	if err != nil {
+		return nil, "", err
+	}
+	filtered := out[:0]
+	for _, r := range out {
+		if r.IsSystem || visible[string(r.ID)] {
+			filtered = append(filtered, r)
+		}
+	}
 	// redesign-2026 F6: present the canonical system-role catalog first — system
 	// roles ahead of custom, and among system the canonical four in
 	// viewer→editor→admin→owner order (domain.CanonicalRank). Stable, so the repo's
 	// (created_at,id) keyset order is preserved within each rank group; this is a
 	// presentation refinement over the authoritative keyset page.
-	sortCatalogFirst(out)
-	return out, next, nil
+	sortCatalogFirst(filtered)
+	return filtered, next, nil
+}
+
+// customRoleIDs projects a role page to the ids of its CUSTOM roles — the only
+// ones subject to the per-object visibility filter (system roles are the catalog
+// floor).
+func customRoleIDs(roles []domain.Role) []string {
+	out := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if !r.IsSystem {
+			out = append(out, string(r.ID))
+		}
+	}
+	return out
 }
 
 // sortCatalogFirst stably orders a role page: system roles first, then by canonical
@@ -118,11 +157,12 @@ func sortCatalogFirst(roles []domain.Role) {
 	})
 }
 
-// resolveVisibleRoleIDs returns the custom-role id set the principal can read —
-// the UNION of the FGA `viewer` and `v_list` relation sets on iam_role:
+// resolveVisibleRoleIDs returns which of the given CUSTOM-role ids the principal
+// can read — the UNION of the FGA `viewer` and `v_list` relations on iam_role,
+// asked DIRECTLY per object:
 //
-//		visible(iam_role) = ListObjects(subject, "viewer", "iam_role")
-//		                  ∪ ListObjects(subject, "v_list", "iam_role")
+//		visible(id) = Check(subject, "viewer", "iam_role:"+id)
+//		            ∨ Check(subject, "v_list", "iam_role:"+id)
 //
 //	  - The `viewer` branch surfaces roles the principal resolves the viewer tier on
 //	    (the account-admin's own roles via the account-tier cascade; viewer implies
@@ -130,44 +170,39 @@ func sortCatalogFirst(roles []domain.Role) {
 //	    tier, so viewer alone never surfaces an object-only v_list grant.
 //	  - The `v_list` branch surfaces roles granted ONLY `iam.roles.{get,list}` via a
 //	    names/labels selector — an OBJECT-ONLY `iam_role:<id> # v_list @ subj` tuple
-//	    with NO viewer-tier cascade (see-in-selector-without-content). The
-//	    viewer-only pre-Design-B filter hid such a grant from its grantee.
-//	  - The two sets are deduplicated; a role in both appears once.
+//	    with NO viewer-tier cascade (see-in-selector-without-content).
 //
-// Returns a non-nil slice (possibly empty) so the repo applies the per-object
-// constraint to custom roles. Fail-closed: a nil FGA port or an FGA error on
-// EITHER relation → Unavailable; an unresolvable subject → empty set
-// (system roles still served).
+// The predicate is unchanged from the ListObjects enumeration this replaces
+// (ListObjects returns, by definition, what Check would allow). What changed is
+// the SHAPE: OpenFGA caps ListObjects server-side at 1000 objects of the type in
+// the store with no continuation token, so past that population a role's own
+// grantee fell outside the returned prefix — List dropped the role and Get
+// answered NOT_FOUND, permanently (internal/authzfilter package doc).
 //
-// Shared by ListRolesUseCase (filter custom roles) AND GetRoleUseCase (enforce a
-// single custom role) so the two read surfaces draw from the IDENTICAL FGA query
-// — Get can never serve a custom role absent from List (no existence leak).
-func resolveVisibleRoleIDs(ctx context.Context, relationQueries clients.RelationQueries, principal operations.Principal) ([]string, error) {
+// Fail-closed: a nil FGA port or an FGA error on ANY object → Unavailable; an
+// unresolvable subject → empty set (system roles still served).
+//
+// Shared by ListRolesUseCase (filter the custom roles on a page) AND
+// GetRoleUseCase (enforce a single custom role) so the two read surfaces draw
+// from the IDENTICAL FGA question — Get can never serve a custom role absent
+// from List (no existence leak).
+func resolveVisibleRoleIDs(ctx context.Context, relationQueries clients.RelationQueries, principal operations.Principal, ids []string) (map[string]bool, error) {
 	if relationQueries == nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	subject := principalSubject(principal)
 	if subject == "" {
-		return []string{}, nil // unknown principal → only system catalog floor
+		return map[string]bool{}, nil // unknown principal → only system catalog floor
 	}
-	seen := map[string]struct{}{}
-	out := []string{} // non-nil so the repo applies the per-object constraint
-	// viewer ∪ v_list — both fail closed on error (never a partial/owner-only list).
-	for _, relation := range []string{"viewer", "v_list"} {
-		ids, err := relationQueries.ListObjects(ctx, subject, relation, "iam_role", nil, 0)
-		if err != nil {
-			return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
-		}
-		for _, id := range ids {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			out = append(out, id)
-		}
+	visible, err := authzfilter.VisibleSet(ctx, relationQueries, subject, fgaRoleObjectType, ids)
+	if err != nil {
+		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
-	return out, nil
+	return visible, nil
 }
+
+// fgaRoleObjectType — the OpenFGA object type of a Role.
+const fgaRoleObjectType = "iam_role"
 
 // principalSubject builds the FGA subject string from the principal type:
 // `user:<id>` for users, `service_account:<id>` for SAs. Any other type → ""

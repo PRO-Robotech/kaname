@@ -32,6 +32,13 @@ type fgaWireListObjectsResponse struct {
 
 // ListObjects — see RelationQueries.
 //
+// Server cap (important): the wire request below carries NO page_size /
+// max_results field, because OpenFGA's list-objects endpoint has none — it
+// applies its OWN ceiling (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default 1000) and
+// returns no continuation token. The `maxResults` argument is therefore applied
+// HERE, client-side, as a trim of an already-bounded response: it can only make
+// the answer smaller. There is no way for this method to ask for more.
+//
 // Consistency: ListObjects always sends HIGHER_CONSISTENCY (strong read-after-write),
 // unlike the hot per-RPC enforcement Check which keeps OpenFGA's cache-eligible
 // default (MINIMIZE_LATENCY). ListObjects resolves a subject's VISIBLE set for a

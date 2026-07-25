@@ -6,8 +6,12 @@ package service_account
 // list.go — ListServiceAccountsUseCase. Единая модель видимости (паритет с
 // account/project/role List): результат фильтруется через UNION FGA-отношений
 //
-//	visible(iam_service_account) = ListObjects(subj,"viewer","iam_service_account")
-//	                             ∪ ListObjects(subj,"v_list","iam_service_account")
+//	visible(id) = Check(subj,"viewer","iam_service_account:"+id)
+//	            ∨ Check(subj,"v_list","iam_service_account:"+id)
+//
+// спрашиваемых для SA СТРАНИЦЫ (страница читается курсором из своей БД ПЕРВОЙ).
+// Прежняя форма — «перечислить всё видимое и пересечь» — молча резалась
+// server-side пределом OpenFGA ListObjects (см. internal/authzfilter).
 //
 //   - ветка `viewer` — SA, на которые принципал держит viewer-tier (account-admin
 //     резолвит viewer на каждый SA своего аккаунта через account-tier cascade;
@@ -29,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -69,7 +74,7 @@ func (u *ListServiceAccountsUseCase) Execute(ctx context.Context, f reposa.ListF
 	if err != nil {
 		return nil, "", err
 	}
-	visible, err := u.visibleServiceAccountIDs(ctx, principal)
+	visible, err := u.visibleServiceAccountIDs(ctx, principal, serviceAccountIDsOf(out))
 	if err != nil {
 		return nil, "", err
 	}
@@ -82,9 +87,15 @@ func (u *ListServiceAccountsUseCase) Execute(ctx context.Context, f reposa.ListF
 	return filtered, next, nil
 }
 
-// visibleServiceAccountIDs — UNION FGA viewer ∪ v_list на iam_service_account.
-// Fail-closed: nil-порт или FGA-ошибка на любой relation → Unavailable.
-func (u *ListServiceAccountsUseCase) visibleServiceAccountIDs(ctx context.Context, principal operations.Principal) (map[string]bool, error) {
+// visibleServiceAccountIDs — UNION FGA viewer ∪ v_list на iam_service_account,
+// спрашиваемый ПРЯМО по каждому объекту СТРАНИЦЫ. Прежняя форма (ListObjects —
+// «перечисли все видимые SA») молча резалась server-side пределом OpenFGA (1000
+// объектов типа в сторе, без continuation-token), из-за чего собственный SA
+// тенанта выпадал из выдачи навсегда; предикат тот же, изменилась только форма
+// вопроса (см. package-doc internal/authzfilter).
+//
+// Fail-closed: nil-порт или FGA-ошибка на любом объекте → Unavailable.
+func (u *ListServiceAccountsUseCase) visibleServiceAccountIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
 	if u.relationQueries == nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
@@ -92,17 +103,20 @@ func (u *ListServiceAccountsUseCase) visibleServiceAccountIDs(ctx context.Contex
 	if subject == "" {
 		return map[string]bool{}, nil
 	}
-	visible := map[string]bool{}
-	for _, relation := range []string{"viewer", "v_list"} {
-		ids, err := u.relationQueries.ListObjects(ctx, subject, relation, "iam_service_account", nil, 0)
-		if err != nil {
-			return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
-		}
-		for _, id := range ids {
-			visible[id] = true
-		}
+	visible, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, "iam_service_account", ids)
+	if err != nil {
+		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	return visible, nil
+}
+
+// serviceAccountIDsOf проецирует страницу SA в голые id.
+func serviceAccountIDsOf(rows []domain.ServiceAccount) []string {
+	out := make([]string, 0, len(rows))
+	for _, sa := range rows {
+		out = append(out, string(sa.ID))
+	}
+	return out
 }
 
 func (u *ListServiceAccountsUseCase) list(ctx context.Context, f reposa.ListFilter) ([]domain.ServiceAccount, string, error) {

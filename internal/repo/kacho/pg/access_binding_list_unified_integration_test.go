@@ -67,15 +67,13 @@ func TestAB_IAM_1_32_UnifiedListRepo(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, rows, 2)
 
-	// (4) VisibleIDs push-down → only the listed id; empty slice → nothing.
-	rows, _, err = rd.AccessBindings().List(ctx, repoab.ListFilter{PageSize: 100, VisibleIDs: []string{string(bOther.ID)}})
+	// (4) subject predicate → only that subject's binding. (There is deliberately
+	// no visible-id push-down: read visibility is resolved per-object by the
+	// use-case over the returned page — see internal/authzfilter.)
+	rows, _, err = rd.AccessBindings().List(ctx, repoab.ListFilter{PageSize: 100, SubjectID: string(bOther.SubjectID)})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, bOther.ID, rows[0].ID)
-
-	rows, _, err = rd.AccessBindings().List(ctx, repoab.ListFilter{PageSize: 100, VisibleIDs: []string{}})
-	require.NoError(t, err)
-	assert.Empty(t, rows, "empty VisibleIDs lists nothing")
 
 	// (5) keyset pagination: page_size 1 → one row + a next token, then resume.
 	page1, next, err := rd.AccessBindings().List(ctx, repoab.ListFilter{PageSize: 1, ScopeType: "account", ScopeID: string(acc.ID)})

@@ -47,7 +47,10 @@ func (u *ListByScopeUseCase) WithRelationQueries(q clients.RelationQueries) *Lis
 // cluster-admin) enumerates ALL bindings on the scope (the existing granted-floor,
 // NOT shrunk). A non-authority caller still sees the bindings on the scope made
 // visible to them by a label-selector grant (viewer ∪ v_list on iam_access_binding) —
-// the additive union floor. Anonymous → rejected. FGA error → UNAVAILABLE.
+// the additive union floor, resolved PER-OBJECT over the page (the previous
+// ListObjects enumeration was silently capped at 1000 objects of the type in the
+// store, which denied a legitimate grantee outright — internal/authzfilter).
+// Anonymous → rejected. FGA error → UNAVAILABLE.
 func (u *ListByScopeUseCase) Execute(ctx context.Context, resourceType domain.ResourceType, resourceID string, f repoab.PageFilter) ([]domain.AccessBinding, string, error) {
 	// Reject anonymous callers — listing bindings on a scope leaks structure.
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
@@ -65,19 +68,33 @@ func (u *ListByScopeUseCase) Execute(ctx context.Context, resourceType domain.Re
 	if hasAuthority {
 		return rows, next, nil
 	}
-	// Non-authority caller: surface only the v_list/viewer-visible subset (D-6 union
-	// floor). Fail-closed on FGA error. A caller with NO label visibility at all
-	// (empty set, or the resolver unwired) → PermissionDenied — preserving the
-	// existing anti-leak contract (a total stranger must not learn the scope exists,
-	// nor receive an empty 200 that distinguishes it from a forbidden one).
-	visible, ok, verr := vlistVisibleBindingIDs(ctx, u.queries)
+	// Non-authority caller: surface only the v_list/viewer-visible subset of the
+	// PAGE (D-6 union floor), resolved per-object. Fail-closed on FGA error.
+	visible, ok, verr := visibleBindingIDsOnPage(ctx, u.queries, bindingIDs(rows))
 	if verr != nil {
 		return nil, "", verr
 	}
-	if !ok || len(visible) == 0 {
+	out := []domain.AccessBinding{}
+	if ok {
+		out = filterVisibleBindings(rows, visible)
+	}
+	// Anti-leak deny. The authority precheck that decides it is `hasAuthority`
+	// (requireGrantAuthority — owner / FGA scope-admin / cluster-admin), which asks
+	// DIRECT per-object Checks and is therefore never truncated. It is combined with
+	// "and the scope held nothing visible to you": a caller who is neither an
+	// authority nor a grantee must not learn the scope exists, nor receive an empty
+	// 200 that distinguishes it from a forbidden one.
+	//
+	// The second clause is evaluated only when this page is the LAST one
+	// (next == ""), i.e. the whole scope has been examined. "Nothing visible ON THIS
+	// PAGE" is NOT "no authority at all" — denying a mid-walk page would 403 a
+	// legitimate grantee whose bindings simply sort onto a later page. A stranger
+	// probing a scope issues an unpaginated first request, which still lands on the
+	// deny (a scope smaller than one page has next == "").
+	if len(out) == 0 && next == "" {
 		return nil, "", authzguard.PermissionDenied()
 	}
-	return filterVisibleBindings(rows, visible), next, nil
+	return out, next, nil
 }
 
 // filterVisibleBindings keeps only the bindings whose id is in the visible set.

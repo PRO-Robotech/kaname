@@ -105,15 +105,6 @@ func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role
 		args = append(args, string(f.AccountID))
 		argIdx++
 	}
-	if f.VisibleIDs != nil {
-		// Per-object push-down: constrain custom roles to the FGA visible-id
-		// set (the caller's `viewer`-tier roles); system roles bypass (catalog
-		// floor). Keyset stays dense over the filtered set because the predicate is in
-		// SQL, not a post-filter.
-		conditions = append(conditions, fmt.Sprintf("(is_system OR id = ANY($%d))", argIdx))
-		args = append(args, f.VisibleIDs)
-		argIdx++
-	}
 	if f.IsSystem != nil {
 		conditions = append(conditions, fmt.Sprintf("is_system = $%d", argIdx))
 		args = append(args, *f.IsSystem)

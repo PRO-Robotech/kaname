@@ -18,6 +18,7 @@ package access_binding
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,17 +31,37 @@ import (
 	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
-// abQueriesStub — relation-aware ListObjects stub on iam_access_binding (viewer / v_list).
-type abQueriesStub struct {
-	clients.RelationQueries
-	idsBy map[string]map[string][]string // [relation][subject] = ids
-	err   error
-	n     int // ListObjects call count (F11 format-before-authz assertion)
+// fgaObjectID extracts the bare id from an FGA object string
+// ("iam_access_binding:acb…" → "acb…"). Shared by the package's Check stubs.
+func fgaObjectID(object string) string {
+	for i := 0; i < len(object); i++ {
+		if object[i] == ':' {
+			return object[i+1:]
+		}
+	}
+	return object
 }
 
-// calls reports how many times ListObjects was invoked (used to assert the
-// listauthz floor is NOT consulted before page-format validation).
-func (s *abQueriesStub) calls() int { return s.n }
+// abQueriesStub — relation-aware FGA stub on iam_access_binding (viewer / v_list).
+// It answers BOTH shapes from the same id-sets: the legacy ListObjects
+// enumeration and the DIRECT per-object CheckWithContext the use-cases now ask
+// (internal/authzfilter), so the fixtures and the intent of these tests are
+// unchanged by the shape swap.
+type abQueriesStub struct {
+	clients.RelationQueries
+	mu    sync.Mutex                     // the per-object Check port is called concurrently
+	idsBy map[string]map[string][]string // [relation][subject] = ids
+	err   error
+	n     int // FGA authz-query count (F11 format-before-authz assertion)
+}
+
+// calls reports how many times the FGA visibility port was consulted (used to
+// assert the listauthz floor is NOT consulted before page-format validation).
+func (s *abQueriesStub) calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n
+}
 
 func newABQueriesStub() *abQueriesStub {
 	return &abQueriesStub{idsBy: map[string]map[string][]string{}}
@@ -55,6 +76,8 @@ func (s *abQueriesStub) set(relation, subject string, ids []string) {
 
 func (s *abQueriesStub) ListObjects(_ context.Context, subject, relation, objType string,
 	_ map[string]any, _ int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.n++
 	if objType != "iam_access_binding" {
 		return nil, nil
@@ -66,6 +89,25 @@ func (s *abQueriesStub) ListObjects(_ context.Context, subject, relation, objTyp
 		return m[subject], nil
 	}
 	return nil, nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle, answering from the SAME
+// (relation, subject) id-sets ListObjects returns.
+func (s *abQueriesStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.n++
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBy[relation][subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // seedABListByScope replaces the fixture rows returned by the fake ListByScope.

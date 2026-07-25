@@ -32,6 +32,7 @@ import (
 	"context"
 	stderrors "errors"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,18 +104,12 @@ func (a *roleListReader) ListAssignable(ctx context.Context, rt, rid string, f r
 }
 
 // List mirrors the pg repo's filter contract: AccountID scopes to system +
-// that Account's custom roles; VisibleIDs (when non-nil) intersects the result
-// at the SQL layer so keyset pagination stays correct over the filtered set
-// (D-46). The use-case must keep system roles (catalog floor) regardless of
-// VisibleIDs.
+// that Account's custom roles. Read VISIBILITY is deliberately NOT a predicate
+// here (same as the pg repo) — the use-case resolves it per-object over the
+// returned page (internal/authzfilter), so the fake must hand back the
+// UNFILTERED page for the use-case's filter to be exercised at all.
 func (a *roleListReader) List(ctx context.Context, f reporole.ListFilter) ([]domain.Role, string, error) {
 	a.p.lastFilter = f
-	visible := map[string]bool{}
-	if f.VisibleIDs != nil {
-		for _, id := range f.VisibleIDs {
-			visible[id] = true
-		}
-	}
 	keys := make([]string, 0, len(a.p.roles))
 	for k := range a.p.roles {
 		keys = append(keys, k)
@@ -125,11 +120,6 @@ func (a *roleListReader) List(ctx context.Context, f reporole.ListFilter) ([]dom
 		ro := a.p.roles[k]
 		if f.AccountID != "" && !ro.IsSystem && ro.AccountID != f.AccountID {
 			continue // scope: foreign Account's custom roles excluded
-		}
-		// push-down mirror: when VisibleIDs is non-nil, custom roles must
-		// be in the set; system roles bypass (catalog floor) — same as the pg repo.
-		if f.VisibleIDs != nil && !ro.IsSystem && !visible[k] {
-			continue
 		}
 		out = append(out, ro)
 	}
@@ -163,8 +153,20 @@ func roleIDs(out []domain.Role) []string {
 
 // ───────────── FGA ListObjects stub ─────────────
 
+// fgaObjectID extracts the bare id from an FGA object string
+// ("iam_role:rol-c1" → "rol-c1"). Shared by the package's Check stubs.
+func fgaObjectID(object string) string {
+	for i := 0; i < len(object); i++ {
+		if object[i] == ':' {
+			return object[i+1:]
+		}
+	}
+	return object
+}
+
 type roleFGAStub struct {
 	clients.RelationQueries
+	mu           sync.Mutex // the per-object Check port is called concurrently
 	idsBySubject map[string][]string
 	err          error
 	calls        int
@@ -182,6 +184,8 @@ func (s *roleFGAStub) set(subject string, ids []string) { s.idsBySubject[subject
 
 func (s *roleFGAStub) ListObjects(ctx context.Context, subject, relation, objectType string,
 	condCtx map[string]any, maxResults int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	s.relations[relation]++
 	s.lastSubject = subject
@@ -196,6 +200,30 @@ func (s *roleFGAStub) ListObjects(ctx context.Context, subject, relation, object
 	return s.idsBySubject[subject], nil
 }
 
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter). Same relation-agnostic grant-set, same
+// observability counters, so these tests' intent is unchanged by the shape swap.
+func (s *roleFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	s.relations[relation]++
+	s.lastSubject = subject
+	s.lastRelation = relation
+	s.lastObjType = object[:len(object)-len(fgaObjectID(object))-1]
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBySubject[subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ───────────── tests ─────────────
 
 // read-relations + object type: the per-object filter MUST query BOTH the `viewer`
@@ -205,6 +233,10 @@ func (s *roleFGAStub) ListObjects(ctx context.Context, subject, relation, object
 func TestListRoles_UsesViewerAndVListRelationsOnIamRole(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedCustomRole(repo, "rol-c1", "acc-A")
+	// A second, UNGRANTED custom role: the per-object union short-circuits on a
+	// `viewer` allow, so the `v_list` arm is only reachable via a role `viewer`
+	// denies. Without this row the union's second branch would never be exercised.
+	seedCustomRole(repo, "rol-c2", "acc-A")
 
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-c1"})

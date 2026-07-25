@@ -10,10 +10,15 @@ package pg_test
 //     custom roles; a foreign Account's custom role never appears (SQL WHERE,
 //     not software post-filter).
 //   - ListFilter.PageSize > 1000 → InvalidArgument (no silent clamp).
-//   - ListFilter.VisibleIDs (FGA `viewer` id-set push-down) intersects at the
-//     SQL layer so keyset (created_at,id) pagination stays correct over the
-//     FILTERED set — no leaky/short pages. System roles bypass VisibleIDs (catalog
-//     floor) so the per-object filter only constrains custom roles.
+//   - keyset (created_at,id) pagination is dense over the account-scoped
+//     catalog — no duplicate and no skipped row across pages.
+//
+// There is deliberately NO visible-id push-down in ListFilter: read visibility
+// is resolved PER-OBJECT by the use-case over the page this returns
+// (internal/authzfilter). The only way to build such an id-set up front is
+// OpenFGA's ListObjects, which is capped server-side at 1000 objects of the type
+// in the store with no continuation token — narrowing the query by it silently
+// hid a tenant's own roles.
 
 import (
 	"context"
@@ -101,10 +106,12 @@ func TestRole_List_184_PageSizeRejectOverMax(t *testing.T) {
 		"MapRepoErr surfaces INVALID_ARGUMENT to the gRPC boundary")
 }
 
-// TestRole_List_D46_VisibleIDsPaginationDense — with a VisibleIDs id-set
-// (the FGA v_list push-down), keyset pagination is dense over the FILTERED set
-// (system roles ∪ the granted custom ids), with no short/leaky pages.
-func TestRole_List_D46_VisibleIDsPaginationDense(t *testing.T) {
+// TestRole_List_D46_KeysetPaginationDense — a keyset walk covers the
+// account-scoped catalog EXACTLY once: no duplicate across pages and no row
+// skipped. This is what makes the use-case's per-object visibility filter safe
+// to apply on top (a filtered page may come back short, but the WALK is still
+// complete).
+func TestRole_List_D46_KeysetPaginationDense(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -118,41 +125,26 @@ func TestRole_List_D46_VisibleIDsPaginationDense(t *testing.T) {
 	owner := mustSeedUser(t, ctx, pool, "rld46")
 	acc := seedAccount(t, ctx, repo, "acc-rld46", owner)
 
-	// 5 custom roles; only 3 are "visible" (granted). The other 2 must NEVER
-	// appear nor cause short pages.
-	cVisible := []domain.RoleID{}
-	cHidden := []domain.RoleID{}
-	for i := 0; i < 3; i++ {
-		r := seedCustomRole(t, ctx, repo, acc.ID, "rld46_vis"+string(rune('a'+i)))
-		cVisible = append(cVisible, r.ID)
-	}
-	for i := 0; i < 2; i++ {
-		r := seedCustomRole(t, ctx, repo, acc.ID, "rld46_hid"+string(rune('a'+i)))
-		cHidden = append(cHidden, r.ID)
-	}
-
-	visibleIDs := make([]string, 0, len(cVisible))
-	for _, id := range cVisible {
-		visibleIDs = append(visibleIDs, string(id))
+	// 5 custom roles in the account — every one of them must be walked exactly once.
+	custom := []domain.RoleID{}
+	for i := 0; i < 5; i++ {
+		r := seedCustomRole(t, ctx, repo, acc.ID, "rld46_c"+string(rune('a'+i)))
+		custom = append(custom, r.ID)
 	}
 
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// Full set with the visible filter: system roles + 3 visible custom.
+	// Full set for the account scope: system roles + this account's 5 custom.
 	full, _, err := rd.Roles().List(ctx, reporole.ListFilter{
-		PageSize:   1000,
-		AccountID:  acc.ID,
-		VisibleIDs: visibleIDs,
+		PageSize:  1000,
+		AccountID: acc.ID,
 	})
 	require.NoError(t, err)
 	fullByID := roleIDs(full)
-	for _, id := range cVisible {
-		assert.Contains(t, fullByID, id, "granted custom role visible")
-	}
-	for _, id := range cHidden {
-		assert.NotContains(t, fullByID, id, "ungranted custom role absent (no leak)")
+	for _, id := range custom {
+		assert.Contains(t, fullByID, id, "account-scoped custom role present in the full set")
 	}
 
 	// Keyset walk page_size=1: dense coverage of exactly the filtered set, no dups.
@@ -161,17 +153,16 @@ func TestRole_List_D46_VisibleIDsPaginationDense(t *testing.T) {
 	pages := 0
 	for {
 		page, next, perr := rd.Roles().List(ctx, reporole.ListFilter{
-			PageSize:   1,
-			AccountID:  acc.ID,
-			VisibleIDs: visibleIDs,
-			PageToken:  token,
+			PageSize:  1,
+			AccountID: acc.ID,
+			PageToken: token,
 		})
 		require.NoError(t, perr)
 		require.LessOrEqual(t, len(page), 1, "page_size=1 yields ≤1 element")
 		for _, r := range page {
 			require.False(t, seen[r.ID], "no duplicate across pages: %s", r.ID)
 			require.True(t, fullByID[r.ID].ID != "" || r.IsSystem,
-				"page only contains filtered-set members: %s", r.ID)
+				"page only contains account-scoped members: %s", r.ID)
 			seen[r.ID] = true
 		}
 		pages++
@@ -182,9 +173,8 @@ func TestRole_List_D46_VisibleIDsPaginationDense(t *testing.T) {
 		require.LessOrEqual(t, pages, len(full)+2, "must terminate")
 	}
 	assert.Equal(t, len(full), len(seen),
-		"paged walk covers exactly the filtered set (dense) — no leaky/short pages")
-	// no hidden custom role ever surfaced through pagination
-	for _, id := range cHidden {
-		assert.False(t, seen[id], "hidden custom role never paginated in (no leak)")
+		"paged walk covers the account-scoped catalog exactly once (dense) — no skipped row")
+	for _, id := range custom {
+		assert.True(t, seen[id], "every account-scoped custom role is reachable by the keyset walk: %s", id)
 	}
 }

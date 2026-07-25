@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -91,9 +92,9 @@ func (u *ListProjectsUseCase) Execute(ctx context.Context, f project.ListFilter)
 		}
 	}
 
-	// Resolve FGA-granted project ids (AccessBinding viewer + SEC-L
-	// system-viewer). Fail-closed on FGA error (INV-7).
-	granted, err := u.grantedProjectIDs(ctx, principal)
+	// Resolve FGA-granted visibility for the projects ON THIS PAGE (AccessBinding
+	// viewer + SEC-L system-viewer). Fail-closed on FGA error (INV-7).
+	granted, err := u.grantedProjectIDs(ctx, principal, projectIDsOf(out))
 	if err != nil {
 		return nil, "", err
 	}
@@ -107,14 +108,21 @@ func (u *ListProjectsUseCase) Execute(ctx context.Context, f project.ListFilter)
 	return filtered, next, nil
 }
 
-// grantedProjectIDs returns the project ids the principal may see via the UNION
-// of the FGA `viewer` and `v_list` relation sets on `project` (rbac-2026 model).
-// The `v_list` branch surfaces object-only `iam.project.{get,list}` grants
-// (see-in-selector-without-contents): the project is listed while a Check
-// on a resource inside it still DENIES. Fail-closed: a nil FGA port or an FGA
-// error on EITHER relation returns Unavailable (no silent owner-only degrade) —
-// INV-7.
-func (u *ListProjectsUseCase) grantedProjectIDs(ctx context.Context, principal operations.Principal) (map[string]bool, error) {
+// grantedProjectIDs returns which of the given project ids the principal may see
+// via the UNION of the FGA `viewer` and `v_list` relations on `project`
+// (rbac-2026 model), asked DIRECTLY per object. The `v_list` branch surfaces
+// object-only `iam.project.{get,list}` grants (see-in-selector-without-contents):
+// the project is listed while a Check on a resource inside it still DENIES.
+//
+// It used to enumerate every visible project (`ListObjects`), which OpenFGA caps
+// server-side at 1000 objects of the type in the store with no continuation
+// token — past that population a tenant's own project fell outside the returned
+// prefix and disappeared from List. Same predicate, bounded shape; see the
+// internal/authzfilter package doc.
+//
+// Fail-closed: a nil FGA port or an FGA error on ANY object returns Unavailable
+// (no silent owner-only degrade) — INV-7.
+func (u *ListProjectsUseCase) grantedProjectIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
 	if u.relationQueries == nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
@@ -122,17 +130,20 @@ func (u *ListProjectsUseCase) grantedProjectIDs(ctx context.Context, principal o
 	if subject == "" {
 		return map[string]bool{}, nil
 	}
-	granted := map[string]bool{}
-	for _, relation := range []string{"viewer", "v_list"} {
-		ids, err := u.relationQueries.ListObjects(ctx, subject, relation, "project", nil, 0)
-		if err != nil {
-			return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
-		}
-		for _, id := range ids {
-			granted[id] = true
-		}
+	granted, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, "project", ids)
+	if err != nil {
+		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	return granted, nil
+}
+
+// projectIDsOf projects a project page to its bare ids.
+func projectIDsOf(rows []domain.Project) []string {
+	out := make([]string, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, string(p.ID))
+	}
+	return out
 }
 
 // principalSubject builds the FGA subject string from the principal type:

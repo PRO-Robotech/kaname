@@ -114,11 +114,17 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 	// binding-object itself (iam_access_binding:<id>). Its grantee may Get the labeled
 	// binding even without scope grant-authority — consistent with the gateway's v_get
 	// Check on AB.Get. Fail-closed: FGA error → UNAVAILABLE. Resolver unwired → deny.
-	visible, ok, verr := vlistVisibleBindingIDs(ctx, u.queries)
+	//
+	// The question is asked DIRECTLY on this one object. It used to be answered by
+	// membership in an FGA ListObjects enumeration of every visible binding, which
+	// OpenFGA caps server-side at 1000 with no continuation token — past that
+	// population a caller's OWN granted binding fell outside the prefix and this Get
+	// returned 403 forever (internal/authzfilter package doc).
+	visible, verr := bindingVisibleToCaller(ctx, u.queries, string(got.ID))
 	if verr != nil {
 		return domain.AccessBinding{}, verr
 	}
-	if ok && visible[string(got.ID)] {
+	if visible {
 		return got, nil
 	}
 	return domain.AccessBinding{}, authzguard.PermissionDenied()

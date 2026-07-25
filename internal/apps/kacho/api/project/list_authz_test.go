@@ -12,6 +12,7 @@ import (
 	"context"
 	stderrors "errors"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,8 +136,20 @@ func seedProject(r *listFakeRepo, prjID, accID string) {
 
 // ───────────── FGA ListObjects stub ─────────────
 
+// fgaObjectID extracts the bare id from an FGA object string
+// ("project:prj-a" → "prj-a"). Shared by the package's per-object Check stubs.
+func fgaObjectID(object string) string {
+	for i := 0; i < len(object); i++ {
+		if object[i] == ':' {
+			return object[i+1:]
+		}
+	}
+	return object
+}
+
 type relationQueriesStub struct {
 	clients.RelationQueries
+	mu         sync.Mutex // the per-object Check port is called concurrently
 	allowedIDs []string
 	called     struct{ subject, relation, objectType string }
 	relations  []string // every relation queried (visibility union viewer ∪ v_list)
@@ -144,11 +157,32 @@ type relationQueriesStub struct {
 
 func (s *relationQueriesStub) ListObjects(ctx context.Context, subject, relation, objectType string,
 	condCtx map[string]any, maxResults int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.called.subject = subject
 	s.called.relation = relation
 	s.called.objectType = objectType
 	s.relations = append(s.relations, relation)
 	return s.allowedIDs, nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter), answering from the SAME allow-set.
+func (s *relationQueriesStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.called.subject = subject
+	s.called.relation = relation
+	s.called.objectType = object[:len(object)-len(fgaObjectID(object))-1]
+	s.relations = append(s.relations, relation)
+	id := fgaObjectID(object)
+	for _, got := range s.allowedIDs {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ctxAs — populate caller principal.
@@ -189,8 +223,10 @@ func TestListProjects_RBACv2_CanonicalScenario_GrantsConcreteIDs(t *testing.T) {
 
 	require.Equal(t, "user:usr-bob", fga.called.subject)
 	require.Equal(t, "project", fga.called.objectType)
-	// visibility unions viewer ∪ v_list — both relations queried.
-	require.ElementsMatch(t, []string{"viewer", "v_list"}, fga.relations,
+	// visibility unions viewer ∪ v_list — both relations are queried. (The filter
+	// is per-object now, so each relation appears once PER PAGE ROW it was needed
+	// for; assert membership, not an exact 2-element sequence.)
+	require.Subset(t, fga.relations, []string{"viewer", "v_list"},
 		"P7 list-filter must query BOTH viewer and v_list (union)")
 }
 

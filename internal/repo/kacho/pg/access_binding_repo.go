@@ -104,11 +104,13 @@ func (r *abReader) GetForUpdate(ctx context.Context, id domain.AccessBindingID) 
 }
 
 // List — the unified read (redesign-2026 F11). Builds the WHERE from whatever
-// optional predicates the filter carries (subject/role/scope-type/scope-id) plus
-// the FGA viewer∪v_list VisibleIDs push-down, then keyset-paginates by
-// (created_at, id) ASC. A non-nil VisibleIDs (incl. empty) constrains
-// `id = ANY($n)`; nil disables it. The page_token decode is the authoritative
-// format backstop (garbage → InvalidArgument), independent of the handler pre-check.
+// optional predicates the filter carries (subject/role/scope-type/scope-id),
+// then keyset-paginates by (created_at, id) ASC. Read VISIBILITY is NOT a
+// predicate here — the use-case applies it per-object to the returned page
+// (internal/authzfilter); the former FGA visible-id push-down was capped at
+// 1000 objects by OpenFGA and silently hid a tenant's own bindings.
+// The page_token decode is the authoritative format backstop (garbage →
+// InvalidArgument), independent of the handler pre-check.
 //
 // IncludeRevoked defaults to FALSE: F10 soft-revoke RETAINS the row with
 // status='REVOKED', so without the predicate a revoked grant would be listed next to
@@ -148,11 +150,6 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 	// disturb argIdx.
 	if !f.IncludeRevoked {
 		conditions = append(conditions, "status <> 'REVOKED'")
-	}
-	if f.VisibleIDs != nil {
-		conditions = append(conditions, fmt.Sprintf("id = ANY($%d)", argIdx))
-		args = append(args, f.VisibleIDs)
-		argIdx++
 	}
 	if f.PageToken != "" {
 		ts, id, err := decodePageToken(f.PageToken)

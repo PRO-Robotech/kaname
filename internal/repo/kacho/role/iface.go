@@ -78,14 +78,10 @@ type ListFilter struct {
 	// Account scope.
 	AccountID domain.AccountID
 	IsSystem  *bool // nil = both
-	// VisibleIDs — per-object visibility push-down. When non-nil
-	// the result is constrained to `is_system OR id = ANY(VisibleIDs)` AT THE SQL
-	// LAYER, so keyset (created_at,id) pagination is dense over the FILTERED set
-	// (no leaky/short pages). System roles bypass the constraint (tenant-wide
-	// reference catalog floor); only custom roles are filtered per-object. The set
-	// is supplied by the use-case from FGA ListObjects(subject,"viewer","iam_role")
-	// (the `viewer` tier cascades from account-tier, so a role's creator /
-	// account-admin resolves their own roles — consistent with account/project List).
-	// A non-nil empty slice means "no custom roles visible" (system-only result).
-	VisibleIDs []string
+	// NB: there is deliberately NO visible-id push-down here. Per-object read
+	// visibility is applied by the use-case to the rows this filter RETURNS
+	// (internal/authzfilter), not pushed into the SQL: the only way to obtain a
+	// visible-id set up front is OpenFGA's ListObjects, which is capped
+	// server-side at 1000 objects of the type in the store with no continuation
+	// token — narrowing the query by that set silently hid a tenant's own roles.
 }

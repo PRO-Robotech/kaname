@@ -38,8 +38,17 @@ type RelationQueries interface {
 	// the tuple to be matched is Conditional.
 	CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (allowed bool, err error)
 
-	// ListObjects — return up to `maxResults` object ids (no type prefix)
-	// the subject has `relation` on, within `objectType`.
+	// ListObjects — object ids (no type prefix) the subject has `relation` on,
+	// within `objectType`.
+	//
+	// The result is a BOUNDED PREFIX, not a complete set: OpenFGA caps the
+	// response SERVER-side (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default 1000) and
+	// exposes no continuation token. `maxResults` is a CLIENT-side trim applied
+	// on top — it can only NARROW the answer, never widen it, so a larger value
+	// does not lift the server cap. Never use this to answer "may the subject
+	// see THIS object" (ask Check/CheckWithContext) nor to narrow a List to an
+	// id-set: both silently lose a tenant's own objects once the store holds
+	// more objects of the type than the cap. See internal/authzfilter.
 	ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error)
 
 	// ListSubjects — inverse of ListObjects. Returns ONLY the subjects on the

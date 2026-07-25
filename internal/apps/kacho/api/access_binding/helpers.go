@@ -15,6 +15,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -62,14 +63,51 @@ func labelsFromProto(m map[string]string) domain.Labels {
 	return out
 }
 
-// vlistVisibleBindingIDs resolves the principal's `viewer ∪ v_list` visible-set on
-// iam_access_binding (D-6 catalog-видимость label-selectable binding'ов). Returns
-// (set, ok): ok=false when the resolver is unwired (no RelationQueries) — callers
-// then rely solely on the self/granted floor. Fail-closed: a FGA ListObjects error
-// on ANY relation → UNAVAILABLE (never an unfiltered leak, never an owner-only
-// fallback; parity with role.List D-47 / security.md). An anonymous / empty-subject
-// principal yields an empty set (default-deny).
-func vlistVisibleBindingIDs(ctx context.Context, rq clients.RelationQueries) (map[string]bool, bool, error) {
+// fgaBindingObjectType — the OpenFGA object type of an AccessBinding.
+const fgaBindingObjectType = "iam_access_binding"
+
+// bindingVisibleToCaller answers the DIRECT per-object question "may the ctx
+// principal read iam_access_binding:<id>?" — the `viewer ∪ v_list` union (D-6
+// label-selectable binding visibility), evaluated on the ONE object being read.
+//
+// It replaces the previous "enumerate every visible binding, then look for this
+// id in the result" shape: OpenFGA caps ListObjects server-side at
+// OPENFGA_LIST_OBJECTS_MAX_RESULTS (default 1000) with no continuation token, so
+// past that population a caller's OWN granted binding fell outside the returned
+// prefix and Get answered 403 forever (see internal/authzfilter package doc).
+// The predicate is unchanged — same two relations, same subject — only the shape
+// of the question is bounded.
+//
+// Fail-closed: the resolver unwired (nil port) or an unresolvable / anonymous
+// principal → (false, nil) = deny; an FGA error → UNAVAILABLE.
+func bindingVisibleToCaller(ctx context.Context, rq clients.RelationQueries, id string) (bool, error) {
+	if rq == nil {
+		return false, nil
+	}
+	subject, ok := authzguard.PrincipalSubject(ctx) // fail-closed: anon / empty / unknown → ""
+	if !ok {
+		return false, nil
+	}
+	visible, err := authzfilter.Visible(ctx, rq, subject, fgaBindingObjectType, id)
+	if err != nil {
+		return false, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	return visible, nil
+}
+
+// visibleBindingIDsOnPage resolves the principal's `viewer ∪ v_list` visibility
+// for the bindings ON THE PAGE the caller already read from the iam database.
+// Returns (set, ok): ok=false when the resolver is unwired (no RelationQueries) —
+// callers then rely solely on the self/granted floor.
+//
+// Cost is proportional to the PAGE, not to the number of iam_access_binding
+// objects in the store, and — unlike the ListObjects enumeration it replaces —
+// the answer is never silently truncated (internal/authzfilter package doc).
+//
+// Fail-closed: an FGA error on ANY object → UNAVAILABLE (never an unfiltered
+// leak, never an owner-only fallback; parity with role.List D-47 / security.md).
+// An anonymous / empty-subject principal yields an empty set (default-deny).
+func visibleBindingIDsOnPage(ctx context.Context, rq clients.RelationQueries, ids []string) (map[string]bool, bool, error) {
 	if rq == nil {
 		return nil, false, nil
 	}
@@ -77,17 +115,21 @@ func vlistVisibleBindingIDs(ctx context.Context, rq clients.RelationQueries) (ma
 	if !ok {
 		return map[string]bool{}, true, nil
 	}
-	visible := map[string]bool{}
-	for _, relation := range []string{"viewer", "v_list"} {
-		ids, err := rq.ListObjects(ctx, subject, relation, "iam_access_binding", nil, 0)
-		if err != nil {
-			return nil, true, shared.MapRepoErr(iamerr.ErrUnavailable)
-		}
-		for _, id := range ids {
-			visible[id] = true
-		}
+	visible, err := authzfilter.VisibleSet(ctx, rq, subject, fgaBindingObjectType, ids)
+	if err != nil {
+		return nil, true, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	return visible, true, nil
+}
+
+// bindingIDs projects a binding page to its bare ids (the input of
+// visibleBindingIDsOnPage).
+func bindingIDs(rows []domain.AccessBinding) []string {
+	out := make([]string, 0, len(rows))
+	for _, b := range rows {
+		out = append(out, string(b.ID))
+	}
+	return out
 }
 
 // requireGrantAuthority — package-level function shared by Create and Delete.

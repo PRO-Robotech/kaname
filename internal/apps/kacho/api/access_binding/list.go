@@ -5,8 +5,24 @@ package access_binding
 
 // list.go — ListUseCase (redesign-2026 F11). The single, plain List that
 // supersedes the legacy ListByScope/ListBySubject/ListByRole/ListByAccount family.
-// Visibility is the caller's `viewer ∪ v_list` set on iam_access_binding, pushed
-// down into the SQL as a VisibleIDs constraint so keyset pagination stays dense.
+// Visibility is the caller's `viewer ∪ v_list` set on iam_access_binding, resolved
+// PER-OBJECT for the rows on the page.
+//
+// Order is load-bearing: the page is read from the iam database by cursor FIRST,
+// and only its ids are then checked. The reverse order ("enumerate every visible
+// binding, then narrow the SQL to that id-set") hit OpenFGA's hard ListObjects
+// bound (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default 1000, no continuation token)
+// and made a tenant's own bindings vanish from List once the store held more
+// objects of the type than the cap — see the internal/authzfilter package doc.
+// Side effect of the new order: a page may come back SHORT (some rows filtered
+// out). That is normal for cursor pagination — next_page_token is derived from
+// the last row EXAMINED, so a full walk still skips nothing. The flip side, and
+// it is a deliberate trade: that cursor encodes the (created_at, id) of a row
+// the caller may not be able to READ, so a caller who decodes tokens learns one
+// binding id + timestamp per page. Content stays gated (Get on such an id still
+// answers 403), and this is the same shape kacho-vpc's authzfilter accepts —
+// weighed against the alternative, which is the ListObjects cap making a
+// tenant's OWN bindings permanently invisible.
 //
 // Contract (IAM-1-32):
 //   - cluster-admin (D-9 super-gate) → the UNFILTERED page (they hold no per-object
@@ -63,48 +79,46 @@ func (u *ListUseCase) WithRelationStore(relations clients.RelationStore) *ListUs
 	return u
 }
 
-// Execute resolves the caller's visible binding set, pushes it into the repo List
-// as a dense keyset constraint, and returns the filtered page. The predicate fields
-// on f (subject/role/scope/scopeId) are AND-combined with the visibility set.
+// Execute reads the page from the iam database by cursor and returns the subset
+// of it visible to the caller. The predicate fields on f (subject/role/scope/
+// scopeId) narrow the page at the SQL layer; visibility is applied to the rows
+// that page yields.
 func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) ([]domain.AccessBinding, string, error) {
 	// D-9 flat super-gate (parity with Get / ListByScope / ListByAccount / ListByRole,
 	// which all reach it through requireGrantAuthority Path 0): a cluster-admin
 	// enumerates the UNFILTERED page. After the access-cascade contraction they hold
 	// no per-object viewer/v_list tuple on iam_access_binding, so the per-object
-	// push-down alone would answer "no grants exist" on the read that supersedes the
-	// whole legacy family. Additive — it lifts VISIBILITY only: f.VisibleIDs stays nil
-	// (the repo then drops the `id = ANY(...)` constraint and keeps the dense
-	// (created_at,id) keyset), while the declarative subject/role/scope predicates
-	// still narrow. nil-safe via the guard inside IsClusterAdmin.
+	// filter alone would answer "no grants exist" on the read that supersedes the
+	// whole legacy family. Additive — it lifts VISIBILITY only: the declarative
+	// subject/role/scope predicates still narrow. nil-safe via the guard inside
+	// IsClusterAdmin.
 	if u.relations != nil && authzguard.IsClusterAdmin(ctx, u.relations) {
 		return readBindingsWithSubjects(ctx, u.repo, func(rd Reader) ([]domain.AccessBinding, string, error) {
 			return rd.AccessBindings().List(ctx, f)
 		})
 	}
-	// viewer ∪ v_list on iam_access_binding. anonymous / unwired → empty (no leak);
-	// FGA error → UNAVAILABLE (fail-closed).
-	visible, ok, err := vlistVisibleBindingIDs(ctx, u.queries)
+	// Page FIRST (the repo also validates page_token/page_size — a second,
+	// grant-independent backstop behind the handler's sync guard), per-object
+	// visibility SECOND.
+	rows, next, err := readBindingsWithSubjects(ctx, u.repo, func(rd Reader) ([]domain.AccessBinding, string, error) {
+		return rd.AccessBindings().List(ctx, f)
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	if !ok || len(visible) == 0 {
-		// No resolvable visibility → empty page (anonymous / no grants). Never an
+	if len(rows) == 0 {
+		return []domain.AccessBinding{}, next, nil
+	}
+	// viewer ∪ v_list on the page's iam_access_binding objects. anonymous / unwired
+	// → empty (no leak); FGA error → UNAVAILABLE (fail-closed).
+	visible, ok, verr := visibleBindingIDsOnPage(ctx, u.queries, bindingIDs(rows))
+	if verr != nil {
+		return nil, "", verr
+	}
+	if !ok {
+		// Resolver unwired → no visibility is resolvable → empty page. Never an
 		// error and never the unfiltered set.
-		return []domain.AccessBinding{}, "", nil
+		return []domain.AccessBinding{}, next, nil
 	}
-	f.VisibleIDs = visibleIDsSlice(visible)
-
-	return readBindingsWithSubjects(ctx, u.repo, func(rd Reader) ([]domain.AccessBinding, string, error) {
-		return rd.AccessBindings().List(ctx, f)
-	})
-}
-
-// visibleIDsSlice materializes the visible-id set as a (non-nil) slice for the
-// SQL `id = ANY($n)` push-down.
-func visibleIDsSlice(visible map[string]bool) []string {
-	out := make([]string, 0, len(visible))
-	for id := range visible {
-		out = append(out, id)
-	}
-	return out
+	return filterVisibleBindings(rows, visible), next, nil
 }

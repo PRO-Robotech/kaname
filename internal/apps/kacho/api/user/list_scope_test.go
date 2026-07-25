@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,9 +107,21 @@ func (r *scopeUserRdr) ListAccountsForUser(context.Context, domain.UserID) ([]do
 	return nil, nil
 }
 
+// fgaObjectID extracts the bare id from an FGA object string
+// ("iam_user:x" → "x"). Shared by the package's per-object Check stubs.
+func fgaObjectID(object string) string {
+	for i := 0; i < len(object); i++ {
+		if object[i] == ':' {
+			return object[i+1:]
+		}
+	}
+	return object
+}
+
 // userUnionFGAStub — relation-aware FGA ListObjects stub (viewer vs v_list).
 type userUnionFGAStub struct {
 	clients.RelationQueries
+	mu    sync.Mutex // the per-object Check port is called concurrently
 	idsBy map[string]map[string][]string
 	err   error
 	calls map[string]int
@@ -127,6 +140,8 @@ func (s *userUnionFGAStub) set(relation, subject string, ids []string) {
 
 func (s *userUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ string,
 	_ map[string]any, _ int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls[relation]++
 	if s.err != nil {
 		return nil, s.err
@@ -135,6 +150,26 @@ func (s *userUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ s
 		return m[subject], nil
 	}
 	return nil, nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter), answering from the SAME (relation,
+// subject) id-sets, so these tests' fixtures and intent are unchanged.
+func (s *userUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[relation]++
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBy[relation][subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func userIDs(in []domain.User) []string {

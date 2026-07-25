@@ -60,7 +60,9 @@ func (u *ListByAccountUseCase) WithRelationQueries(q clients.RelationQueries) *L
 // FGA-admin / cluster-admin) sees EVERY binding in the account (the existing admin
 // floor, NOT shrunk). A non-admin caller sees only the bindings made visible by a
 // label-selector grant (viewer ∪ v_list on iam_access_binding) — the additive union
-// floor. Anonymous → rejected. FGA error → UNAVAILABLE.
+// floor, resolved PER-OBJECT over the page rather than by the server-capped
+// ListObjects enumeration it replaces (internal/authzfilter). Anonymous → rejected.
+// FGA error → UNAVAILABLE.
 func (u *ListByAccountUseCase) Execute(
 	ctx context.Context,
 	accountID string,
@@ -84,15 +86,23 @@ func (u *ListByAccountUseCase) Execute(
 	if isAdmin {
 		return rows, next, nil
 	}
-	visible, ok, verr := vlistVisibleBindingIDs(ctx, u.queries)
+	visible, ok, verr := visibleBindingIDsOnPage(ctx, u.queries, bindingIDs(rows))
 	if verr != nil {
 		return nil, "", verr
 	}
-	if !ok || len(visible) == 0 {
-		// No admin floor and no label visibility → existence-leak-safe deny (parity
-		// with the prior requireAccountAdmin → PermissionDenied behaviour; a stranger
-		// must not learn the account exists nor get an empty 200 distinguishing it).
+	out := []domain.AccessBinding{}
+	if ok {
+		out = filterVisibleBindings(rows, visible)
+	}
+	// No admin floor and nothing visible in the WHOLE account (next == "" ⇒ the last
+	// page) → existence-leak-safe deny (parity with the prior requireAccountAdmin →
+	// PermissionDenied behaviour; a stranger must not learn the account exists nor get
+	// an empty 200 distinguishing it). The authority precheck driving this is
+	// requireGrantAuthority above — DIRECT per-object Checks, never a truncated
+	// enumeration. See list_by_scope.go for why the emptiness clause is gated on the
+	// last page rather than on any page.
+	if len(out) == 0 && next == "" {
 		return nil, "", authzguard.PermissionDenied()
 	}
-	return filterVisibleBindings(rows, visible), next, nil
+	return out, next, nil
 }

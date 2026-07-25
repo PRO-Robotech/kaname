@@ -14,11 +14,10 @@ import (
 type ReaderIface interface {
 	Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error)
 	// List — the unified read (redesign-2026 F11). Optional predicate fields
-	// (subject/role/scope-type/scope-id) plus an optional VisibleIDs push-down
-	// constrain the result; keyset paginated by (created_at, id) ASC. All fields
-	// empty (with a non-nil VisibleIDs) lists the caller's whole visible set. The
-	// use-case supplies VisibleIDs from the FGA `viewer ∪ v_list` set so keyset
-	// stays dense over the filtered rows (mirrors role.ListFilter.VisibleIDs).
+	// (subject/role/scope-type/scope-id) constrain the result; keyset paginated
+	// by (created_at, id) ASC. Read VISIBILITY is not a predicate here: the
+	// use-case applies it per-object to the rows this returns
+	// (internal/authzfilter).
 	List(ctx context.Context, filter ListFilter) ([]domain.AccessBinding, string, error)
 	ListByScope(ctx context.Context, resourceType domain.ResourceType, resourceID string, filter PageFilter) ([]domain.AccessBinding, string, error)
 	ListBySubject(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, filter PageFilter) ([]domain.AccessBinding, string, error)
@@ -371,9 +370,16 @@ type PageFilter struct {
 }
 
 // ListFilter — params for the unified List (redesign-2026 F11). Every predicate
-// is optional; an empty predicate set (with VisibleIDs) lists the whole visible
-// set. ScopeType is the BARE within-service anchor kind (cluster/account/project),
+// is optional; an empty predicate set lists the whole (unfiltered) page.
+// ScopeType is the BARE within-service anchor kind (cluster/account/project),
 // mapped from the dotted `scope=` filter value by the use-case.
+//
+// NB: there is deliberately NO visible-id push-down here. Per-object read
+// visibility is applied by the use-case to the rows this filter RETURNS
+// (internal/authzfilter), not pushed into the SQL: the only way to obtain a
+// visible-id set up front is OpenFGA's ListObjects, which is capped server-side
+// at 1000 objects of the type in the store with no continuation token —
+// narrowing the query by that set silently hid a tenant's own bindings.
 type ListFilter struct {
 	PageSize  int32
 	PageToken string
@@ -381,12 +387,6 @@ type ListFilter struct {
 	RoleID    string // role= (matches role_id)
 	ScopeType string // scope= (bare resource_type: cluster|account|project)
 	ScopeID   string // scopeId= (matches resource_id)
-	// VisibleIDs — per-object push-down of the caller's FGA viewer ∪ v_list set.
-	// Non-nil constrains the result to `id = ANY(VisibleIDs)` at the SQL layer so
-	// keyset (created_at,id) pagination is dense over the filtered set. A non-nil
-	// empty slice lists nothing. nil disables the constraint (admin/unfiltered
-	// paths do not use List).
-	VisibleIDs []string
 	// IncludeRevoked — default false hides status='REVOKED' rows (F10 soft-revoke
 	// retains the row). Parity with ListByAccount/ListByRole: a revoked grant is
 	// no longer a grant, so the unified read must not return it next to live ones

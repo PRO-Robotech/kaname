@@ -14,6 +14,7 @@ package project
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,7 @@ import (
 // needs an impl.
 type seclFGAStub struct {
 	clients.RelationQueries
+	mu          sync.Mutex // the per-object Check port is called concurrently
 	ids         []string
 	err         error
 	lastSubject string
@@ -38,11 +40,34 @@ type seclFGAStub struct {
 
 func (s *seclFGAStub) ListObjects(ctx context.Context, subject, relation, objectType string,
 	condCtx map[string]any, maxResults int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lastSubject = subject
 	if s.err != nil {
 		return nil, s.err
 	}
 	return s.ids, nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter), answering from the SAME id-set and
+// still capturing the subject (the SEC-L "subject reaches FGA as
+// service_account:<id>" assertion).
+func (s *seclFGAStub) CheckWithContext(_ context.Context, subject, _, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSubject = subject
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.ids {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func ctxSA(said string) context.Context {

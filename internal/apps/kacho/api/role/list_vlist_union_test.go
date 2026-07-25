@@ -22,6 +22,7 @@ package role
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,7 @@ import (
 // v_list so the union and dedup are observable.
 type roleUnionFGAStub struct {
 	clients.RelationQueries
+	mu    sync.Mutex                     // the per-object Check port is called concurrently
 	idsBy map[string]map[string][]string // [relation][subject] = ids
 	err   error
 	calls map[string]int
@@ -54,6 +56,8 @@ func (s *roleUnionFGAStub) set(relation, subject string, ids []string) {
 
 func (s *roleUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ string,
 	_ map[string]any, _ int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls[relation]++
 	if s.err != nil {
 		return nil, s.err
@@ -62,6 +66,26 @@ func (s *roleUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ s
 		return m[subject], nil
 	}
 	return nil, nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter), answering from the SAME (relation,
+// subject) id-sets, so these tests' fixtures and intent are unchanged.
+func (s *roleUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[relation]++
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBy[relation][subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // v_list-only grant on a custom role → role VISIBLE in List (selector-without-

@@ -497,20 +497,68 @@ type ListObjectsRequest struct {
 	Subject      string
 	ResourceType string
 	Action       string
-	MaxResults   int
-	PageToken    string
-	Context      map[string]any
+	// MaxResults — CLIENT-side trim of the (already server-capped) response. It
+	// can only NARROW the result; a larger value never widens it. 0 → 1000.
+	MaxResults int
+	// PageToken — carried from the proto request only so a non-empty value can be
+	// REJECTED: OpenFGA's ListObjects has no continuation token, so a page cannot
+	// be honoured and quietly ignoring the token would return the wrong one.
+	PageToken string
+	Context   map[string]any
 }
 
 // ListObjectsResult — output.
 type ListObjectsResult struct {
-	ResourceIDs   []string
+	ResourceIDs []string
+	// NextPageToken — ALWAYS empty. It mirrors the proto response field, which is
+	// a dead skeleton: ListObjects cannot paginate (see the RPC doc). Kept so the
+	// wire contract has a named, documented counterpart rather than a silently
+	// unset field, and locked by TestListObjects_PageToken_Rejected.
 	NextPageToken string
-	Truncated     bool
+	// Truncated — true when the answer is a CUT PREFIX, either because OpenFGA hit
+	// its own server-side ceiling or because MaxResults trimmed it. A caller that
+	// ignores this will mistake a prefix for the complete set.
+	Truncated bool
 }
+
+// fgaListObjectsServerCap — OpenFGA's OWN server-side ceiling on a ListObjects
+// response (`OPENFGA_LIST_OBJECTS_MAX_RESULTS`; default 1000, and unset — hence
+// default — on the deployed stand). It is applied by the SERVER and there is NO
+// continuation token, so a response of exactly this size is indistinguishable
+// from "there were more": we must report it as truncated.
+//
+// Do NOT "fix" a truncated answer by raising this. It is an external, finite
+// bound; the cure for a visibility question is to ask it PER-OBJECT instead of
+// by enumeration (see internal/authzfilter, and the iam read use-cases which no
+// longer call this RPC at all).
+const fgaListObjectsServerCap = 1000
 
 // ListObjects — "which objects of resource_type can subject act on?".
 // Requires a configured OpenFGA client (composition root fails fast otherwise).
+//
+// # Bounded and NOT paginated — read this before relying on the result
+//
+// The answer is a BOUNDED PREFIX, never a guaranteed-complete set:
+//
+//   - OpenFGA caps the response server-side at fgaListObjectsServerCap objects
+//     of the type IN THE STORE (cluster-wide, not per-tenant) and offers no
+//     continuation token. `max_results` is a CLIENT-side trim applied on top, so
+//     it can only NARROW the answer — asking for more can never widen it.
+//   - `Truncated` reports either bound (server cap hit, or client trim applied).
+//     A caller that ignores `Truncated` will silently mistake a cut prefix for
+//     the complete set.
+//   - There is no pagination and there cannot be one: `NextPageToken` is always
+//     empty and a non-empty `page_token` is REJECTED rather than ignored
+//     (silently ignoring it would return a wrong page dressed as a right one).
+//
+// Consequently this RPC MUST NOT be used as a visibility oracle — neither
+// "enumerate then match" for a read-by-id, nor "enumerate then narrow the SQL"
+// for a List. Both silently lose a tenant's own resources once the store holds
+// more objects of the type than the cap. Ask a per-object Check/BatchCheck for
+// the ids on the page instead (that is what iam's own read use-cases and
+// kacho-vpc's authzfilter now do). The RPC remains for genuine enumeration use
+// (admin tooling / discovery) where a bounded prefix plus a truncation flag is
+// an acceptable answer.
 //
 // For a list/get-class action on a verb-bearing type the visibility set is the
 // UNION of the principal's `viewer`-set and `v_list`-set on the type:
@@ -536,10 +584,19 @@ func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsReque
 	if relation == "" {
 		return nil, fmt.Errorf("Illegal argument action %q", req.Action)
 	}
+	// OpenFGA's ListObjects has no continuation token, so a page_token can never
+	// be honoured. Rejecting it is the honest contract: accepting-and-ignoring
+	// would hand the caller page 1 while they believe they hold page 2.
+	if req.PageToken != "" {
+		return nil, fmt.Errorf("Illegal argument page_token: ListObjects does not paginate")
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	// Same server-authoritative sanitisation as Check: forged principal/connection
 	// attributes are stripped, current_time / trusted acr are server-derived.
 	condCtx := buildCondContext(ctx, req.Context, now)
+	// maxR is a CLIENT-side trim: it can only narrow the (already server-capped)
+	// response, never widen it. The 10000 ceiling therefore bounds our own work,
+	// not OpenFGA's.
 	maxR := req.MaxResults
 	if maxR <= 0 {
 		maxR = 1000
@@ -558,12 +615,21 @@ func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsReque
 
 	seen := make(map[string]struct{})
 	ids := make([]string, 0, maxR)
+	// serverCapped — at least one relation's response came back at OpenFGA's own
+	// ceiling, i.e. the server cut it. This is the ONLY signal available (there is
+	// no continuation token and no server-side "more" flag), and it must be checked
+	// PER RELATION: the union of two capped responses can hold up to 2×cap ids, so
+	// a check on the merged length would miss it.
+	serverCapped := false
 	for _, rel := range relations {
 		got, err := s.relations.ListObjects(ctx, req.Subject, rel, req.ResourceType, condCtx, maxR)
 		if err != nil {
 			// Fail-closed on EITHER relation — never a partial list (no leak, no
 			// silent narrowing).
 			return nil, fmt.Errorf("authz listObjects: %w", err)
+		}
+		if len(got) >= fgaListObjectsServerCap {
+			serverCapped = true
 		}
 		for _, id := range got {
 			if _, ok := seen[id]; ok {
@@ -573,7 +639,12 @@ func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsReque
 			ids = append(ids, id)
 		}
 	}
-	truncated := len(ids) >= maxR
+	// Truncated must reflect BOTH bounds. `len(ids) >= maxR` alone (the previous
+	// formula) was silently FALSE for every server-capped answer whenever the
+	// caller asked for more than the server cap — e.g. max_results=5000 over a
+	// 1000-capped response reported "complete". That is exactly how a tenant's own
+	// objects vanished without any signal.
+	truncated := serverCapped || len(ids) >= maxR
 	return &ListObjectsResult{
 		ResourceIDs: ids,
 		Truncated:   truncated,

@@ -23,6 +23,7 @@ package project
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,7 @@ import (
 
 type projUnionFGAStub struct {
 	clients.RelationQueries
+	mu    sync.Mutex                     // the per-object Check port is called concurrently
 	idsBy map[string]map[string][]string // [relation][subject] = ids
 	err   error
 	calls map[string]int
@@ -61,6 +63,8 @@ func (s *projUnionFGAStub) set(relation, subject string, ids []string) {
 
 func (s *projUnionFGAStub) ListObjects(ctx context.Context, subject, relation, objectType string,
 	condCtx map[string]any, maxResults int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls[relation]++
 	if s.err != nil {
 		return nil, s.err
@@ -69,6 +73,26 @@ func (s *projUnionFGAStub) ListObjects(ctx context.Context, subject, relation, o
 		return m[subject], nil
 	}
 	return nil, nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter), answering from the SAME (relation,
+// subject) id-sets, so these tests' fixtures and intent are unchanged.
+func (s *projUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[relation]++
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBy[relation][subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // P7-A — v_list-only grant (object-only, no viewer, non-owner) → project VISIBLE.

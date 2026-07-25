@@ -11,7 +11,9 @@ package access_binding
 //   - the optional whitelist filter (subject/role/scope/scopeId) rejects an
 //     unknown key with INVALID_ARGUMENT and maps `scope` dotted→bare;
 //   - visibility is the caller's viewer ∪ v_list set (anonymous → empty, never a
-//     leak; FGA error → UNAVAILABLE), pushed down as the repo VisibleIDs constraint.
+//     leak; FGA error → UNAVAILABLE), resolved PER-OBJECT over the page the repo
+//     returned (never by a server-capped ListObjects enumeration —
+//     internal/authzfilter).
 
 import (
 	"context"
@@ -99,9 +101,9 @@ func TestABList_IAM_1_32_FilterWhitelist(t *testing.T) {
 	})
 }
 
-// IAM-1-32: visibility is viewer ∪ v_list, pushed down as VisibleIDs — a v_list-only
-// caller sees exactly their matched bindings, not the whole set.
-func TestABList_IAM_1_32_VisibilityPushdown(t *testing.T) {
+// IAM-1-32: visibility is viewer ∪ v_list applied per-object to the page — a
+// v_list-only caller sees exactly their matched bindings, not the whole set.
+func TestABList_IAM_1_32_VisibilityFilteredPerObject(t *testing.T) {
 	repo := newABFakeRepo("usr_o", "acc_l32d", "", "rol_v", "kacho.view", nil)
 	acbKeep := domain.AccessBinding{ID: "acb000000000000keep1", ResourceType: "account", ResourceID: "acc_l32d", SubjectID: "usr_a"}
 	acbHide := domain.AccessBinding{ID: "acb000000000000hide2", ResourceType: "account", ResourceID: "acc_l32d", SubjectID: "usr_b"}
@@ -115,8 +117,10 @@ func TestABList_IAM_1_32_VisibilityPushdown(t *testing.T) {
 	require.NoError(t, err)
 	got := respIDs(resp)
 	assert.Equal(t, []string{"acb000000000000keep1"}, got, "only the v_list-visible binding is returned")
-	assert.ElementsMatch(t, []string{"acb000000000000keep1"}, repo.lastListFilter.VisibleIDs,
-		"the viewer∪v_list set is pushed down to the repo")
+	// The repo page carried BOTH rows (the fake applies no visibility predicate);
+	// hide2 is dropped by the use-case's per-object check, not by the SQL. That
+	// order is the fix for the OpenFGA ListObjects cap — see internal/authzfilter.
+	assert.Positive(t, fga.calls(), "visibility must be resolved per-object on the returned page")
 }
 
 // IAM-1-32: anonymous → empty page (no leak, no error); FGA error → UNAVAILABLE.
@@ -162,8 +166,9 @@ func TestABList_IAM_1_32_ClusterAdminUnfiltered(t *testing.T) {
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"acb00000000000000ca1", "acb00000000000000ca2"}, respIDs(resp),
 			"cluster-admin must enumerate every binding (parity with ListByScope Path 0)")
-		assert.Nil(t, repo.lastListFilter.VisibleIDs,
-			"the per-object push-down must be DROPPED (nil), not an empty allow-list")
+		assert.Zero(t, fga.calls(),
+			"the per-object visibility filter must be SKIPPED entirely for a cluster-admin, "+
+				"not run and then overridden")
 	})
 
 	t.Run("cluster-admin keeps the declarative predicates", func(t *testing.T) {

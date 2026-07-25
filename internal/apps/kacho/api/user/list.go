@@ -7,8 +7,12 @@ package user
 // account/serviceAccount/role List): результат фильтруется через UNION
 // FGA-отношений
 //
-//	visible(iam_user) = ListObjects(subj,"viewer","iam_user")
-//	                  ∪ ListObjects(subj,"v_list","iam_user")
+//	visible(id) = Check(subj,"viewer","iam_user:"+id)
+//	            ∨ Check(subj,"v_list","iam_user:"+id)
+//
+// спрашиваемых для user'ов СТРАНИЦЫ (страница читается курсором из своей БД
+// ПЕРВОЙ). Прежняя форма — «перечислить всё видимое и пересечь» — молча резалась
+// server-side пределом OpenFGA ListObjects (см. internal/authzfilter).
 //
 //   - ветка `viewer` — user'ы, на которые принципал держит viewer-tier
 //     (account-admin/owner резолвит viewer на каждого user'а своего аккаунта через
@@ -31,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -71,7 +76,7 @@ func (uc *ListUsersUseCase) Execute(ctx context.Context, f user.ListFilter) ([]d
 	if err != nil {
 		return nil, "", err
 	}
-	visible, err := uc.visibleUserIDs(ctx, principal)
+	visible, err := uc.visibleUserIDs(ctx, principal, userIDsOf(out))
 	if err != nil {
 		return nil, "", err
 	}
@@ -91,9 +96,15 @@ func (uc *ListUsersUseCase) Execute(ctx context.Context, f user.ListFilter) ([]d
 	return filtered, next, nil
 }
 
-// visibleUserIDs — UNION FGA viewer ∪ v_list на iam_user. Fail-closed: nil-порт
-// или FGA-ошибка на любой relation → Unavailable.
-func (uc *ListUsersUseCase) visibleUserIDs(ctx context.Context, principal operations.Principal) (map[string]bool, error) {
+// visibleUserIDs — UNION FGA viewer ∪ v_list на iam_user, спрашиваемый ПРЯМО по
+// каждому объекту СТРАНИЦЫ. Прежняя форма (ListObjects — «перечисли всех видимых
+// user'ов») молча резалась server-side пределом OpenFGA (1000 объектов типа в
+// сторе, без continuation-token), из-за чего собственная запись тенанта выпадала
+// из выдачи навсегда; предикат тот же, изменилась только форма вопроса (см.
+// package-doc internal/authzfilter).
+//
+// Fail-closed: nil-порт или FGA-ошибка на любом объекте → Unavailable.
+func (uc *ListUsersUseCase) visibleUserIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
 	if uc.relationQueries == nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
@@ -101,17 +112,20 @@ func (uc *ListUsersUseCase) visibleUserIDs(ctx context.Context, principal operat
 	if subject == "" {
 		return map[string]bool{}, nil
 	}
-	visible := map[string]bool{}
-	for _, relation := range []string{"viewer", "v_list"} {
-		ids, err := uc.relationQueries.ListObjects(ctx, subject, relation, "iam_user", nil, 0)
-		if err != nil {
-			return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
-		}
-		for _, id := range ids {
-			visible[id] = true
-		}
+	visible, err := authzfilter.VisibleSet(ctx, uc.relationQueries, subject, "iam_user", ids)
+	if err != nil {
+		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	return visible, nil
+}
+
+// userIDsOf проецирует страницу user'ов в голые id.
+func userIDsOf(rows []domain.User) []string {
+	out := make([]string, 0, len(rows))
+	for _, u := range rows {
+		out = append(out, string(u.ID))
+	}
+	return out
 }
 
 func (uc *ListUsersUseCase) list(ctx context.Context, f user.ListFilter) ([]domain.User, string, error) {

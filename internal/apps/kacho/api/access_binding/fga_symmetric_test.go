@@ -680,15 +680,10 @@ func (a *fakeABRdr) List(_ context.Context, f ab_repo.ListFilter) ([]domain.Acce
 	a.repo.mu.Lock()
 	defer a.repo.mu.Unlock()
 	a.repo.lastListFilter = f
-	vis := map[string]bool{}
-	for _, id := range f.VisibleIDs {
-		vis[id] = true
-	}
+	// No visibility predicate: read visibility is applied by the use-case to the
+	// rows this returns (internal/authzfilter), mirroring the pg repo.
 	var out []domain.AccessBinding
 	for _, b := range a.repo.lbsRows {
-		if f.VisibleIDs != nil && !vis[string(b.ID)] {
-			continue
-		}
 		if f.SubjectID != "" && string(b.SubjectID) != f.SubjectID {
 			continue
 		}

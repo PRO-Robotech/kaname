@@ -24,6 +24,7 @@ import (
 	"context"
 	stderrors "errors"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,8 +128,20 @@ func acctIDs(out []domain.Account) []string {
 // ───────────── FGA ListObjects stub (local — the clients-package stub is a
 // _test.go type not linked into this package's test binary) ───────────────
 
+// fgaObjectID extracts the bare id from an FGA object string ("account:acc-1"
+// → "acc-1"). Shared by the package's per-object Check stubs.
+func fgaObjectID(object string) string {
+	for i := 0; i < len(object); i++ {
+		if object[i] == ':' {
+			return object[i+1:]
+		}
+	}
+	return object
+}
+
 type acctFGAStub struct {
 	clients.RelationQueries
+	mu           sync.Mutex // the per-object Check port is called concurrently
 	idsBySubject map[string][]string
 	err          error
 	calls        int
@@ -143,12 +156,36 @@ func (s *acctFGAStub) set(subject string, ids []string) { s.idsBySubject[subject
 
 func (s *acctFGAStub) ListObjects(ctx context.Context, subject, relation, objectType string,
 	condCtx map[string]any, maxResults int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	s.lastSubject = subject
 	if s.err != nil {
 		return nil, s.err
 	}
 	return s.idsBySubject[subject], nil
+}
+
+// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
+// of enumerating (internal/authzfilter). It answers from the SAME id-set
+// ListObjects would return, so the tests' grant fixtures and their intent are
+// unchanged.
+func (s *acctFGAStub) CheckWithContext(_ context.Context, subject, _, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	s.lastSubject = subject
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBySubject[subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ───────────── tests ─────────────
