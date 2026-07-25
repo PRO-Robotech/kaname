@@ -332,22 +332,81 @@ def resolve_binding_id_step(name, resource_id_tmpl, subject_env_key, out_env_key
     # the right product behaviour, not a regression. So filter to DELETABLE rows:
     # b.deletionProtection !== true, optionally matching the exact role the case
     # created, and resolve the first such row.
+    #
+    # Pagination (KAC-132 follow-up). `:listByScope` is cursor-paginated with a
+    # DEFAULT page_size of 50 (api-conventions.md). `account:accountA` is a
+    # long-lived shared fixture scope that accumulates bindings across runs — on
+    # the kind stand it holds 73 rows, and EVERY `usr`-subject row sits at index
+    # 53-55, i.e. on page 2. Reading a single default page therefore returned 50
+    # unrelated `sva`-subject rows, the filter matched nothing, and the phantom id
+    # (see the ALREADY_EXISTS note above) was left untouched in the environment.
+    # The downstream FGA probe then asked for `v_delete` on an
+    # `iam_access_binding` that had been rolled back and never existed — which
+    # reads exactly like a missing permission-model relation, but is not one:
+    # against a REAL persisted binding the account-admin does hold `v_delete`.
+    # So: walk the `nextPageToken` cursor until the row is found or the scope is
+    # exhausted. `cases/rbac-visibility-set.py` already carries this fix for the
+    # same reason; this is the same class in the resolver.
+    #
+    # Note the self-`setNextRequest` below deliberately has NO inter-request
+    # busy-wait: this is a page WALK, not a convergence POLL. Each iteration
+    # requests a strictly different page and makes progress, so a delay would add
+    # latency without adding correctness (the busy-wait discipline in testing.md
+    # targets retry loops that re-probe the SAME state waiting for it to change).
     role_filter = ""
     if role_id is not None:
         role_filter = f" && b.roleId === '{role_id}'"
+    tok_var = f"_{name.replace('-', '_')}_tok"
+    page_var = f"_{name.replace('-', '_')}_page"
+    started_var = f"_{name.replace('-', '_')}_started"
     return Step(
         name=name,
         method="GET",
+        # Declarative base (pageSize pinned to the 1000 max so the common case is
+        # a single round-trip); the pre-script re-derives the URL to append the
+        # cursor on continuation pages.
         path=(f"/iam/v1/accessBindings:listByScope?resourceType={resource_type}"
-              f"&resourceId={resource_id_tmpl}"),
+              f"&resourceId={resource_id_tmpl}&pageSize=1000"),
         auth=auth,
+        pre_script=[
+            # First entry: reset the cursor AND drop any pre-seeded value of the
+            # output var. That value came from `Operation.metadata.accessBindingId`,
+            # which is a phantom (minted-then-rolled-back) id whenever the create
+            # took the ALREADY_EXISTS path. If the resolve below fails, the step
+            # must leave NOTHING behind rather than let the phantom flow onward.
+            f"if (pm.environment.get('{started_var}') !== pm.info.requestName) {{",
+            f"  pm.environment.set('{tok_var}', '');",
+            f"  pm.environment.set('{page_var}', '0');",
+            f"  pm.environment.set('{started_var}', pm.info.requestName);",
+            f"  pm.environment.unset('{out_env_key}');",
+            "}",
+            "const _base = pm.environment.get('baseUrl') || pm.variables.get('baseUrl') || '';",
+            f"const _rid = pm.variables.replaceIn('{resource_id_tmpl}');",
+            f"const _tok = pm.environment.get('{tok_var}') || '';",
+            f"pm.request.url = _base + '/iam/v1/accessBindings:listByScope?resourceType={resource_type}'",
+            "  + '&resourceId=' + encodeURIComponent(_rid)",
+            "  + '&pageSize=1000'",
+            "  + (_tok ? '&pageToken=' + encodeURIComponent(_tok) : '');",
+        ],
         test_script=[
             "pm.test('listByScope → 200', () => pm.expect(pm.response.code).to.eql(200));",
             "const j = pm.response.json();",
             f"const want = pm.environment.get('{subject_env_key}');",
             "const rows = (j.accessBindings || []).filter(b => b.subjectId === want"
             f" && b.deletionProtection !== true{role_filter});",
-            f"pm.test('deletable persisted binding for subject found', () => pm.expect(rows.length, JSON.stringify(j)).to.be.greaterThan(0));",
+            f"const _pg = parseInt(pm.environment.get('{page_var}') || '0', 10);",
+            # Not on this page, but the cursor says there is more → advance.
+            # Bounded at 25 pages x 1000 rows so a runaway scope cannot spin.
+            "if (rows.length === 0 && pm.response.code === 200 && j.nextPageToken && _pg < 25) {",
+            f"  pm.environment.set('{tok_var}', j.nextPageToken);",
+            f"  pm.environment.set('{page_var}', String(_pg + 1));",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset('{tok_var}');",
+            f"pm.environment.unset('{page_var}');",
+            f"pm.environment.unset('{started_var}');",
+            "pm.test('deletable persisted binding for subject found', () => pm.expect(rows.length, JSON.stringify({pagesWalked: _pg, lastPage: j})).to.be.greaterThan(0));",
             "if (rows.length > 0) {",
             f"  pm.environment.set('{out_env_key}', rows[0].id);",
             "}",
@@ -618,7 +677,7 @@ CASES.append(Case(
         Step(
             name="owner-aaa-on-accountA",
             method="GET",
-            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}",
+            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('owner sees own ListByScope → 200', () => pm.expect(pm.response.code).to.eql(200));",
@@ -627,7 +686,7 @@ CASES.append(Case(
         Step(
             name="stranger-inv-on-accountA",
             method="GET",
-            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}",
+            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtInvitee",
             test_script=[
                 "pm.test('stranger ListByScope → 403', () => pm.expect(pm.response.code).to.eql(403));",

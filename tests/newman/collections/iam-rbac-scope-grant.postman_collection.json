@@ -213,6 +213,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_sgBindAOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accessBindingId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_sgBindAOpAcb', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -587,6 +592,136 @@
               }
             }
           ]
+        },
+        {
+          "name": "RBACSG-ESCALATION-CLOSED :: revoke-admin",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{_sgBindAOpAcb}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{_sgBindAOpAcb}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_revoke_admin') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_revoke_admin', '0');",
+                  "  pm.environment.set('_poll200_started_revoke_admin', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_revoke_admin') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_revoke_admin', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_revoke_admin');",
+                  "pm.environment.unset('_poll200_started_revoke_admin');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('__sgBindAOpAcbRevOp');",
+                  "pm.test('teardown: NOB grant revoked (200) or already gone (404) — a persistent 403 leaves the no-grant leak-guard subject authorized for every later suite', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('__sgBindAOpAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSG-ESCALATION-CLOSED :: revoke-await-admin",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{__sgBindAOpAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{__sgBindAOpAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__sgBindAOpAcbRevStarted') !== pm.info.requestName) { pm.environment.set('__sgBindAOpAcbRevCount', '0'); pm.environment.set('__sgBindAOpAcbRevStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('__sgBindAOpAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__sgBindAOpAcbRevCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__sgBindAOpAcbRevCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__sgBindAOpAcbRevCount'); pm.environment.unset('__sgBindAOpAcbRevStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -780,6 +915,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_sgBindGCOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accessBindingId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('_sgBindGCOpAcb', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -1073,6 +1213,136 @@
                   "  pm.expect(j.reason).to.include('compute_instance');",
                   "  pm.expect(j.reason).to.include('v_update');",
                   "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSG-PER-VERB :: revoke-getcreate",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{_sgBindGCOpAcb}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{_sgBindGCOpAcb}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_revoke_getcreate') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_revoke_getcreate', '0');",
+                  "  pm.environment.set('_poll200_started_revoke_getcreate', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_revoke_getcreate') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_revoke_getcreate', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_revoke_getcreate');",
+                  "pm.environment.unset('_poll200_started_revoke_getcreate');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('__sgBindGCOpAcbRevOp');",
+                  "pm.test('teardown: NOB grant revoked (200) or already gone (404) — a persistent 403 leaves the no-grant leak-guard subject authorized for every later suite', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('__sgBindGCOpAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSG-PER-VERB :: revoke-await-getcreate",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{__sgBindGCOpAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{__sgBindGCOpAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__sgBindGCOpAcbRevStarted') !== pm.info.requestName) { pm.environment.set('__sgBindGCOpAcbRevCount', '0'); pm.environment.set('__sgBindGCOpAcbRevStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('__sgBindGCOpAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__sgBindGCOpAcbRevCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__sgBindGCOpAcbRevCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__sgBindGCOpAcbRevCount'); pm.environment.unset('__sgBindGCOpAcbRevStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }

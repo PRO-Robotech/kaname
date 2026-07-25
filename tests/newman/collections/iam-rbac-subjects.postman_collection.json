@@ -541,6 +541,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_e30AcbId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_e30AcbId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_e30AcbId', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -550,7 +556,150 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_e30AcbId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_e30AcbId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_e30AcbId');",
+                  "pm.environment.unset('_poll200_started_teardown_e30AcbId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_e30AcbIdRevOp');",
+                  "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_e30AcbIdRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-CR-MULTI-OK :: teardown-await-e30AcbId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_e30AcbIdRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_e30AcbIdRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__e30AcbIdRevOpStarted') !== pm.info.requestName) { pm.environment.set('__e30AcbIdRevOpCount', '0'); pm.environment.set('__e30AcbIdRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_e30AcbIdRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__e30AcbIdRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__e30AcbIdRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__e30AcbIdRevOpCount'); pm.environment.unset('__e30AcbIdRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-CR-MULTI-OK :: teardown-group-e30GroupId",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{e30GroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{e30GroupId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_group_e30GroupId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_group_e30GroupId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_group_e30GroupId', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_group_e30GroupId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_group_e30GroupId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_group_e30GroupId');",
+                  "pm.environment.unset('_poll200_started_teardown_group_e30GroupId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('teardown: group deleted (200) or already gone (404) — a surviving group in the SHARED account is a cross-suite grant carrier', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
                 ]
               }
             }
@@ -1082,6 +1231,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_e34NewAcbId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_e34NewAcbId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_e34NewAcbId', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -1091,7 +1246,81 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_e34NewAcbId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_e34NewAcbId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_e34NewAcbId');",
+                  "pm.environment.unset('_poll200_started_teardown_e34NewAcbId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_e34NewAcbIdRevOp');",
+                  "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_e34NewAcbIdRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED :: teardown-await-e34NewAcbId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_e34NewAcbIdRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_e34NewAcbIdRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__e34NewAcbIdRevOpStarted') !== pm.info.requestName) { pm.environment.set('__e34NewAcbIdRevOpCount', '0'); pm.environment.set('__e34NewAcbIdRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_e34NewAcbIdRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__e34NewAcbIdRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__e34NewAcbIdRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__e34NewAcbIdRevOpCount'); pm.environment.unset('__e34NewAcbIdRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
@@ -1488,6 +1717,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_e34LegAcbId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_e34LegAcbId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_e34LegAcbId', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -1497,7 +1732,81 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_e34LegAcbId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_e34LegAcbId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_e34LegAcbId');",
+                  "pm.environment.unset('_poll200_started_teardown_e34LegAcbId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_e34LegAcbIdRevOp');",
+                  "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_e34LegAcbIdRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED :: teardown-await-e34LegAcbId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_e34LegAcbIdRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_e34LegAcbIdRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__e34LegAcbIdRevOpStarted') !== pm.info.requestName) { pm.environment.set('__e34LegAcbIdRevOpCount', '0'); pm.environment.set('__e34LegAcbIdRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_e34LegAcbIdRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__e34LegAcbIdRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__e34LegAcbIdRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__e34LegAcbIdRevOpCount'); pm.environment.unset('__e34LegAcbIdRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
@@ -1886,6 +2195,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_e33AcbId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_e33AcbId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_e33AcbId', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -1895,7 +2210,81 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_e33AcbId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_e33AcbId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_e33AcbId');",
+                  "pm.environment.unset('_poll200_started_teardown_e33AcbId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_e33AcbIdRevOp');",
+                  "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_e33AcbIdRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-LISTBYROLE-OK :: teardown-await-e33AcbId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_e33AcbIdRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_e33AcbIdRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__e33AcbIdRevOpStarted') !== pm.info.requestName) { pm.environment.set('__e33AcbIdRevOpCount', '0'); pm.environment.set('__e33AcbIdRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_e33AcbIdRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__e33AcbIdRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__e33AcbIdRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__e33AcbIdRevOpCount'); pm.environment.unset('__e33AcbIdRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }
@@ -2659,6 +3048,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_e31AcbId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_e31AcbId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_e31AcbId', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -2668,7 +3063,306 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_e31AcbId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_e31AcbId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_e31AcbId');",
+                  "pm.environment.unset('_poll200_started_teardown_e31AcbId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_e31AcbIdRevOp');",
+                  "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_e31AcbIdRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-EXPAND-GROUP-OK :: teardown-await-e31AcbId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_e31AcbIdRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_e31AcbIdRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__e31AcbIdRevOpStarted') !== pm.info.requestName) { pm.environment.set('__e31AcbIdRevOpCount', '0'); pm.environment.set('__e31AcbIdRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_e31AcbIdRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__e31AcbIdRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__e31AcbIdRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__e31AcbIdRevOpCount'); pm.environment.unset('__e31AcbIdRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-EXPAND-GROUP-OK :: teardown-unmember-e31GroupId-0",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{e31GroupId}}:removeMember",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{e31GroupId}}:removeMember"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAAAId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_unmember_e31GroupId_0') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_unmember_e31GroupId_0', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_unmember_e31GroupId_0', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_unmember_e31GroupId_0') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_unmember_e31GroupId_0', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_unmember_e31GroupId_0');",
+                  "pm.environment.unset('_poll200_started_teardown_unmember_e31GroupId_0');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('teardown: userAAAId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-EXPAND-GROUP-OK :: teardown-unmember-e31GroupId-1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{e31GroupId}}:removeMember",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{e31GroupId}}:removeMember"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAABId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_unmember_e31GroupId_1') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_unmember_e31GroupId_1', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_unmember_e31GroupId_1', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_unmember_e31GroupId_1') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_unmember_e31GroupId_1', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_unmember_e31GroupId_1');",
+                  "pm.environment.unset('_poll200_started_teardown_unmember_e31GroupId_1');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('teardown: userAABId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-EXPAND-GROUP-OK :: teardown-group-e31GroupId",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{e31GroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{e31GroupId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_group_e31GroupId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_group_e31GroupId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_group_e31GroupId', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_group_e31GroupId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_group_e31GroupId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_group_e31GroupId');",
+                  "pm.environment.unset('_poll200_started_teardown_group_e31GroupId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('teardown: group deleted (200) or already gone (404) — a surviving group in the SHARED account is a cross-suite grant carrier', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
                 ]
               }
             }
@@ -3203,6 +3897,12 @@
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_gmGrantAcbId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_gmGrantAcbId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_gmGrantAcbId', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -3212,7 +3912,228 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_gmGrantAcbId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_gmGrantAcbId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_gmGrantAcbId');",
+                  "pm.environment.unset('_poll200_started_teardown_gmGrantAcbId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_gmGrantAcbIdRevOp');",
+                  "pm.test('teardown: binding revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_gmGrantAcbIdRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK :: teardown-await-gmGrantAcbId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_gmGrantAcbIdRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_gmGrantAcbIdRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__gmGrantAcbIdRevOpStarted') !== pm.info.requestName) { pm.environment.set('__gmGrantAcbIdRevOpCount', '0'); pm.environment.set('__gmGrantAcbIdRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_gmGrantAcbIdRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__gmGrantAcbIdRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 30) {",
+                  "  pm.environment.set('__gmGrantAcbIdRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__gmGrantAcbIdRevOpCount'); pm.environment.unset('__gmGrantAcbIdRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK :: teardown-unmember-gmGrantGroupId-0",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{gmGrantGroupId}}:removeMember",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{gmGrantGroupId}}:removeMember"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAABId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_unmember_gmGrantGroupId_0') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_unmember_gmGrantGroupId_0', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_unmember_gmGrantGroupId_0', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_unmember_gmGrantGroupId_0') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_unmember_gmGrantGroupId_0', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_unmember_gmGrantGroupId_0');",
+                  "pm.environment.unset('_poll200_started_teardown_unmember_gmGrantGroupId_0');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('teardown: userAABId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK :: teardown-group-gmGrantGroupId",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{gmGrantGroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{gmGrantGroupId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_group_gmGrantGroupId') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_group_gmGrantGroupId', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_group_gmGrantGroupId', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_group_gmGrantGroupId') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_group_gmGrantGroupId', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_group_gmGrantGroupId');",
+                  "pm.environment.unset('_poll200_started_teardown_group_gmGrantGroupId');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('teardown: group deleted (200) or already gone (404) — a surviving group in the SHARED account is a cross-suite grant carrier', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
                 ]
               }
             }
