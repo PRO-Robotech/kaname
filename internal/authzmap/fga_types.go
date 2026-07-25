@@ -157,13 +157,10 @@ var verbBearingTypes = map[string]bool{
 	// is read-only at the service layer (Get/List only) but still verb-bearing
 	// in the model (uniform v_* across resource types; read-only-ness is enforced
 	// by the absence of mutating RPCs, not by omitting model relations).
-	"compute_disk_placement_group":   true,
 	"compute_host_group":             true,
-	"compute_filesystem":             true,
 	"compute_gpu_cluster":            true,
 	"compute_placement_group":        true,
 	"compute_reserved_instance_pool": true,
-	"compute_snapshot_schedule":      true,
 	"compute_host_type":              true,
 	"vpc_network":                    true,
 	"vpc_subnet":                     true,
@@ -250,13 +247,10 @@ var objectTypes = map[string]string{
 	// compute placement / capacity / data-protection resources (kacho-proto
 	// per-resource object_type). Each is a verb-bearing by-id authz object
 	// (see verbBearingTypes above).
-	"compute.diskPlacementGroup":   "compute_disk_placement_group",
 	"compute.hostGroup":            "compute_host_group",
-	"compute.filesystem":           "compute_filesystem",
 	"compute.gpuCluster":           "compute_gpu_cluster",
 	"compute.placementGroup":       "compute_placement_group",
 	"compute.reservedInstancePool": "compute_reserved_instance_pool",
-	"compute.snapshotSchedule":     "compute_snapshot_schedule",
 	"compute.hostType":             "compute_host_type",
 
 	// vpc

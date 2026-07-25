@@ -1,105 +1,5 @@
 [
   {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/Create",
-    "permission": "compute.disk_placement_groups.create",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/Delete",
-    "permission": "compute.disk_placement_groups.delete",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_disk_placement_group",
-      "from_request_field": "disk_placement_group_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/Get",
-    "permission": "compute.disk_placement_groups.get",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_disk_placement_group",
-      "from_request_field": "disk_placement_group_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/List",
-    "permission": "compute.disk_placement_groupses.list",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/ListAccessBindings",
-    "permission": "compute.access_bindingses.listAccessBindings",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/ListDisks",
-    "permission": "compute.disk_placement_group_diskses.listDisks",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_disk_placement_group",
-      "from_request_field": "disk_placement_group_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/ListOperations",
-    "permission": "compute.disk_placement_group_operationses.listOperations",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_disk_placement_group",
-      "from_request_field": "disk_placement_group_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/SetAccessBindings",
-    "permission": "compute.access_bindingses.setAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/Update",
-    "permission": "compute.disk_placement_groups.update",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_disk_placement_group",
-      "from_request_field": "disk_placement_group_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskPlacementGroupService/UpdateAccessBindings",
-    "permission": "compute.access_bindingses.updateAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.DiskService/Create",
     "permission": "compute.disks.create",
     "required_relation": "editor",
@@ -152,16 +52,6 @@
   {
     "fqn": "kacho.cloud.compute.v1.DiskService/ListOperations",
     "permission": "compute.disk_operationses.listOperations",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "compute_disk",
-      "from_request_field": "disk_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskService/ListSnapshotSchedules",
-    "permission": "compute.disk_snapshot_scheduleses.listSnapshotSchedules",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "compute_disk",
@@ -228,96 +118,6 @@
       "from_request_field": "*"
     },
     "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/Create",
-    "permission": "compute.filesystems.create",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/Delete",
-    "permission": "compute.filesystems.delete",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_filesystem",
-      "from_request_field": "filesystem_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/Get",
-    "permission": "compute.filesystems.get",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_filesystem",
-      "from_request_field": "filesystem_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/List",
-    "permission": "compute.filesystemses.list",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/ListAccessBindings",
-    "permission": "compute.access_bindingses.listAccessBindings",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/ListOperations",
-    "permission": "compute.filesystem_operationses.listOperations",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_filesystem",
-      "from_request_field": "filesystem_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/SetAccessBindings",
-    "permission": "compute.access_bindingses.setAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/Update",
-    "permission": "compute.filesystems.update",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_filesystem",
-      "from_request_field": "filesystem_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.FilesystemService/UpdateAccessBindings",
-    "permission": "compute.access_bindingses.updateAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
   },
   {
     "fqn": "kacho.cloud.compute.v1.GpuClusterService/Create",
@@ -680,16 +480,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/AttachFilesystem",
-    "permission": "compute.instance_filesystems.attachFilesystem",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.InstanceService/AttachNetworkInterface",
     "permission": "compute.instance_network_interfaces.attachNetworkInterface",
     "required_relation": "v_update",
@@ -722,16 +512,6 @@
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/DetachDisk",
     "permission": "compute.instance_disks.detachDisk",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/DetachFilesystem",
-    "permission": "compute.instance_filesystems.detachFilesystem",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "compute_instance",
@@ -1204,146 +984,6 @@
     "scope_extractor": {
       "object_type": "compute_reserved_instance_pool",
       "from_request_field": "reserved_instance_pool_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Create",
-    "permission": "compute.snapshot_schedules.create",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Delete",
-    "permission": "compute.snapshot_schedules.delete",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Disable",
-    "permission": "compute.snapshot_schedules.disable",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Enable",
-    "permission": "compute.snapshot_schedules.enable",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Get",
-    "permission": "compute.snapshot_schedules.get",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/List",
-    "permission": "compute.snapshot_scheduleses.list",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListAccessBindings",
-    "permission": "compute.access_bindingses.listAccessBindings",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListDisks",
-    "permission": "compute.snapshot_schedule_diskses.listDisks",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListOperations",
-    "permission": "compute.snapshot_schedule_operationses.listOperations",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/ListSnapshots",
-    "permission": "compute.snapshot_schedule_snapshotses.listSnapshots",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/SetAccessBindings",
-    "permission": "compute.access_bindingses.setAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/Update",
-    "permission": "compute.snapshot_schedules.update",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/UpdateAccessBindings",
-    "permission": "compute.access_bindingses.updateAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.SnapshotScheduleService/UpdateDisks",
-    "permission": "compute.snapshot_schedule_diskses.updateDisks",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "compute_snapshot_schedule",
-      "from_request_field": "snapshot_schedule_id"
     },
     "required_acr_min": "1"
   },
