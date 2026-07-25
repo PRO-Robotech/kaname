@@ -244,6 +244,10 @@ func (r *strictDupABReader) ListByRole(context.Context, domain.RoleID, repoab.Li
 func (r *strictDupABReader) ListSubjects(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 	return nil, nil
 }
+func (r *strictDupABReader) ListMaterializedAtForBindings(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
+	return nil, nil
+}
+
 func (r *strictDupABReader) ListSubjectsForBindings(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error) {
 	return nil, nil
 }

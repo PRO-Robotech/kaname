@@ -406,3 +406,49 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# ===========================================================================
+# Grantable-token gate — a rule's (module,resource) must be in the published
+# catalog, not merely grammar-valid.
+#
+# Before this gate an authoring typo produced a role that looked perfectly
+# healthy (Create 200, AccessBinding.Create 200) but reconciled to ZERO tuples,
+# so the grantee got 403 forever with no signal anywhere. The spelling cannot be
+# guessed — it is deliberately non-uniform across modules (compute.instance and
+# iam.serviceAccount are singular; storage.volumes, registry.registries,
+# loadbalancer.networkLoadBalancers are plural) — so the reject names the token
+# AND points at GET /iam/v1/permissionCatalog, which publishes exactly the set
+# this gate accepts.
+# ===========================================================================
+
+CASES.append(Case(
+    id="IAM-ROL-RD-CR-UNKNOWN-RESOURCE-TOKEN-NEG",
+    title="Create с неизвестным (module,resource) — 'instances' вместо 'instance' → sync 400 "
+          "INVALID_ARGUMENT с указанием токена и публичного каталога; НЕ 200 с молча-пустым грантом",
+    classes=["NEG"],
+    priority="P0",
+    steps=[
+        Step(
+            name="create-role-typo-resource",
+            method="POST",
+            path="/iam/v1/roles",
+            body={"name": "rdbadres{{runId}}", "accountId": "{{accountAId}}",
+                  "rules": [{"module": "compute", "resources": ["instances"], "verbs": ["get", "list"]}]},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                "pm.test('names the offending token', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('compute.instances'));",
+                "pm.test('points at the public grantable catalog', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('/iam/v1/permissionCatalog'));",
+            ],
+        ),
+    ],
+))
+
+# NOTE — no separate "catalog token accepted" newman case: the very first case in
+# this file (IAM-ROL-RD-CR-DEFINITIONTIER-OK) already creates a role with the
+# canonical tokens compute.instance/compute.disk end-to-end, so it goes RED if the
+# gate ever over-rejects a grantable token. The exhaustive both-ways conformance
+# (every published catalog pair is accepted) is locked in Go —
+# role/rules_catalog_test.go::TestRuleCatalogGate_AcceptsEveryPublishedCatalogToken.

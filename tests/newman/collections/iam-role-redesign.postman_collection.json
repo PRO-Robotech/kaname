@@ -1363,6 +1363,76 @@
           ]
         }
       ]
+    },
+    {
+      "name": "IAM-ROL-RD-CR-UNKNOWN-RESOURCE-TOKEN-NEG — Create с неизвестным (module,resource) — 'instances' вместо 'instance' → sync 400 INVALID_ARGUMENT с указанием токена и публичного каталога; НЕ 200 с молча-пустым грантом",
+      "description": "class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "IAM-ROL-RD-CR-UNKNOWN-RESOURCE-TOKEN-NEG :: create-role-typo-resource",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"rdbadres{{runId}}\", \"accountId\": \"{{accountAId}}\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instances\"], \"verbs\": [\"get\", \"list\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('names the offending token', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('compute.instances'));",
+                  "pm.test('points at the public grantable catalog', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('/iam/v1/permissionCatalog'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

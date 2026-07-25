@@ -223,6 +223,10 @@ func (delABReader) ListByRole(context.Context, domain.RoleID, access_binding.Lis
 func (delABReader) ListSubjects(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 	return nil, nil
 }
+func (delABReader) ListMaterializedAtForBindings(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
+	return nil, nil
+}
+
 func (delABReader) ListSubjectsForBindings(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error) {
 	return nil, nil
 }

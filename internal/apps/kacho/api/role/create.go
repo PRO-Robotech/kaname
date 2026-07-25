@@ -119,6 +119,17 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if verr := r.Rules.Validate(r.IsSystem); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
+	// Grantable-token gate: the resource segment must be a PUBLISHED
+	// `(module,resource)` pair, not merely a grammar-valid token. Without this a
+	// typo'd token compiles into a role that reconciles to ZERO tuples (the
+	// reconciler's fgaObjectType fail-closed-SKIPs an unknown key), so the grantee
+	// 403s forever with no signal on the role, the binding or the Operation. Runs
+	// AFTER Rule.Validate so the wildcard/XOR/feed errors surface first (they are
+	// more specific), and BEFORE CompileRules so the compiled projection never
+	// carries an ungrantable token.
+	if verr := validateRuleCatalog(r.Rules, r.IsSystem); verr != nil {
+		return nil, shared.MapValidationErr(verr)
+	}
 	compiled, cerr := domain.CompileRules(r.Rules)
 	if cerr != nil {
 		return nil, shared.MapValidationErr(cerr)

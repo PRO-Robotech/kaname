@@ -177,6 +177,10 @@ func (r *fakeABRdr) ListByRole(context.Context, domain.RoleID, access_binding.Li
 func (r *fakeABRdr) ListSubjects(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 	return nil, nil
 }
+func (r *fakeABRdr) ListMaterializedAtForBindings(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
+	return nil, nil
+}
+
 func (r *fakeABRdr) ListSubjectsForBindings(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error) {
 	return nil, nil
 }

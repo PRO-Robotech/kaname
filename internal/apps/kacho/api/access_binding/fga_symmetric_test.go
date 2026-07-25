@@ -322,6 +322,16 @@ type abFakeRepo struct {
 	// lastListFilter — the ListFilter the unified List last received (F11 tests
 	// assert the use-case's VisibleIDs push-down + predicate mapping).
 	lastListFilter ab_repo.ListFilter
+	// materializedAt — reconciler-ledger fixture backing
+	// ListMaterializedAtForBindings (AccessBinding.materialized_at). Seed via
+	// seedMaterializedAt; an absent binding reports nothing (= not yet live).
+	materializedAt map[domain.AccessBindingID]time.Time
+	// lastByScopeType / lastByScopeID — the scope anchor ListByScope last received.
+	// The handler resolves the canonical dotted `scope_type` (or the legacy bare
+	// `resource_type`) to the bare within-service kind BEFORE the use-case, so these
+	// pin that resolution (scope_coordinate_test.go).
+	lastByScopeType domain.ResourceType
+	lastByScopeID   string
 	// reconcileObjs — object ids for which a reconcile-event was emitted in the
 	// writer-tx (labels co-commit). Drained via drainReconcileObjects.
 	reconcileObjs []string
@@ -423,6 +433,17 @@ func (r *abFakeRepo) seedSubjectPrivileges(rows []domain.SubjectPrivilege) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.spRows = append(r.spRows[:0], rows...)
+}
+
+// seedMaterializedAt — test helper. Records the instant a binding's per-object
+// access became live, as the reconciler ledger would.
+func (r *abFakeRepo) seedMaterializedAt(id domain.AccessBindingID, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.materializedAt == nil {
+		r.materializedAt = map[domain.AccessBindingID]time.Time{}
+	}
+	r.materializedAt[id] = at
 }
 
 // seedABListByAccount — test helper. Replaces the fixture rows returned by
@@ -678,9 +699,11 @@ func (a *fakeABRdr) List(_ context.Context, f ab_repo.ListFilter) ([]domain.Acce
 	}
 	return out, "", nil
 }
-func (a *fakeABRdr) ListByScope(_ context.Context, _ domain.ResourceType, _ string, _ ab_repo.PageFilter) ([]domain.AccessBinding, string, error) {
+func (a *fakeABRdr) ListByScope(_ context.Context, resourceType domain.ResourceType, resourceID string, _ ab_repo.PageFilter) ([]domain.AccessBinding, string, error) {
 	a.repo.mu.Lock()
 	defer a.repo.mu.Unlock()
+	a.repo.lastByScopeType = resourceType
+	a.repo.lastByScopeID = resourceID
 	if a.repo.lbsRows == nil {
 		return nil, "", nil
 	}

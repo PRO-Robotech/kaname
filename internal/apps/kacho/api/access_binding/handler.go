@@ -247,6 +247,12 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	}
 	f.PageSize = safeconv.ClampNonNegInt32(req.GetPageSize())
 	f.PageToken = req.GetPageToken()
+	// (4) lifecycle: soft-revoked rows are retained for audit (F10) and were
+	// reachable ONLY through the legacy ListByAccount/ListByRole — the canonical
+	// List could not answer "who USED to hold this". A dedicated flag (not a filter
+	// key) so it COMPOSES with the single-predicate filter expression; default
+	// false keeps parity with those two RPCs.
+	f.IncludeRevoked = req.GetIncludeRevoked()
 
 	rows, next, err := h.list.Execute(ctx, f)
 	if err != nil {
@@ -290,8 +296,16 @@ func parseABListFilter(expr string) (repoab.ListFilter, error) {
 }
 
 func (h *Handler) ListByScope(ctx context.Context, req *iamv1.ListAccessBindingsByScopeRequest) (*iamv1.ListAccessBindingsResponse, error) {
+	// One coordinate, one name: prefer the canonical dotted scope_type/scope_id
+	// (parity with Create + AccessBinding), fall back to the legacy bare
+	// resource_type/resource_id. An unknown dotted value → sync INVALID_ARGUMENT.
+	scopeType, scopeID, err := scopeCoordinate(
+		req.GetScopeType(), req.GetScopeId(), req.GetResourceType(), req.GetResourceId())
+	if err != nil {
+		return nil, err
+	}
 	rows, next, err := h.listByScope.Execute(ctx,
-		domain.ResourceType(req.GetResourceType()), req.GetResourceId(),
+		domain.ResourceType(scopeType), scopeID,
 		repoab.PageFilter{PageSize: safeconv.ClampNonNegInt32(req.GetPageSize()), PageToken: req.GetPageToken()},
 	)
 	if err != nil {
@@ -387,8 +401,15 @@ func (h *Handler) ListSubjectPrivileges(ctx context.Context, req *iamv1.ListSubj
 // resource_type/id validation, existence + grant-authority, and the
 // isRoleAssignable filter all live in the use-case.
 func (h *Handler) ListAssignableRoles(ctx context.Context, req *iamv1.ListAssignableRolesRequest) (*iamv1.ListAssignableRolesResponse, error) {
+	// Same one-coordinate-one-name resolution as ListByScope: the role picker and
+	// the Create it feeds must speak the SAME vocabulary.
+	scopeType, scopeID, err := scopeCoordinate(
+		req.GetScopeType(), req.GetScopeId(), req.GetResourceType(), req.GetResourceId())
+	if err != nil {
+		return nil, err
+	}
 	roles, next, err := h.listAssignableRoles.Execute(ctx,
-		req.GetResourceType(), req.GetResourceId(),
+		scopeType, scopeID,
 		reporole.ListFilter{PageSize: safeconv.ClampNonNegInt32(req.GetPageSize()), PageToken: req.GetPageToken()},
 	)
 	if err != nil {
@@ -432,21 +453,44 @@ func scopeGroupToProto(g domain.RoleScopeGroup) iamv1.ScopeGroup {
 
 // subjectPrivilegeToProto maps the enriched domain projection to the proto
 // SubjectPrivilege. created_at/expires_at are truncated to seconds
-// (api-conventions). derivation is always DIRECT in v1 (D-5; GROUP reserved).
+// (api-conventions).
+//
+// Two projections are deliberately dual-written:
+//   - the scope anchor is emitted under BOTH the canonical dotted
+//     `scope_type`/`scope_id` and the legacy bare `resource_type`/`resource_id`
+//     (see scope_coordinate.go) so no client breaks while the names converge;
+//   - `derivation` reflects HOW the subject holds the privilege — DIRECT, or
+//     GROUP with `via_group_id` naming the carrying group.
 func subjectPrivilegeToProto(p domain.SubjectPrivilege) *iamv1.SubjectPrivilege {
 	return &iamv1.SubjectPrivilege{
-		BindingId:       string(p.BindingID),
-		RoleId:          string(p.RoleID),
-		RoleName:        string(p.RoleName),
-		ResourceType:    string(p.ResourceType),
-		ResourceId:      p.ResourceID,
+		BindingId: string(p.BindingID),
+		RoleId:    string(p.RoleID),
+		RoleName:  string(p.RoleName),
+		// Legacy spelling of the scope anchor — kept populated for back-compat.
+		ResourceType: string(p.ResourceType),
+		ResourceId:   p.ResourceID,
+		// Canonical spelling — identical in form/meaning to AccessBinding.scope_type.
+		ScopeType:       domain.ScopeTypeToDotted(string(p.ResourceType)),
+		ScopeId:         p.ResourceID,
 		Scope:           scopeToProto(p.Scope),
 		Status:          statusToProto(p.Status),
 		CreatedAt:       shared.TimestampProto(p.CreatedAt),
 		GrantedByUserId: string(p.GrantedByUserID),
 		ExpiresAt:       expiresAtProto(p.ExpiresAt),
-		Derivation:      iamv1.Derivation_DIRECT,
+		Derivation:      derivationToProto(p.Derivation),
+		ViaGroupId:      string(p.ViaGroupID),
 	}
+}
+
+// derivationToProto maps the domain derivation to the proto enum. The domain zero
+// value means DIRECT (a row produced without an explicit derivation is a direct
+// grant), so UNSPECIFIED is never emitted — leaking it would make every
+// pre-existing row look like an unknown derivation.
+func derivationToProto(d domain.PrivilegeDerivation) iamv1.Derivation {
+	if d == domain.DerivationGroup {
+		return iamv1.Derivation_GROUP
+	}
+	return iamv1.Derivation_DIRECT
 }
 
 func scopeToProto(s domain.Scope) iamv1.AccessBinding_Scope {

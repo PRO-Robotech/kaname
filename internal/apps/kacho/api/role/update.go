@@ -156,6 +156,12 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		if verr := in.Rules.Validate(current.IsSystem); verr != nil {
 			return nil, shared.MapValidationErr(verr)
 		}
+		// Grantable-token gate — parity with Create (see rules_catalog.go). An
+		// Update that swaps a valid token for a typo'd one would otherwise silently
+		// DEMOTE a working grant to an empty one.
+		if verr := validateRuleCatalog(in.Rules, current.IsSystem); verr != nil {
+			return nil, shared.MapValidationErr(verr)
+		}
 		compiled, cerr := domain.CompileRules(in.Rules)
 		if cerr != nil {
 			return nil, shared.MapValidationErr(cerr)

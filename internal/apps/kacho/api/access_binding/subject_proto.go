@@ -109,7 +109,35 @@ func readBindingsWithSubjects(ctx context.Context, repo Repo, query func(rd Read
 	if err := projectSubjectsBatch(ctx, rd, out); err != nil {
 		return nil, "", err
 	}
+	if err := projectMaterializedAtBatch(ctx, rd, out); err != nil {
+		return nil, "", err
+	}
 	return out, next, nil
+}
+
+// projectMaterializedAtBatch stamps each binding with the instant its per-object
+// access last became live (reconciler ledger), in ONE query for the whole page
+// (mirrors projectSubjectsBatch — no per-row N+1). A binding with no ACTIVE member
+// keeps a zero MaterializedAt, which the API projects as an unset field.
+//
+// This is the read-only observable for the eventually-consistent materialization
+// window; it never gates a write (Operation.done stays durability-only, ban #9).
+func projectMaterializedAtBatch(ctx context.Context, rd Reader, bindings []domain.AccessBinding) error {
+	if len(bindings) == 0 {
+		return nil
+	}
+	ids := make([]domain.AccessBindingID, len(bindings))
+	for i := range bindings {
+		ids[i] = bindings[i].ID
+	}
+	byID, err := rd.AccessBindings().ListMaterializedAtForBindings(ctx, ids)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	for i := range bindings {
+		bindings[i].MaterializedAt = byID[bindings[i].ID]
+	}
+	return nil
 }
 
 // subjectsFromProto maps a request's repeated Subject into domain.Subject. nil

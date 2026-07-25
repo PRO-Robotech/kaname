@@ -39,6 +39,28 @@ type AccessBinding struct {
 	RevokedByUserID *UserID                  // nullable
 	CreatedAt       time.Time
 
+	// MaterializedAt — OUTPUT-ONLY. When this binding's per-object access last
+	// became live: MAX(updated_at) over its ACTIVE rows in
+	// access_binding_target_members (the reconciler's ledger). Zero when nothing
+	// has materialized yet.
+	//
+	// It exists because Kachō is eventually-consistent by contract: Operation.done
+	// means the binding row is DURABLE, never that the FGA tuples are visible
+	// (gating done on downstream visibility is forbidden — ban #9). In that window
+	// the grantee's 403 is byte-identical to a real denial, leaving the granting
+	// admin with nothing to distinguish "propagating" from "wrong grant" and
+	// nothing to poll. This field is the observable — NOT a barrier: it is filled
+	// by the read path from an already-written ledger and never blocks a write.
+	//
+	// Legitimately zero forever for a binding that materializes no per-object
+	// membership (CLUSTER scope — served by the flat short-circuit; a legacy
+	// permissions-only role with no authored rules[]). Zero therefore means "no
+	// ACTIVE per-object member", NOT "the grant is broken".
+	//
+	// Not persisted on the access_bindings row; filled by the read-side batch
+	// projection, like Subjects.
+	MaterializedAt time.Time
+
 	// DeletionProtection guards the binding from Delete (RBAC explicit-model 2026
 	// P6 — D-10, by the image of vpc.address.deletion_protection). The owner
 	// auto-binding created on Account.Create sets it true; Delete on a protected

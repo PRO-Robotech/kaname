@@ -64,7 +64,22 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		// label-selectable наравне с account/project (ARM_LABELS-грант →
 		// v_list по `labels @> matchLabels`; List фильтрует viewer ∪ v_list).
 		Labels: labelsToStringMap(b.Labels),
+		// Observability of the eventually-consistent materialization window: WHEN
+		// this binding's per-object access became live (reconciler ledger). Left
+		// UNSET while nothing has materialized — an epoch-zero timestamp would read
+		// as "materialized in 1970" and defeat the whole point.
+		MaterializedAt: materializedAtProto(b.MaterializedAt),
 	}, nil
+}
+
+// materializedAtProto projects the materialization instant, truncated to seconds
+// (api-conventions). A zero time means "no ACTIVE per-object member" and maps to
+// an ABSENT field, never to epoch-zero.
+func materializedAtProto(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t.Truncate(tsTruncate))
 }
 
 // domainSubjectsToProto builds the canonical subjects[]. Uses the loaded

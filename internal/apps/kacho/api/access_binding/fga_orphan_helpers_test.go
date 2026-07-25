@@ -11,6 +11,7 @@ package access_binding
 
 import (
 	"context"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -200,6 +201,21 @@ func (rd *fakeABRdr) ListSubjectsForBindings(_ context.Context, ids []domain.Acc
 			cp := make([]domain.Subject, len(subs))
 			copy(cp, subs)
 			out[id] = cp
+		}
+	}
+	return out, nil
+}
+
+// ListMaterializedAtForBindings — batch fake of the reconciler-ledger read that
+// backs AccessBinding.materialized_at. Only bindings seeded via
+// seedMaterializedAt appear (mirrors the real repo: no ACTIVE member ⇒ absent).
+func (rd *fakeABRdr) ListMaterializedAtForBindings(_ context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
+	rd.repo.mu.Lock()
+	defer rd.repo.mu.Unlock()
+	out := map[domain.AccessBindingID]time.Time{}
+	for _, id := range ids {
+		if at, ok := rd.repo.materializedAt[id]; ok {
+			out[id] = at
 		}
 	}
 	return out, nil

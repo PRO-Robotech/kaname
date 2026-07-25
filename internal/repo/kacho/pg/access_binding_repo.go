@@ -333,9 +333,21 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 		pageSize = 1000
 	}
 
+	// Subject-match: DIRECT (the binding names the subject) OR GROUP-derived (the
+	// binding names a group the subject belongs to). Both branches are equality
+	// predicates on (subject_type, subject_id), so access_bindings_subject_idx
+	// serves them as a BitmapOr — the read stays index-driven, no seq-scan.
+	//
+	// The group side reads kacho_iam.group_members via group_members_member_idx.
+	// Groups do NOT nest (group_members_type_check allows only user /
+	// service_account), so this is exactly ONE hop and cannot recurse: when the
+	// REQUESTED subject is itself a group the sub-select is empty and only the
+	// DIRECT branch applies.
 	conditions := []string{
-		"ab.subject_type = $1",
-		"ab.subject_id = $2",
+		`(   (ab.subject_type = $1 AND ab.subject_id = $2)
+		  OR (ab.subject_type = 'group' AND ab.subject_id IN (
+		        SELECT gm.group_id FROM group_members gm
+		         WHERE gm.member_type = $1 AND gm.member_id = $2)) )`,
 		"ab.status <> 'REVOKED'",
 	}
 	args := []any{string(subjectType), string(subjectID)}
@@ -354,10 +366,20 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 
 	// COALESCE(r.name, '') so a LEFT JOIN miss (dangling role) scans as "" — the
 	// Go scan target is a plain string, never NULL.
+	//
+	// The last two columns attribute the row: `is_direct` is true when the binding
+	// names the subject itself; otherwise it was reached through the group named by
+	// `via_group_id`. A binding that is BOTH direct and group-carried resolves to
+	// DIRECT (the stronger, self-evident attribution) and yields ONE row — the
+	// predicate is a disjunction on the same row, never a join, so cardinality stays
+	// one-row-per-binding and the (created_at, id) keyset cursor stays valid.
 	q := fmt.Sprintf(`
 		SELECT ab.id, ab.role_id, COALESCE(r.name, ''),
 		       ab.resource_type, ab.resource_id, ab.scope, ab.status,
-		       ab.created_at, ab.granted_by_user_id, ab.expires_at
+		       ab.created_at, ab.granted_by_user_id, ab.expires_at,
+		       (ab.subject_type = $1 AND ab.subject_id = $2) AS is_direct,
+		       CASE WHEN ab.subject_type = 'group' AND NOT (ab.subject_type = $1 AND ab.subject_id = $2)
+		            THEN ab.subject_id ELSE '' END AS via_group_id
 		  FROM access_bindings ab
 		  LEFT JOIN roles r ON ab.role_id = r.id
 		 WHERE %s
@@ -394,12 +416,16 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 
 // scanSubjectPrivilege — maps a ListSubjectPrivileges row into the enriched
 // domain projection. role_name is already COALESCE'd to ” (dangling role).
-// scope is bounds-checked the same way as scanAB.
+// scope is bounds-checked the same way as scanAB. The trailing
+// is_direct/via_group_id columns carry the derivation attribution (DIRECT vs
+// GROUP-derived — see the query comment).
 func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 	var (
-		sp        domain.SubjectPrivilege
-		expiresAt sql.NullTime
-		scopeI    int16
+		sp         domain.SubjectPrivilege
+		expiresAt  sql.NullTime
+		scopeI     int16
+		isDirect   bool
+		viaGroupID string
 	)
 	err := row.Scan(
 		(*string)(&sp.BindingID),
@@ -412,9 +438,15 @@ func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 		&sp.CreatedAt,
 		(*string)(&sp.GrantedByUserID),
 		&expiresAt,
+		&isDirect,
+		&viaGroupID,
 	)
 	if err != nil {
 		return domain.SubjectPrivilege{}, err
+	}
+	if !isDirect {
+		sp.Derivation = domain.DerivationGroup
+		sp.ViaGroupID = domain.GroupID(viaGroupID)
 	}
 	if expiresAt.Valid {
 		t := expiresAt.Time
@@ -1377,6 +1409,50 @@ func (r *abReader) ListSubjectsForBindings(ctx context.Context, bindingIDs []dom
 		}
 		key := domain.AccessBindingID(bid)
 		out[key] = append(out[key], s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	return out, nil
+}
+
+// ListMaterializedAtForBindings batch-loads each binding's materialization instant
+// — MAX(updated_at) over its ACTIVE rows in access_binding_target_members (the
+// reconciler's ledger). Bindings with no ACTIVE member are ABSENT from the map
+// (the caller leaves MaterializedAt zero → the API projects an unset field).
+//
+// PENDING_VERIFICATION rows are deliberately excluded by the WHERE: a pending
+// member is NOT live access, and reporting it would tell an administrator the
+// grant works when it does not. Served by the PK's leading binding_id column, so
+// this is one indexed aggregate, not an N+1 fan-out.
+func (r *abReader) ListMaterializedAtForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
+	out := make(map[domain.AccessBindingID]time.Time, len(bindingIDs))
+	if len(bindingIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(bindingIDs))
+	for i, id := range bindingIDs {
+		ids[i] = string(id)
+	}
+	rows, err := r.tx.Query(ctx,
+		`SELECT binding_id, MAX(updated_at)
+		   FROM access_binding_target_members
+		  WHERE binding_id = ANY($1)
+		    AND verification_status = 'ACTIVE'
+		  GROUP BY binding_id`, ids)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			bid string
+			at  time.Time
+		)
+		if err := rows.Scan(&bid, &at); err != nil {
+			return nil, mapErr(err, "", "")
+		}
+		out[domain.AccessBindingID(bid)] = at
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapErr(err, "", "")

@@ -81,6 +81,17 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 		return domain.AccessBinding{}, shared.MapRepoErr(serr)
 	}
 	got.Subjects = subs
+	// Materialization observable — on the SAME reader-tx (before the scope-filter
+	// may release it), same reason as the subjects load. Answers "has the access I
+	// just granted gone live, and when" WITHOUT a server-side barrier: Get is the
+	// natural poll target for the bounded client retry that already runs against
+	// the transient 403 of the eventually-consistent window (ban #9 forbids gating
+	// Operation.done on it). Zero ⇒ no ACTIVE per-object member yet.
+	matAt, merr := rd.AccessBindings().ListMaterializedAtForBindings(ctx, []domain.AccessBindingID{id})
+	if merr != nil {
+		return domain.AccessBinding{}, shared.MapRepoErr(merr)
+	}
+	got.MaterializedAt = matAt[id]
 	// Scope-filter: AB visible только если principal является:
 	//   - subject (granted to self), OR
 	//   - holder of grant-authority on the binding's scope (resource owner OR

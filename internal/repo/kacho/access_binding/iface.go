@@ -6,6 +6,7 @@ package access_binding
 
 import (
 	"context"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
@@ -105,6 +106,21 @@ type ReaderIface interface {
 	// ordered subjects; a binding with no rows is absent from the map (caller
 	// applies the legacy single-subject fallback).
 	ListSubjectsForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error)
+
+	// ListMaterializedAtForBindings batch-loads, for MANY bindings in one query,
+	// the instant each one's per-object access last became live: MAX(updated_at)
+	// over its ACTIVE rows in access_binding_target_members (the reconciler's
+	// ledger). Mirrors ListSubjectsForBindings (no per-row N+1).
+	//
+	// A binding with NO ACTIVE member is ABSENT from the map — the caller leaves
+	// domain.AccessBinding.MaterializedAt zero, which the API projects as an unset
+	// field. PENDING_VERIFICATION members do NOT count: reporting a pending member
+	// as materialized would tell an administrator the grant works when it does not.
+	//
+	// This is the read-only observable for the eventually-consistent
+	// materialization window (Operation.done is durability, NOT visibility — ban
+	// #9). It never gates a write.
+	ListMaterializedAtForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error)
 }
 
 type WriterIface interface {
