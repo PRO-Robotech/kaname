@@ -45,18 +45,13 @@ func (u *DeleteGroupUseCase) Execute(ctx context.Context, id domain.GroupID) (*o
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
+	// WHO may delete this group is decided by the MODEL: the api-gateway Checks
+	// `v_delete@iam_group:<id>` before iam is dialed (security.md «Авторизация
+	// живёт в МОДЕЛИ»). The read below is existence/metadata only, not authz.
 	g, err := rd.Groups().Get(ctx, id)
-	if err != nil {
-		_ = rd.Rollback(ctx)
-		return nil, shared.MapRepoErr(err)
-	}
-	acct, err := rd.Accounts().Get(ctx, g.AccountID)
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
-		return nil, err
 	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,

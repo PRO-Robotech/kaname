@@ -55,25 +55,22 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 		_ = rd.Rollback(ctx)
 		return nil, shared.MapRepoErr(err)
 	}
-	// Self-delete всегда разрешен.
-	if !authzguard.IsSelf(ctx, string(target.ID)) {
-		// Иначе: owner аккаунта может удалить user в своем аккаунте.
-		if target.AccountID == "" {
-			_ = rd.Rollback(ctx)
-			return nil, authzguard.PermissionDenied()
-		}
-		acct, err := rd.Accounts().Get(ctx, target.AccountID)
-		if err != nil {
-			_ = rd.Rollback(ctx)
-			return nil, shared.MapRepoErr(err)
-		}
+	// Deleting SOMEONE ELSE is decided by the MODEL: the api-gateway Checks
+	// `v_delete@iam_user:<user_id>` before iam is dialed. The former in-service
+	// owner-equality check against the owning account's owner_user_id re-decided
+	// that from a DB column — denying owner-granted delegates and every machine
+	// principal (security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных
+	// проверках»).
+	//
+	// Two decisions deliberately kept, both narrower than the removed guard and
+	// both pre-existing: self-delete is always permitted, and an ACCOUNT-LESS
+	// user is self-delete-only — it sits in no account, so there is no scope an
+	// AccessBinding could be written against and no per-object grant to resolve.
+	if !authzguard.IsSelf(ctx, string(target.ID)) && target.AccountID == "" {
 		_ = rd.Rollback(ctx)
-		if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
-			return nil, err
-		}
-	} else {
-		_ = rd.Rollback(ctx)
+		return nil, authzguard.PermissionDenied()
 	}
+	_ = rd.Rollback(ctx)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Delete user %s", id),

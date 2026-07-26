@@ -49,22 +49,14 @@ func (u *DeleteRoleUseCase) Execute(ctx context.Context, id domain.RoleID) (*ope
 		_ = rd.Rollback(ctx)
 		return nil, shared.MapRepoErr(err)
 	}
-	// System roles are not deletable (handled in writer); custom roles —
-	// требуют ownership на account.
-	if role.AccountID != "" {
-		acct, err := rd.Accounts().Get(ctx, role.AccountID)
-		_ = rd.Rollback(ctx)
-		if err != nil {
-			return nil, shared.MapRepoErr(err)
-		}
-		if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
-			return nil, err
-		}
-	} else {
-		// System role: any user может попытаться удалить — writer вернет
-		// FailedPrecondition. Защищаемся anti-anon (уже выше).
-		_ = rd.Rollback(ctx)
-	}
+	// System roles are not deletable — the writer returns FailedPrecondition
+	// (resource STATE, not authz). WHO may delete a custom role is decided by
+	// the MODEL: the api-gateway Checks `v_delete@iam_role:<role_id>` before iam
+	// is dialed. The former in-service owner-equality check against the owning
+	// account's owner_user_id re-decided that more coarsely and could never be
+	// satisfied by a machine principal — security.md «Авторизация живёт в
+	// МОДЕЛИ, а не в самодельных проверках».
+	_ = rd.Rollback(ctx)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Delete role %s", id),

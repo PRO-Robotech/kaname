@@ -54,26 +54,33 @@ func PermissionDenied() error {
 	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
-// RequireOwnerMatchesPrincipal — anti-hijacking guard for Account.Create.
-// An authenticated user may create an Account ONLY with themselves as
-// owner_user_id; otherwise that would be privilege escalation by claiming
-// an account with another user-id as owner. Cluster-admin tooling must go
-// through the internal listener (bypass guard).
+// RequireOwnerMatchesPrincipal is GONE (2026-07-27). It was written as
+// request-body validation for ONE operation — Account.Create anti-hijacking
+// ("you may not create an account naming someone else as owner") — and was then
+// copied into 12 other use-cases where the same comparison means a DECISION
+// ABOUT ACCESS, not validation.
 //
-// Returns InvalidArgument (3) when owner_user_id != principal, not
-// PermissionDenied (7): this is a request-body validation failure — the
-// caller is supplying an owner_user_id that doesn't match their identity —
-// not an authz failure (they have no permission).
-func RequireOwnerMatchesPrincipal(ctx context.Context, ownerUserID string) error {
-	p := operations.PrincipalFromContext(ctx)
-	if p.ID == "" || ownerUserID == "" {
-		return status.Error(codes.InvalidArgument, "owner_user_id must match the authenticated principal")
-	}
-	if p.ID != ownerUserID {
-		return status.Error(codes.InvalidArgument, "owner_user_id must match the authenticated principal")
-	}
-	return nil
-}
+// Both halves are now obsolete:
+//
+//   - Account.Create no longer needs it. `owner_user_id` is OUTPUT-ONLY: supplying
+//     ANY value is a sync InvalidArgument and the owner is derived from the
+//     verified principal (account/create.go). There is nothing left to hijack —
+//     a stronger, structural guarantee than the comparison ever gave.
+//   - The other 12 are decided by the MODEL. Each carries a permission-catalog
+//     entry pinning a per-object relation (`v_delete@account`,
+//     `v_update@iam_group`, …) that the api-gateway Checks before iam is dialed.
+//     The comparison sat on top of that working system as a second, coarser one:
+//     it keyed on `accounts.owner_user_id`, so it could not be granted, scoped,
+//     revoked or audited; it voided delegation the owner had deliberately made
+//     through an AccessBinding; it rejected cluster-admins on accounts they do
+//     not own; and because a service-account id can never equal an account's
+//     owner user-id, it made all 12 unreachable for ANY machine principal by
+//     construction — answering with InvalidArgument naming a field the caller
+//     never sent.
+//
+// See security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных проверках».
+// Do not reintroduce an identity-equality gate next to a catalog entry: express
+// the policy as a relation in the model instead.
 
 // IsAnonymous — true if the principal is anonymous / empty / system+anonymous
 // / system+bootstrap-fallback.

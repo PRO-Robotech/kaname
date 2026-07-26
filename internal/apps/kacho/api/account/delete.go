@@ -39,26 +39,31 @@ func NewDeleteAccountUseCase(r Repo, opsRepo operations.Repo) *DeleteAccountUseC
 
 // Execute — sync id-validate + create Operation + worker doDelete.
 func (u *DeleteAccountUseCase) Execute(ctx context.Context, id domain.AccountID) (*operations.Operation, error) {
-	// Anti-anon required + ownership check (account.owner_user_id == principal).
+	// Anti-anon floor (defence-in-depth against a mis-wired listener). WHO may
+	// delete this account is decided by the MODEL, not here: the api-gateway
+	// resolves account_id and Checks `v_delete@account:<id>` before iam is
+	// dialed (permission catalog). The former in-service
+	// `RequireOwnerMatchesPrincipal(existing.OwnerUserID)` re-decided that from
+	// a DB column — narrower than the model, unrevocable, invisible to audit,
+	// and unsatisfiable by any machine principal — see security.md
+	// «Авторизация живёт в МОДЕЛИ, а не в самодельных проверках».
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 	if err := shared.ValidateResourceID(string(id), domain.PrefixAccount, "account"); err != nil {
 		return nil, err
 	}
-	// Account.Delete: only owner может удалить. Load existing account для проверки.
-	// Если account не существует — return NotFound (no info leak).
+	// Existence pre-check (NOT authz): a well-formed-but-absent id resolves to a
+	// sync NotFound here instead of an async Operation error (api-conventions:
+	// well-formed-но-нет → NotFound через repo.Get).
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	existing, err := rd.Accounts().Get(ctx, id)
+	_, err = rd.Accounts().Get(ctx, id)
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(existing.OwnerUserID)); err != nil {
-		return nil, err
 	}
 
 	op, err := operations.NewFromContext(ctx,

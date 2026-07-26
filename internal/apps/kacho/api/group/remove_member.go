@@ -48,7 +48,10 @@ func (u *RemoveMemberUseCase) Execute(ctx context.Context, in RemoveMemberInput)
 	if err := in.MemberType.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
-	// Anti-anon + ownership check на group.account.
+	// Anti-anon floor only. WHO may change this group's membership is decided by
+	// the MODEL: the api-gateway Checks `v_update@iam_group:<group_id>` before
+	// iam is dialed (security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных
+	// проверках»).
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
@@ -57,17 +60,9 @@ func (u *RemoveMemberUseCase) Execute(ctx context.Context, in RemoveMemberInput)
 		return nil, shared.MapRepoErr(err)
 	}
 	g, err := rd.Groups().Get(ctx, in.GroupID)
-	if err != nil {
-		_ = rd.Rollback(ctx)
-		return nil, shared.MapRepoErr(err)
-	}
-	acct, err := rd.Accounts().Get(ctx, g.AccountID)
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
-		return nil, err
 	}
 
 	op, err := operations.NewFromContext(ctx,

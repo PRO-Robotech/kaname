@@ -47,9 +47,13 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 	if in.MemberID == "" {
 		return nil, shared.InvalidArg("member_id", "member_id required")
 	}
-	// Anti-anon + ownership на group.account.
-	// Без этого любой добавляет SELF в чужую группу → privilege escalation
-	// via group bindings.
+	// Anti-anon floor only. Adding SELF to someone else's group (privilege
+	// escalation via group bindings) is prevented by the MODEL: the api-gateway
+	// Checks `v_update@iam_group:<group_id>` — membership changes ride the
+	// group's update verb — before iam is dialed. The former in-service
+	// owner-equality check re-decided that from the owning account's
+	// owner_user_id, denying owner-granted delegates and every machine principal
+	// (security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных проверках»).
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
@@ -58,17 +62,9 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 		return nil, shared.MapRepoErr(err)
 	}
 	g, err := rd.Groups().Get(ctx, in.GroupID)
-	if err != nil {
-		_ = rd.Rollback(ctx)
-		return nil, shared.MapRepoErr(err)
-	}
-	acct, err := rd.Accounts().Get(ctx, g.AccountID)
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
-		return nil, err
 	}
 	if err := in.MemberType.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)

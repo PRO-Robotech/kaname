@@ -141,16 +141,15 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		// (the resource's state, not the request, forbids the mutation).
 		return nil, status.Error(codes.FailedPrecondition, "System role is read-only and cannot be updated")
 	}
-	// Custom role: проверяем ownership account.
-	acct, err := rd.Accounts().Get(ctx, current.AccountID)
 	_ = rd.Rollback(ctx)
-	if err != nil {
-		return nil, shared.MapRepoErr(err)
-	}
+	// Anti-anon floor only. WHO may update this custom role is decided by the
+	// MODEL: the api-gateway Checks `v_update@iam_role:<role_id>` before iam is
+	// dialed. The former in-service owner-equality check against the owning
+	// account's owner_user_id was narrower than that per-object relation and
+	// unsatisfiable by a machine principal — security.md «Авторизация живёт в
+	// МОДЕЛИ, а не в самодельных проверках». (The is-system refusal above is a
+	// resource-STATE check, not authz, and stays.)
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
 		return nil, err
 	}
 

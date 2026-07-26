@@ -122,19 +122,17 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 		return nil, shared.MapRepoErr(err)
 	}
 	current, err := rd.Users().Get(ctx, in.ID)
-	if err != nil {
-		_ = rd.Rollback(ctx)
-		return nil, shared.MapRepoErr(err)
-	}
-	acct, err := rd.Accounts().Get(ctx, current.AccountID)
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
+	// Anti-anon floor only. WHO may update this user is decided by the MODEL:
+	// the api-gateway Checks `v_update@iam_user:<user_id>` before iam is dialed.
+	// The former in-service owner-equality check against the owning account's
+	// owner_user_id was narrower than that per-object relation and unsatisfiable
+	// by a machine principal — security.md «Авторизация живёт в МОДЕЛИ, а не в
+	// самодельных проверках».
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
 		return nil, err
 	}
 

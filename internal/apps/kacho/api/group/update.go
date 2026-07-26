@@ -80,20 +80,17 @@ func (u *UpdateGroupUseCase) Execute(ctx context.Context, in UpdateGroupInput) (
 		return nil, shared.MapRepoErr(err)
 	}
 	current, err := rd.Groups().Get(ctx, in.ID)
-	if err != nil {
-		_ = rd.Rollback(ctx)
-		return nil, shared.MapRepoErr(err)
-	}
-	// Ownership check на group.account.
-	acct, err := rd.Accounts().Get(ctx, current.AccountID)
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
+	// Anti-anon floor only. WHO may update this group is decided by the MODEL:
+	// the api-gateway Checks `v_update@iam_group:<id>` before iam is dialed. The
+	// former in-service owner-equality check against the owning account's
+	// owner_user_id voided owner-granted delegation and could never be satisfied
+	// by a machine principal — security.md «Авторизация живёт в МОДЕЛИ, а не в
+	// самодельных проверках».
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-	if err := authzguard.RequireOwnerMatchesPrincipal(ctx, string(acct.OwnerUserID)); err != nil {
 		return nil, err
 	}
 
