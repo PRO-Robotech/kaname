@@ -30,8 +30,28 @@ Operation envelope:
 Gotchas:
   - AddMember with non-existent user/SA → FailedPrecondition (9) via
     group_members_member_exists_trg DB trigger (NOT a software refcheck).
-  - AddMember duplicate (same member_type+member_id in same group) → AlreadyExists (6).
-  - RemoveMember of non-member → NotFound (5) or FailedPrecondition (9).
+  - Membership set-verbs are IDEMPOTENT, and that is the CONTRACT, not an
+    accident: group_service.proto states it on both RPCs ("Идемпотентно:
+    повторное добавление того же member'а — no-op" / "удаление
+    несуществующего членства — no-op"), the use-cases implement it
+    (add_member.go INSERT … ON CONFLICT DO NOTHING; remove_member.go treats 0
+    rows affected as success), and it is the platform-wide semantics for
+    collection membership (nlb TargetGroup.AddTargets, vpc
+    Network/Subnet.AddCidrBlocks, iam access_binding_subjects — all ON CONFLICT
+    DO NOTHING; data-integrity.md's attach template is idempotent by
+    construction: "свободно ИЛИ уже наш"). So:
+      * AddMember of an existing member  → Operation done, NO error, and the
+        member appears EXACTLY ONCE (asserted, not assumed).
+      * RemoveMember of a non-member     → Operation done, NO error, and the
+        membership set is unchanged (asserted).
+    A retried mutation is not an error; the failure modes worth reporting are
+    "the row is missing" / "the row is duplicated", both of which these cases
+    check through ListMembers instead of through an error code.
+  - ListMembers is a custom method: `GET /iam/v1/groups/{group_id}:listMembers`
+    (group_service.proto). It is NOT `/groups/{id}/members` — that path is not
+    in the generated REST route table, so it resolves to no FQN and fail-closes
+    on a permission-catalog miss (403 with an EMPTY `action`), which silently
+    satisfies any assertion that only looks at the status code.
   - Group.List is scope-filtered: non-member gets 200 + empty list (like SA.List).
   - GroupService has no plain account-unscoped List; always ?accountId=<id>.
 
@@ -39,9 +59,9 @@ Case IDs follow the IAM-GRP-<RPC>-<CLASS>[-detail] scheme.
 
 Acceptance scenarios:
   CreateGroup → id starts with `grp`.
-  AddMember happy + idempotent (дубль → AlreadyExists or no-op).
+  AddMember happy + idempotent (дубль → no-op, ровно одна строка членства).
   AddMember с несущ. user → FailedPrecondition (DB-триггер).
-  RemoveMember + no-member guard.
+  RemoveMember + idempotent remove-of-non-member (набор членов не меняется).
   DeleteGroup с AccessBinding → FailedPrecondition (FK RESTRICT).
 
 Test-first note (strict TDD):
@@ -66,6 +86,84 @@ def assert_iam_operation_envelope():
         "  const j = pm.response.json();",
         "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
         "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+        "});",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Helper: a 403 must be the deny we are actually testing, not a catalog miss.
+#
+# The api-gateway fail-closes with 403 AUTHZ_DENIED when the requested method
+# has no permission-catalog entry — which is also what a MISROUTED path
+# produces, because an unresolved path yields no FQN to look up. Both denials
+# are `{"code":7}`, so a negative that asserts only the status code passes on
+# either, and a wrong path turns the whole case into a tautology.
+#
+# The two are distinguishable in the body: a real per-object deny carries the
+# resolved permission and scope in ErrorInfo.metadata (`action`, `resource`),
+# whereas the catalog miss carries an EMPTY action (the descriptor is built
+# before the entry is known). Asserting the action/resource pins the deny to
+# the RPC and object under test.
+# ---------------------------------------------------------------------------
+
+def assert_scoped_authz_deny(action: str, resource_expr: str):
+    """resource_expr is a JS expression (not a literal) — `{{var}}` is not
+    interpolated inside test scripts, so a variable-bearing scope must be read
+    with pm.environment.get()."""
+    return [
+        "pm.test('403 PermissionDenied (code 7)', () => {",
+        "  pm.expect(pm.response.code).to.eql(403);",
+        "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
+        "});",
+        f"pm.test('deny is the scoped authz deny on {action}, not a permission-catalog miss', () => {{",
+        "  const j = pm.response.json();",
+        "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+        "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+        "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+        "  const md = info.metadata || {};",
+        f"  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('{action}');",
+        f"  pm.expect(md.resource, JSON.stringify(j)).to.eql({resource_expr});",
+        "});",
+    ]
+
+
+# Permission + FGA object type of GroupService/ListMembers (permission_catalog.json).
+LM_ACTION = "iam.group_memberses.listMembers"
+
+
+# ---------------------------------------------------------------------------
+# Helper: poll an Operation to done and assert it carries NO error.
+#
+# gen.py has poll_operation_until_done() (fixed `opId`) and assert_op_error()
+# (asserts an error). The idempotent membership verbs need the third
+# combination: a named op var, polled to done, asserted SUCCESSFUL.
+#
+# The busy-wait before setNextRequest is mandatory (testing.md): newman runs the
+# test script synchronously and dispatches setNextRequest before any setTimeout
+# callback, so without it the loop retries back-to-back and covers milliseconds
+# instead of seconds.
+# ---------------------------------------------------------------------------
+
+def poll_until_done_no_error(why: str, cap: int = 50):
+    delay = max(100, min(500, 30000 // cap))
+    return [
+        "const j = pm.response.json();",
+        "if (pm.environment.get('_okPollStarted') !== pm.info.requestName) {",
+        "  pm.environment.set('_okPollCount', '0');",
+        "  pm.environment.set('_okPollStarted', pm.info.requestName);",
+        "}",
+        "const pc = parseInt(pm.environment.get('_okPollCount') || '0', 10);",
+        f"if (!j.done && pc < {cap}) {{",
+        "  pm.environment.set('_okPollCount', String(pc + 1));",
+        f"  const _ipd = Date.now(); while (Date.now() - _ipd < {delay}) void 0;",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
+        "  return;",
+        "}",
+        "pm.environment.unset('_okPollCount');",
+        "pm.environment.unset('_okPollStarted');",
+        "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+        f"pm.test('operation carries no error — {why}', () => {{",
+        "  pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([undefined, null, 0]);",
         "});",
     ]
 
@@ -679,15 +777,25 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-AM-NEG-DUP — AddMember duplicate → AlreadyExists (6)
-# Same (member_type, member_id) in same group → UNIQUE violation → AlreadyExists.
+# IAM-GRP-AM-IDEMPOTENT-DUP — AddMember of a member the group already has.
+#
+# CONTRACT: idempotent no-op. group_service.proto/AddMember says so verbatim
+# ("Идемпотентно: повторное добавление того же member'а — no-op"), add_member.go
+# implements it (INSERT … ON CONFLICT DO NOTHING), and it is the platform-wide
+# semantics for collection membership (nlb AddTargets, vpc AddCidrBlocks, iam
+# access_binding_subjects). A retried Add is not an error.
+#
+# What idempotency can actually break is the ROW COUNT, so that is what is
+# asserted: the Operation succeeds AND the member is present exactly once. An
+# error-code assertion could never have caught a duplicate row.
+#
 # Depends on IAM-GRP-AM-CRUD-OK having added userNOBId.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
-    id="IAM-GRP-AM-NEG-DUP",
-    title="AddMember duplicate (userNOBId already in group) → async AlreadyExists (6)",
-    classes=["NEG"],
+    id="IAM-GRP-AM-IDEMPOTENT-DUP",
+    title="AddMember of an existing member (userNOBId) → Operation done, no error, member still present exactly once",
+    classes=["CRUD"],
     priority="P1",
     steps=[
         Step(
@@ -697,14 +805,9 @@ CASES.append(Case(
             body={"memberType": "user", "memberId": "{{userNOBId}}"},
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('sync 200 or 400/409', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 409]));",
-                "const j = pm.response.json();",
-                "if (pm.response.code === 200) {",
-                "  pm.environment.set('dupAddMemberOpId', j.id || '');",
-                "} else {",
-                "  // sync rejection: 6 (ALREADY_EXISTS) or 3 (INVALID_ARGUMENT)",
-                "  pm.test('sync code 3 or 6', () => pm.expect(j.code).to.be.oneOf([3, 6]));",
-                "}",
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "dupAddMemberOpId"),
             ],
         ),
         Step(
@@ -712,19 +815,22 @@ CASES.append(Case(
             method="GET",
             path="/operations/{{dupAddMemberOpId}}",
             auth="jwtAccountAdminA",
-            pre_script=[
-                "if (!pm.environment.get('dupAddMemberOpId')) {",
-                "  pm.execution.skipRequest();",
-                "}",
-            ],
             test_script=[
-                "const j = pm.response.json();",
-                "if (pm.environment.get('dupAddMemberOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 6 (ALREADY_EXISTS — duplicate member)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(6);",
-                "  });",
-                "}",
+                *poll_until_done_no_error("re-adding an existing member is a no-op, not an error"),
+            ],
+        ),
+        Step(
+            name="dup-add-leaves-one-row",
+            method="GET",
+            path="/iam/v1/groups/{{crudGroupId}}:listMembers",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('member present exactly once after the duplicate Add', () => {",
+                "  const ms = pm.response.json().members || [];",
+                "  const mine = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                "  pm.expect(mine.length, JSON.stringify(ms)).to.eql(1);",
+                "});",
             ],
         ),
     ],
@@ -819,15 +925,40 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-RM-NEG-NOT-MEMBER — RemoveMember of non-member → NotFound or FailedPrecondition
+# IAM-GRP-RM-IDEMPOTENT-NOT-MEMBER — RemoveMember of a subject that is not a member.
+#
+# CONTRACT: idempotent no-op. group_service.proto/RemoveMember says so verbatim
+# ("Идемпотентно: удаление несуществующего членства — no-op") and
+# remove_member.go implements it (0 rows affected is success). Symmetric with
+# AddMember, and with the platform's other detach/remove verbs — a retried
+# teardown must not fail, or every compensating path has to special-case it.
+#
+# The real risk of a no-op remove is COLLATERAL: that it removes something else,
+# or that a genuine membership silently disappears. That is what is asserted —
+# the Operation succeeds, userINVId is (still) absent, and the group's other
+# membership is untouched.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
-    id="IAM-GRP-RM-NEG-NOT-MEMBER",
-    title="RemoveMember non-member (userINVId not in group) → 404 NotFound or 9 FailedPrecondition",
-    classes=["NEG"],
+    id="IAM-GRP-RM-IDEMPOTENT-NOT-MEMBER",
+    title="RemoveMember of a non-member (userINVId) → Operation done, no error, membership set unchanged",
+    classes=["CRUD"],
     priority="P1",
     steps=[
+        # Re-seed one known member so "unchanged" has something to be measured
+        # against (IAM-GRP-RM-CRUD-OK emptied the group just above).
+        Step(
+            name="seed-member-before-noop-remove",
+            method="POST",
+            path="/iam/v1/groups/{{crudGroupId}}:addMember",
+            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
         Step(
             name="remove-not-member",
             method="POST",
@@ -835,13 +966,9 @@ CASES.append(Case(
             body={"memberType": "user", "memberId": "{{userINVId}}"},
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('sync 200 or 4xx', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 404]));",
-                "const j = pm.response.json();",
-                "if (pm.response.code === 200) {",
-                "  pm.environment.set('rmNotMemberOpId', j.id || '');",
-                "} else {",
-                "  pm.test('sync code 3, 5, or 9', () => pm.expect(j.code).to.be.oneOf([3, 5, 9]));",
-                "}",
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "rmNotMemberOpId"),
             ],
         ),
         Step(
@@ -849,21 +976,43 @@ CASES.append(Case(
             method="GET",
             path="/operations/{{rmNotMemberOpId}}",
             auth="jwtAccountAdminA",
-            pre_script=[
-                "if (!pm.environment.get('rmNotMemberOpId')) {",
-                "  pm.execution.skipRequest();",
-                "}",
-            ],
             test_script=[
-                "const j = pm.response.json();",
-                "if (pm.environment.get('rmNotMemberOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 5 or 9 (NOT_FOUND or FAILED_PRECONDITION)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([5, 9]);",
-                "  });",
-                "}",
+                *poll_until_done_no_error("removing a non-member is a no-op, not an error"),
             ],
         ),
+        Step(
+            name="noop-remove-changed-nothing",
+            method="GET",
+            path="/iam/v1/groups/{{crudGroupId}}:listMembers",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('the non-member is still absent', () => {",
+                "  const ms = pm.response.json().members || [];",
+                "  const inv = ms.filter(m => m.memberId === pm.environment.get('userINVId'));",
+                "  pm.expect(inv.length, JSON.stringify(ms)).to.eql(0);",
+                "});",
+                "pm.test('the genuine member was NOT collaterally removed', () => {",
+                "  const ms = pm.response.json().members || [];",
+                "  const nob = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                "  pm.expect(nob.length, JSON.stringify(ms)).to.eql(1);",
+                "});",
+            ],
+        ),
+        # Restore the pre-case state (group empty) so later cases keep their
+        # own preconditions.
+        Step(
+            name="restore-empty-group",
+            method="POST",
+            path="/iam/v1/groups/{{crudGroupId}}:removeMember",
+            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
     ],
 ))
 
@@ -895,25 +1044,53 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-LM-CRUD-OK — ListMembers of crudGroupId → 200, members array
+# IAM-GRP-LM-CRUD-OK — ListMembers of crudGroupId → 200, and the member is IN it.
+#
+# Self-seeded (testing.md): IAM-GRP-RM-CRUD-OK emptied the group a few cases
+# earlier, so the case adds its own member instead of reading whatever previous
+# cases happened to leave behind. "members is an array" is satisfied by an empty
+# array — the content assertion is what makes this a read test.
+#
+# Path: the custom-method form from group_service.proto. The former
+# `/groups/{id}/members` is not a generated route, so this case used to fail-close
+# on a permission-catalog miss.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-LM-CRUD-OK",
-    title="ListMembers of crudGroupId → 200, members array present",
+    title="ListMembers of crudGroupId → 200, self-seeded member present exactly once",
     classes=["CRUD"],
     priority="P0",
     steps=[
         Step(
+            name="seed-member-for-list",
+            method="POST",
+            path="/iam/v1/groups/{{crudGroupId}}:addMember",
+            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
             name="list-members",
             method="GET",
-            path="/iam/v1/groups/{{crudGroupId}}/members",
+            path="/iam/v1/groups/{{crudGroupId}}:listMembers",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
                 "pm.test('members array present', () => {",
                 "  const j = pm.response.json();",
                 "  pm.expect(j.members, 'members field').to.be.an('array');",
+                "});",
+                "pm.test('the seeded member is present exactly once, typed', () => {",
+                "  const ms = pm.response.json().members || [];",
+                "  const mine = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                "  pm.expect(mine.length, JSON.stringify(ms)).to.eql(1);",
+                "  pm.expect(mine[0].memberType, JSON.stringify(mine[0])).to.eql('user');",
                 "});",
             ],
         ),
@@ -922,22 +1099,32 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-LM-NEG-NOTFOUND — ListMembers of non-existent group → 404 or 403
+# IAM-GRP-LM-NEG-NOTFOUND — ListMembers of a well-formed but non-existent group.
+#
+# Authz-first (testing.md): the gateway resolves the scope to
+# `iam_group:<garbage>` and Checks it BEFORE the backend, so a group that does
+# not exist has no authorization path and the answer is 403 — for THIS group and
+# THIS permission. ListMembers is not a hide-existence read (that fallback covers
+# `/Get` + `v_get`), so the 403 is not rewritten to 404.
+#
+# The assertion pins the deny to its subject: previously this case passed on the
+# permission-catalog miss caused by a misrouted path, i.e. on a denial that had
+# nothing to do with the group being absent.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-LM-NEG-NOTFOUND",
-    title="ListMembers of non-existent group → 404 NotFound or 403",
+    title="ListMembers of non-existent group → 403 on iam_group:<absent> (authz-first, no path)",
     classes=["NEG"],
     priority="P1",
     steps=[
         Step(
             name="list-members-notfound",
             method="GET",
-            path=f"/iam/v1/groups/{GARBAGE_GRP}/members",
+            path=f"/iam/v1/groups/{GARBAGE_GRP}:listMembers",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
+                *assert_scoped_authz_deny(LM_ACTION, f"'iam_group:{GARBAGE_GRP}'"),
             ],
         ),
     ],
@@ -945,24 +1132,30 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-LM-AUTHZ-FOREIGN-DENY — jwtNoBindings cannot ListMembers of accountA group → 403
+# IAM-GRP-LM-AUTHZ-FOREIGN-DENY — jwtNoBindings cannot ListMembers of accountA group.
+#
+# The deny under test is "this subject has no v_list path to THIS group". The
+# same request under jwtAccountAdminA is a 200 two cases up, so the assertion
+# below isolates the subject as the only difference — and pins the denial to
+# `iam_group:<crudGroupId>` + the ListMembers permission, so a route/catalog
+# regression (which denies every subject, for an unrelated reason) fails the
+# case instead of satisfying it.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-LM-AUTHZ-FOREIGN-DENY",
-    title="ListMembers of crudGroupId as jwtNoBindings (no viewer on group) → 403",
+    title="ListMembers of crudGroupId as jwtNoBindings (no v_list on group) → 403 on iam_group:<crudGroupId>",
     classes=["AUTHZ", "NEG"],
     priority="P1",
     steps=[
         Step(
             name="list-members-foreign",
             method="GET",
-            path="/iam/v1/groups/{{crudGroupId}}/members",
+            path="/iam/v1/groups/{{crudGroupId}}:listMembers",
             auth="jwtNoBindings",
             test_script=[
-                "pm.test('FOREIGN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
-                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                "pm.test('FOREIGN: code 7 or 5', () => pm.expect(j && j.code).to.be.oneOf([7, 5]));",
+                *assert_scoped_authz_deny(
+                    LM_ACTION, "'iam_group:' + pm.environment.get('crudGroupId')"),
             ],
         ),
     ],
