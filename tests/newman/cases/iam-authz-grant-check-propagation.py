@@ -607,29 +607,27 @@ CASES.append(Case(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REVIEW-APPROVE-ANON-DENY — AccessReview approve must reject anonymous caller.
+# REMOVED — AUTHZGCP-REVIEW-APPROVE-ANON-DENY (AccessReview approve, anonymous).
+#
+# The case posted to `/iam/v1/accessReviewCampaigns/{id}/items/{item}:approve`
+# and accepted 401/403/404. There is no such RPC: `AccessReviewCampaign` exists
+# nowhere in this product — no service in proto/kacho/cloud/iam/v1/, no entry in
+# the gateway route table or either embedded permission catalog, no handler, and
+# no table (`access_review_campaigns` is named only inside the dedup loop of
+# migration 0002, which this schema never creates — see the report note). The
+# design that specified it (the pre-monorepo W2.B "enterprise block" stream) was
+# dropped by the RBAC v2 simplification and never carried over.
+#
+# So the request could not resolve to an FQN, the catalog lookup missed, and the
+# gateway fail-closed 403 AUTHZ_DENIED with an EMPTY `action` — on every run, for
+# every caller. The case therefore proved nothing about anonymous access; it
+# proved only that an unroutable path is denied.
+#
+# Nothing is lost by deleting it: "anonymous cannot invoke a mutating IAM RPC" is
+# covered on REAL routes, and more strictly (exact 401 + grpc code 16), by
+# iam-account.py / iam-project.py / iam-user.py / iam-group.py /
+# iam-service-account.py / iam-role.py create-anon steps.
 # ─────────────────────────────────────────────────────────────────────────────
-
-CASES.append(Case(
-    id="AUTHZGCP-REVIEW-APPROVE-ANON-DENY",
-    title="anonymous AccessReview approve → 403/404",
-    classes=["AUTHZ", "ANON"],
-    priority="P0",
-    steps=[
-        Step(
-            name="anon-approve",
-            method="POST",
-            path="/iam/v1/accessReviewCampaigns/arc_dummy/items/ari_dummy:approve",
-            body={},
-            auth="anonymous",
-            test_script=[
-                "pm.test('anon Approve → 401/403/404', () => {",
-                "  pm.expect([401, 403, 404]).to.include(pm.response.code);",
-                "});",
-            ],
-        ),
-    ],
-))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -648,11 +646,12 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userAAAId}}",
             auth="jwtInvitee",
-            test_script=[
-                "pm.test('foreign subject ListBySubject → 403', () => {",
-                "  pm.expect(pm.response.code, 'expected 403').to.eql(403);",
-                "});",
-            ],
+            # `action` pins the deny to ListBySubject: a bare 403 would also be
+            # satisfied by a permission-catalog miss (empty action), which is what
+            # a misrouted path produces. The scope anchor of this RPC is the
+            # cluster singleton (scope_extractor {cluster, "*"}), whose id a
+            # black-box caller does not know, so `resource` is left unpinned.
+            test_script=assert_scoped_authz_deny("iam.access_bindings_by_subjects.listBySubject"),
         ),
     ],
 ))
@@ -682,9 +681,15 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtInvitee",
-            test_script=[
-                "pm.test('stranger ListByScope → 403', () => pm.expect(pm.response.code).to.eql(403));",
-            ],
+            # Same discriminator as inv-lists-aaa-subject: without `action` a bare
+            # 403 is also satisfied by a catalog miss. This RPC's scope IS
+            # deterministic (scope_extractor reads resource_type/resource_id off
+            # the request), so the object is pinned too — the stranger must be
+            # denied on accountA, not on some other anchor.
+            test_script=assert_scoped_authz_deny(
+                "iam.access_bindings_by_resources.listByScope",
+                "'account:' + pm.environment.get('accountAId')",
+            ),
         ),
     ],
 ))
@@ -855,76 +860,26 @@ CASES.append(Case(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REVIEW-DECIDE-REVIEWER-IS-PRINCIPAL — AccessReview decide with empty
-# reviewer_user_id must record the authenticated principal in audit, never
-# accept caller-supplied identity.
+# REMOVED — AUTHZGCP-REVIEW-DECIDE-REVIEWER-IS-PRINCIPAL and
+#           AUTHZGCP-REVIEW-DECIDE-SPOOF-DENY.
 #
-# Suite caveat: AccessReviewCampaigns is fully end-to-end only with seeded
-# campaign/item rows. We assert the *handler behaviour* via a black-box probe
-# that hits the Approve endpoint and observes either 200 (campaign exists) or
-# 4xx (campaign absent in fixture) — and in the 200 case verifies that the
-# returned reviewerUserId == AAA.
+# Both posted to `/iam/v1/accessReviewCampaigns/{id}/items/{item}:approve` — the
+# same non-existent RPC as the deleted REVIEW-APPROVE-ANON-DENY above (no proto
+# service, no route, no catalog entry, no handler, no table). Both accepted a
+# 4xx as a pass, and the 4xx they always received was the gateway's catalog-miss
+# 403 (empty `action`), never the behaviour named in the title:
+#
+#   * "decide path reachable" was satisfied by an unreachable path;
+#   * the `reviewerUserId == principal` assertion sat behind `if (code === 200)`
+#     and never executed;
+#   * "spoofed reviewer_user_id → 400 InvalidArgument" never saw a 400, so the
+#     grpc-code-3 assertion behind `if (code === 400)` never executed either.
+#
+# The contract they were written for — audit identity comes from the
+# authenticated principal, a caller-supplied identity is rejected — is exercised
+# on a REAL route by AUTHZGCP-SAKEY-CREATEDBY-NOT-SPOOFABLE below
+# (`POST /iam/v1/serviceAccounts/{id}/keys` with `createdByUserId`).
 # ─────────────────────────────────────────────────────────────────────────────
-
-CASES.append(Case(
-    id="AUTHZGCP-REVIEW-DECIDE-REVIEWER-IS-PRINCIPAL",
-    title="AccessReview decide — empty reviewer_user_id → audit takes from principal",
-    classes=["AUTHZ", "AUDIT"],
-    priority="P1",
-    steps=[
-        Step(
-            name="aaa-decide-empty-reviewer",
-            method="POST",
-            path="/iam/v1/accessReviewCampaigns/arc_reviewerPrincipal_probe/items/ari_reviewerPrincipal_probe:approve",
-            body={"reviewerUserId": ""},
-            auth="jwtAccountAdminA",
-            test_script=[
-                # 404 acceptable when no campaign exists yet in fixture; the
-                # important assertion is "if accepted, identity ≠ spoofed".
-                "pm.test('decide path reachable', () => {",
-                "  pm.expect([200, 400, 403, 404]).to.include(pm.response.code);",
-                "});",
-                "if (pm.response.code === 200) {",
-                "  const j = pm.response.json();",
-                "  pm.test('reviewerUserId == principal', () => {",
-                "    pm.expect(j.reviewerUserId).to.eql(pm.environment.get('userAAAId'));",
-                "  });",
-                "}",
-            ],
-        ),
-    ],
-))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# REVIEW-DECIDE-SPOOF-DENY — explicit foreign reviewer_user_id must be
-# rejected as InvalidArgument (no audit-identity spoofing).
-# ─────────────────────────────────────────────────────────────────────────────
-
-CASES.append(Case(
-    id="AUTHZGCP-REVIEW-DECIDE-SPOOF-DENY",
-    title="AccessReview decide w/ spoofed reviewer_user_id → 400 InvalidArgument",
-    classes=["AUTHZ", "SPOOF"],
-    priority="P0",
-    steps=[
-        Step(
-            name="aaa-decide-spoof-inv",
-            method="POST",
-            path="/iam/v1/accessReviewCampaigns/arc_reviewerSpoof_probe/items/ari_reviewerSpoof_probe:approve",
-            body={"reviewerUserId": "{{userINVId}}"},
-            auth="jwtAccountAdminA",
-            test_script=[
-                "pm.test('spoofed reviewer_user_id → 400 InvalidArgument', () => {",
-                "  pm.expect([400, 403, 404]).to.include(pm.response.code);",
-                "});",
-                "if (pm.response.code === 400) {",
-                "  const j = pm.response.json();",
-                "  pm.test('grpc code 3 (InvalidArgument)', () => pm.expect(j.code).to.eql(3));",
-                "}",
-            ],
-        ),
-    ],
-))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1150,26 +1105,29 @@ CASES.append(Case(
 ))
 
 
-CASES.append(Case(
-    id="AUTHZGCP-BG-APPROVEB-CLUSTERADMIN-GRANT",
-    title="BG.ApproveB atomic cluster_admin_grants INSERT + fga_outbox emit",
-    classes=["FGA", "BG", "CLUSTER-ADMIN"],
-    priority="P0",
-    steps=[
-        # Like the JIT cases, ApproveB requires a seeded BG request; we use the
-        # bootstrap JWT and a synthetic id. We assert: not 5xx (no SQL-broken
-        # path on UNIQUE constraint), graceful 400/404/403 acceptable.
-        Step(
-            name="bootstrap-approveB",
-            method="POST",
-            path="/iam/v1/breakGlassRequests/bgr_seeded_or_404:approveB",
-            body={},
-            auth="jwtBootstrap",
-            test_script=[
-                "pm.test('approveB does not 5xx (UNIQUE 23505 mapped, no panic)', () => {",
-                "  pm.expect(pm.response.code, 'expected <500').to.be.lessThan(500);",
-                "});",
-            ],
-        ),
-    ],
-))
+# ─────────────────────────────────────────────────────────────────────────────
+# REMOVED — AUTHZGCP-BG-APPROVEB-CLUSTERADMIN-GRANT (Break-Glass ApproveB).
+#
+# The case posted to `/iam/v1/breakGlassRequests/{id}:approveB` and asserted only
+# `code < 500`. Break-Glass is not a feature of this product: it was PHYSICALLY
+# REMOVED by migration 0006_drop_scim_saml_break_glass.sql ("Break-Glass
+# (cluster_break_glass_grants + post-incident reviews) is removed as part of the
+# RBAC v2 simplification"), with the residual condition kind dropped by 0013.
+# There is no `BreakGlassService` in proto/kacho/cloud/iam/v1/, no route in the
+# gateway table, no catalog entry and no handler. (The `BreakGlassService/...`
+# strings in internal/authzguard/interceptor_anonymous_table_test.go are
+# synthetic FullMethod fixtures for the suffix matcher, alongside an invented
+# `SomeService` — not evidence of a live RPC.)
+#
+# So the response was always the gateway's catalog-miss 403, which is `< 500` —
+# the assertion was a tautology. The stated subject (an atomic
+# `cluster_admin_grants` INSERT co-committed with an fga_outbox emit, and its
+# UNIQUE-violation mapping) was never reached by this request at all.
+#
+# That subject IS live and IS covered elsewhere, on the RPC that actually owns
+# it: `InternalClusterService.GrantAdmin` (`POST /iam/v1/internal/cluster/admins`)
+# — see gateway/tests/newman/cases/cluster_admin.py (KAC-196 suite).
+#
+# `bootstrap-approveB` is removed from the known-RED whitelist in
+# scripts/assert-suites-green.sh by the same change (the list shrinks, never grows).
+# ─────────────────────────────────────────────────────────────────────────────

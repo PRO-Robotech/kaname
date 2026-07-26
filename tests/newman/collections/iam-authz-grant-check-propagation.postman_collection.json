@@ -521,70 +521,6 @@
       ]
     },
     {
-      "name": "AUTHZGCP-REVIEW-APPROVE-ANON-DENY — anonymous AccessReview approve → 403/404",
-      "description": "class:AUTHZ | class:ANON | priority:P0",
-      "item": [
-        {
-          "name": "AUTHZGCP-REVIEW-APPROVE-ANON-DENY :: anon-approve",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessReviewCampaigns/arc_dummy/items/ari_dummy:approve",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessReviewCampaigns",
-                "arc_dummy",
-                "items",
-                "ari_dummy:approve"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('anon Approve → 401/403/404', () => {",
-                  "  pm.expect([401, 403, 404]).to.include(pm.response.code);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
       "name": "AUTHZGCP-BIND-LIST-BY-SUBJECT-FOREIGN-DENY — INV's ListBySubject?subjectId=<userAAA> → 403 (cross-user denial)",
       "description": "class:AUTHZ | class:ISOLATION | priority:P0",
       "item": [
@@ -634,8 +570,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('foreign subject ListBySubject → 403', () => {",
-                  "  pm.expect(pm.response.code, 'expected 403').to.eql(403);",
+                  "pm.test('403 PermissionDenied (code 7)', () => {",
+                  "  pm.expect(pm.response.code).to.eql(403);",
+                  "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
+                  "});",
+                  "pm.test('deny is the scoped authz deny on iam.access_bindings_by_subjects.listBySubject, not a permission-catalog miss', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                  "  const md = info.metadata || {};",
+                  "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.access_bindings_by_subjects.listBySubject');",
                   "});"
                 ]
               }
@@ -746,7 +691,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('stranger ListByScope → 403', () => pm.expect(pm.response.code).to.eql(403));"
+                  "pm.test('403 PermissionDenied (code 7)', () => {",
+                  "  pm.expect(pm.response.code).to.eql(403);",
+                  "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
+                  "});",
+                  "pm.test('deny is the scoped authz deny on iam.access_bindings_by_resources.listByScope, not a permission-catalog miss', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                  "  const md = info.metadata || {};",
+                  "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.access_bindings_by_resources.listByScope');",
+                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('account:' + pm.environment.get('accountAId'));",
+                  "});"
                 ]
               }
             }
@@ -1311,160 +1268,6 @@
                   "pm.test('stranger DELETE → 403', () => {",
                   "  pm.expect([403, 404]).to.include(pm.response.code);",
                   "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZGCP-REVIEW-DECIDE-REVIEWER-IS-PRINCIPAL — AccessReview decide — empty reviewer_user_id → audit takes from principal",
-      "description": "class:AUTHZ | class:AUDIT | priority:P1",
-      "item": [
-        {
-          "name": "AUTHZGCP-REVIEW-DECIDE-REVIEWER-IS-PRINCIPAL :: aaa-decide-empty-reviewer",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessReviewCampaigns/arc_reviewerPrincipal_probe/items/ari_reviewerPrincipal_probe:approve",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessReviewCampaigns",
-                "arc_reviewerPrincipal_probe",
-                "items",
-                "ari_reviewerPrincipal_probe:approve"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"reviewerUserId\": \"\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('decide path reachable', () => {",
-                  "  pm.expect([200, 400, 403, 404]).to.include(pm.response.code);",
-                  "});",
-                  "if (pm.response.code === 200) {",
-                  "  const j = pm.response.json();",
-                  "  pm.test('reviewerUserId == principal', () => {",
-                  "    pm.expect(j.reviewerUserId).to.eql(pm.environment.get('userAAAId'));",
-                  "  });",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZGCP-REVIEW-DECIDE-SPOOF-DENY — AccessReview decide w/ spoofed reviewer_user_id → 400 InvalidArgument",
-      "description": "class:AUTHZ | class:SPOOF | priority:P0",
-      "item": [
-        {
-          "name": "AUTHZGCP-REVIEW-DECIDE-SPOOF-DENY :: aaa-decide-spoof-inv",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessReviewCampaigns/arc_reviewerSpoof_probe/items/ari_reviewerSpoof_probe:approve",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accessReviewCampaigns",
-                "arc_reviewerSpoof_probe",
-                "items",
-                "ari_reviewerSpoof_probe:approve"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"reviewerUserId\": \"{{userINVId}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('spoofed reviewer_user_id → 400 InvalidArgument', () => {",
-                  "  pm.expect([400, 403, 404]).to.include(pm.response.code);",
-                  "});",
-                  "if (pm.response.code === 400) {",
-                  "  const j = pm.response.json();",
-                  "  pm.test('grpc code 3 (InvalidArgument)', () => pm.expect(j.code).to.eql(3));",
-                  "}"
                 ]
               }
             }
@@ -2290,76 +2093,6 @@
                   "pm.test('revoke→deny: probed tuple converged allowed=false', () => {",
                   "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
                   "  pm.expect(j.allowed === true, JSON.stringify(j)).to.eql(false);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZGCP-BG-APPROVEB-CLUSTERADMIN-GRANT — BG.ApproveB atomic cluster_admin_grants INSERT + fga_outbox emit",
-      "description": "class:FGA | class:BG | class:CLUSTER-ADMIN | priority:P0",
-      "item": [
-        {
-          "name": "AUTHZGCP-BG-APPROVEB-CLUSTERADMIN-GRANT :: bootstrap-approveB",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/breakGlassRequests/bgr_seeded_or_404:approveB",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "breakGlassRequests",
-                "bgr_seeded_or_404:approveB"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtBootstrap'",
-                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('approveB does not 5xx (UNIQUE 23505 mapped, no panic)', () => {",
-                  "  pm.expect(pm.response.code, 'expected <500').to.be.lessThan(500);",
                   "});"
                 ]
               }

@@ -212,6 +212,55 @@ def assert_unscoped_rejected(action: Optional[str] = None,
     return out
 
 
+def assert_scoped_authz_deny(action: str,
+                             resource_expr: Optional[str] = None) -> List[str]:
+    """A 403 must be the per-object deny under test, not a permission-catalog miss.
+
+    Companion to `assert_unscoped_rejected` above (same discriminator, different
+    shape): that one covers "rejected, 400-or-403"; this one covers "denied, 403,
+    on a specific object". Both live here so there is exactly ONE implementation
+    of the catalog-miss discriminator — do not re-derive a third copy in a case
+    file.
+
+    Why it is needed. The api-gateway fail-closes with 403 AUTHZ_DENIED when the
+    requested method has no permission-catalog entry — which is also what a
+    MISROUTED path produces, because an unresolvable path yields no FQN to look
+    up. Both denials are `{"code":7}`, so a negative that asserts only the status
+    code passes on either, and a wrong path turns the whole case into a tautology
+    (three such cases were found and removed on 2026-07-26).
+
+    The two are distinguishable in the body: a real per-object deny carries the
+    resolved permission and scope in `ErrorInfo.metadata` (`action`, `resource`),
+    whereas the catalog miss carries an EMPTY action — the descriptor is built
+    before the entry is known. Asserting the action pins the deny to the RPC.
+
+    `resource_expr` is a JS EXPRESSION (not a literal): `{{var}}` is not
+    interpolated inside test scripts, so a variable-bearing scope must be read
+    with `pm.environment.get()`. Pass it whenever the scope the gateway resolves
+    is deterministic — `resourceLabel()` renders `"<object_type>:<id>"`, or
+    `"<object_type>:*"` when the extractor resolves no id. Omit it for RPCs whose
+    scope anchor is a cluster singleton (id not known to a black-box caller); the
+    `action` assertion alone already excludes the catalog miss.
+    """
+    out = [
+        "pm.test('403 PermissionDenied (code 7)', () => {",
+        "  pm.expect(pm.response.code).to.eql(403);",
+        "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
+        "});",
+        f"pm.test('deny is the scoped authz deny on {action}, not a permission-catalog miss', () => {{",
+        "  const j = pm.response.json();",
+        "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+        "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+        "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+        "  const md = info.metadata || {};",
+        f"  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('{action}');",
+    ]
+    if resource_expr:
+        out.append(f"  pm.expect(md.resource, JSON.stringify(j)).to.eql({resource_expr});")
+    out.append("});")
+    return out
+
+
 def assert_field_violation(field_name: str) -> List[str]:
     return [
         f"pm.test('field violation on \"{field_name}\"', () => {{",
@@ -1228,6 +1277,7 @@ def load_cases_module(path: Path):
     mod.assert_grpc_code = assert_grpc_code
     mod.assert_field_violation = assert_field_violation
     mod.assert_unscoped_rejected = assert_unscoped_rejected
+    mod.assert_scoped_authz_deny = assert_scoped_authz_deny
     mod.save_from_response = save_from_response
     mod.assert_operation_envelope = assert_operation_envelope
     mod.assert_created_at_seconds = assert_created_at_seconds

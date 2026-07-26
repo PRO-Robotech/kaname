@@ -85,12 +85,25 @@ for col in "${collections[@]}"; do
   #   - any-authz-gated-rpc-during-openfga-outage — needs external `kubectl
   #     scale openfga --replicas=0` orchestration (authz-deny).
   #   - inv-get-account-allow-warm-cache — FGA grant→Check warm-cache window.
-  #   - probe-check / -after-revoke / health-check — speculative /iam/v1/check
-  #     (real path is /iam/v1/authorize:check), never wired.
-  #   - inv-list-* / aaa-creates-eligibility / aab-approves-some-pending /
-  #     bootstrap-approveB — JIT/eligibility orchestration not seeded in CI.
-  #   - anon-*-op / poll-op-plaintext / re-get-op-redacted / list-perms-on-internal
-  #     — operation anon/redaction spot-checks (NM-cases).
+  #   - probe-check / -after-revoke — grant→Check propagation probes against
+  #     /iam/v1/authorize:check. (The old note here said these hit a "speculative
+  #     /iam/v1/check … never wired"; that misroute was corrected in the case
+  #     helper — see cases/iam-authz-grant-check-propagation.py:127 — so what
+  #     remains RED is the propagation window itself, not the path.)
+  #   - anon-*-op / poll-op-plaintext / re-get-op-redacted — operation
+  #     anon/redaction spot-checks (NM-cases).
+  #
+  #   PRUNED 2026-07-26 (the list shrinks, never grows). Every name below matched
+  #   NO request in ANY generated collection — the cases were deleted earlier and
+  #   the mask outlived them, so it protected nothing while standing ready to
+  #   silently absorb any future step that reused the name:
+  #     health-check, inv-list-pending, inv-list-reports, inv-get-foreign-pending,
+  #     aaa-creates-eligibility, aab-approves-some-pending, list-perms-on-internal.
+  #   bootstrap-approveB was pruned with its case: AUTHZGCP-BG-APPROVEB-CLUSTERADMIN-GRANT
+  #   called `/iam/v1/breakGlassRequests/{id}:approveB`, an RPC removed from the
+  #   product by migration 0006, so the step could only ever receive the gateway's
+  #   catalog-miss 403 and its `code < 500` assertion was a tautology. See the
+  #   removal note in cases/iam-authz-grant-check-propagation.py.
   #   - SEC-C-A-* (parent.name) — FGA-proxy Register/UnregisterResource are
   #     cluster-internal :9091-only RPCs with no google.api.http mapping (ban
   #     #6) → un-runnable as black-box REST; covered by fgaproxy_test.go
@@ -311,7 +324,7 @@ for col in "${collections[@]}"; do
   # variable could be absorbed by an unrelated alternation entry and the suite would
   # go quiet again in exactly the way this whole mechanism exists to prevent.
   if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache|probe-check|probe-check-after-revoke|health-check|inv-list-pending|inv-list-reports|inv-get-foreign-pending|aaa-creates-eligibility|aab-approves-some-pending|bootstrap-approveB|anon-get-op|anon-cancel-op|anon-cant-see-op|poll-op-plaintext|re-get-op-redacted|list-perms-on-internal|poll-bind-project-anchor|te4-post-bind-project-viewer|teardown-user-gone|teardown-grp-gone|teardown-nonmem-gone|revoke-binding-gone|teardown-sa-gone|teardown-sa-iso-gone|teardown-usr-iso-gone|teardown-user-revoke|teardown-usr-iso-revoke|issue-sakey")) or (.parent.name? // "" | test("^SEC-C-A-|^T31-LBLREVOKE-NLB-|^IAM-CH-GRP-MEMBERSHIP-FLIP-OK|^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^INST-AD-|^INST-DD-|^INST-DISK-DEL-WHILE-ATTACHED|^INST-DEL-STATE-|^INST-NIC-|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-START-CRUD-OK |^NLB-STOP-CRUD-OK |^NLB-STOP-STATE-ALREADY-STOPPED |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^NLB-DEL-STATE-HAS-ATTACHED |^NLB-ATT-STATE-REGION-MISMATCH |^NLB-ATT-NEG-TG-UNKNOWN |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH |^INST-CR-CRUD-BOOT-DISK-ID-OK |^SUBNET-LF-D-VISIBLE |^SUBNET-LF-D-NOLEAK |^SUBNET-LF-D-NONE ")))] | length' "$report")
+    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache|probe-check|probe-check-after-revoke|anon-get-op|anon-cancel-op|anon-cant-see-op|poll-op-plaintext|re-get-op-redacted|poll-bind-project-anchor|te4-post-bind-project-viewer|teardown-user-gone|teardown-grp-gone|teardown-nonmem-gone|revoke-binding-gone|teardown-sa-gone|teardown-sa-iso-gone|teardown-usr-iso-gone|teardown-user-revoke|teardown-usr-iso-revoke|issue-sakey")) or (.parent.name? // "" | test("^SEC-C-A-|^T31-LBLREVOKE-NLB-|^IAM-CH-GRP-MEMBERSHIP-FLIP-OK|^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^INST-AD-|^INST-DD-|^INST-DISK-DEL-WHILE-ATTACHED|^INST-DEL-STATE-|^INST-NIC-|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-START-CRUD-OK |^NLB-STOP-CRUD-OK |^NLB-STOP-STATE-ALREADY-STOPPED |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^NLB-DEL-STATE-HAS-ATTACHED |^NLB-ATT-STATE-REGION-MISMATCH |^NLB-ATT-NEG-TG-UNKNOWN |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH |^INST-CR-CRUD-BOOT-DISK-ID-OK |^SUBNET-LF-D-VISIBLE |^SUBNET-LF-D-NOLEAK |^SUBNET-LF-D-NONE ")))] | length' "$report")
     fails=$((fails - known_red))
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi

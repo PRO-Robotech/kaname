@@ -91,41 +91,14 @@ def assert_iam_operation_envelope():
 
 
 # ---------------------------------------------------------------------------
-# Helper: a 403 must be the deny we are actually testing, not a catalog miss.
-#
-# The api-gateway fail-closes with 403 AUTHZ_DENIED when the requested method
-# has no permission-catalog entry — which is also what a MISROUTED path
-# produces, because an unresolved path yields no FQN to look up. Both denials
-# are `{"code":7}`, so a negative that asserts only the status code passes on
-# either, and a wrong path turns the whole case into a tautology.
-#
-# The two are distinguishable in the body: a real per-object deny carries the
-# resolved permission and scope in ErrorInfo.metadata (`action`, `resource`),
-# whereas the catalog miss carries an EMPTY action (the descriptor is built
-# before the entry is known). Asserting the action/resource pins the deny to
-# the RPC and object under test.
+# `assert_scoped_authz_deny(action, resource_expr=None)` — "a 403 must be the
+# deny we are actually testing, not a permission-catalog miss" — was defined
+# here; it now lives in scripts/gen.py next to its sibling
+# `assert_unscoped_rejected` (same discriminator, different shape) and is
+# injected into every case module, so there is exactly ONE implementation for
+# all iam cases to reuse. Rationale and the `resource_expr` contract are in the
+# gen.py docstring.
 # ---------------------------------------------------------------------------
-
-def assert_scoped_authz_deny(action: str, resource_expr: str):
-    """resource_expr is a JS expression (not a literal) — `{{var}}` is not
-    interpolated inside test scripts, so a variable-bearing scope must be read
-    with pm.environment.get()."""
-    return [
-        "pm.test('403 PermissionDenied (code 7)', () => {",
-        "  pm.expect(pm.response.code).to.eql(403);",
-        "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
-        "});",
-        f"pm.test('deny is the scoped authz deny on {action}, not a permission-catalog miss', () => {{",
-        "  const j = pm.response.json();",
-        "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
-        "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
-        "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
-        "  const md = info.metadata || {};",
-        f"  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('{action}');",
-        f"  pm.expect(md.resource, JSON.stringify(j)).to.eql({resource_expr});",
-        "});",
-    ]
-
 
 # Permission + FGA object type of GroupService/ListMembers (permission_catalog.json).
 LM_ACTION = "iam.group_memberses.listMembers"
