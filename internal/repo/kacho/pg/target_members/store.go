@@ -84,6 +84,24 @@ func ListByBindingTx(ctx context.Context, tx pgx.Tx, bindingID string) ([]Member
 		bindingID)
 }
 
+// ListByBindingObjectTx returns the materialized members of ONE binding on ONE object —
+// the NARROW diff base of the object-triggered reconcile pass (a mirror upsert/delete or
+// a label UPDATE changes exactly one object, so only that object's members can change).
+//
+// The predicate leads with (object_type, object_id) so it is served by the by-object
+// index: an object carries a handful of member rows (3.2 bindings on average on the
+// measured stand, 66 at the tail), whereas the PK's leading column is binding_id, under
+// which the hottest bindings hold 10 140 rows. Filtering the object out of a whole
+// binding would be the very O(mirror) read this narrow base exists to avoid.
+func ListByBindingObjectTx(ctx context.Context, tx pgx.Tx, bindingID, objectType, objectID string) ([]Member, error) {
+	return queryMembers(ctx, tx,
+		`SELECT binding_id, role_id, rule_fp, object_type, object_id, verification_status
+		   FROM kacho_iam.access_binding_target_members
+		  WHERE object_type = $2 AND object_id = $3 AND binding_id = $1
+		  ORDER BY rule_fp ASC`,
+		bindingID, objectType, objectID)
+}
+
 // BindingsForObjectTx returns the distinct binding ids that have a materialized
 // member referencing (objectType, objectID). The reconciler uses this on a
 // mirror-change event to find which selector/byName bindings must be

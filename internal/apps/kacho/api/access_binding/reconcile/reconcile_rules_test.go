@@ -55,6 +55,14 @@ type fakeStore struct {
 	sharedLocks   int                      // AcquireBindingLockShared (SHARE) call count (forward path)
 	unlockedLoads int                      // LoadBindingUnlocked call count (forward path)
 
+	// Producer-cost counters. An object-triggered pass must recompute ONLY the changed
+	// object, so the whole-scope candidate scan (MatchAllInScope*) and the whole-binding
+	// member read (CurrentMembers) must NOT be reached — they are the O(mirror) recompute.
+	matchAllCalls          int // MatchAllInScope + MatchAllInScopeIAMDirect call count
+	matchAllObjectsScanned int // objects returned by those scans (the recompute's read volume)
+	currentMembersCalls    int // CurrentMembers (whole-binding) call count
+	currentForObjectCalls  int // CurrentMembersForObject (narrow) call count
+
 	// ReconcileObject fan-out fixtures (deadlock-class lock-ordering test). When set,
 	// BindingsForObject / SelectorBindingsMatchingObject return these (possibly
 	// overlapping, intentionally UNSORTED) id sets; lockOrder records the order in
@@ -68,6 +76,11 @@ type fakeStore struct {
 	// getter + iam-direct fan-out) without disturbing the mirror-fed forward tests.
 	iamDirectSelectorBindings []domain.AccessBindingID
 	lockOrder                 []domain.AccessBindingID
+
+	// scopeSelfVerbs seeds BindingScope.ScopeSelfVerbs — the role's verbs ON the
+	// binding's own scope anchor (account:<X>/project:<X>). Empty ⇒ no scope-self member
+	// (the default for the content-selector slices).
+	scopeSelfVerbs []string
 }
 
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
@@ -86,12 +99,13 @@ func (f *fakeStore) AcquireBindingLockShared(ctx context.Context, id domain.Acce
 
 func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
 	return BindingScope{
-		BindingID:   id,
-		Scope:       f.scope,
-		SubjectType: f.subjectType,
-		SubjectID:   f.subjectID,
-		Selectors:   f.selectors,
-		Active:      f.active,
+		BindingID:      id,
+		Scope:          f.scope,
+		SubjectType:    f.subjectType,
+		SubjectID:      f.subjectID,
+		Selectors:      f.selectors,
+		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Active:         f.active,
 	}, true, nil
 }
 
@@ -102,12 +116,13 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
 	f.unlockedLoads++
 	return BindingScope{
-		BindingID:   id,
-		Scope:       f.scope,
-		SubjectType: f.subjectType,
-		SubjectID:   f.subjectID,
-		Selectors:   f.selectors,
-		Active:      f.active,
+		BindingID:      id,
+		Scope:          f.scope,
+		SubjectType:    f.subjectType,
+		SubjectID:      f.subjectID,
+		Selectors:      f.selectors,
+		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Active:         f.active,
 	}, true, nil
 }
 
@@ -145,6 +160,8 @@ func (f *fakeStore) MatchAllInScope(ctx context.Context, types []string, scope d
 	for _, t := range types {
 		out = append(out, f.mirror[t]...)
 	}
+	f.matchAllCalls++
+	f.matchAllObjectsScanned += len(out)
 	return out, nil
 }
 
@@ -172,6 +189,8 @@ func (f *fakeStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string
 	for _, t := range types {
 		out = append(out, f.iamDirect[t]...)
 	}
+	f.matchAllCalls++
+	f.matchAllObjectsScanned += len(out)
 	return out, nil
 }
 
@@ -214,7 +233,23 @@ func (f *fakeStore) GetIAMDirectObject(ctx context.Context, ot, oid string) (dom
 }
 
 func (f *fakeStore) CurrentMembers(ctx context.Context, id domain.AccessBindingID) ([]domain.TargetMember, error) {
+	f.currentMembersCalls++
 	return f.current, nil
+}
+
+// CurrentMembersForObject is the NARROW diff base: the materialized members of ONE
+// binding on ONE object. It models the indexed (binding_id, object_type, object_id)
+// read the production adapter performs — the object-triggered pass must use this
+// instead of the whole-binding CurrentMembers scan.
+func (f *fakeStore) CurrentMembersForObject(ctx context.Context, id domain.AccessBindingID, ot, oid string) ([]domain.TargetMember, error) {
+	f.currentForObjectCalls++
+	var out []domain.TargetMember
+	for _, m := range f.current {
+		if m.ObjectType == ot && m.ObjectID == oid {
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }
 func (f *fakeStore) BindingsForObject(ctx context.Context, ot, oid string) ([]domain.AccessBindingID, error) {
 	return f.bindingsForObject, nil

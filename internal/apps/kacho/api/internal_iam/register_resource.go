@@ -52,8 +52,13 @@ type relationOutboxEmitter interface {
 // output-only mirror: UPSERT/DELETE a kacho_iam.resource_mirror row inside the
 // caller-owned tx (atomic co-commit with the owner-tuple emit, ban #10).
 // Implemented by *repo/kacho/pg.ResourceMirrorEmitter.
+//
+// UpsertTx reports whether it actually CHANGED a row. The mirror's monotonic guard
+// applies a register only when its source_version is strictly newer than the stored one,
+// so a redelivery of an already-applied registration updates zero rows — the signal the
+// register path uses to skip re-materialising work the first delivery already did.
 type resourceMirrorEmitter interface {
-	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) error
+	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (changed bool, err error)
 	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) error
 }
 
@@ -177,15 +182,46 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		return err
 	}
 	objType, objID := t.objectType()
-	if err := uc.emit(ctx, t, service.ResourceMirrorRow{
+	changed, err := uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:      objType,
 		ObjectID:        objID,
 		ParentProjectID: in.GetParentProjectId(),
 		ParentAccountID: in.GetParentAccountId(),
 		Labels:          labels,
 		SourceVersion:   sourceVersion(in),
-	}, true); err != nil {
+	}, true)
+	if err != nil {
 		return err
+	}
+	// REDELIVERY GATE. Every consumer delivers each registration TWICE — a synchronous
+	// post-commit call plus the at-least-once register-drainer replaying the same durable
+	// intent — and the two carry the SAME monotonic source_version lineage (the sync path
+	// stamps wall-clock AFTER the commit, the drainer replays the version the DB stamped
+	// INSIDE the writer-tx, i.e. strictly earlier). The mirror's monotonic guard therefore
+	// already recognises the second delivery: it changes zero rows. When nothing changed
+	// there is, by construction, nothing to materialise — the delivery that DID write the
+	// row emitted the owner tuple and the reconcile event — so the expensive forward
+	// reconcile fan-out is skipped. Before this, iam re-ran the whole materialisation on
+	// every duplicate (measured: two byte-identical 27-row fga_outbox batches 6.7 ms apart
+	// for one created network).
+	//
+	// This is keyed on APPLIED STATE via a MONOTONIC version, NOT on queue contents.
+	// De-duplicating unsent outbox rows by (event type, payload) would silently drop a
+	// re-grant — grant → revoke → grant folds into grant → revoke — whereas a genuine
+	// re-registration always carries a newer version (and an unregister removes the mirror
+	// row outright), so it can never be swallowed. The revoke path is deliberately NOT
+	// gated at all: a swallowed revoke is an over-grant, so Unregister always materialises.
+	//
+	// UNVERSIONED PRODUCERS ARE NEVER GATED. A caller that sends no source_version maps to
+	// '-infinity', which loses every monotonic comparison — so its writes report `changed
+	// = false` for reasons that have NOTHING to do with redelivery, and gating them would
+	// suppress REAL materialisation. (Measured: registry's synchronous registrar sends no
+	// version, so every re-registration after the first would have lost its fast path and
+	// fallen back to the async drain — a widened read-your-writes window, not a saving.)
+	// The gate therefore requires positive proof of redelivery — a version to compare —
+	// and fails OPEN into doing the work when it has none.
+	if !changed && !sourceVersion(in).IsZero() {
+		return nil
 	}
 	// Instant-visibility: after the owner-tuple + mirror + reconcile event COMMIT, drive
 	// a SYNCHRONOUS ADDITIVE forward materialization so the creator's per-object v_get
@@ -237,11 +273,17 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// SourceVersion carries the unregister tombstone-version: the mirror DELETE
 	// fires only if it is >= the stored register (Delete-after-Update reorder
 	// cannot wipe a fresher row).
-	return uc.emit(ctx, t, service.ResourceMirrorRow{
+	//
+	// The revoke path is NEVER gated on "did the mirror change": a swallowed revoke is a
+	// standing over-grant, so the tuple-delete and the reconcile event are enqueued
+	// unconditionally (fail-closed). The producer-cost saving is taken only on the grant
+	// path, where a no-op is provably a redelivery of work already done.
+	_, err = uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:    objType,
 		ObjectID:      objID,
 		SourceVersion: sourceVersion(in),
 	}, false)
+	return err
 }
 
 // tupleInput — the minimal transport-agnostic shape both RPCs share. Satisfied
@@ -330,22 +372,26 @@ func validateRelationString(field, v string) error {
 // in ONE writer-tx — both commit together or roll back together (atomic
 // co-commit, ban #10). write=true → register (UPSERT + tuple.write);
 // write=false → unregister (DELETE + tuple.delete).
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool) error {
+// It returns whether the mirror statement actually CHANGED a row. On the register path a
+// false means the monotonic guard rejected the write as not-newer — a redelivery of a
+// registration already applied — and the owner-tuple + reconcile-event enqueues are
+// SKIPPED with it (they were performed by the delivery that did write the row). The
+// unregister path always enqueues (a swallowed revoke would be an over-grant), so its
+// flag is informational only.
+func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool) (bool, error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		// Backend-down at connection acquisition → retriable Unavailable (the
 		// handler maps ErrUnavailable → codes.Unavailable; the caller's
 		// transactional-outbox drainer then re-delivers). Fixed opaque message —
 		// never surface the raw pgx driver text (host/port/user/db).
-		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
 	tuples := []service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}
+	changed := true
 	if write {
-		if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
-			return fmt.Errorf("emit fga outbox: %w", err)
-		}
 		// Backfill parent_account_id SAME-DB from projects.account_id when the
 		// owner supplied only parent_project_id (IAM owns Project — no peer-call, no
 		// cycle). The owner-supplied value (if any) wins only when the project is not
@@ -353,21 +399,35 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if uc.accounts != nil && row.ParentAccountID == "" && row.ParentProjectID != "" {
 			accID, ok, rerr := uc.accounts.AccountForProjectTx(ctx, tx, row.ParentProjectID)
 			if rerr != nil {
-				return fmt.Errorf("resolve account for project: %w", rerr)
+				return false, fmt.Errorf("resolve account for project: %w", rerr)
 			}
 			if ok {
 				row.ParentAccountID = accID
 			}
 		}
-		if err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
-			return fmt.Errorf("upsert resource mirror: %w", err)
+		// The mirror UPSERT runs FIRST so its monotonic verdict can gate the two
+		// enqueues below. Ordering within the tx is otherwise irrelevant — all three
+		// statements still commit together or roll back together (ban #10).
+		if changed, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
+			return false, fmt.Errorf("upsert resource mirror: %w", err)
+		}
+		// An UNVERSIONED producer ('-infinity') loses every monotonic comparison, so its
+		// `changed = false` proves nothing about redelivery — treat it as changed so a
+		// real registration is never suppressed (see the gate note in Register).
+		if row.SourceVersion.IsZero() {
+			changed = true
+		}
+		if changed {
+			if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
+				return false, fmt.Errorf("emit fga outbox: %w", err)
+			}
 		}
 	} else {
 		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
-			return fmt.Errorf("emit fga outbox: %w", err)
+			return false, fmt.Errorf("emit fga outbox: %w", err)
 		}
 		if err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion); err != nil {
-			return fmt.Errorf("delete resource mirror: %w", err)
+			return false, fmt.Errorf("delete resource mirror: %w", err)
 		}
 	}
 	// Enqueue a reconcile event in the SAME writer-tx as the mirror
@@ -375,7 +435,11 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	// binding member referencing this object (selector membership / byName
 	// containment / PENDING→ACTIVE verify). nil-safe when the reconciler is
 	// unwired (the periodic sweep then catches up).
-	if uc.reconcile != nil {
+	//
+	// Skipped on a no-op register (see the redelivery gate in Register): the mirror is
+	// byte-for-byte what it already was, so re-running the reconciler over it would
+	// re-derive an identical desired set and change nothing.
+	if uc.reconcile != nil && changed {
 		// NOTE: keep these literals in sync with reconcile_outbox.EventUpsert /
 		// reconcile_outbox.EventDelete (the drainer reads them). They are inlined
 		// here rather than imported because this use-case must not depend on the
@@ -385,14 +449,14 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			eventType = "mirror.delete"
 		}
 		if err = uc.reconcile.EmitTx(ctx, tx, eventType, row.ObjectType, row.ObjectID); err != nil {
-			return fmt.Errorf("emit reconcile event: %w", err)
+			return false, fmt.Errorf("emit reconcile event: %w", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
 		// contract as Begin). The row/tuple did not durably land; the caller's
 		// drainer re-delivers.
-		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
-	return nil
+	return changed, nil
 }

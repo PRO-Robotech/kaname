@@ -213,8 +213,18 @@ type ReconcileStore interface {
 	// instant it exists) — same-DB read, no peer call (graph stays acyclic).
 	GetIAMDirectObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
 
-	// CurrentMembers returns the materialized members of a binding (the diff base).
+	// CurrentMembers returns the materialized members of a binding (the diff base) —
+	// the WHOLE-binding read, used only by the binding-triggered passes (ReconcileBinding
+	// / ExpireBinding / sweep), whose desired set genuinely spans the whole scope.
 	CurrentMembers(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.TargetMember, error)
+
+	// CurrentMembersForObject returns the materialized members of ONE binding on ONE
+	// object — the NARROW diff base of the object-triggered pass (ReconcileObject). A
+	// mirror upsert/delete changes exactly one object, so only that object's members can
+	// change; reading the binding's WHOLE member set for it is the O(mirror) recompute
+	// (the two hottest measured bindings carry 10 140 members each). Indexed by the
+	// members' (binding_id, object_type, object_id) key.
+	CurrentMembersForObject(ctx context.Context, bindingID domain.AccessBindingID, objectType, objectID string) ([]domain.TargetMember, error)
 
 	// BindingsForObject returns binding ids that have a member referencing the
 	// object (used to fan a mirror-change event out to affected bindings).
@@ -401,23 +411,39 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 	c.pendingDeletes = append(c.pendingDeletes, pendingDelete{binding: binding, tuples: tuples})
 }
 
-// collect appends a member's ACTIVE-emit tuples, DE-DUPLICATED across the whole pass
-// (skips when the collector is nil — i.e. sync-FGA unwired). De-dup is mandatory: one
-// reconcile pass (esp. ReconcileObject fanning over many bindings, or the scope-self
-// member plus a `*.*` content member that both target account:<X>) emits the SAME tuple
-// more than once, and OpenFGA's batch Write rejects the WHOLE request on a duplicate
-// (cannot_allow_duplicate_tuples_in_one_request) — distinct from the idempotent
-// already_exists across requests. The fga_outbox enqueue is row-per-tuple so duplicates
-// there are harmless; only the single batched sync Write needs the set. Called from
-// applyDiff right where EmitTupleWrite enqueues them, so the sync write-set is the
-// deduped fga_outbox write-set (no drift in CONTENT, only dups removed).
-func (c *syncFGACollector) collect(tuples []domain.MembershipTuple) {
+// collectNew records a member's ACTIVE-emit tuples DE-DUPLICATED across the whole pass
+// and returns exactly the subset NOT already emitted in this pass — the set the caller
+// must enqueue into fga_outbox.
+//
+// De-dup is mandatory for the batched sync write: one reconcile pass (ReconcileObject
+// fanning over many bindings, or the scope-self member plus a `*.*` content member that
+// both target account:<X>, or two rules of one binding whose verb sets overlap) derives
+// the SAME tuple more than once, and OpenFGA's batch Write rejects the WHOLE request on
+// a duplicate (cannot_allow_duplicate_tuples_in_one_request) — distinct from the
+// idempotent already_exists across requests.
+//
+// The fga_outbox enqueue is de-duplicated by the SAME set (producer cost). A second
+// outbox row for a tuple this very transaction already enqueued is pure waste: the
+// drainer would apply a byte-identical write twice. The measured stand showed 27 outbox
+// rows for 21 distinct tuples in a single pass — 2.2 rows per distinct tuple table-wide.
+// The de-dup is strictly PER-PASS (per writer-tx) and keyed on the tuple, so it can never
+// collapse a grant → revoke → grant sequence: those are three separate passes, each with
+// its own collector, and the revoke in between clears the member row and the ledger.
+//
+// The per-binding LEDGER write is deliberately NOT de-duplicated by this set: the ledger
+// PK is (binding_id, fga_user, relation, object), so two bindings claiming the identical
+// tuple must each keep their OWN row — that is what makes the cross-binding revoke
+// subtraction (TuplesStillClaimedByOtherBindings) correct.
+//
+// A nil collector (sync-FGA unwired) de-duplicates nothing and returns the input as-is.
+func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.MembershipTuple {
 	if c == nil {
-		return
+		return tuples
 	}
 	if c.seen == nil {
 		c.seen = make(map[SyncFGATuple]struct{})
 	}
+	fresh := tuples[:0:0]
 	for _, t := range tuples {
 		st := SyncFGATuple{User: t.User, Relation: t.Relation, Object: t.Object}
 		if _, dup := c.seen[st]; dup {
@@ -425,7 +451,9 @@ func (c *syncFGACollector) collect(tuples []domain.MembershipTuple) {
 		}
 		c.seen[st] = struct{}{}
 		c.tuples = append(c.tuples, st)
+		fresh = append(fresh, t)
 	}
+	return fresh
 }
 
 // flushDeletes emits the pass's DEFERRED tuple-deletes inside the writer-tx, AFTER
@@ -520,10 +548,45 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 
 // ReconcileObject re-evaluates every binding that has a member referencing the
 // changed object (trigger (b) — a resource_mirror upsert/delete). For each such
-// binding it recomputes the full desired set (idempotent diff), so a label flip
-// or a parent change is reflected. It ALSO handles the PENDING→ACTIVE/REJECTED
-// transition: a binding whose selector now matches a newly-arrived object picks
-// it up because the full recompute re-runs MatchSelector.
+// binding it re-derives THAT OBJECT's membership and diffs it against THAT OBJECT's
+// materialized members, so a label flip or a parent change is reflected — including
+// the delete-stale revoke and the PENDING→ACTIVE/REJECTED transition.
+//
+// COST — the pass is O(1) in the binding's scope size (the producer-cost fix). The
+// event carries exactly ONE changed object, so exactly one object's membership can
+// change; the pass therefore re-derives only that object's desired members
+// (desiredMembersForObject) and reads only that object's current members
+// (CurrentMembersForObject). It previously ran reconcileBinding — a FULL O(scope)
+// desired recompute (MatchAllInScope over every mirror object of the scope) plus the
+// binding's WHOLE materialized member set — for each fanned-out binding. Measured on
+// the stand: the two hottest bindings carry 10 140 members each over a 10 132-object
+// account and one object change fans out to 3.2 bindings on average, so a single
+// re-register or label update read ~64 000 rows while holding the per-binding
+// EXCLUSIVE advisory lock that every sibling registration in that account queues
+// behind. That is what pushed grant materialisation past the clients' retry budgets
+// under load.
+//
+// WHY NARROWING IS EXACT, not an approximation:
+//
+//   - Members are keyed BY OBJECT (binding, rule_fp, object_type, object_id), so a
+//     change to object X cannot add, remove or re-status a member on object Y. The
+//     desired verdict for X is derived by desiredMemberForObject — the SAME per-object
+//     decision point the full recompute uses — so the two paths stay byte-identical.
+//   - The within-binding survivingClaims subtraction (applyDiff) only ever involves
+//     members that SHARE a ledger row, and the ledger PK is
+//     (binding_id, fga_user, relation, object): a shared row implies the SAME object.
+//     Restricting the desired set to one object therefore computes exactly the same
+//     subtraction the full set would have.
+//   - The CROSS-binding subtraction (flushDeletes → TuplesStillClaimedByOtherBindings)
+//     reads the ledger directly and does not consult the desired set at all, so it is
+//     unaffected by the narrowing.
+//   - The fan-out itself was ALREADY object-narrowed (BindingsForObject ∪
+//     SelectorBindingsMatchingObject) — only the per-binding recompute inside it was not.
+//
+// The binding-triggered passes (ReconcileBinding, ExpireBinding, the periodic sweep)
+// keep the FULL O(scope) recompute: there the binding's role/selectors/scope changed,
+// so the whole desired set genuinely has to be re-derived. They also remain the
+// at-least-once backstop that re-converges anything an object pass could have missed.
 func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID string) error {
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
@@ -551,11 +614,26 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if err != nil {
 			return fmt.Errorf("selector bindings matching object %s:%s: %w", objectType, objectID, err)
 		}
-		// Fan out over the de-duplicated union; reconcileBinding is a full
-		// idempotent recompute (MatchSelector), so reconciling a binding once is
-		// enough regardless of which source it came from.
+		// The changed object's projection, read ONCE for the whole fan-out (every
+		// binding diffs the same object). Absent from its source — a mirror DELETE, or
+		// an iam row that raced a delete — leaves an EMPTY desired set for every
+		// binding, which is exactly what drives the delete-stale revoke below.
+		var obj domain.MirrorObject
+		objPresent := false
+		if domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
+			obj, objPresent, err = s.GetIAMDirectObject(ctx, objectType, objectID)
+		} else {
+			obj, objPresent, err = s.GetMirrorObject(ctx, objectType, objectID)
+		}
+		if err != nil {
+			return fmt.Errorf("get object %s:%s: %w", objectType, objectID, err)
+		}
+
+		// Fan out over the de-duplicated union; the per-binding pass is an idempotent
+		// diff of THIS OBJECT's membership, so reconciling a binding once is enough
+		// regardless of which source it came from.
 		//
-		// DEADLOCK-CLASS: each reconcileBinding takes
+		// DEADLOCK-CLASS: each reconcileBindingForObject takes
 		// pg_advisory_xact_lock(hashtext(binding_id)) inside the ONE writer-tx of this
 		// pass. The two source queries return binding ids in NON-deterministic order,
 		// so locking in arrival order lets two concurrent ReconcileObject passes (on
@@ -564,7 +642,7 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// every pass a GLOBALLY-consistent acquisition order, which is deadlock-free.
 		union := dedupSortBindingIDs(existing, matching)
 		for _, bID := range union {
-			if err := r.reconcileBinding(ctx, s, bID, col); err != nil {
+			if err := r.reconcileBindingForObject(ctx, s, bID, objectType, objectID, obj, objPresent, col); err != nil {
 				return err
 			}
 		}
@@ -668,6 +746,110 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 	}
 
 	return r.applyDiff(ctx, s, bs, desired, current, col)
+}
+
+// reconcileBindingForObject is the OBJECT-NARROWED twin of reconcileBinding: it diffs
+// ONE binding's membership ON ONE OBJECT, instead of recomputing the binding's whole
+// desired set over its whole scope. It is what an object-change event (a mirror
+// upsert/delete, a label UPDATE) actually needs — see the ReconcileObject doc for why
+// the narrowing is exact rather than an approximation.
+//
+// It keeps everything the full path does per object: the EXCLUSIVE advisory lock (so a
+// concurrent pass of the same binding cannot interleave with this object's delete-stale
+// diff), the ACTIVE/REJECTED verdict, the containment audit, the eager-revoke of a
+// member that fell out, and the deferred cross-binding delete flush. Only the SIZE of
+// the diffed set changes: O(1) in the scope instead of O(scope). Because the critical
+// section is now a handful of indexed rows rather than a whole-scope recompute, the
+// per-binding lock every sibling registration in the account queues behind is held for
+// a fraction of the time — which is the throughput property this fix is after.
+//
+// objPresent=false (the object left its source — a mirror DELETE) yields an EMPTY
+// desired set, which drives exactly the delete-stale revoke the full path produced when
+// the object stopped appearing in MatchAllInScope.
+func (r *Reconciler) reconcileBindingForObject(
+	ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID,
+	objectType, objectID string, obj domain.MirrorObject, objPresent bool, col *syncFGACollector,
+) error {
+	// Serialize concurrent passes of the same binding on the xact-scoped advisory lock
+	// BEFORE any read/write (exactly-once materialization under N replicas), acquired in
+	// the caller's globally-sorted binding order (deadlock-free).
+	if err := s.AcquireBindingLock(ctx, bindingID); err != nil {
+		return fmt.Errorf("acquire binding lock %s: %w", bindingID, err)
+	}
+	bs, ok, err := s.LoadBinding(ctx, bindingID)
+	if err != nil {
+		return fmt.Errorf("load binding %s: %w", bindingID, err)
+	}
+	if !ok || !bs.Active {
+		// Deleted or no longer ACTIVE — do not re-materialize.
+		return nil
+	}
+
+	var desired []DesiredMember
+	if objPresent {
+		desired = desiredMembersForObject(bs, obj)
+	}
+
+	// The NARROW diff base: this binding's members ON THIS OBJECT only.
+	current, err := s.CurrentMembersForObject(ctx, bindingID, objectType, objectID)
+	if err != nil {
+		return fmt.Errorf("current members for object %s %s:%s: %w", bindingID, objectType, objectID, err)
+	}
+
+	return r.applyDiff(ctx, s, bs, desired, current, col)
+}
+
+// desiredMembersForObject derives the members ONE binding wants ON ONE OBJECT. It is
+// the object-narrowed equivalent of desiredMembers/desiredRuleMembers, built from the
+// SAME per-object decision points those use — selectorMatchesObject (the pure-Go mirror
+// of the arm-match SQL), the per-object target intersection, desiredMemberForObject (the
+// containment verdict + tuple derivation) and scopeSelfMember — so the narrow and full
+// paths can never drift in what an object is granted.
+//
+// The full path resolves a candidate SET per arm (MatchAllInScope / MatchByIDs /
+// MatchSelector) and then decides per candidate; here the candidate is given, so only
+// the per-candidate half runs. The three arms map exactly:
+//
+//	ARM_ANCHOR → type membership (the scope push-down is subsumed: the object is the
+//	             one that changed, and IsContainedIn re-verifies its scope as before)
+//	ARM_NAMES  → id ∈ ResourceNames
+//	ARM_LABELS → labels @> matchLabels
+//
+// The scope-self member (the binding's tier on account:<X>/project:<X>) belongs to this
+// object's desired set exactly when the changed object IS the binding's own scope anchor
+// — a project/account label update reaches it through the iam-direct feed. Suppressed for
+// a per-object target, matching desiredRuleMembers (granting the whole scope anchor
+// contradicts a least-priv per-object grant).
+func desiredMembersForObject(bs BindingScope, o domain.MirrorObject) []DesiredMember {
+	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
+	perObject := len(bs.Target.Resources) > 0
+
+	var out []DesiredMember
+	if len(bs.ScopeSelfVerbs) > 0 && !perObject &&
+		o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
+		if sm, ok := scopeSelfMember(subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
+			out = append(out, sm)
+		}
+	}
+	// Per-object target least-priv (F8, IAM-1-21): a rule may only grant an object the
+	// binding's target also lists. Uniform across all arms, exactly as
+	// matchSelectorObjects intersects the matched set.
+	if perObject && !bs.Target.Contains(o.ObjectType, o.ObjectID) {
+		return out
+	}
+	for _, sel := range bs.Selectors {
+		if !selectorMatchesObject(sel, o) {
+			continue
+		}
+		dm, ok := desiredMemberForObject(subject, sel, o, bs.Scope)
+		if !ok {
+			// A type the model has no FGA object for → no tuple → skip the object
+			// (fail-closed: a typo'd type never grants).
+			continue
+		}
+		out = append(out, dm)
+	}
+	return out
 }
 
 // desiredMembers computes the desired member set + containment verdict for a
@@ -928,12 +1110,15 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			if !tupleOK {
 				return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 			}
-			if err := s.EmitTupleWrite(ctx, tuples); err != nil {
-				return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
+			// Enqueue ONLY the tuples this pass has not already enqueued, and collect the
+			// same set for the post-commit synchronous OpenFGA write (read-after-write
+			// closer). The outbox write-set and the sync write-set are therefore the SAME
+			// de-duplicated set — no drift in content, only duplicate rows removed.
+			if fresh := col.collectNew(tuples); len(fresh) > 0 {
+				if err := s.EmitTupleWrite(ctx, fresh); err != nil {
+					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
+				}
 			}
-			// Collect the SAME tuples for the post-commit
-			// synchronous OpenFGA write (read-after-write closer). no-op when unwired.
-			col.collect(tuples)
 			// Co-commit the emitted member-tuple into the ledger — the
 			// symmetric revoke + Role.Update reconcile both rest on it (ban #10).
 			if err := s.RecordEmittedTuples(ctx, bs.BindingID, tuples); err != nil {

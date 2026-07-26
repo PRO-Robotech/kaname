@@ -61,8 +61,15 @@ type ResourceMirrorRow struct {
 // neither the mirror row nor the tuple intent. The mirror-fill path only FILLS
 // the mirror; the reconciler reads it. UPSERT-on-PK gives idempotency under the
 // at-least-once drainer.
+// UpsertTx reports whether the statement actually CHANGED a row (`changed`). The
+// monotonic guard means a register whose SourceVersion is not strictly newer than the
+// stored one updates ZERO rows — a redelivery of a registration already applied. Every
+// consumer delivers each registration TWICE (a synchronous post-commit call plus the
+// at-least-once register-drainer replaying the same durable intent), so this flag is
+// what lets the second delivery skip the materialisation the first already performed.
+// Reporting it costs nothing: the statement already evaluates the guard.
 type ResourceMirrorEmitter interface {
-	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) error
+	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) (changed bool, err error)
 	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) error
 }
 

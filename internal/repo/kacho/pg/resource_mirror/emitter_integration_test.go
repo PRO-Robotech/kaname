@@ -44,13 +44,13 @@ func TestResourceMirror_UpsertTx_InsertsRowAtomically(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(ctx) })
 
-	require.NoError(t, resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+	require.NoError(t, upsertErr(resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
 		ObjectType:      "compute.instance",
 		ObjectID:        "inst-abc",
 		ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A",
 		Labels:          map[string]string{"env": "dev", "team": "core"},
-	}))
+	})))
 	require.NoError(t, tx.Commit(ctx))
 
 	gotType, gotPrj, gotAcc, gotLabels := readMirror(t, ctx, pool, "compute.instance", "inst-abc")
@@ -73,12 +73,12 @@ func TestResourceMirror_UpsertTx_EmptyLabelsLandsAsObject(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(ctx) })
 
-	require.NoError(t, resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+	require.NoError(t, upsertErr(resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
 		ObjectType:      "compute.instance",
 		ObjectID:        "inst-nolabels",
 		ParentProjectID: "prj-P",
 		Labels:          nil, // legacy / no-labels caller
-	}))
+	})))
 	require.NoError(t, tx.Commit(ctx))
 
 	_, gotPrj, _, gotLabels := readMirror(t, ctx, pool, "compute.instance", "inst-nolabels")
@@ -97,9 +97,9 @@ func TestResourceMirror_UpsertTx_RollbackDiscardsRow(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+	require.NoError(t, upsertErr(resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-rollback", ParentProjectID: "prj-P",
-	}))
+	})))
 	require.NoError(t, tx.Rollback(ctx))
 
 	require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", "inst-rollback"),
@@ -344,7 +344,7 @@ func upsertCommitted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, row 
 	t.Helper()
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, resource_mirror.UpsertTx(ctx, tx, row))
+	require.NoError(t, upsertErr(resource_mirror.UpsertTx(ctx, tx, row)))
 	require.NoError(t, tx.Commit(ctx))
 }
 
@@ -385,4 +385,48 @@ func countMirror(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType,
 		`SELECT count(*) FROM kacho_iam.resource_mirror
 		  WHERE object_type = $1 AND object_id = $2`, objType, objID).Scan(&n))
 	return n
+}
+
+// upsertErr drops UpsertTx's `changed` flag so these slices — which assert the ROW state
+// the statement leaves behind — read as before. The flag itself is contracted by
+// TestResourceMirror_UpsertTx_ReportsWhetherRowChanged below.
+func upsertErr(_ bool, err error) error { return err }
+
+// TestResourceMirror_UpsertTx_ReportsWhetherRowChanged pins the redelivery signal the
+// register use-case gates on: the monotonic guard's verdict, surfaced as `changed`.
+// A fresh INSERT and a strictly-newer register report true; a stale or equal
+// source_version reports false, having updated zero rows.
+func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	require.NoError(t, err)
+	defer pool.Close()
+
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	row := func(v time.Time, labels map[string]string) resource_mirror.Row {
+		return resource_mirror.Row{
+			ObjectType: "compute.instance", ObjectID: "inst-changed",
+			ParentProjectID: "prj-P", Labels: labels, SourceVersion: v,
+		}
+	}
+	exec := func(r resource_mirror.Row) bool {
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		changed, err := resource_mirror.UpsertTx(ctx, tx, r)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(ctx))
+		return changed
+	}
+
+	require.True(t, exec(row(base, map[string]string{"tier": "gold"})),
+		"a fresh INSERT changed the row")
+	require.False(t, exec(row(base, map[string]string{"tier": "gold"})),
+		"an EQUAL source_version updates zero rows — the drainer replay of an applied register")
+	require.False(t, exec(row(base.Add(-time.Second), map[string]string{"tier": "gold"})),
+		"a STALE source_version updates zero rows")
+	require.True(t, exec(row(base.Add(time.Second), map[string]string{"tier": "bronze"})),
+		"a strictly-NEWER source_version applies — a real label update must never be gated away")
 }

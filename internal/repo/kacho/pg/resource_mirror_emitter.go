@@ -27,8 +27,9 @@ func NewResourceMirrorEmitter() *ResourceMirrorEmitter {
 	return &ResourceMirrorEmitter{}
 }
 
-// UpsertTx — implements service.ResourceMirrorEmitter.
-func (e *ResourceMirrorEmitter) UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) error {
+// UpsertTx — implements service.ResourceMirrorEmitter. Returns whether the monotonic
+// guard actually changed a row (false ⇒ redelivery of an already-applied registration).
+func (e *ResourceMirrorEmitter) UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (bool, error) {
 	return resource_mirror.UpsertTx(ctx, txAsPgx(tx), resource_mirror.Row{
 		ObjectType:      row.ObjectType,
 		ObjectID:        row.ObjectID,

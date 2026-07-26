@@ -579,6 +579,28 @@ func (s *reconcileStore) CurrentMembers(ctx context.Context, bindingID domain.Ac
 	return out, nil
 }
 
+// CurrentMembersForObject returns the materialized members of ONE binding on ONE object
+// — the NARROW diff base of the object-triggered pass. See ListByBindingObjectTx for why
+// the read is driven off the by-object index rather than the binding-leading PK.
+func (s *reconcileStore) CurrentMembersForObject(ctx context.Context, bindingID domain.AccessBindingID, objectType, objectID string) ([]domain.TargetMember, error) {
+	rows, err := target_members.ListByBindingObjectTx(ctx, s.tx, string(bindingID), objectType, objectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.TargetMember, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, domain.TargetMember{
+			BindingID:          domain.AccessBindingID(m.BindingID),
+			RoleID:             domain.RoleID(m.RoleID),
+			RuleFP:             m.RuleFP,
+			ObjectType:         m.ObjectType,
+			ObjectID:           m.ObjectID,
+			VerificationStatus: m.VerificationStatus,
+		})
+	}
+	return out, nil
+}
+
 // BindingsForObject returns binding ids with a member referencing the object.
 func (s *reconcileStore) BindingsForObject(ctx context.Context, objectType, objectID string) ([]domain.AccessBindingID, error) {
 	ids, err := target_members.BindingsForObjectTx(ctx, s.tx, objectType, objectID)

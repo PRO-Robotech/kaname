@@ -77,9 +77,9 @@ func versionOr(t time.Time) any {
 //
 // MUST run in the same pgx.Tx as the owner-tuple fga_outbox emit; tx rollback ⇒
 // the row is not visible (atomic co-commit, ban #10).
-func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) error {
+func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (bool, error) {
 	if tx == nil {
-		return fmt.Errorf("resource_mirror: tx must not be nil")
+		return false, fmt.Errorf("resource_mirror: tx must not be nil")
 	}
 	labels := row.Labels
 	if labels == nil {
@@ -87,9 +87,9 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) error {
 	}
 	payload, err := json.Marshal(labels)
 	if err != nil {
-		return fmt.Errorf("resource_mirror: marshal labels: %w", err)
+		return false, fmt.Errorf("resource_mirror: marshal labels: %w", err)
 	}
-	if _, err := tx.Exec(ctx,
+	tag, err := tx.Exec(ctx,
 		`INSERT INTO kacho_iam.resource_mirror
 		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
 		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
@@ -101,10 +101,14 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) error {
 		        updated_at        = now()
 		  WHERE resource_mirror.source_version < EXCLUDED.source_version`,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, versionOr(row.SourceVersion),
-	); err != nil {
-		return fmt.Errorf("resource_mirror: upsert: %w", err)
+	)
+	if err != nil {
+		return false, fmt.Errorf("resource_mirror: upsert: %w", err)
 	}
-	return nil
+	// The monotonic guard already decides this; reporting it is free. 0 rows means the
+	// stored version is at least as new as the incoming one — a redelivery of a
+	// registration that was already applied, so the caller can skip re-materialising it.
+	return tag.RowsAffected() > 0, nil
 }
 
 // DeleteTx conditionally removes the mirror row for (objectType, objectID). The

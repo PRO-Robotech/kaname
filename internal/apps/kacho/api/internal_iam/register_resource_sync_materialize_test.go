@@ -52,8 +52,10 @@ func (smEmitter) EmitDeleteTx(context.Context, service.Tx, []service.RelationTup
 
 type mirrorAdapter struct{}
 
-func (mirrorAdapter) UpsertTx(context.Context, service.Tx, service.ResourceMirrorRow) error {
-	return nil
+// UpsertTx always reports `changed` — these slices exercise the materialisation path,
+// not the redelivery gate (which register_resource_redelivery_test.go owns).
+func (mirrorAdapter) UpsertTx(context.Context, service.Tx, service.ResourceMirrorRow) (bool, error) {
+	return true, nil
 }
 func (mirrorAdapter) DeleteTx(context.Context, service.Tx, string, string, time.Time) error {
 	return nil

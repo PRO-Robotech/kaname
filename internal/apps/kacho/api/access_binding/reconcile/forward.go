@@ -417,29 +417,18 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	if !ok || !bs.Active {
 		return nil // deleted / not ACTIVE — nothing to materialize.
 	}
-	// Per-object target least-priv (F8, IAM-1-21): the additive forward path materializes
-	// a freshly-registered object ONLY when the binding's per-object target lists it. A
-	// binding whose ROLE has an ARM_ANCHOR selector matches EVERY object of the type via
-	// SelectorBindingsMatchingObject, so without this guard an unlisted new object would be
-	// granted (over-grant). AllInScope/empty target ⇒ no restriction (existing behaviour).
-	if len(bs.Target.Resources) > 0 && !bs.Target.Contains(obj.ObjectType, obj.ObjectID) {
-		return nil
-	}
-	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
-	for _, sel := range bs.Selectors {
-		// Match this ONE object against the selector's arm (scope-aware projection). A
-		// cluster `*.*` binding carries selectors with EMPTY ObjectTypes (the D-9 flat
-		// short-circuit owns cluster super-admin), so selectorMatchesObject returns false
-		// → no per-object materialization on cluster (short-circuit preserved).
-		if !selectorMatchesObject(sel, obj) {
-			continue
-		}
-		// SHARED per-object verdict with the full recompute (byte-identical tuples).
-		dm, ok := desiredMemberForObject(subject, sel, obj, bs.Scope)
-		if !ok || dm.Status != domain.VerificationActive {
-			// unknown FGA type (skip) OR a REJECTED containment verdict: the additive
-			// forward path materializes only ACTIVE grants; the async full backstop owns
-			// the REJECTED member row + containment audit.
+	// The object's desired members under this binding — derived by the SHARED
+	// desiredMembersForObject (per-object target least-priv, arm match, containment
+	// verdict, scope-self anchor), so the forward fast-path, the object-narrowed full
+	// pass and the whole-scope recompute all derive BYTE-IDENTICAL tuples. A cluster
+	// `*.*` binding carries selectors with EMPTY ObjectTypes (the D-9 flat short-circuit
+	// owns cluster super-admin), so nothing matches → no per-object materialization on
+	// cluster (short-circuit preserved).
+	for _, dm := range desiredMembersForObject(bs, obj) {
+		if dm.Status != domain.VerificationActive {
+			// A REJECTED containment verdict: the additive forward path materializes only
+			// ACTIVE grants; the async full backstop owns the REJECTED member row +
+			// containment audit.
 			continue
 		}
 		if err := r.materializeForwardMember(ctx, s, bs, dm, col); err != nil {
@@ -461,12 +450,14 @@ func (r *Reconciler) materializeForwardMember(ctx context.Context, s ReconcileSt
 	}); err != nil {
 		return fmt.Errorf("forward: upsert member %s/%s:%s: %w", dm.RuleFP, dm.ObjectType, dm.ObjectID, err)
 	}
-	if err := s.EmitTupleWrite(ctx, dm.Tuples); err != nil {
-		return fmt.Errorf("forward: emit tuple write %s:%s: %w", dm.ObjectType, dm.ObjectID, err)
+	// Enqueue ONLY the tuples this pass has not already enqueued, and collect the same set
+	// for the post-commit synchronous OpenFGA write (read-after-write closer). Per-pass
+	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
+	if fresh := col.collectNew(dm.Tuples); len(fresh) > 0 {
+		if err := s.EmitTupleWrite(ctx, fresh); err != nil {
+			return fmt.Errorf("forward: emit tuple write %s:%s: %w", dm.ObjectType, dm.ObjectID, err)
+		}
 	}
-	// Collect for the post-commit synchronous OpenFGA write (read-after-write closer);
-	// no-op when sync-FGA is unwired.
-	col.collect(dm.Tuples)
 	// Co-commit the emitted member-tuple into the ledger — the symmetric revoke +
 	// Role.Update reconcile both rest on it (ban #10). The INSERT is
 	// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'`
