@@ -91,16 +91,17 @@ CASES = []
 # ---------------------------------------------------------------------------
 
 def _external_url_override(path: str):
-    """Return a pre_script list that overrides the request URL to externalBaseUrl+path."""
+    """Return a pre_script list that overrides the request URL to externalBaseUrl+path.
+
+    externalBaseUrl is harness configuration: without it the external-isolation
+    negative cannot be attempted at all. That is a broken harness, not a legal
+    mode, so require_env_url ASSERTS it (naming the variable) before skipping —
+    otherwise losing the variable would silently delete these checks and the
+    suite would still read GREEN."""
     return [
-        "// internal-only check: redirect this request to external TLS endpoint.",
-        "const extBase = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
-        "if (!extBase) {",
-        "  console.warn('externalBaseUrl not set in env — skipping external isolation check for this step.');",
-        "  pm.execution.skipRequest();",
-        "} else {",
-        f"  pm.request.url = extBase + '{path}';",
-        "}",
+        *require_env_url("externalBaseUrl", path,
+                         "external-isolation negative — Internal* paths must 404 on the "
+                         "advertised TLS endpoint"),
         "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
         "pm.environment.set('_extIsolationStep', 'true');",
     ]
@@ -116,20 +117,14 @@ def _internal_url_override(path: str):
     404s them by design (ban #6). The premise `{{baseUrl}} is already the internal
     mux` is FALSE for the public port-forward: {{baseUrl}} (:18080) reaches the PUBLIC
     listener. So point these controls at {{internalBaseUrl}} (the internal-rest
-    port-forward, http://localhost:18081 in CI). Mirrors _external_url_override; if
-    internalBaseUrl is unset (local dev without the internal-rest port-forward) the
-    step is skipped rather than failing on a spurious public 404."""
-    return [
-        "// internal-only POSITIVE control: send this request to the api-gateway",
-        "// cluster-internal REST listener (Internal* paths live ONLY there).",
-        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
-        "if (!intBase) {",
-        "  console.warn('internalBaseUrl not set in env — skipping internal-mux positive control for this step.');",
-        "  pm.execution.skipRequest();",
-        "} else {",
-        f"  pm.request.url = intBase + '{path}';",
-        "}",
-    ]
+    port-forward, http://localhost:18081 in CI). Mirrors _external_url_override:
+    a missing internalBaseUrl is a broken harness, not a legal mode, so the guard
+    ASSERTS it (RED, naming the variable) before skipping — see
+    gen.py::require_env_url."""
+    return require_env_url(
+        "internalBaseUrl", path,
+        "internal-mux positive control — Internal* paths live ONLY on the "
+        "cluster-internal REST listener")
 
 
 # ===========================================================================

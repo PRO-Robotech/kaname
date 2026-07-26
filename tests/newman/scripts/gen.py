@@ -173,6 +173,62 @@ def assert_created_at_seconds(jsonpath="pm.response.json().createdAt") -> List[s
     ]
 
 
+# ---------------------------------------------------------------------------
+# Harness-config guard — the ONE place the "base URL came from the environment"
+# idiom is allowed to live.
+# ---------------------------------------------------------------------------
+
+def require_env_url(var: str, path: str, why: str = "") -> List[str]:
+    """Pre-request block: point this request at {{<var>}}+path, and FAIL if <var>
+    is not set.
+
+    WHY THIS ASSERTS INSTEAD OF ONLY SKIPPING
+    -----------------------------------------
+    Two guards look identical and are not the same thing:
+
+      * an OPERATION guard — `if (!opId) skipRequest()` — is a LEGAL skip. The
+        create under test was rejected on purpose, so there is no operation to
+        poll and nothing to assert. Nothing is lost.
+
+      * an ENVIRONMENT guard — `if (!internalBaseUrl) skipRequest()` — is a
+        BROKEN HARNESS. The check it removes is still meaningful and still
+        expected to run; the only reason it cannot is that the runner did not
+        inject the variable (deploy/scripts/newman-e2e.sh / newman-parallel.sh
+        pass it as `--env-var`).
+
+    newman leaves NO trace of a skipped request — no assertion, no failure, no
+    execution record — so the second kind used to pass by never running. That is
+    the same blindness as the `setNextRequest(null)` truncation, one level down:
+    there the run ended, here the run continues and quietly drops checks. The
+    execution-coverage gate cannot tell them apart either, because BOTH are an
+    explicit `skipRequest()` and both are therefore "explained".
+
+    So the missing variable is asserted here. If it is lost, the suite goes RED
+    with the variable's name in the message instead of silently shrinking. The
+    request is still skipped afterwards — sending it to the wrong listener would
+    only add a cascade of confusing 404s on top of a failure already reported.
+
+    exec-coverage.py enforces this shape statically: a `skipRequest()` guard that
+    reads a *BaseUrl variable and carries no `pm.test(` fails the gate.
+    """
+    reason = f" — {why}" if why else ""
+    return [
+        f"// HARNESS-CONFIG GUARD — {var} is injected by the newman runner (--env-var).",
+        "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+        f"const __cfgUrl = pm.environment.get('{var}') || pm.variables.get('{var}') || '';",
+        "if (__cfgUrl) {",
+        f"  pm.request.url = __cfgUrl + '{path}';",
+        "} else {",
+        f"  pm.test('harness config: {var} is set{reason}', () => {{",
+        f"    pm.expect.fail('{var} is not set — the newman runner "
+        "(deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. "
+        "This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+        "  });",
+        "  pm.execution.skipRequest();",
+        "}",
+    ]
+
+
 _RYA_SEQ = [0]
 
 
@@ -810,6 +866,21 @@ def _auth_pre_script(auth: str) -> List[str]:
         "if (__t) {",
         "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
         "} else {",
+        # HARNESS-CONFIG GUARD. An `auth="<envVar>"` step names a SUBJECT the case
+        # is about ("a never-granted user must see nothing", "a foreign editor must
+        # be denied"). If the fixture seed never wrote that variable, silently
+        # dropping the header does not skip the check — it runs it as ANONYMOUS,
+        # against a different subject entirely. The typical expectation (401/403)
+        # then still holds, so the case passes FOR THE WRONG REASON and the subject
+        # under test is never exercised. Missing subject = misconfigured harness:
+        # FAIL naming the variable. The header is still removed afterwards so the
+        # request stays deterministic. (`auth="anonymous"` is the DELIBERATE
+        # anonymous case and takes the branch above — it is never affected.)
+        f"  pm.test('harness config: {auth} is set (subject under test)', () => {{",
+        f"    pm.expect.fail('{auth} is not set — the authz-fixture seed "
+        "(tests/authz-fixtures/setup.sh) did not provide this subject. Running the step "
+        "anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+        "  });",
         "  pm.request.headers.remove('Authorization');",
         "}",
     ]
@@ -957,6 +1028,7 @@ def load_cases_module(path: Path):
     mod.save_from_response = save_from_response
     mod.assert_operation_envelope = assert_operation_envelope
     mod.assert_created_at_seconds = assert_created_at_seconds
+    mod.require_env_url = require_env_url
     mod.poll_operation_until_done = poll_operation_until_done
     mod.retry_until_authorized = retry_until_authorized
     mod.retry_until_absent = retry_until_absent

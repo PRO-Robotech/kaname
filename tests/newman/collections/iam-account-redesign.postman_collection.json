@@ -69,6 +69,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -132,6 +135,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -200,6 +206,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -252,6 +261,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -342,6 +354,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -415,6 +430,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -488,6 +506,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -556,6 +577,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -626,6 +650,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -694,6 +721,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -746,6 +776,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -812,6 +845,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-for-propagation counter reset on first entry (request-name-scoped);",
@@ -902,6 +938,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -965,6 +1004,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -1033,6 +1075,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1085,6 +1130,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1158,6 +1206,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1235,6 +1286,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1298,6 +1352,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -1366,6 +1423,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1418,6 +1478,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1496,6 +1559,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1548,6 +1614,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -1633,6 +1702,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1701,6 +1773,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1764,6 +1839,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -1832,6 +1910,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1892,6 +1973,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -1945,6 +2029,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -2016,6 +2103,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -2079,6 +2169,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -2147,6 +2240,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -2199,6 +2295,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -2267,6 +2366,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
@@ -2337,6 +2439,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
                 ]
@@ -2405,6 +2510,9 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",

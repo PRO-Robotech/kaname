@@ -62,15 +62,16 @@ def _ok_or_empty():
 
 
 def _external_url_override(path: str):
-    return [
-        "const extBase = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
-        "if (!extBase) {",
-        "  console.warn('externalBaseUrl not set — skipping external isolation check.');",
-        "  pm.execution.skipRequest();",
-        "} else {",
-        f"  pm.request.url = extBase + '{path}';",
-        "}",
-    ]
+    """Point the external-isolation negative at {{externalBaseUrl}}.
+
+    A missing externalBaseUrl is a broken harness, not a legal mode: without it
+    the check cannot be attempted, so require_env_url ASSERTS it (RED, naming the
+    variable) before skipping. Silently dropping it would leave the suite GREEN
+    with the isolation invariant untested."""
+    return require_env_url(
+        "externalBaseUrl", path,
+        "external-isolation negative — fga-proxy Internal* must not be reachable "
+        "on the advertised TLS endpoint")
 
 
 # ---------------------------------------------------------------------------

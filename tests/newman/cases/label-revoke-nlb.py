@@ -81,16 +81,10 @@ def _internal_url_override(path):
     gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
     public port → "404 page not found" → JSONError on the first pm.response.json().
     Mirrors label-revoke-vpc.py::_internal_url_override / iam-internal-only-check.py."""
-    return [
-        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
-        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
-        "if (!intBase) {",
-        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-        "  pm.execution.skipRequest();",
-        "} else {",
-        f"  pm.request.url = intBase + '{path}';",
-        "}",
-    ]
+    return require_env_url(
+        "internalBaseUrl", path,
+        "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
+        "cluster-internal REST listener")
 
 
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):

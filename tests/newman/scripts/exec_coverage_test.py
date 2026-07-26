@@ -147,6 +147,73 @@ def test_legacy_postman_alias_is_banned_too(tmp_path):
     assert "BANNED setNextRequest(null)" in r.stdout
 
 
+def test_environment_guard_without_an_assertion_is_banned(tmp_path):
+    """THE SECOND-ORDER BLIND SPOT.
+
+    An operation guard and an environment guard are the same three lines of
+    JavaScript and mean opposite things:
+
+      if (!opId)            skipRequest()  → legal: the create was rejected on
+                                             purpose, there is nothing to poll.
+      if (!internalBaseUrl) skipRequest()  → BROKEN HARNESS: the check is still
+                                             expected to run; the runner simply
+                                             did not inject the variable.
+
+    newman leaves NO trace of a skipped request, so the second kind passes by
+    never running — and the coverage gate cannot tell them apart, because both
+    are an explicit `skipRequest()` and both are therefore "explained". Losing
+    one variable would silently delete 31 authorization checks from a single
+    collection and the suite would still be GREEN.
+
+    So an environment guard must FAIL, not merely skip: it has to carry an
+    assertion. This locks that statically."""
+    items = [_item("probe", prereq=[
+        "const b = pm.environment.get('internalBaseUrl') || '';",
+        "if (!b) { console.warn('not set — skipping'); pm.execution.skipRequest(); }",
+        "else { pm.request.url = b + '/iam/v1/internal/iam:check'; }",
+    ])]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [0], 1)  # it ran; nothing truncated, zero failures
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "SILENT environment guard" in r.stdout
+    assert "internalBaseUrl" in r.stdout
+
+
+def test_environment_guard_that_asserts_is_accepted(tmp_path):
+    """The sanctioned shape: fail (naming the variable), then skip."""
+    items = [_item("probe", prereq=[
+        "const b = pm.environment.get('internalBaseUrl') || '';",
+        "if (b) { pm.request.url = b + '/iam/v1/internal/iam:check'; }",
+        "else {",
+        "  pm.test('harness config: internalBaseUrl is set', () => { pm.expect.fail('internalBaseUrl is not set'); });",
+        "  pm.execution.skipRequest();",
+        "}",
+    ])]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [], 1)  # the variable was missing → skipped, and RED elsewhere
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 explained-skip" in r.stdout
+
+
+def test_operation_guard_stays_a_legal_silent_skip(tmp_path):
+    """The environment rule must NOT bleed onto operation guards: a rejected
+    create genuinely has no operation to poll, and demanding an assertion there
+    would turn every negative case red."""
+    items = [_item("create-rejected"),
+             _item("poll", prereq=[
+                 "// no operation id → the create was refused on purpose.",
+                 "if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }",
+             ]),
+             _item("after")]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [0, 2], 3)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 explained-skip" in r.stdout
+
+
 def test_report_for_a_different_collection_is_red(tmp_path):
     """A stale report cannot be silently paired with a regenerated collection."""
     _collection(tmp_path, "c", [_item(f"i{i}") for i in range(5)])

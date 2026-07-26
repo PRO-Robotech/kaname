@@ -57,18 +57,13 @@ def _internal_url_override(path):
     gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
     public port → "404 page not found" → JSONError on the first pm.response.json().
     Mirrors label-revoke-iam.py::_internal_url_override. internalBaseUrl is injected at
-    runtime by the newman harness (--env-var); if unset (local dev without the internal-
-    rest port-forward) the step is skipped rather than hitting a spurious public 404."""
-    return [
-        "// internal-only Check probe → api-gateway cluster-internal REST listener.",
-        "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
-        "if (!intBase) {",
-        "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-        "  pm.execution.skipRequest();",
-        "} else {",
-        f"  pm.request.url = intBase + '{path}';",
-        "}",
-    ]
+    runtime by the newman harness (--env-var); a MISSING value is a broken harness, not a legal mode, so the
+    guard ASSERTS it (RED, naming the variable) before skipping — see
+    gen.py::require_env_url."""
+    return require_env_url(
+        "internalBaseUrl", path,
+        "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
+        "cluster-internal REST listener")
 
 
 def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):

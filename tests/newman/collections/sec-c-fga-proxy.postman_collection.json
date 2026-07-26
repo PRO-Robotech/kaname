@@ -403,12 +403,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const extBase = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
-                  "if (!extBase) {",
-                  "  console.warn('externalBaseUrl not set — skipping external isolation check.');",
-                  "  pm.execution.skipRequest();",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + '/iam/v1/internal:registerResource';",
                   "} else {",
-                  "  pm.request.url = extBase + '/iam/v1/internal:registerResource';",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — fga-proxy Internal* must not be reachable on the advertised TLS endpoint', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}"
                 ]
               }

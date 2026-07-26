@@ -32,10 +32,36 @@ WHAT THIS CHECKS
 ----------------
 Per collection, two independent things:
 
-1. STATIC BAN — no script may contain `setNextRequest(null)`. It is never the
-   right primitive inside a per-request guard, and its damage is invisible to the
-   assertion-based verdict, so it is banned outright rather than merely detected
-   through its effects.
+1. STATIC BANS
+   a. no script may contain `setNextRequest(null)`. It is never the right
+      primitive inside a per-request guard, and its damage is invisible to the
+      assertion-based verdict, so it is banned outright rather than merely
+      detected through its effects.
+   b. no ENVIRONMENT guard may skip SILENTLY. A guard that skips because a
+      harness variable is missing must carry an assertion, so the missing
+      variable is reported instead of quietly deleting checks. See below.
+
+   THE SECOND-ORDER BLIND SPOT (why 1b exists). Skipping is the sanctioned fix
+   for 1a — but a skip leaves NO trace either: no execution record, no assertion,
+   no failure. So a guard that fires for the WRONG REASON still passes, and this
+   gate cannot see it, because "explained by a skipRequest() guard" is exactly
+   what it was taught to accept. Two guards, three identical lines, opposite
+   meanings:
+
+     if (!opId)            skipRequest()  → LEGAL. The create under test was
+                                            refused on purpose; there is no
+                                            operation to poll and nothing to
+                                            assert. Nothing is lost.
+     if (!internalBaseUrl) skipRequest()  → BROKEN HARNESS. The check is still
+                                            meaningful and still expected to run;
+                                            the runner merely failed to inject
+                                            the variable (--env-var).
+
+   Losing one variable would silently remove 31 authorization checks from a
+   single collection (label-revoke-vpc) and the suite would still report GREEN —
+   the same blindness as the truncation above, one level down. Hence: an
+   environment guard must FAIL, not merely skip. The sanctioned shape is
+   gen.py::require_env_url — assert (naming the variable), then skip.
 
 2. EXECUTION COVERAGE — every leaf request must either have EXECUTED or be
    statically EXPLAINED as skippable. A request is explained when:
@@ -77,6 +103,14 @@ _BAN_RE = re.compile(r"setNextRequest\(\s*null\s*\)")
 
 # Explicit single-request skip — the sanctioned opt-out.
 _SKIP_RE = re.compile(r"skipRequest\s*\(")
+
+# A read of a harness-supplied endpoint variable: pm.environment.get('internalBaseUrl'),
+# pm.variables.get('externalBaseUrl'), ... A guard keyed on one of these is an
+# ENVIRONMENT guard (misconfigured harness), not an operation guard (legal skip).
+_ENV_URL_VAR_RE = re.compile(r"""(?:environment|variables|globals)\.get\(\s*['"](\w*[Bb]aseUrl)['"]\s*\)""")
+
+# Any assertion at all in the same script — that is what makes a skip audible.
+_ASSERT_RE = re.compile(r"pm\.test\s*\(")
 
 # Literal forward jump: setNextRequest('name') / setNextRequest("name").
 # The dynamic self-loop form setNextRequest(pm.info.requestName) has no quotes and
@@ -148,13 +182,36 @@ def check_collection(col_path, out_dir):
     leaves = list(_iter_leaves(col.get("item", [])))
     total = len(leaves)
 
-    # (1) static ban
+    # (1a) static ban — setNextRequest(null) ends the run
     for it in leaves:
         if _BAN_RE.search(_scripts(it)):
             problems.append(
                 f"  BANNED setNextRequest(null) in {it.get('name','?')!r} — it ENDS THE RUN, "
                 f"it does not skip a request. Use pm.execution.skipRequest()."
             )
+
+    # (1b) static ban — an environment guard that skips without saying so
+    silent = []
+    for it in leaves:
+        src = _scripts(it, "prerequest")
+        if not _SKIP_RE.search(src):
+            continue
+        env_vars = sorted(set(_ENV_URL_VAR_RE.findall(src)))
+        if env_vars and not _ASSERT_RE.search(src):
+            silent.append((it.get("name", "?"), "/".join(env_vars)))
+    if silent:
+        problems.append(
+            f"  {len(silent)} SILENT environment guard(s) — skip when a harness variable is "
+            f"missing and assert NOTHING. A missing variable is a misconfigured runner, not a "
+            f"legal mode: newman leaves no trace of a skipped request, so the check would "
+            f"vanish and the suite would still read GREEN. Use gen.py::require_env_url — fail "
+            f"naming the variable, then skip. (Operation guards `if (!opId)` are unaffected: a "
+            f"create refused on purpose genuinely has nothing to poll.)"
+        )
+        for nm, vs in silent[:_MAX_REPORTED]:
+            problems.append(f"    {nm}  [{vs}]")
+        if len(silent) > _MAX_REPORTED:
+            problems.append(f"    ... and {len(silent) - _MAX_REPORTED} more")
 
     report = os.path.join(out_dir, f"{name}.json")
     if not os.path.isfile(report):
