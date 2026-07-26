@@ -220,7 +220,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('badAccGrpOpId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[
@@ -714,7 +714,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('dupAddMemberOpId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[
@@ -851,7 +851,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('rmNotMemberOpId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[

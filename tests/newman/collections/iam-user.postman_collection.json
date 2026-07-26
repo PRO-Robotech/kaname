@@ -1049,7 +1049,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('invitedUserId')) {",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "}"
                 ]
               }
@@ -1249,7 +1249,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('badRoleInvOpId')) {",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "}"
                 ]
               }

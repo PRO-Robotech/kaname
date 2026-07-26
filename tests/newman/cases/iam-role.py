@@ -887,7 +887,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('sysMutOpId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[
@@ -1019,7 +1019,7 @@ CASES.append(Case(
             pre_script=[
                 "// If sync returned 403, no operation was created — skip poll.",
                 "if (!pm.environment.get('opId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[

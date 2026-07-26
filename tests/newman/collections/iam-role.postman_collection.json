@@ -1714,7 +1714,7 @@
                   "  pm.request.headers.remove('Authorization');",
                   "}",
                   "if (!pm.environment.get('sysMutOpId')) {",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "}"
                 ]
               }
@@ -2168,7 +2168,7 @@
                   "}",
                   "// If sync returned 403, no operation was created — skip poll.",
                   "if (!pm.environment.get('opId')) {",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "}"
                 ]
               }

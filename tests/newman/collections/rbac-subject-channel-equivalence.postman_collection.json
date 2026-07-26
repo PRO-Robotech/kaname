@@ -596,7 +596,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -1299,7 +1299,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -1965,7 +1965,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -2713,7 +2713,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -3359,7 +3359,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -3965,7 +3965,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -4566,7 +4566,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"
@@ -5167,7 +5167,7 @@
                   "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (!intBase) {",
                   "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-                  "  pm.execution.setNextRequest(null);",
+                  "  pm.execution.skipRequest();",
                   "} else {",
                   "  pm.request.url = intBase + '/iam/v1/internal/iam:check';",
                   "}"

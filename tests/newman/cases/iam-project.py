@@ -225,7 +225,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('badAccPrjOpId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[

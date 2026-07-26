@@ -10769,7 +10769,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_A_AAA')) { pm.execution.setNextRequest(null); }"
+                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_A_AAA')) { pm.execution.skipRequest(); }"
                 ]
               }
             },
@@ -11268,7 +11268,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_AAB')) { pm.execution.setNextRequest(null); }"
+                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_AAB')) { pm.execution.skipRequest(); }"
                 ]
               }
             },
@@ -11700,7 +11700,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_INV')) { pm.execution.setNextRequest(null); }"
+                  "if (!pm.environment.get('_abDelOpId_AUTHZ_AB_CR_B_INV')) { pm.execution.skipRequest(); }"
                 ]
               }
             },

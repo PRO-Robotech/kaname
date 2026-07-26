@@ -25,6 +25,39 @@ if [ "${#collections[@]}" -eq 0 ]; then
 fi
 
 failed_suites=()
+
+# ─── Execution-coverage gate ─────────────────────────────────────────────────
+# The assertion-based verdict below can only see requests that RAN. A request
+# that never executed produces no assertions and therefore no failures — so a
+# collection that stopped after 6 of its 46 requests reads exactly like one that
+# ran all 46 cleanly, and this gate called both GREEN.
+#
+# That was not hypothetical: a poll pre-request guard used
+# `setNextRequest(null)` meaning "skip this poll when the create was rejected and
+# no operation id exists". `setNextRequest(null)` does not skip a request, it ENDS
+# THE RUN — and the guard fires deterministically on negative cases. The iam suite
+# executed 1177 of 1502 requests (78.4%) while every collection was gated GREEN;
+# what went unexecuted was the authz-deny data-leak matrix, the ROLE/INV/USR/ESC
+# deny matrices and the fail-closed OpenFGA-outage case.
+#
+# exec-coverage.py closes that: per collection it requires every leaf request to
+# have executed or to be STATICALLY EXPLAINED (an explicit `skipRequest()` guard,
+# or a literal forward `setNextRequest('<name>')` that jumps over it), and it bans
+# `setNextRequest(null)` outright. It runs BEFORE the assertion loop because a
+# truncated run makes the assertion counts meaningless.
+_gate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${_gate_dir}/exec-coverage.py" ] && command -v python3 >/dev/null 2>&1; then
+  if ! python3 "${_gate_dir}/exec-coverage.py" \
+        --collections-glob 'collections/*.postman_collection.json' \
+        --out-dir out; then
+    failed_suites+=("execution-coverage")
+  fi
+  echo
+else
+  echo "FAIL: exec-coverage.py missing next to the gate — execution coverage unverified" >&2
+  exit 1
+fi
+
 for col in "${collections[@]}"; do
   name=$(basename "$col" .postman_collection.json)
   report="out/${name}.json"
@@ -90,15 +123,31 @@ for col in "${collections[@]}"; do
   #     cannot be authored; binding an account-scoped role on `project:A1` returns
   #     Operation.error FAILED_PRECONDITION. RED-by-product-gap until kacho-iam#212
   #     wires project_id into CreateRoleRequest + the Role.Create handler.
-  #   - T31-LBLREVOKE-NLB-* (label-revoke-nlb suite) — the cross-service
-  #     label-revoke MECHANIC is proven for nlb by the GREEN integration test
-  #     kacho-nlb TestListenerRepo_T31Revoke04 (db-architect-reviewed). The
-  #     BLACK-BOX e2e here is blocked on test-INFRA, not product: an EXTERNAL
-  #     listener auto-allocate needs a zone_id that the iam-suite umbrella env
-  #     cannot provision (no VPC subnet / external AddressPool-with-zone wiring
-  #     for nlb) → "zone_id is empty" on Create listener → cascade. vpc + compute
-  #     label-revoke e2e are GREEN. Un-skip once the umbrella seeds nlb external
-  #     address allocation (tracking: kacho-iam#217).
+  #   - T31-LBLREVOKE-NLB-* (label-revoke-nlb suite) — CORRECTED 2026-07-26. The
+  #     previous justification here ("blocked on test-INFRA, not product: an
+  #     EXTERNAL listener auto-allocate needs a zone_id the umbrella env cannot
+  #     provision → 'zone_id is empty' on Create listener → cascade") was NOT what
+  #     the suite was doing. There was never a zone_id error. The real cause was a
+  #     STALE FIXTURE: create-lb still sent the retired `type: "EXTERNAL"`, but the
+  #     NLB redesign (F2) merged type + placement_type into `placement`, which is
+  #     now the SOLE authoritative REQUIRED Create input, with type°/placementType°
+  #     demoted to DERIVED output-only mirrors that are WRITE-REJECTED on input
+  #     (network_load_balancer_service.proto:186). So Create was a sync 400, the
+  #     Operation id was never saved, and SIX downstream steps cascaded — 7 failing
+  #     assertions that never reached the invariant under test. Fixture corrected to
+  #     `placement: "EXTERNAL_REGIONAL"` (mirrors the GREEN nlb suite `_LB_BODY`).
+  #     With the cascade gone the whole chain now runs GREEN — LB create, listener
+  #     create, pre-grant deny, grant, post-grant ALLOW — and exactly ONE assertion
+  #     remains RED, the last one: `lsn-post-revoke-deny` still gets {"allowed":true}
+  #     after the matching label is removed. That step polls POLL_CAP×500ms (~15s+)
+  #     before failing, so it is NOT the FGA materialization race — the revoke does
+  #     not land. This is now a REAL PRODUCT finding (nlb.listener label-revoke:
+  #     create-emit works, update-label-remove does not revoke), i.e. precisely the
+  #     "double-bug" this case was written to catch, and it is NOT covered by the
+  #     nlb integration test that the old note leaned on. Still whitelisted so the
+  #     shared gate does not flip red on a pre-existing product gap, but it must be
+  #     un-skipped the moment the revoke path is fixed (tracking: kacho-iam#217 —
+  #     retitle: this is a product revoke gap, not an address-seeding gap).
   #   - IAM-ACB-DP-* (rbac-2026 P6 deletion_protection): UN-WHITELISTED (rbac-2026
   #     P7). Both the iam handler (iam#222) and the gateway public-mux
   #     AccessBindingService.Update route (gateway#97) are now in main, so the

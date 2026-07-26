@@ -1338,7 +1338,7 @@
                   "} else {",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "if (!pm.environment.get('opId')) { pm.execution.setNextRequest(null); }"
+                  "if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }"
                 ]
               }
             },

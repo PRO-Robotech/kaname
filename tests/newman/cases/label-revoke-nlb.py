@@ -86,7 +86,7 @@ def _internal_url_override(path):
         "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
         "if (!intBase) {",
         "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-        "  pm.execution.setNextRequest(null);",
+        "  pm.execution.skipRequest();",
         "} else {",
         f"  pm.request.url = intBase + '{path}';",
         "}",
@@ -225,11 +225,19 @@ CASES.append(Case(
         # parent EXTERNAL load balancer (VIP auto-allocates, no subnet needed). An EXTERNAL
         # LB MUST declare a vip source for at least one ip family (nlb contract) — v4Source
         # {public:{}} auto-allocates a public IPv4 VIP. Without it the Create is a sync 400
-        # "load balancer must declare a vip source for at least one ip family" (see the
-        # load-balancer.py EXTERNAL bodies: type EXTERNAL + v4Source {public:{}}).
+        # "load balancer must declare a vip source for at least one ip family".
+        #
+        # `placement` — NOT `type`. The NLB redesign (F2) merged type + placement_type into
+        # a single `placement` discriminator which is the SOLE authoritative and REQUIRED
+        # mode input on Create; `type°`/`placementType°` became DERIVED output-only mirrors
+        # and are WRITE-REJECTED on input (network_load_balancer_service.proto:186 "Setting
+        # type (or placement_type) → InvalidArgument"). This fixture still sent the retired
+        # `type: EXTERNAL`, so Create was a sync 400, `_op_t31nLb` was never saved, and the
+        # six steps after it cascaded. Live contract mirrored from the GREEN nlb suite
+        # (services/nlb/tests/newman/cases/load-balancer.py `_LB_BODY`).
         Step(name="create-lb", method="POST", path=NLB,
              body={"projectId": "{{projectA1Id}}", "name": "t31n-lb-{{runId}}",
-                   "regionId": "{{_t31nRegionId}}", "type": "EXTERNAL",
+                   "regionId": "{{_t31nRegionId}}", "placement": "EXTERNAL_REGIONAL",
                    "v4Source": {"public": {}}},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),

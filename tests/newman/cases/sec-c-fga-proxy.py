@@ -66,7 +66,7 @@ def _external_url_override(path: str):
         "const extBase = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
         "if (!extBase) {",
         "  console.warn('externalBaseUrl not set — skipping external isolation check.');",
-        "  pm.execution.setNextRequest(null);",
+        "  pm.execution.skipRequest();",
         "} else {",
         f"  pm.request.url = extBase + '{path}';",
         "}",

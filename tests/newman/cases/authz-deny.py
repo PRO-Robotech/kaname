@@ -471,9 +471,13 @@ for _case in CASES:
     #      DIFFERENT principal → 404 (Operation.Get is principal-scoped, anti-leak),
     #      exhausting the poll without resolving the teardown id.
     #   2. With the teardown id unresolved, the DELETE pre-script guard
-    #      `setNextRequest(null)` does NOT skip the current request (it only sets the
-    #      NEXT one), so the DELETE fired with a literal `{{_abTeardownId}}` URL →
-    #      400 InvalidArgument → the `[teardown] 200 or 404` assert failed.
+    #      `setNextRequest(null)` did NOT skip the current request — worse, it
+    #      ABORTED THE WHOLE RUN (setNextRequest(null) ends the newman run; it never
+    #      meant "skip this one"). The DELETE still fired with a literal
+    #      `{{_abTeardownId}}` URL → 400 InvalidArgument → `[teardown] 200 or 404`
+    #      failed, and every request after it in the collection was silently never
+    #      executed. The correct primitive for "skip exactly this request" is
+    #      `pm.execution.skipRequest()`, which is what every guard here now uses.
     # Fix (test-side, harness-only): unique per-case names so setNextRequest re-enters
     # the correct step and never bypasses a create; per-case env vars reset on the
     # create step so no stale op id bleeds in; and an unresolved teardown id falls
@@ -559,7 +563,7 @@ for _case in CASES:
         path="/operations/{{" + _delopvar + "}}",
         auth=_auth,
         pre_script=[
-            f"if (!pm.environment.get('{_delopvar}')) {{ pm.execution.setNextRequest(null); }}",
+            f"if (!pm.environment.get('{_delopvar}')) {{ pm.execution.skipRequest(); }}",
         ],
         test_script=[
             # First-entry reset (request-name-scoped flag).

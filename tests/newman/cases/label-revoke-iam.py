@@ -97,7 +97,7 @@ def _internal_url_override(path):
         "const intBase = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
         "if (!intBase) {",
         "  console.warn('internalBaseUrl not set — skipping internal Check probe for this step.');",
-        "  pm.execution.setNextRequest(null);",
+        "  pm.execution.skipRequest();",
         "} else {",
         f"  pm.request.url = intBase + '{path}';",
         "}",

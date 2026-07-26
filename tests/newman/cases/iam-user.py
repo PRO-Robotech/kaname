@@ -535,7 +535,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('invitedUserId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[
@@ -618,7 +618,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (!pm.environment.get('badRoleInvOpId')) {",
-                "  pm.execution.setNextRequest(null);",
+                "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[

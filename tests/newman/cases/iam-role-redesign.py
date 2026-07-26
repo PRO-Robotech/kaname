@@ -390,7 +390,7 @@ CASES.append(Case(
             method="GET",
             path="/operations/{{opId}}",
             auth="jwtBootstrap",
-            pre_script=["if (!pm.environment.get('opId')) { pm.execution.setNextRequest(null); }"],
+            pre_script=["if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }"],
             test_script=[
                 "if (pm.environment.get('opId')) {",
                 "  const j = pm.response.json();",
