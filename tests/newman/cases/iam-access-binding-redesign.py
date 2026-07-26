@@ -84,9 +84,14 @@ def _seed_role(suffix, save_var, tier_type="iam.account", tier_id="{{accountAId}
 
 
 def _cleanup_role(save_var, name="cleanup-role"):
+    # Best-effort teardown: the DELETE may legitimately be refused (403/404) for a
+    # role another suite already removed, in which case there is no Operation to
+    # poll — required=False so a teardown detail is not reported as a defect of the
+    # case under test. (`opId` is cleared before every capture, so an empty value
+    # here means exactly "this DELETE returned nothing", never a stale id.)
     return [Step(name=name, method="DELETE", path="/iam/v1/roles/{{" + save_var + "}}",
                  auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
-            poll_operation_until_done()]
+            poll_operation_until_done(required=False)]
 
 
 def _acb_body(role_var, target, scope_type="iam.account", scope_id="{{accountAId}}",
@@ -112,9 +117,10 @@ def _create_binding(name, body, save_var):
 
 
 def _cleanup_binding(save_var, name="cleanup-binding"):
+    # Best-effort teardown — see _cleanup_role.
     return [Step(name=name, method="DELETE", path="/iam/v1/accessBindings/{{" + save_var + "}}",
                  auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
-            poll_operation_until_done()]
+            poll_operation_until_done(required=False)]
 
 
 # ===========================================================================

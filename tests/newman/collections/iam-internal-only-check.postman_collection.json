@@ -724,6 +724,7 @@
                   "  const uid = (j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id;",
                   "  pm.expect(uid, 'user id must start with usr').to.match(/^usr[a-z0-9]+$/);",
                   "});",
+                  "pm.environment.unset('createdInternalUserOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",

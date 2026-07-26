@@ -341,7 +341,10 @@ CASES.append(Case(
         # cleanup (best-effort): delete the fresh project.
         Step(name="cleanup-project", method="DELETE", path="/iam/v1/projects/{{rdPrjId}}",
              auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
+        # Best-effort teardown: a refused DELETE returns no Operation, so there is
+        # nothing to poll (required=False keeps a teardown detail from being
+        # reported as a defect of the case under test).
+        poll_operation_until_done(required=False),
     ],
 ))
 

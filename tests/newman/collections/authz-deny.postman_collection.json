@@ -391,13 +391,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -453,13 +453,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -524,13 +524,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -595,13 +595,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -657,13 +657,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -718,13 +718,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -2842,13 +2842,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -2912,13 +2912,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -2974,13 +2974,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -3036,13 +3036,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -3107,13 +3107,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -3178,13 +3178,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -3240,13 +3240,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -3301,13 +3301,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -3361,13 +3361,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -6101,13 +6101,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -6171,13 +6171,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -6233,13 +6233,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -6294,13 +6294,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -6354,13 +6354,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -6415,13 +6415,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -8350,13 +8350,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -8420,13 +8420,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -8482,13 +8482,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -8543,13 +8543,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -8603,13 +8603,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -8664,13 +8664,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -10495,13 +10495,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -10565,13 +10565,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -10627,13 +10627,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -10689,13 +10689,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -12342,7 +12342,7 @@
       ]
     },
     {
-      "name": "AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY — non-member (jwtNoBindings) → Project & Group List → 200 + empty (was 403 pre-unify call-gate)",
+      "name": "AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY — non-member (jwtPureNoBindings) → Project & Group List → 200 + empty (was 403 pre-unify call-gate)",
       "description": "class:AUTHZ | class:SCOPE | class:NEG | class:RBAC | priority:P1",
       "item": [
         {
@@ -12373,13 +12373,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -12427,13 +12427,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -12768,13 +12768,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -12829,13 +12829,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -12898,13 +12898,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -12969,13 +12969,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -13031,13 +13031,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -14519,13 +14519,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -14589,13 +14589,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -15176,7 +15176,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-ANON — [DENY] Get userNOB (self-viewable only) as anon (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-ANON — [DENY] Get own user record (self-viewable only) as anon (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -15190,7 +15190,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{userPureNoBindingsId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -15198,7 +15198,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{userPureNoBindingsId}}"
               ]
             }
           },
@@ -15439,7 +15439,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-NOB — [ALLOW] Get userNOB (self-viewable only) as no-bind (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-NOB — [ALLOW] Get own user record (self-viewable only) as no-bind (user-get-nob)",
       "description": "class:AUTHZ | class:POS | priority:P1",
       "item": [
         {
@@ -15453,7 +15453,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{userPureNoBindingsId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -15461,7 +15461,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{userPureNoBindingsId}}"
               ]
             }
           },
@@ -15471,13 +15471,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -15532,13 +15532,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -15593,13 +15593,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -15653,13 +15653,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -15714,13 +15714,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -15744,7 +15744,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-PA1 — [DENY] Get userNOB (self-viewable only) as proj-adm (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-PA1 — [DENY] Get own user record (self-viewable only) as proj-adm (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -15758,7 +15758,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{userPureNoBindingsId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -15766,7 +15766,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{userPureNoBindingsId}}"
               ]
             }
           },
@@ -16050,7 +16050,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-AAA — [DENY] Get userNOB (self-viewable only) as acct-adm-a (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-AAA — [DENY] Get own user record (self-viewable only) as acct-adm-a (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -16064,7 +16064,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{userPureNoBindingsId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -16072,7 +16072,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{userPureNoBindingsId}}"
               ]
             }
           },
@@ -16356,7 +16356,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-AAB — [DENY] Get userNOB (self-viewable only) as acct-adm-b (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-AAB — [DENY] Get own user record (self-viewable only) as acct-adm-b (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -16370,7 +16370,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{userPureNoBindingsId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -16378,7 +16378,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{userPureNoBindingsId}}"
               ]
             }
           },
@@ -16662,7 +16662,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-INV — [DENY] Get userNOB (self-viewable only) as invitee (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-INV — [DENY] Get own user record (self-viewable only) as invitee (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -16676,7 +16676,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{userPureNoBindingsId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -16684,7 +16684,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{userPureNoBindingsId}}"
               ]
             }
           },
@@ -16993,7 +16993,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPureNoBindingsId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17054,7 +17054,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPureNoBindingsId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17115,7 +17115,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPureNoBindingsId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17129,13 +17129,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -17185,7 +17185,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userNOBId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjectType\": \"user\", \"subjectId\": \"{{userPureNoBindingsId}}\", \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountBId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17199,13 +17199,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -17887,13 +17887,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -18293,13 +18293,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -18685,13 +18685,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -19014,6 +19014,7 @@
                 "exec": [
                   "pm.test('grant create accepted', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
                   "const j = pm.response.json();",
+                  "pm.environment.unset('opId');",
                   "if (j && j.id) pm.environment.set('opId', j.id);",
                   "if (j && j.metadata && j.metadata.accessBindingId) {",
                   "  pm.environment.set('w12RevokeBindingId', j.metadata.accessBindingId);",
@@ -19210,6 +19211,7 @@
                   "pm.environment.unset('_w12RevokeRetry');",
                   "pm.test('revoke accepted (200/202)', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
                   "const j = pm.response.json();",
+                  "pm.environment.unset('opId');",
                   "if (j && j.id) pm.environment.set('opId', j.id);"
                 ]
               }

@@ -4,6 +4,101 @@ The suite is gated by `scripts/assert-suites-green.sh`: the gate subtracts a sma
 explicitly-enumerated known-RED set from each suite's failure count; everything else
 must be 0. The known-RED set is kept tiny and each entry has a documented reason.
 
+## Test-side fixes (round — 2026-07-26; base `adf1cb2`) — the suite starts checking itself
+
+Context: `adf1cb2`/`647b5f8` repaired the execution guards, so ~325 previously-dropped
+requests began to RUN. Nothing regressed — the 87 post-gate failures that appeared were
+requests that had never executed, now reporting honestly. This round closes the test-side
+debt they exposed. **No entry was added to the known-RED whitelist** and no assertion was
+weakened; two assertions were re-pointed at the refusal that is actually reachable, and
+several were strengthened.
+
+### Harness (scripts/gen.py) — two classes that made green cases meaningless
+
+- **The Operation poll ran as the wrong principal.** `poll_operation_until_done` /
+  `assert_op_success` / `assert_op_error` hard-coded `jwtAccountAdminA`.
+  `OperationService.Get` is principal-scoped and hides a foreign operation as 404, so any
+  case whose mutation runs as somebody else polled an operation it may not see, for its
+  whole retry budget — `IAM-USR-DL-CRUD-OK` alone was 52 of the 87 failures, one root.
+  The default is now `AUTH_INHERIT_OP`: at collection-build time the poll takes the auth of
+  the step that captured its operation-id variable (explicit `auth=` still wins; no local
+  producer → the historical default; an `anonymous` producer is never inherited). Exactly
+  two steps in the whole suite changed principal, which is the point — it is a
+  root-cause fix, not 52 patches. Unit-locked in `scripts/gen_test.py`.
+
+- **The Operation id survived between cases.** `opId` is one shared variable and a
+  REJECTED mutation writes nothing to it, so the poll confirmed the PREVIOUS case's
+  operation and the case passed having tested nothing. `save_from_response` now CLEARS any
+  operation-id variable before the capture attempt, and the six hand-written
+  `pm.environment.set('…OpId', …)` branches that had the same shape were given the same
+  reset. Two live victims: `IAM-USR-INV-IDEM-REINVITE` (400 on a missing field → polled the
+  prior invite → "idempotency" never once exercised) and `IAM-ROL-DL-NEG-SYSTEM` (403 →
+  the stale id DEFEATED its own `if (!opId) skipRequest()` guard → asserted
+  FAILED_PRECONDITION against the previous case's SUCCESSFUL delete). An empty id is now
+  reported once, by name, at a `skipRequest()` guard (`required=False` on the 21
+  best-effort `cleanup-*` polls, where a refused teardown genuinely has nothing to poll).
+  Audit of other shared variables: resource-id captures (`crudRoleId`, `crudGroupId`, …)
+  are deliberately NOT reset — they are read many steps later by design; the stale-poll
+  class is specific to ids consumed by the next request.
+
+### Fixture / subject defects
+
+- **The "sees nothing" probes were run by a subject that genuinely sees things.**
+  `jwtNoBindings` (userNOBId) is the standard grant TARGET of the AccessBinding suites:
+  `iam-flat-authz-vbc` grants it `view` on account-A, the `authz-deny` AB-CR ALLOW rows
+  grant it `view` on account-B, and both stay ACTIVE in Postgres across runs. Every
+  DENY/EMPTY expectation for it was being asserted against an authorised principal.
+  Switched to the DEDICATED never-granted `jwtPureNoBindings` (seeded by
+  `tests/authz-fixtures/setup.sh`, never a grant target anywhere): the `authz-deny` NOB
+  matrix row, `AUTHZ-ULG04`, and the foreign-Get / scope-filter probes in
+  `iam-project` / `iam-group` / `iam-service-account`. The two self-referential rows
+  (`USR-GT-A` self-get, `ESC-SELF-ADMIN-*` self-grant) were re-targeted to
+  `userPureNoBindingsId` so "self" still means self. Stale titles naming `jwtNoBindings`
+  on steps that already used the pure subject were corrected.
+
+- **`IAM-USR-DL-CRUD-OK` deleted a user that cannot be deleted** (surfaced *by* the poll
+  fix — the 404 had been hiding it). `userINVId` holds active AccessBindings by
+  construction (own personal-account owner grant + default-project admin + the
+  account-B admin grant from the seed), and `User.Delete` is guarded by the access-binding
+  RESTRICT. The case asserted only `done`, never SUCCESS, and its get-after-delete ran as
+  a principal that gets 404 on that record either way — "gone" was satisfied by
+  hide-existence. **Case defect, not a product one**: the RESTRICT is deliberate and
+  unit-locked (`pgmaperr_test.go`). The case now self-seeds a genuinely deletable user
+  (invite without `roleId` → PENDING row, no binding), deletes it as the account owner and
+  asserts the operation SUCCEEDED. The refusal it had been hitting is now covered on
+  purpose by the new `IAM-USR-DL-NEG-ACTIVE-BINDINGS`, pinned to its verbatim text.
+
+- **`IAM-USR-INV-IDEM-REINVITE` had never sent a valid request.** `project_id` is required
+  whenever `role_id` is set, and the body omitted it → 400 on every run. Rebuilt
+  self-contained: re-inviting the same email returns the SAME user row (asserted on
+  `response.id`, not the pre-allocated `metadata.userId`), and re-issuing an
+  already-active project grant returns Operation `ALREADY_EXISTS` — `AccessBinding.Insert`
+  is a strict create by design (the `ON CONFLICT DO UPDATE` upsert was removed because it
+  hid duplicate grants, `access_binding_repo.go:18`).
+
+### Stale fixtures in `iam-role` (12 assertions)
+
+| Case | Was | Now |
+|---|---|---|
+| `IAM-ROL-UP-T33-LABELS-OK` | used `crudRoleId`, deleted by `IAM-ROL-DL-CRUD-OK` earlier in the same collection → 404 on every step | self-seeds its own role (run-unique name) + cleanup |
+| `IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE` | listed the operations of a CLUSTER-scope system role → 403 AUTHZ_DENIED, never reached page-token validation | self-seeded own role; also pins the message to `page_token` |
+| `IAM-ROL-DL-NEG-SYSTEM` | ran as an account subject, denied by `cluster-role-mutate` before the system-role guard; the 403 branch left `opId` stale | runs as `jwtBootstrap` (passes the gate, reaches the guard), clears `opId` |
+| `IAM-ROL-CR-RULES-CAP-OVER-DENY` | 16 synthetic resource tokens per module, rejected by the closed-catalog check that was added after the payload | asserts the catalog rejection verbatim (see note below) |
+| `IAM-ROL-CR-NEG-NO-SCOPE` | hard-expected 400 where the gateway fail-closes 403 on the unscoped `account:*` anchor first | `assert_unscoped_rejected('iam.roles.create', 'account:*')` — tolerant of both, but PINNED to the action + anchor so it cannot pass on an unrelated refusal |
+
+**Note on the compiled-permission cap.** `>1024` is UNREACHABLE through the public API by
+construction: the published catalog is 28 resource types × 5 closed verbs = 140 compiled
+permissions, and a custom role may not use a module/resource wildcard
+(`moduleResourceWildcardSystemOnly: true`). The numeric cap stays locked where it is
+reachable — `domain.TestPermissions_Validate_CapRaise1024` (1024 accepted / 1025 rejected).
+Re-pointing the black-box case at the closed-catalog gate loses no coverage and replaces an
+assertion that could never pass with one that can.
+
+**Product observation (not fixed here — test-only round).** `invite.go:277` still comments
+the project bind as "idempotent через ON CONFLICT DO UPDATE"; that upsert was deliberately
+removed and the insert is now strict create-or-conflict. The comment contradicts the code
+(`architecture.md` doc-truthfulness) — worth a follow-up in the owning repo.
+
 ## Test-side fixes (round — 2026-07-21, qa; base `redesign/integration`@99f33d2)
 
 Triaged the clean-seed umbrella CI artifact (`na4/iam/.../out/*.json`). Findings by class:

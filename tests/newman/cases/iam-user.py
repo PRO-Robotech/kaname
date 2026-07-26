@@ -604,6 +604,10 @@ CASES.append(Case(
                 # Sync 200 (Operation accepted) or sync 400 (role id format invalid).
                 "pm.test('sync 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
                 "const j = pm.response.json();",
+                # Clear FIRST: the sync-400 branch mints no Operation, and a leftover
+                # id from an earlier case would make the poll below confirm THAT
+                # operation instead of skipping.
+                "pm.environment.unset('badRoleInvOpId');",
                 "if (pm.response.code === 400) {",
                 "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
                 "} else {",
@@ -636,32 +640,146 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-USR-INV-IDEM-REINVITE — Invite same email twice → idempotent (existing binding, no error)
-# The invite path is idempotent. Re-inviting the same
-# email with the same role should succeed (return existing binding, not fail).
+# IAM-USR-INV-IDEM-REINVITE — re-invite the SAME email to the SAME account.
+#
+# WHAT THIS CASE USED TO DO (and why it proved nothing). The body carried
+# `roleId` but no `projectId`, and `project_id` has been REQUIRED whenever
+# `role_id` is set since the RPC existed — so the invite was rejected 400
+# `Illegal argument project_id: required when role_id is set` on every run. The
+# rejection carried no Operation id, the shared `opId` kept the PREVIOUS case's
+# invite, and the poll confirmed THAT operation as `done` — green. The
+# idempotency this case is named for was therefore never once exercised.
+# (`opId` is now cleared before each capture — gen.py::save_from_response — so
+# this class cannot silently recur.)
+#
+# WHAT IT CHECKS NOW — the two halves of the landed contract, separately:
+#
+#  1. USER-ROW idempotency (the invariant in the case name): re-inviting an email
+#     that already has a row in the account returns the SAME user, no error. The
+#     assertion is on `response.id`, NOT `metadata.userId`: Invite pre-allocates a
+#     fresh id into metadata BEFORE the async worker discovers the existing row,
+#     so metadata carries a phantom id on the idempotent path and only the
+#     Operation `response` is authoritative (testing.md: check op.error/response,
+#     never read an id out of metadata alone).
+#
+#  2. GRANT strictness with `projectId`+`roleId` present (the required field the
+#     old payload omitted): re-issuing an ALREADY-ACTIVE grant is NOT silently
+#     absorbed — `AccessBinding.Insert` is a strict create (the previous
+#     `ON CONFLICT DO UPDATE` upsert was deliberately removed because it hid real
+#     duplicate grants from the audit chain, access_binding_repo.go:18), so the
+#     partial UNIQUE `access_bindings_active_grant_uniq` raises 23505 and the
+#     Operation completes with ALREADY_EXISTS and the verbatim contract text.
+#     Asserting that text pins WHICH rejection this is, so the negative cannot
+#     pass on an unrelated refusal.
+#
+# Self-seeded per run (`{{runId}}` in the email) so the case is idempotent across
+# runs and independent of what other suites did to the shared fixture users.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-INV-IDEM-REINVITE",
-    title="Re-invite same email+role to same account → 200 idempotent (no AlreadyExists)",
-    classes=["IDEM"],
+    title="Re-invite same email → same User row (idempotent); re-issuing an already-active "
+          "project grant → Operation ALREADY_EXISTS (strict create, not a silent upsert)",
+    classes=["IDEM", "NEG"],
     priority="P1",
     steps=[
+        # --- 1. seed: first invite of a fresh email, no grant ------------------
         Step(
-            name="reinvite",
+            name="invite-first",
             method="POST",
             path="/iam/v1/users:invite",
-            # Re-invite jwtInvitee's email to accountBId (already a member).
-            body={"accountId": "{{accountBId}}", "email": "auth-test-invitee@example.com", "roleId": ROLE_VIEW},
+            body={"accountId": "{{accountBId}}", "email": "reinv-{{runId}}@kacho.local"},
             auth="jwtAccountAdminB",
             test_script=[
-                # Should succeed (200 Operation) — idempotent re-invite.
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "opId"),
             ],
         ),
         poll_operation_until_done(),
+        Step(
+            name="capture-first-user",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('first invite succeeded (no op.error)', () => pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                "pm.test('first invite returned the User in response', () => {",
+                "  pm.expect(j.response && j.response.id, JSON.stringify(j)).to.match(/^usr[a-z0-9]+$/);",
+                "});",
+                *save_from_response("j.response && j.response.id", "reinvUserId"),
+            ],
+        ),
+        # --- 2. the idempotency claim: identical invite → SAME user row --------
+        Step(
+            name="reinvite-same-email",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={"accountId": "{{accountBId}}", "email": "reinv-{{runId}}@kacho.local"},
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="reinvite-is-idempotent",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('re-invite succeeded (no AlreadyExists on the user row)', () => pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                # The authoritative id is response.id — metadata.userId is the
+                # pre-allocated candidate the idempotent path discards.
+                "pm.test('re-invite returned the SAME User row (idempotent)', () => {",
+                "  pm.expect(j.response && j.response.id, JSON.stringify(j))",
+                "    .to.eql(pm.environment.get('reinvUserId'));",
+                "});",
+                "pm.test('re-invite did not resurrect the row as a new invite', () => {",
+                "  pm.expect(j.response && j.response.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                "});",
+            ],
+        ),
+        # --- 3. grant strictness: projectId+roleId, issued twice ---------------
+        Step(
+            name="invite-with-grant",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={"accountId": "{{accountBId}}", "projectId": "{{projectB1Id}}",
+                  "email": "reinv-{{runId}}@kacho.local", "roleId": ROLE_VIEW},
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(
+            name="reinvite-duplicate-grant",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={"accountId": "{{accountBId}}", "projectId": "{{projectB1Id}}",
+                  "email": "reinv-{{runId}}@kacho.local", "roleId": ROLE_VIEW},
+            auth="jwtAccountAdminB",
+            test_script=[
+                # The duplicate is detected in the async worker (DB UNIQUE), so the
+                # RPC itself is accepted — the refusal lands on the Operation.
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "dupGrantOpId"),
+            ],
+        ),
+        assert_op_error(6, "ALREADY_EXISTS",
+                        msg_substr="these permissions are already granted",
+                        op_var="dupGrantOpId"),
     ],
 ))
 
@@ -757,22 +875,48 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-USR-DL-CRUD-OK — Delete seeded user (userINVId) without active group membership
-# Note: userINVId is the invitee user. Deleting them removes the record.
-# Depends on: userINVId from crud-fixture/setup.sh.
+# IAM-USR-DL-CRUD-OK — delete a user that CAN be deleted.
+#
+# TWO defects, one behind the other:
+#
+#  (a) The Operation was minted by jwtInvitee (self-delete) but polled by the
+#      helper's old hard-coded default, jwtAccountAdminA. OperationService.Get is
+#      principal-scoped and hides a foreign operation as 404, so the poll 404'd for
+#      its whole retry budget — 52 failing assertions, one root. Fixed at the
+#      harness level: the poll now inherits the minting principal
+#      (gen.py::AUTH_INHERIT_OP), so this cannot recur in the next case either.
+#
+#  (b) Underneath it, the delete NEVER SUCCEEDED. `userINVId` is a shared fixture
+#      user that by construction holds active AccessBindings — the owner grant on
+#      its own personal account, admin on its default project, plus admin@account-B
+#      from tests/authz-fixtures/setup.sh — and User.Delete is guarded by the
+#      access-binding RESTRICT: `FAILED_PRECONDITION: User <id> has active access
+#      bindings and cannot be deleted` (product behaviour, deliberate, locked by
+#      pgmaperr_test.go). The old case never noticed because it asserted only
+#      `done`, never SUCCESS, and its get-after-delete ran as an unrelated principal
+#      that gets 403/404 on that record whether or not it still exists — the
+#      "gone" assertion was satisfied by hide-existence, not by deletion.
+#
+# So the fixture is the defect, not the product: the case has to target a user that
+# is genuinely deletable. It self-seeds one — an invite WITHOUT `roleId` creates a
+# PENDING user row and no AccessBinding — and deletes it as the account owner (the
+# non-self branch of the Delete guard: owner of the target's account). Run-unique
+# email keeps it idempotent across runs.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-DL-CRUD-OK",
-    title="Delete userINVId (no group membership) → Operation done, Get returns 404 or 403",
+    title="Delete a binding-free user as the owner of its account → Operation SUCCEEDS, Get returns 404",
     classes=["CRUD"],
     priority="P0",
     steps=[
         Step(
-            name="delete-user",
-            method="DELETE",
-            path="/iam/v1/users/{{userINVId}}",
-            auth="jwtInvitee",
+            name="seed-deletable-user",
+            method="POST",
+            path="/iam/v1/users:invite",
+            # No roleId ⇒ no AccessBinding ⇒ nothing for the RESTRICT guard to hold.
+            body={"accountId": "{{accountAId}}", "email": "dele-{{runId}}@kacho.local"},
+            auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
@@ -780,9 +924,78 @@ CASES.append(Case(
             ],
         ),
         poll_operation_until_done(),
+        Step(
+            name="capture-deletable-user",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                # op.error BEFORE reading an id (testing.md): a failed Invite still
+                # carries a pre-allocated id in metadata, so metadata alone would
+                # hand the delete below a phantom user.
+                "pm.test('seed invite succeeded (no op.error)', () => pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                "pm.test('seed invite returned a User', () => {",
+                "  pm.expect(j.response && j.response.id, JSON.stringify(j)).to.match(/^usr[a-z0-9]+$/);",
+                "});",
+                *save_from_response("j.response && j.response.id", "delUserId"),
+            ],
+        ),
+        retry_until_authorized(Step(
+            name="delete-user",
+            method="DELETE",
+            path="/iam/v1/users/{{delUserId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        )),
+        poll_operation_until_done(),
+        # The assertion the case was missing: the delete has to have SUCCEEDED.
+        # Without it "gone" below is indistinguishable from hide-existence.
+        assert_op_success(),
         # Poll the GET until the user is actually gone (async delete + FGA
         # tuple removal can lag the Operation→done a beat).
-        get_until_gone("/iam/v1/users/{{userINVId}}", "User"),
+        get_until_gone("/iam/v1/users/{{delUserId}}", "User"),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-DL-NEG-ACTIVE-BINDINGS — the other half of the contract that (b) above
+# exposed: a user holding active AccessBindings CANNOT be deleted. This is the
+# behaviour the old IAM-USR-DL-CRUD-OK was silently hitting; asserted here on
+# purpose, with the verbatim text so it cannot pass on an unrelated refusal.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-DL-NEG-ACTIVE-BINDINGS",
+    title="Delete a user that holds active AccessBindings → Operation.error FAILED_PRECONDITION (9) "
+          "'has active access bindings and cannot be deleted'",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="delete-bound-user",
+            method="DELETE",
+            # Self-delete: jwtInvitee always holds bindings (own personal account
+            # owner grant + the account-B admin grant from the fixture seed), so the
+            # RESTRICT guard is reached rather than the authz gate.
+            path="/iam/v1/users/{{userINVId}}",
+            auth="jwtInvitee",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "boundDelOpId"),
+            ],
+        ),
+        # Polls as jwtInvitee — inherited from the step that minted the operation.
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_substr="has active access bindings and cannot be deleted",
+                        op_var="boundDelOpId"),
     ],
 ))
 

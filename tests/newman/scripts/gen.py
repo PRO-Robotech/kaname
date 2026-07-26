@@ -21,6 +21,7 @@ GET /operations/{id} до done → assert response/error) — переиспол
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 import importlib.util
@@ -50,7 +51,34 @@ class Step:
     #   None              — header не трогается (default — inherit collection Bearer если есть)
     #   "anonymous"       — Authorization header снимается перед запросом
     #   "<envVarName>"    — Authorization: Bearer {{envVarName}} (значение читается из env при выполнении)
+    #   AUTH_INHERIT_OP   — resolved at build time to the auth of the step that
+    #                       captured `op_var` (see AUTH_INHERIT_OP below)
     auth: Optional[str] = None
+    # Which env var holds the Operation id this step reads. Only meaningful for
+    # the op-poll/assert helpers; drives AUTH_INHERIT_OP resolution.
+    op_var: Optional[str] = None
+
+
+# Sentinel `auth` value: "poll the Operation as whoever MINTED it".
+#
+# WHY THIS EXISTS. `OperationService.Get` is principal-scoped and hides a foreign
+# operation behind 404 (hide-existence). The op-poll helpers used to hard-code a
+# DEFAULT principal (`jwtAccountAdminA`), which is only correct for the cases whose
+# mutation happens to run as that same principal. Any case that mutates as somebody
+# else — IAM-USR-DL-CRUD-OK deletes as `jwtInvitee` — polls an operation it is not
+# allowed to see and gets a perfectly correct 404 for POLL_CAP retries: 52 failing
+# assertions with one root, and a fix applied case-by-case would simply wait for the
+# next case to be written the same way.
+#
+# So the DEFAULT is now "inherit": at collection-build time the poll step takes the
+# auth of the nearest preceding step that captured its operation-id variable. An
+# explicit `auth=` argument still wins (some cases deliberately poll as a different,
+# authorised principal); if nothing in the case minted the id — the case polls an id
+# seeded by an earlier case — the historical default applies.
+AUTH_INHERIT_OP = "\0inherit-op-principal"
+
+# The principal used when a case has no local op-producer to inherit from.
+DEFAULT_OP_POLL_AUTH = "jwtAccountAdminA"
 
 
 @dataclass
@@ -127,6 +155,63 @@ def assert_grpc_code(code: int, code_name: str) -> List[str]:
     ]
 
 
+def assert_unscoped_rejected(action: Optional[str] = None,
+                             unscoped_resource: Optional[str] = None) -> List[str]:
+    """An UNSCOPED create (no account/project anchor in the body) is REJECTED.
+
+    Two defensible outcomes, both "rejected" — this is the platform-wide
+    authz-first ordering (security.md), already encoded by the identical helper in
+    the vpc/nlb/compute/storage suites:
+
+      403 PERMISSION_DENIED (code 7) — the gateway scope_extractor cannot resolve a
+        scope for the anti-BOLA check, so it fail-closes on the unscoped anchor
+        (`account:*`) BEFORE the backend ever validates the body;
+      400 INVALID_ARGUMENT (code 3) — the backend's "scope is required" when the
+        request does reach it.
+
+    Tolerating both is NOT the whole helper. A bare `403|400` negative passes on ANY
+    refusal — a permission-catalog miss, a malformed body, a typo in the path — i.e.
+    exactly the "negative that passes for the wrong reason" this suite keeps finding.
+    So pass `action` (+ `unscoped_resource`) to PIN which refusal it is: on the 403
+    branch the `ErrorInfo` must carry `reason=AUTHZ_DENIED` and that method's action
+    (an EMPTY action means the catalog had no entry — a routing/catalog regression,
+    not the invariant under test); on the 400 branch the message must name the scope.
+    """
+    out = [
+        "pm.test('unscoped rejected (400 InvalidArgument or 403 authz-first)', () => {",
+        "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([400, 403]);",
+        "});",
+        "pm.test('grpc code 3 (INVALID_ARGUMENT) or 7 (PERMISSION_DENIED)', () => {",
+        "  const j = pm.response.json();",
+        "  pm.expect(j.code, JSON.stringify(j)).to.be.oneOf([3, 7]);",
+        "});",
+    ]
+    if action is None:
+        return out
+    res_line = (
+        f"    pm.expect(md.resource, JSON.stringify(j)).to.eql('{unscoped_resource}');"
+        if unscoped_resource else "    // resource anchor not pinned for this RPC"
+    )
+    out += [
+        f"pm.test('the refusal is about the MISSING SCOPE on {action}, not some other rejection', () => {{",
+        "  const j = pm.response.json();",
+        "  if (pm.response.code === 403) {",
+        "    const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+        "    pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+        "    pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+        "    const md = info.metadata || {};",
+        f"    pm.expect(md.action, 'empty action = permission-catalog miss, not a scope refusal: ' "
+        f"+ JSON.stringify(j)).to.eql('{action}');",
+        res_line,
+        "  } else {",
+        "    pm.expect((j.message || '').toLowerCase(), JSON.stringify(j))",
+        "      .to.satisfy(m => m.includes('scope') || m.includes('account') || m.includes('project'));",
+        "  }",
+        "});",
+    ]
+    return out
+
+
 def assert_field_violation(field_name: str) -> List[str]:
     return [
         f"pm.test('field violation on \"{field_name}\"', () => {{",
@@ -139,9 +224,51 @@ def assert_field_violation(field_name: str) -> List[str]:
     ]
 
 
+_ENV_SET_RE = re.compile(r"""pm\.environment\.set\(\s*['"](\w+)['"]""")
+
+
+def _captured_op_vars(test_script: List[str]) -> List[str]:
+    """Operation-id env vars this step WRITES.
+
+    Recognises both the `save_from_response` helper and the hand-written
+    `pm.environment.set('opId', j.id || '')` idiom several cases use inline — the
+    producer of an operation id is whoever wrote the variable, however they wrote it."""
+    return [v for v in _ENV_SET_RE.findall("\n".join(test_script)) if _is_operation_id_var(v)]
+
+
+def _is_operation_id_var(env_var: str) -> bool:
+    """Does this env var hold an Operation id (i.e. is it consumed by an op-poll)?
+
+    Naming is the contract across every case file: the shared `opId`, or a per-case
+    variable ending in `OpId` (`vbcDelOpId`, `badRoleInvOpId`, `addAisOpId`, …)."""
+    return env_var == "opId" or env_var.endswith("OpId") or env_var.endswith("OperationId")
+
+
 def save_from_response(jsonpath: str, env_var: str) -> List[str]:
-    """Сохранить значение из response в env."""
+    """Сохранить значение из response в env.
+
+    OPERATION IDS ARE CLEARED FIRST — the capture is a REPLACE, not an upsert.
+
+    `opId` is one shared environment variable and the poll step that reads it is the
+    very next request. When a mutation is REJECTED (400/403) the response carries no
+    `id`, so the write below never happens — and the variable silently keeps the
+    PREVIOUS case's operation. The poll then fetches a stale, unrelated, long-since
+    `done` operation, `done === true` holds, and the case reports GREEN having
+    verified nothing about the mutation it was written for. Two live examples:
+    IAM-USR-INV-IDEM-REINVITE (re-invite 400s on a missing field, poll confirms the
+    PRIOR invite → "idempotency" never once exercised) and IAM-ROL-DL-NEG-SYSTEM
+    (system-role delete 403s, the `if (!opId) skipRequest()` guard is DEFEATED by the
+    stale value, and the poll asserts FAILED_PRECONDITION against the previous case's
+    SUCCESSFUL delete).
+
+    Clearing first makes a failed capture observable: the guard skips as intended, or
+    the poll fails loudly on an empty id, instead of passing on a foreign object.
+    Non-operation captures (resource ids) are deliberately NOT cleared — several cases
+    save a resource id once and read it many steps later, across requests that do not
+    return it; the stale-poll class is specific to ids consumed immediately."""
+    reset = [f"pm.environment.unset('{env_var}');"] if _is_operation_id_var(env_var) else []
     return [
+        *reset,
         "try {",
         "  const j = pm.response.json();",
         f"  const v = ({jsonpath});",
@@ -339,13 +466,59 @@ def retry_until_absent(step: Step, still_present_expr: str, budget: int = 25,
     return replace(step, test_script=guard + list(step.test_script))
 
 
-def poll_operation_until_done(auth: str = "jwtAccountAdminA") -> Step:
+def _op_id_guard(op_var: str, required: bool) -> List[str]:
+    """Pre-request guard: do not send the poll when `op_var` is empty.
+
+    Since the capture clears the variable first (save_from_response), an empty
+    `op_var` now means exactly one thing: the mutation this poll belongs to did not
+    return an Operation. Two intents, two shapes — and the difference is the whole
+    point of the guard:
+
+      required=True  (default) — the case under test asserts its mutation succeeded,
+        so a missing id is a DEFECT of that case. Report it once, naming the
+        variable, then skip: without the report the poll silently disappears (the
+        second-order blindness exec-coverage.py documents); without the skip the
+        gateway receives a literal `{{opId}}` and answers `invalid operation id`
+        POLL_CAP times, burying one root cause under 50 identical failures.
+
+      required=False — a best-effort `cleanup-*` teardown. Its DELETE is allowed to
+        be refused (403/404 for a resource another suite already removed); there is
+        genuinely nothing to poll and nothing is lost. This is the sanctioned
+        operation-guard skip (exec-coverage.py: "a create refused on purpose
+        genuinely has nothing to poll"), NOT an environment guard.
+    """
+    if not required:
+        return [
+            f"// best-effort teardown: no Operation to poll when the cleanup was refused.",
+            f"if (!pm.environment.get('{op_var}')) {{ pm.execution.skipRequest(); }}",
+        ]
+    return [
+        f"// OPERATION GUARD — '{op_var}' is captured by the mutation this poll follows.",
+        "// Empty = that mutation returned no Operation. Report it (a skipped request",
+        "// leaves no trace at all) and skip, rather than polling a literal template.",
+        f"if (!pm.environment.get('{op_var}')) {{",
+        f"  pm.test('operation id {op_var} was captured (the mutation returned an Operation)', () => {{",
+        f"    pm.expect.fail('{op_var} is empty — the mutation this poll belongs to did not "
+        "return an Operation (it was rejected, or its capture failed). Polling would hit an "
+        "unresolved template; a previous case\\'s operation is NOT a substitute.');",
+        "  });",
+        "  pm.execution.skipRequest();",
+        "}",
+    ]
+
+
+def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True) -> Step:
     """Reusable poll step: до POLL_CAP попыток (через setNextRequest), потом fail если done остался false.
 
-    The auth parameter (default jwtAccountAdminA) lets the poll step send a
-    valid Bearer token. Without auth the gateway exempts OperationService/Get
-    but the IAM service's anti-anonymous interceptor still rejects
-    unauthenticated callers with 401 UNAUTHENTICATED (code 16).
+    The auth parameter carries a valid Bearer token: without one the gateway exempts
+    OperationService/Get but the IAM service's anti-anonymous interceptor still
+    rejects unauthenticated callers with 401 UNAUTHENTICATED (code 16).
+
+    By DEFAULT it is AUTH_INHERIT_OP — the poll runs as whoever minted the operation
+    (see AUTH_INHERIT_OP). `OperationService.Get` hides a foreign operation as 404,
+    so a hard-coded principal 404s on every case that mutates as somebody else.
+    Pass an explicit principal only when the case deliberately polls as a different,
+    authorised caller.
 
     The retry cap is POLL_CAP (single source of truth — see the constant above).
     Between retries a ~500ms busy-wait spaces out the polls (see the test script),
@@ -365,7 +538,9 @@ def poll_operation_until_done(auth: str = "jwtAccountAdminA") -> Step:
         method="GET",
         path="/operations/{{opId}}",
         auth=auth,
+        op_var="opId",
         pre_script=[
+            *_op_id_guard("opId", required),
             "// poll-counter reset on first entry (request-name-scoped flag);",
             "// re-invocations via setNextRequest skip the reset.",
             "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
@@ -538,14 +713,15 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
 
 
 def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
-                    msg_regex: Optional[str] = None, auth: str = "jwtAccountAdminA",
+                    msg_regex: Optional[str] = None, auth: str = AUTH_INHERIT_OP,
                     op_var: str = "opId") -> Step:
     """Поллит /operations/{op_var} до done и проверяет, что operation завершилась с error.code == code.
 
-    The auth parameter (default jwtAccountAdminA) carries a valid Bearer token.
-    OperationService/Get is <exempt> in the catalog but IAM's anti-anonymous
-    interceptor still blocks unauthenticated callers → 401. Steps must carry a
-    valid JWT.
+    The auth parameter carries a valid Bearer token: OperationService/Get is
+    <exempt> in the catalog but IAM's anti-anonymous interceptor still blocks
+    unauthenticated callers → 401. By default it is AUTH_INHERIT_OP — the step
+    reads the operation as whoever minted `op_var` (a foreign operation is hidden
+    as 404, so a hard-coded principal reads nothing).
 
     op_var: the env-var name holding the operation id to assert.
     A step that returns its Operation into a PER-CASE var (e.g. the :verb-action
@@ -581,13 +757,15 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
         body.append(f"pm.test('error text includes \"{msg_substr}\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('{msg_substr.lower()}'));")
     if msg_regex is not None:
         body.append(f"pm.test('error text matches /{msg_regex}/', () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/{msg_regex}/));")
-    return Step(name="assert-op-error", method="GET", path="/operations/{{" + op_var + "}}", auth=auth, test_script=body)
+    return Step(name="assert-op-error", method="GET", path="/operations/{{" + op_var + "}}",
+                auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True), test_script=body)
 
 
-def assert_op_success(auth: str = "jwtAccountAdminA") -> Step:
-    """The auth parameter ensures the step carries a valid Bearer token."""
-    return Step(name="assert-op-success", method="GET", path="/operations/{{opId}}",
-                auth=auth,
+def assert_op_success(auth: str = AUTH_INHERIT_OP, op_var: str = "opId") -> Step:
+    """The auth parameter ensures the step carries a valid Bearer token; by default
+    it inherits the principal that minted `op_var` (AUTH_INHERIT_OP)."""
+    return Step(name="assert-op-success", method="GET", path="/operations/{{" + op_var + "}}",
+                auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True),
                 test_script=[
                     "const j = pm.response.json();",
                     "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
@@ -855,6 +1033,12 @@ def _auth_pre_script(auth: str) -> List[str]:
     Для "anonymous" — снимает Authorization. Для имени env-переменной —
     Authorization: Bearer <значение env-var>. Snippet идет в начало
     step.pre_script, перед всеми остальными pre-script строками."""
+    if auth == AUTH_INHERIT_OP:
+        # Unresolved sentinel: case_to_postman resolves it before this point. Reaching
+        # here means a Step bypassed the case builder — fail loudly rather than emit a
+        # step whose principal is a literal control character.
+        raise ValueError("AUTH_INHERIT_OP reached _auth_pre_script unresolved — "
+                         "steps must be emitted through case_to_postman()")
     if auth == "anonymous":
         return [
             "// per-step auth: anonymous step",
@@ -974,7 +1158,24 @@ def case_to_postman(case: Case) -> Dict:
         return out
 
     items = []
+    # AUTH_INHERIT_OP resolution — "poll the Operation as whoever MINTED it".
+    #
+    # Walk the case in execution order carrying a var → principal map of who captured
+    # which operation id. A poll/assert step marked AUTH_INHERIT_OP takes the
+    # principal of the nearest PRECEDING step that captured its `op_var`; with no
+    # local producer (the id came from an earlier case / fixture) the historical
+    # default applies. An `anonymous` step is never registered as a producer — an
+    # anonymous mutation is a 401 negative that mints nothing, and inheriting it
+    # would silently turn the poll into a second anonymous probe that passes for the
+    # wrong reason.
+    op_producer: Dict[str, str] = {}
     for idx, s in enumerate(case.steps):
+        auth = s.auth
+        if auth == AUTH_INHERIT_OP:
+            auth = op_producer.get(s.op_var or "opId", DEFAULT_OP_POLL_AUTH)
+        if s.auth and s.auth not in ("anonymous", AUTH_INHERIT_OP):
+            for var in _captured_op_vars(s.test_script):
+                op_producer[var] = s.auth
         s2 = Step(
             name=final_names[idx],
             method=s.method,
@@ -982,7 +1183,8 @@ def case_to_postman(case: Case) -> Dict:
             body=s.body,
             pre_script=_rewrite_jumps(list(s.pre_script)),
             test_script=_rewrite_jumps(list(s.test_script)),
-            auth=s.auth,
+            auth=auth,
+            op_var=s.op_var,
         )
         items.append(step_to_postman(s2))
 
@@ -1025,6 +1227,7 @@ def load_cases_module(path: Path):
     mod.assert_status = assert_status
     mod.assert_grpc_code = assert_grpc_code
     mod.assert_field_violation = assert_field_violation
+    mod.assert_unscoped_rejected = assert_unscoped_rejected
     mod.save_from_response = save_from_response
     mod.assert_operation_envelope = assert_operation_envelope
     mod.assert_created_at_seconds = assert_created_at_seconds

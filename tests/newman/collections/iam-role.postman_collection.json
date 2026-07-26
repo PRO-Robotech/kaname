@@ -88,6 +88,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -1534,6 +1535,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -1580,6 +1582,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -1736,6 +1747,7 @@
                 "exec": [
                   "pm.test('400 or 403 or 200 (then async fail)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 200]));",
                   "const j = pm.response.json();",
+                  "pm.environment.unset('sysMutOpId');",
                   "if (pm.response.code === 400) {",
                   "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
                   "} else if (pm.response.code === 403) {",
@@ -2007,6 +2019,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2053,6 +2066,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -2160,7 +2182,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-DL-NEG-SYSTEM — Delete system role ROLE_VIEW → Operation.error FAILED_PRECONDITION (9) 'System role cannot be deleted'",
+      "name": "IAM-ROL-DL-NEG-SYSTEM — Delete system role ROLE_VIEW as cluster-admin → Operation.error FAILED_PRECONDITION (9) 'System role cannot be deleted'",
       "description": "class:NEG | priority:P1",
       "item": [
         {
@@ -2192,13 +2214,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}"
@@ -2210,10 +2232,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('sync 200 or 403 (cluster-role-mutate)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('sync 200 (Operation minted) or sync 400 FAILED_PRECONDITION', () => pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 400]));",
                   "const j = pm.response.json();",
-                  "if (pm.response.code === 403) {",
-                  "  pm.test('403 code 7 (PERMISSION_DENIED)', () => pm.expect(j.code).to.eql(7));",
+                  "pm.environment.unset('opId');",
+                  "if (pm.response.code === 400) {",
+                  "  pm.test('sync code 9 (FAILED_PRECONDITION — system role)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(9));",
+                  "  pm.test('sync message names the system role', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('system role'));",
                   "} else {",
                   "  pm.environment.set('opId', j.id || '');",
                   "}"
@@ -2249,17 +2273,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "// If sync returned 403, no operation was created — skip poll.",
+                  "// Legal operation guard: a sync reject minted no Operation, so there",
+                  "// is nothing to poll. `opId` is cleared by the step above, so an empty",
+                  "// value here can only mean that — never a previous case's id.",
                   "if (!pm.environment.get('opId')) {",
                   "  pm.execution.skipRequest();",
                   "}"
@@ -2349,6 +2375,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2400,6 +2427,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -2491,6 +2527,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2542,6 +2579,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -2625,6 +2671,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2798,6 +2845,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2844,6 +2892,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -2927,6 +2984,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3176,11 +3234,13 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
                   "} catch (e) {}",
+                  "pm.environment.unset('lsopOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3327,11 +3387,88 @@
       ]
     },
     {
-      "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE — ListOperations with garbage pageToken → 400 InvalidArgument",
+      "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE — ListOperations of an OWN role with a garbage pageToken → 400 InvalidArgument 'invalid page_token'",
       "description": "class:NEG | class:PAGE | class:VAL | priority:P1",
       "item": [
         {
-          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: lsop-bad-token",
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: seed-lsop-role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lsoptok_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('lsopTokRoleId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: poll-op",
           "request": {
             "method": "GET",
             "header": [
@@ -3341,7 +3478,149 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/roles/rol1bda80f2be4d3658e/operations?pageSize=10&pageToken=not-a-real-token",
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: lsop-bad-token-rya21",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{lsopTokRoleId}}/operations?pageSize=10&pageToken=not-a-real-token",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -3349,7 +3628,7 @@
                 "iam",
                 "v1",
                 "roles",
-                "rol1bda80f2be4d3658e",
+                "{{lsopTokRoleId}}",
                 "operations?pageSize=10&pageToken=not-a-real-token"
               ]
             }
@@ -3378,11 +3657,161 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('rejection names the page token', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('page_token');",
                   "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: cleanup-lsop-role",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{lsopTokRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{lsopTokRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// best-effort teardown: no Operation to poll when the cleanup was refused.",
+                  "if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
               }
             }
@@ -3455,6 +3884,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3506,6 +3936,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -3810,6 +4249,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('feedgateIamRoleOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3950,6 +4390,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3996,6 +4437,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -4067,6 +4517,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}"
                 ]
               }
@@ -4293,7 +4752,7 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-RULES-CAP-OVER-DENY — Create custom role whose rules compile to >1024 permissions → 400 (compiled permissions exceed 1024)",
+      "name": "IAM-ROL-CR-RULES-CAP-OVER-DENY — Create custom role with resource types outside the published catalog → 400 INVALID_ARGUMENT naming each unknown type and pointing at GET /iam/v1/permissionCatalog",
       "description": "class:NEG | class:VAL | class:BVA | priority:P1",
       "item": [
         {
@@ -4319,7 +4778,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"overcap_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"ra\", \"rb\", \"rc\", \"rd\", \"re\", \"rf\", \"rg\", \"rh\", \"ri\", \"rj\", \"rk\", \"rl\", \"rm\", \"rn\", \"ro\", \"rp\"], \"verbs\": [\"va\", \"vb\", \"vc\", \"vd\", \"ve\", \"vf\", \"vg\", \"vh\", \"vi\", \"vj\", \"vk\", \"vl\", \"vm\", \"vn\", \"vo\", \"vp\"]}, {\"module\": \"vpc\", \"resources\": [\"ra\", \"rb\", \"rc\", \"rd\", \"re\", \"rf\", \"rg\", \"rh\", \"ri\", \"rj\", \"rk\", \"rl\", \"rm\", \"rn\", \"ro\", \"rp\"], \"verbs\": [\"va\", \"vb\", \"vc\", \"vd\", \"ve\", \"vf\", \"vg\", \"vh\", \"vi\", \"vj\", \"vk\", \"vl\", \"vm\", \"vn\", \"vo\", \"vp\"]}, {\"module\": \"compute\", \"resources\": [\"ra\", \"rb\", \"rc\", \"rd\", \"re\", \"rf\", \"rg\", \"rh\", \"ri\", \"rj\", \"rk\", \"rl\", \"rm\", \"rn\", \"ro\", \"rp\"], \"verbs\": [\"va\", \"vb\", \"vc\", \"vd\", \"ve\", \"vf\", \"vg\", \"vh\", \"vi\", \"vj\", \"vk\", \"vl\", \"vm\", \"vn\", \"vo\", \"vp\"]}, {\"module\": \"loadbalancer\", \"resources\": [\"ra\", \"rb\", \"rc\", \"rd\", \"re\", \"rf\", \"rg\", \"rh\", \"ri\", \"rj\", \"rk\", \"rl\", \"rm\", \"rn\", \"ro\", \"rp\"], \"verbs\": [\"va\", \"vb\", \"vc\", \"vd\", \"ve\", \"vf\", \"vg\", \"vh\", \"vi\", \"vj\", \"vk\", \"vl\", \"vm\", \"vn\", \"vo\", \"vp\"]}, {\"module\": \"iam\", \"resources\": [\"sa\", \"sb\", \"sc\", \"sd\", \"se\", \"sf\", \"sg\", \"sh\", \"si\", \"sj\", \"sk\", \"sl\", \"sm\", \"sn\", \"so\", \"sp\"], \"verbs\": [\"va\", \"vb\", \"vc\", \"vd\", \"ve\", \"vf\", \"vg\", \"vh\", \"vi\", \"vj\", \"vk\", \"vl\", \"vm\", \"vn\", \"vo\", \"vp\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"overcap_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"ra\", \"rb\"], \"verbs\": [\"get\"]}, {\"module\": \"vpc\", \"resources\": [\"rc\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4356,9 +4815,16 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});",
-                  "pm.test('message: compiled permissions exceed 1024', () => {",
+                  "pm.test('rejection names the offending type and the catalog endpoint', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.contain('exceed 1024');",
+                  "  const m = j.message || '';",
+                  "  pm.expect(m, JSON.stringify(j)).to.contain(\"Illegal argument resources (unknown type 'iam.ra'\");",
+                  "  pm.expect(m, JSON.stringify(j)).to.contain('GET /iam/v1/permissionCatalog');",
+                  "});",
+                  "pm.test('EVERY unknown type is reported, not just the first', () => {",
+                  "  const m = pm.response.json().message || '';",
+                  "  ['iam.ra', 'iam.rb', 'vpc.rc'].forEach(t =>",
+                  "    pm.expect(m, 'missing ' + t + ' in: ' + m).to.contain(\"unknown type '\" + t + \"'\"));",
                   "});"
                 ]
               }
@@ -4625,6 +5091,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -4676,6 +5143,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -4826,6 +5302,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -4877,6 +5354,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -5049,8 +5535,8 @@
       ]
     },
     {
-      "name": "IAM-ROL-CR-NEG-NO-SCOPE — Create role with NEITHER accountId nor projectId → 400 INVALID_ARGUMENT (scope required)",
-      "description": "class:NEG | class:VAL | priority:P0",
+      "name": "IAM-ROL-CR-NEG-NO-SCOPE — Create role with NEITHER accountId nor projectId → rejected: 403 on the unscoped `account:*` anchor (authz-first) or 400 INVALID_ARGUMENT (scope required)",
+      "description": "class:NEG | class:VAL | class:AUTHZ | priority:P0",
       "item": [
         {
           "name": "IAM-ROL-CR-NEG-NO-SCOPE :: create-no-scope",
@@ -5107,10 +5593,30 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
-                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "pm.test('unscoped rejected (400 InvalidArgument or 403 authz-first)', () => {",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([400, 403]);",
+                  "});",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT) or 7 (PERMISSION_DENIED)', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.be.oneOf([3, 7]);",
+                  "});",
+                  "pm.test('the refusal is about the MISSING SCOPE on iam.roles.create, not some other rejection', () => {",
+                  "  const j = pm.response.json();",
+                  "  if (pm.response.code === 403) {",
+                  "    const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "    pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+                  "    pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                  "    const md = info.metadata || {};",
+                  "    pm.expect(md.action, 'empty action = permission-catalog miss, not a scope refusal: ' + JSON.stringify(j)).to.eql('iam.roles.create');",
+                  "    pm.expect(md.resource, JSON.stringify(j)).to.eql('account:*');",
+                  "  } else {",
+                  "    pm.expect((j.message || '').toLowerCase(), JSON.stringify(j))",
+                  "      .to.satisfy(m => m.includes('scope') || m.includes('account') || m.includes('project'));",
+                  "  }",
+                  "});",
+                  "pm.test('no Operation was minted for an unscoped create', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.id, JSON.stringify(j)).to.not.match(/^iop/);",
                   "});"
                 ]
               }
@@ -5120,13 +5626,13 @@
       ]
     },
     {
-      "name": "IAM-ROL-UP-T33-LABELS-OK — Update crudRoleId labels (updateMask=labels) → Operation done, Get confirms own-resource labels",
+      "name": "IAM-ROL-UP-T33-LABELS-OK — Update a freshly-created role's labels (updateMask=labels) → Operation done, Get confirms own-resource labels",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
-          "name": "IAM-ROL-UP-T33-LABELS-OK :: update-labels",
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: seed-labels-role",
           "request": {
-            "method": "PATCH",
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
@@ -5134,20 +5640,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/roles/{{crudRoleId}}",
+              "raw": "{{baseUrl}}/iam/v1/roles",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "roles",
-                "{{crudRoleId}}"
+                "roles"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"labels\": {\"team\": \"payments\", \"tier\": \"gold\"}, \"updateMask\": \"labels\"}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"t33lbl_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5185,10 +5690,16 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('t33RoleId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -5232,6 +5743,15 @@
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
                   "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
@@ -5267,6 +5787,298 @@
           ]
         },
         {
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: update-labels-rya22",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{t33RoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{t33RoleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"labels\": {\"team\": \"payments\", \"tier\": \"gold\"}, \"updateMask\": \"labels\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: assert-op-success #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-ROL-UP-T33-LABELS-OK :: get-confirms-labels",
           "request": {
             "method": "GET",
@@ -5277,7 +6089,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/roles/{{crudRoleId}}",
+              "raw": "{{baseUrl}}/iam/v1/roles/{{t33RoleId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -5285,7 +6097,7 @@
                 "iam",
                 "v1",
                 "roles",
-                "{{crudRoleId}}"
+                "{{t33RoleId}}"
               ]
             }
           },
@@ -5336,14 +6148,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/roles?accountId={{accountAId}}",
+              "raw": "{{baseUrl}}/iam/v1/roles?accountId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "roles?accountId={{accountAId}}"
+                "roles?accountId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -5375,8 +6187,141 @@
                   "pm.test('account-admin lists own custom role (viewer-tier, List unaffected)', () => {",
                   "  const j = pm.response.json();",
                   "  const ids = (j.roles || []).map(r => r.id);",
-                  "  pm.expect(ids, JSON.stringify(ids)).to.include(pm.environment.get('crudRoleId'));",
+                  "  const rid = pm.environment.get('t33RoleId');",
+                  "  pm.expect(rid, 't33RoleId captured by seed-labels-role').to.be.a('string').and.not.empty;",
+                  "  pm.expect(ids, JSON.stringify(ids)).to.include(rid);",
                   "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: cleanup-t33-role",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{t33RoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{t33RoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: poll-op #3",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// best-effort teardown: no Operation to poll when the cleanup was refused.",
+                  "if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
               }
             }

@@ -221,6 +221,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('e30GrpOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -362,6 +363,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('e30OpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -1085,6 +1087,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('e34NewOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -1588,6 +1591,7 @@
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
                   "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
                   "});",
+                  "pm.environment.unset('e34LegOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2090,6 +2094,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('e33OpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2561,6 +2566,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('e31GrpOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2716,6 +2722,7 @@
                   "pm.environment.unset('_poll200_add_member_aaa');",
                   "pm.environment.unset('_poll200_started_add_member_aaa');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('e31AddAaaOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2848,6 +2855,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('e31AddAabOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -2979,6 +2987,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('e31BindOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3574,6 +3583,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('gmGrantGrpOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3729,6 +3739,7 @@
                   "pm.environment.unset('_poll200_add_member');",
                   "pm.environment.unset('_poll200_started_add_member');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('gmGrantAddOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -3860,6 +3871,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('gmGrantBindOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",

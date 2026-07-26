@@ -119,7 +119,8 @@ CASES.append(Case(
         )),
         Step(name="cleanup-role-tier", method="DELETE", path="/iam/v1/roles/{{rdRoleId}}",
              auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
+        # Best-effort teardown — a refused DELETE mints no Operation.
+        poll_operation_until_done(required=False),
     ],
 ))
 
@@ -222,7 +223,8 @@ CASES.append(Case(
         )),
         Step(name="cleanup-role-proj", method="DELETE", path="/iam/v1/roles/{{projRoleId}}",
              auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
+        # Best-effort teardown — a refused DELETE mints no Operation.
+        poll_operation_until_done(required=False),
     ],
 ))
 

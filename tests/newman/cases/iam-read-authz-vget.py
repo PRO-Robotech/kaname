@@ -28,19 +28,20 @@ Happy (IAM-RDAUTHZ-ACC-GT-GRANTED-NONOWNER-OK):
   GET /iam/v1/accounts/{accountAId} как jwtInvitee → 200 (был 404).
 
 Negative (IAM-RDAUTHZ-ACC-GT-NONGRANTED-DENY):
-  jwtNoBindings (никакого v_get на accountA) GET accountA → 404 NOT_FOUND (code 5,
+  jwtPureNoBindings (никакого v_get на accountA) GET accountA → 404 NOT_FOUND (code 5,
   hide existence, без deny_reasons). Single-shot — поллить нельзя, иначе маскирует
   утечку.
 
 No-leak (IAM-RDAUTHZ-ACC-GT-NONEXISTENT-EQ-DENIED):
-  GET well-formed-но-несуществующего account id как jwtNoBindings → тот же 404
+  GET well-formed-но-несуществующего account id как jwtPureNoBindings → тот же 404
   code 5, что и existing-denied → existing-denied неотличим от nonexistent.
 
 Fixture (crud-fixture/setup.sh):
   jwtAccountAdminA — owner+grant-authority на accountAId.
   accountAId       — scope гранта (ACCOUNT tier), owned by accountAdminA.
   jwtInvitee / userINVId — НЕ-owner subject, которому выдается v_get.
-  jwtNoBindings    — subject без грантов (negative).
+  jwtPureNoBindings — выделенный НИКОГДА-не-гранченый subject (negative). jwtNoBindings
+                     им не является: сюиты грантят userNOBId view на оба аккаунта.
 
 Test-first (strict TDD): кейс написан RED-first против
 owner-only use-case-gate — был красным (404), зеленый после v_get-фикса.
@@ -208,7 +209,7 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 CASES.append(Case(
     id="IAM-RDAUTHZ-ACC-GT-NONGRANTED-DENY",
-    title="GET account as jwtNoBindings (no v_get grant) → 404 NOT_FOUND (hide existence)",
+    title="GET account as jwtPureNoBindings (no v_get grant) → 404 NOT_FOUND (hide existence)",
     classes=["AUTHZ", "NEG"],
     priority="P1",
     steps=[

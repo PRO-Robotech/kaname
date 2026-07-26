@@ -465,7 +465,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-PRJ-GT-AUTHZ-FOREIGN-DENY",
-    title="Get crudProjectId as jwtNoBindings (non-owner) → 404 NOT_FOUND (hide existence)",
+    title="Get crudProjectId as jwtPureNoBindings (non-owner) → 404 NOT_FOUND (hide existence)",
     classes=["AUTHZ", "NEG"],
     priority="P1",
     steps=[
@@ -473,7 +473,16 @@ CASES.append(Case(
             name="get-foreign",
             method="GET",
             path="/iam/v1/projects/{{crudProjectId}}",
-            auth="jwtNoBindings",
+            # jwtNoBindings is NOT a no-grant subject any more: the iam suites
+            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
+            # and those bindings stay ACTIVE in the DB across runs. A probe that
+            # asserts "this subject sees nothing" was therefore asserting it
+            # against a subject that is genuinely authorised — a fixture artifact,
+            # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
+            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # never a grant TARGET anywhere in the tree).
+            auth="jwtPureNoBindings",
             test_script=[
                 # BUG-2 hide-existence: read-deny on a verb-bearing IAM Get is surfaced
                 # as NotFound (404 / code 5), never PermissionDenied — no enumeration leak.

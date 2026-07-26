@@ -33,9 +33,20 @@ CASES = []
 ROLE_ADMIN = "rol21232f297a57a5a74"   # md5('admin')[:17] — global super-admin
 ROLE_VIEW  = "rol1bda80f2be4d3658e"   # md5('view')[:17]  — global read-only
 
+# NOB -> jwtPureNoBindings, the DEDICATED never-granted subject.
+#
+# `jwtNoBindings` (userNOBId) is doubly used in this tree: it is the standard grant
+# TARGET for the AccessBinding suites — iam-flat-authz-vbc grants it `view` on
+# account-A and the AB-CR ALLOW rows below grant it `view` on account-B — and those
+# rows stay ACTIVE in Postgres/OpenFGA across runs. Every DENY/EMPTY expectation for
+# this subject was therefore being asserted against a principal that genuinely holds
+# a live grant (AUTHZ-USR-LS-A-NOB / -B-NOB over-showed real users for exactly that
+# reason). userPureNoBindingsId is seeded by tests/authz-fixtures/setup.sh and is
+# never a grant target anywhere in the tree, so the matrix rows below mean what they
+# say. (Parity with services/vpc/tests/newman/cases/authz-deny.py, kacho-iam#276.)
 SUBJECTS = [
     ("ANON", "anon",       "anonymous"),
-    ("NOB",  "no-bind",    "jwtNoBindings"),
+    ("NOB",  "no-bind",    "jwtPureNoBindings"),
     ("PA1",  "proj-adm",   "jwtProjectAdminA1"),
     ("AAA",  "acct-adm-a", "jwtAccountAdminA"),
     ("AAB",  "acct-adm-b", "jwtAccountAdminB"),
@@ -396,20 +407,21 @@ define_account_scoped(
 # (+ required_acr_min=2). Non-member без этого якоря получал 403 PERMISSION_DENIED.
 # Теперь List = <exempt>, единственный гейт — in-handler `viewer ∪ v_list`
 # фильтр → 200 + пустой массив (existence не раскрывается кодом ошибки; паритет с
-# ServiceAccount/User List). jwtNoBindings — субъект без единого гранта, гарантированно
-# non-member на оба аккаунта → детерминированно пустой List (immune к pollution).
+# ServiceAccount/User List). jwtPureNoBindings — выделенный НИКОГДА-не-гранченый субъект
+# (jwtNoBindings им БОЛЬШЕ НЕ является: сюиты сами грантят userNOBId view на оба аккаунта),
+# гарантированно non-member на оба аккаунта → детерминированно пустой List (immune к pollution).
 # ---------------------------------------------------------------------------
 CASES.append(Case(
     id="AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY",
-    title="non-member (jwtNoBindings) → Project & Group List → 200 + empty (was 403 pre-unify call-gate)",
+    title="non-member (jwtPureNoBindings) → Project & Group List → 200 + empty (was 403 pre-unify call-gate)",
     classes=["AUTHZ", "SCOPE", "NEG", "RBAC"],
     priority="P1",
     steps=[
         Step(name="prj-list-nonmember-empty", method="GET",
-             path="/iam/v1/projects?accountId={{accountAId}}", auth="jwtNoBindings",
+             path="/iam/v1/projects?accountId={{accountAId}}", auth="jwtPureNoBindings",
              test_script=empty_asserts("ULG04-PRJ", "projects")),
         Step(name="grp-list-nonmember-empty", method="GET",
-             path="/iam/v1/groups?accountId={{accountAId}}", auth="jwtNoBindings",
+             path="/iam/v1/groups?accountId={{accountAId}}", auth="jwtPureNoBindings",
              test_script=empty_asserts("ULG04-GRP", "groups")),
     ],
 ))
@@ -631,8 +643,12 @@ for subj in SUBJECTS:
     # record; no cross-user account-admin path exists (AAA is admin of
     # account-A, not of NOB's home account). USR-GT-A targets userNOB →
     # ALLOW only for NOB; USR-GT-B targets userINV → ALLOW only for INV.
-    emit("USR-GT-A", "Get userNOB (self-viewable only)", "user-get-nob",
-         "GET", "/iam/v1/users/{{userNOBId}}", None, subj)
+    # The target follows the SUBJECT: the row is "only the user themselves may Get
+    # their own record", so it must point at the record of the acting NOB principal
+    # — which is now userPureNoBindingsId (see the SUBJECTS note above). Left on
+    # userNOBId it would have asserted self-access for a DIFFERENT user.
+    emit("USR-GT-A", "Get own user record (self-viewable only)", "user-get-nob",
+         "GET", "/iam/v1/users/{{userPureNoBindingsId}}", None, subj)
     emit("USR-GT-B", "Get userINV (self-viewable only)", "user-get-inv",
          "GET", "/iam/v1/users/{{userINVId}}", None, subj)
     # List ?accountId — главный default-deny scope-filter case
@@ -683,9 +699,11 @@ EXPECT["iso-internal-rpc"]     = {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":
 # ALLOW (Problem-3: owner grant-authority в своем scope); на чужом — DENY.
 for subj in SUBJECTS:
     user_var = {
-        "NOB": "{{userNOBId}}", "PA1": "{{userPA1Id}}",
+        # NOB acts as jwtPureNoBindings, so its SELF-grant target is that user's id
+        # (userNOBId would make the row a grant to a third party, not self-escalation).
+        "NOB": "{{userPureNoBindingsId}}", "PA1": "{{userPA1Id}}",
         "AAA": "{{userAAAId}}", "AAB": "{{userAABId}}", "INV": "{{userINVId}}",
-    }.get(subj[0], "{{userNOBId}}")  # для ANON хватает любого id — суть DENY на anon
+    }.get(subj[0], "{{userPureNoBindingsId}}")  # для ANON хватает любого id — суть DENY на anon
     emit("ESC-SELF-ADMIN-A", "Self-grant iam.admin on account-A",
          "esc-self-grant-A", "POST", "/iam/v1/accessBindings",
          {"subjectType":"user","subjectId":user_var,"roleId":ROLE_ADMIN,
@@ -783,6 +801,9 @@ CASES.append(Case(
             test_script=[
                 "pm.test('grant create accepted', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
                 "const j = pm.response.json();",
+                # Clear FIRST — a rejected create mints no Operation and must not
+                # inherit a previous case's id (the poll below would confirm it).
+                "pm.environment.unset('opId');",
                 "if (j && j.id) pm.environment.set('opId', j.id);",
                 "if (j && j.metadata && j.metadata.accessBindingId) {",
                 "  pm.environment.set('w12RevokeBindingId', j.metadata.accessBindingId);",
@@ -874,6 +895,8 @@ CASES.append(Case(
                 "pm.environment.unset('_w12RevokeRetry');",
                 "pm.test('revoke accepted (200/202)', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
                 "const j = pm.response.json();",
+                # Clear FIRST — see the grant step above.
+                "pm.environment.unset('opId');",
                 "if (j && j.id) pm.environment.set('opId', j.id);",
             ],
         ),

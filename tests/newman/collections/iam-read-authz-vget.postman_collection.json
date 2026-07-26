@@ -270,6 +270,7 @@
                   "const j = pm.response.json();",
                   "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "pm.environment.unset('opId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
@@ -321,6 +322,15 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "// poll-counter reset on first entry (request-name-scoped flag);",
                   "// re-invocations via setNextRequest skip the reset.",
@@ -542,7 +552,7 @@
       ]
     },
     {
-      "name": "IAM-RDAUTHZ-ACC-GT-NONGRANTED-DENY — GET account as jwtNoBindings (no v_get grant) → 404 NOT_FOUND (hide existence)",
+      "name": "IAM-RDAUTHZ-ACC-GT-NONGRANTED-DENY — GET account as jwtPureNoBindings (no v_get grant) → 404 NOT_FOUND (hide existence)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {

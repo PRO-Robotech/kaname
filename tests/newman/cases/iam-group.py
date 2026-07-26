@@ -451,7 +451,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-GRP-GT-AUTHZ-FOREIGN-DENY",
-    title="Get crudGroupId as jwtNoBindings (no v_get on accountA) → 404 NOT_FOUND (hide existence)",
+    title="Get crudGroupId as jwtPureNoBindings (no v_get on accountA) → 404 NOT_FOUND (hide existence)",
     classes=["AUTHZ", "NEG"],
     priority="P1",
     steps=[
@@ -459,7 +459,16 @@ CASES.append(Case(
             name="get-foreign",
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}",
-            auth="jwtNoBindings",
+            # jwtNoBindings is NOT a no-grant subject any more: the iam suites
+            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
+            # and those bindings stay ACTIVE in the DB across runs. A probe that
+            # asserts "this subject sees nothing" was therefore asserting it
+            # against a subject that is genuinely authorised — a fixture artifact,
+            # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
+            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # never a grant TARGET anywhere in the tree).
+            auth="jwtPureNoBindings",
             test_script=[
                 "pm.test('FOREIGN: status 404 (hide existence, was 403)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                 "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
@@ -537,7 +546,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-GRP-LS-AUTHZ-SCOPE-FILTER",
-    title="List groups ?accountId=accountAId as jwtNoBindings → 200 + empty list (scope-filter)",
+    title="List groups ?accountId=accountAId as jwtPureNoBindings → 200 + empty list (scope-filter)",
     classes=["AUTHZ", "SCOPE"],
     priority="P1",
     steps=[
@@ -545,7 +554,16 @@ CASES.append(Case(
             name="list-nonmember",
             method="GET",
             path="/iam/v1/groups?accountId={{accountAId}}",
-            auth="jwtNoBindings",
+            # jwtNoBindings is NOT a no-grant subject any more: the iam suites
+            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
+            # and those bindings stay ACTIVE in the DB across runs. A probe that
+            # asserts "this subject sees nothing" was therefore asserting it
+            # against a subject that is genuinely authorised — a fixture artifact,
+            # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
+            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # never a grant TARGET anywhere in the tree).
+            auth="jwtPureNoBindings",
             test_script=[
                 *assert_status(200),
                 "pm.test('scope-filter: groups array present', () => {",
@@ -858,6 +876,8 @@ CASES.append(Case(
                 # May be sync 400 (soft validation before Operation) or 200 (Operation).
                 "pm.test('sync 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
                 "const j = pm.response.json();",
+                # Clear FIRST — the sync-400 branch mints no Operation (see iam-user.py).
+                "pm.environment.unset('opId');",
                 "if (pm.response.code === 400) {",
                 "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
                 "} else {",
@@ -1144,7 +1164,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-GRP-LM-AUTHZ-FOREIGN-DENY",
-    title="ListMembers of crudGroupId as jwtNoBindings (no v_list on group) → 403 on iam_group:<crudGroupId>",
+    title="ListMembers of crudGroupId as jwtPureNoBindings (no v_list on group) → 403 on iam_group:<crudGroupId>",
     classes=["AUTHZ", "NEG"],
     priority="P1",
     steps=[
@@ -1152,7 +1172,16 @@ CASES.append(Case(
             name="list-members-foreign",
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}:listMembers",
-            auth="jwtNoBindings",
+            # jwtNoBindings is NOT a no-grant subject any more: the iam suites
+            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
+            # and those bindings stay ACTIVE in the DB across runs. A probe that
+            # asserts "this subject sees nothing" was therefore asserting it
+            # against a subject that is genuinely authorised — a fixture artifact,
+            # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
+            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # never a grant TARGET anywhere in the tree).
+            auth="jwtPureNoBindings",
             test_script=[
                 *assert_scoped_authz_deny(
                     LM_ACTION, "'iam_group:' + pm.environment.get('crudGroupId')"),

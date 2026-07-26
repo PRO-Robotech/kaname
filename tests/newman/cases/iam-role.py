@@ -871,6 +871,8 @@ CASES.append(Case(
                 # Or could be sync 403 if authz is enforced (cluster-role-mutate).
                 "pm.test('400 or 403 or 200 (then async fail)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 200]));",
                 "const j = pm.response.json();",
+                # Clear FIRST — the 400/403 branches mint no Operation.
+                "pm.environment.unset('sysMutOpId');",
                 "if (pm.response.code === 400) {",
                 "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
                 "} else if (pm.response.code === 403) {",
@@ -989,9 +991,19 @@ CASES.append(Case(
 # IAM-ROL-DL-NEG-SYSTEM — Delete system role → Operation.error FAILED_PRECONDITION
 # ---------------------------------------------------------------------------
 
+# The subject under test is the SYSTEM-ROLE guard ("a seeded role is immutable"),
+# so the delete must be issued by a principal that gets PAST the cluster-role-mutate
+# authz gate. As jwtAccountAdminA it never did: ROLE_VIEW is a CLUSTER-scope role and
+# every account-level subject is denied on it (authz-deny EXPECT: cluster-role-mutate
+# → DENY for all six subjects), so the request stopped at a 403 that says nothing
+# about system roles. Worse, the 403 branch left `opId` holding the PREVIOUS case's
+# successful delete, which defeated the `if (!opId) skipRequest()` guard below and
+# made the poll assert FAILED_PRECONDITION against that unrelated, SUCCESSFUL
+# operation. Issued as jwtBootstrap (cluster admin) the guard is genuinely reached:
+# 200 + Operation → done with error 9 "System role <id> cannot be deleted".
 CASES.append(Case(
     id="IAM-ROL-DL-NEG-SYSTEM",
-    title="Delete system role ROLE_VIEW → Operation.error FAILED_PRECONDITION (9) 'System role cannot be deleted'",
+    title="Delete system role ROLE_VIEW as cluster-admin → Operation.error FAILED_PRECONDITION (9) 'System role cannot be deleted'",
     classes=["NEG"],
     priority="P1",
     steps=[
@@ -999,13 +1011,18 @@ CASES.append(Case(
             name="delete-system",
             method="DELETE",
             path=f"/iam/v1/roles/{ROLE_VIEW}",
-            auth="jwtAccountAdminA",
+            auth="jwtBootstrap",
             test_script=[
-                # Could be sync 403 (cluster-role-mutate authz) or 200 (Operation then async fail).
-                "pm.test('sync 200 or 403 (cluster-role-mutate)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                # The guard lives in the async worker → 200 + Operation. A sync 400/9
+                # (guard firing before the mint) is the same refusal and is tolerated.
+                "pm.test('sync 200 (Operation minted) or sync 400 FAILED_PRECONDITION', () => pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 400]));",
                 "const j = pm.response.json();",
-                "if (pm.response.code === 403) {",
-                "  pm.test('403 code 7 (PERMISSION_DENIED)', () => pm.expect(j.code).to.eql(7));",
+                # Clear FIRST — the sync-reject branch mints no Operation, and a
+                # leftover id would make the poll below confirm a FOREIGN operation.
+                "pm.environment.unset('opId');",
+                "if (pm.response.code === 400) {",
+                "  pm.test('sync code 9 (FAILED_PRECONDITION — system role)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(9));",
+                "  pm.test('sync message names the system role', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('system role'));",
                 "} else {",
                 "  pm.environment.set('opId', j.id || '');",
                 "}",
@@ -1015,9 +1032,13 @@ CASES.append(Case(
             name="poll-system-delete",
             method="GET",
             path="/operations/{{opId}}",
-            auth="jwtAccountAdminA",
+            # OperationService.Get is principal-scoped: only the minting principal
+            # sees the operation, so this must be the same jwtBootstrap.
+            auth="jwtBootstrap",
             pre_script=[
-                "// If sync returned 403, no operation was created — skip poll.",
+                "// Legal operation guard: a sync reject minted no Operation, so there",
+                "// is nothing to poll. `opId` is cleared by the step above, so an empty",
+                "// value here can only mean that — never a previous case's id.",
                 "if (!pm.environment.get('opId')) {",
                 "  pm.execution.skipRequest();",
                 "}",
@@ -1293,24 +1314,56 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 # IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE — ListOperations bad pageToken → 400
 # Opaque cursor token; garbage must yield InvalidArgument (never INTERNAL/200).
+#
+# The subject is PAGE-TOKEN VALIDATION, so the request has to reach the handler.
+# It used to list the operations of ROLE_VIEW — a CLUSTER-scope system role on which
+# every account-level subject is denied (`no authorization path to the resource`,
+# reason AUTHZ_DENIED) — so it never got past the authz gate and the case "passed"
+# only in the sense that it never tested a page token at all. Self-seeded own role
+# instead: authz resolves, the handler runs, and `invalid page_token` is observable.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE",
-    title="ListOperations with garbage pageToken → 400 InvalidArgument",
+    title="ListOperations of an OWN role with a garbage pageToken → 400 InvalidArgument 'invalid page_token'",
     classes=["NEG", "PAGE", "VAL"],
     priority="P1",
     steps=[
         Step(
+            name="seed-lsop-role",
+            method="POST",
+            path="/iam/v1/roles",
+            body={"accountId": "{{accountAId}}", "name": "lsoptok_{{runId}}",
+                  "rules": [{"module": "iam", "resources": ["project"], "verbs": ["get"]}]},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.roleId", "lsopTokRoleId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        retry_until_authorized(Step(
             name="lsop-bad-token",
             method="GET",
-            path=f"/iam/v1/roles/{ROLE_VIEW}/operations?pageSize=10&pageToken=not-a-real-token",
+            path="/iam/v1/roles/{{lsopTokRoleId}}/operations?pageSize=10&pageToken=not-a-real-token",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                # Pin the rejection to the token, so an authz/route regression that
+                # also 4xx-es cannot satisfy this negative.
+                "pm.test('rejection names the page token', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('page_token');",
+                "});",
             ],
-        ),
+        ), retry_on=(403, 404)),
+        Step(name="cleanup-lsop-role", method="DELETE", path="/iam/v1/roles/{{lsopTokRoleId}}",
+             auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(required=False),
     ],
 ))
 
@@ -1575,30 +1628,33 @@ CASES.append(Case(
 ))
 
 
-# Compiled-cap — rules compiling to >1024 permissions → 400 (not silent
-# truncation). One module per rule, and the module must be a member
-# of the closed set {iam,vpc,compute,loadbalancer} (Rule.Validate runs BEFORE the
-# compiler, so an unknown module would 400 with the wrong text). Five single-module
-# rules each over 16 resources x 16 verbs = 256 compiled; 4 distinct known modules
-# + a 2nd `iam` rule with a DISJOINT resource set (so permissions stay distinct,
-# not deduped) → 5 x 256 = 1280 > 1024. Each list ≤16 so the shape validation
-# passes and the cap (not a cardinality error) is what trips.
-def _over_cap_rules():
-    verbs = [f"v{chr(97 + i)}" for i in range(16)]
-    res_a = [f"r{chr(97 + i)}" for i in range(16)]
-    res_b = [f"s{chr(97 + i)}" for i in range(16)]
+# Rules are validated against the CLOSED permission catalog.
+#
+# This case used to send 16 synthetic resource tokens per module (`ra`..`rp`,
+# `sa`..`sp`) purely to inflate the compiled-permission count past the ≤1024 cap.
+# Those tokens predate the closed-catalog check, which now runs FIRST and rejects
+# every one of them by name — so the request never reached the compiler and the
+# `exceed 1024` assertion could not pass. Nor can it ever: the entire grantable
+# universe published by GET /iam/v1/permissionCatalog is 28 resource types x 5
+# closed verbs = 140 compiled permissions, and a custom role may not use a
+# module/resource wildcard (`moduleResourceWildcardSystemOnly: true`), so >1024 is
+# UNREACHABLE through the public API by construction. The numeric cap stays locked
+# where it is reachable — domain unit test TestPermissions_Validate_CapRaise1024
+# (1024 accepted / 1025 rejected) — and this black-box case is re-pointed at the
+# gate that actually guards this input class, asserting its verbatim text so it
+# cannot pass on some other rejection.
+def _uncatalogued_rules():
+    """Rules whose resource tokens are absent from the published catalog."""
     return [
-        {"module": "iam", "resources": res_a, "verbs": verbs},
-        {"module": "vpc", "resources": res_a, "verbs": verbs},
-        {"module": "compute", "resources": res_a, "verbs": verbs},
-        {"module": "loadbalancer", "resources": res_a, "verbs": verbs},
-        {"module": "iam", "resources": res_b, "verbs": verbs},  # disjoint resources → distinct perms
+        {"module": "iam", "resources": ["ra", "rb"], "verbs": ["get"]},
+        {"module": "vpc", "resources": ["rc"], "verbs": ["get"]},
     ]
 
 
 CASES.append(Case(
     id="IAM-ROL-CR-RULES-CAP-OVER-DENY",
-    title="Create custom role whose rules compile to >1024 permissions → 400 (compiled permissions exceed 1024)",
+    title="Create custom role with resource types outside the published catalog → 400 INVALID_ARGUMENT "
+          "naming each unknown type and pointing at GET /iam/v1/permissionCatalog",
     classes=["NEG", "VAL", "BVA"],
     priority="P1",
     steps=[
@@ -1606,14 +1662,21 @@ CASES.append(Case(
             name="create-over-cap",
             method="POST",
             path="/iam/v1/roles",
-            body={"accountId": "{{accountAId}}", "name": "overcap_{{runId}}", "rules": _over_cap_rules()},
+            body={"accountId": "{{accountAId}}", "name": "overcap_{{runId}}", "rules": _uncatalogued_rules()},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('message: compiled permissions exceed 1024', () => {",
+                "pm.test('rejection names the offending type and the catalog endpoint', () => {",
                 "  const j = pm.response.json();",
-                "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.contain('exceed 1024');",
+                "  const m = j.message || '';",
+                "  pm.expect(m, JSON.stringify(j)).to.contain(\"Illegal argument resources (unknown type 'iam.ra'\");",
+                "  pm.expect(m, JSON.stringify(j)).to.contain('GET /iam/v1/permissionCatalog');",
+                "});",
+                "pm.test('EVERY unknown type is reported, not just the first', () => {",
+                "  const m = pm.response.json().message || '';",
+                "  ['iam.ra', 'iam.rb', 'vpc.rc'].forEach(t =>",
+                "    pm.expect(m, 'missing ' + t + ' in: ' + m).to.contain(\"unknown type '\" + t + \"'\"));",
                 "});",
             ],
         ),
@@ -1832,14 +1895,27 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-ROL-CR-NEG-NO-SCOPE — scope XOR: neither accountId nor projectId →
-# 400 INVALID_ARGUMENT (a custom role must carry exactly one scope). No role.
+# IAM-ROL-CR-NEG-NO-SCOPE — scope XOR: neither accountId nor projectId → REJECTED.
+#
+# The case hard-expected 400 INVALID_ARGUMENT, i.e. that the request reaches the
+# backend's scope validation. It does not, and by design: with no scope in the body
+# the gateway scope_extractor has nothing to resolve for the anti-BOLA check, so it
+# fail-closes on the unscoped anchor `account:*` FIRST (403 AUTHZ_DENIED,
+# `no authorization path to the resource`) — the platform-wide authz-before-
+# validation ordering (security.md), the same one the vpc/nlb/compute/storage suites
+# already encode via assert_unscoped_rejected.
+#
+# So: tolerate 400 OR 403 — but PIN the refusal. A bare "403 or 400" would also be
+# satisfied by a permission-catalog miss or a malformed body, which is exactly the
+# class of negative-passing-for-the-wrong-reason this suite keeps finding; the
+# action/anchor assertion makes the tolerance harmless.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ROL-CR-NEG-NO-SCOPE",
-    title="Create role with NEITHER accountId nor projectId → 400 INVALID_ARGUMENT (scope required)",
-    classes=["NEG", "VAL"],
+    title="Create role with NEITHER accountId nor projectId → rejected: 403 on the unscoped "
+          "`account:*` anchor (authz-first) or 400 INVALID_ARGUMENT (scope required)",
+    classes=["NEG", "VAL", "AUTHZ"],
     priority="P0",
     steps=[
         Step(
@@ -1852,8 +1928,12 @@ CASES.append(Case(
             },
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_status(400),
-                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                *assert_unscoped_rejected("iam.roles.create", "account:*"),
+                # And the role must NOT have been created either way.
+                "pm.test('no Operation was minted for an unscoped create', () => {",
+                "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                "  pm.expect(j.id, JSON.stringify(j)).to.not.match(/^iop/);",
+                "});",
             ],
         ),
     ],
@@ -1871,16 +1951,37 @@ CASES.append(Case(
 # invalid labels → INVALID_ARGUMENT.
 # ---------------------------------------------------------------------------
 
+# `crudRoleId` is NOT usable here: IAM-ROL-DL-CRUD-OK deletes that role earlier in
+# this very collection, so every step below ran against a `rol…` id whose row was
+# already gone — PATCH 404, Get 404, List "not present" — five failing assertions
+# that never touched the labels round-trip they were written for. The case now seeds
+# its own role (run-unique name → idempotent across runs) and cleans it up.
 CASES.append(Case(
     id="IAM-ROL-UP-T33-LABELS-OK",
-    title="Update crudRoleId labels (updateMask=labels) → Operation done, Get confirms own-resource labels",
+    title="Update a freshly-created role's labels (updateMask=labels) → Operation done, Get confirms own-resource labels",
     classes=["CRUD"],
     priority="P0",
     steps=[
         Step(
+            name="seed-labels-role",
+            method="POST",
+            path="/iam/v1/roles",
+            body={"accountId": "{{accountAId}}", "name": "t33lbl_{{runId}}",
+                  "rules": [{"module": "iam", "resources": ["project"], "verbs": ["get"]}]},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.roleId", "t33RoleId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        retry_until_authorized(Step(
             name="update-labels",
             method="PATCH",
-            path="/iam/v1/roles/{{crudRoleId}}",
+            path="/iam/v1/roles/{{t33RoleId}}",
             body={"labels": {"team": "payments", "tier": "gold"}, "updateMask": "labels"},
             auth="jwtAccountAdminA",
             test_script=[
@@ -1888,12 +1989,13 @@ CASES.append(Case(
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "opId"),
             ],
-        ),
+        )),
         poll_operation_until_done(),
+        assert_op_success(),
         Step(
             name="get-confirms-labels",
             method="GET",
-            path="/iam/v1/roles/{{crudRoleId}}",
+            path="/iam/v1/roles/{{t33RoleId}}",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1908,17 +2010,22 @@ CASES.append(Case(
         Step(
             name="list-roles-visible",
             method="GET",
-            path="/iam/v1/roles?accountId={{accountAId}}",
+            path="/iam/v1/roles?accountId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
                 "pm.test('account-admin lists own custom role (viewer-tier, List unaffected)', () => {",
                 "  const j = pm.response.json();",
                 "  const ids = (j.roles || []).map(r => r.id);",
-                "  pm.expect(ids, JSON.stringify(ids)).to.include(pm.environment.get('crudRoleId'));",
+                "  const rid = pm.environment.get('t33RoleId');",
+                "  pm.expect(rid, 't33RoleId captured by seed-labels-role').to.be.a('string').and.not.empty;",
+                "  pm.expect(ids, JSON.stringify(ids)).to.include(rid);",
                 "});",
             ],
         ),
+        Step(name="cleanup-t33-role", method="DELETE", path="/iam/v1/roles/{{t33RoleId}}",
+             auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(required=False),
     ],
 ))
 

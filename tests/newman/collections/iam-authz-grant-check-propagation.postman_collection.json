@@ -2132,6 +2132,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('_abDeleteChk_delOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
