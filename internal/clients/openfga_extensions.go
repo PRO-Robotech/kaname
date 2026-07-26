@@ -143,7 +143,7 @@ type retryClient struct {
 
 func newRetryClient(c httpDoer, maxTry int, baseBackoff time.Duration) *retryClient {
 	if c == nil {
-		c = http.DefaultClient
+		c = fgaHTTPClient
 	}
 	if maxTry <= 0 {
 		maxTry = 3
@@ -230,7 +230,7 @@ func (c *OpenFGAHTTPClient) do(ctx context.Context, method, url string, body []b
 			return nil, err
 		}
 	}
-	return newRetryClient(http.DefaultClient, 3, 20*time.Millisecond).Do(req)
+	return newRetryClient(fgaHTTPClient, 3, 20*time.Millisecond).Do(req)
 }
 
 // nopCloser — io.ReadCloser shim for http.Request.GetBody.

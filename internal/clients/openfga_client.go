@@ -125,11 +125,13 @@ func (c *OpenFGAHTTPClient) check(ctx context.Context, subject, relation, object
 		return false, ErrNotConfigured
 	}
 	// Bound the per-RPC authz Check to the configured CheckTimeout (default 200ms):
-	// http.DefaultClient has no Timeout, so an OpenFGA that accepts the TCP connection
-	// but stops responding (GC pause / overload / half-open TCP after a partition)
-	// would otherwise hang the authz-interceptor goroutine forever instead of failing
-	// closed within the FGA budget (D-47 "FGA outage → Unavailable"). Mirrors the
-	// sibling CheckWithContext / c.do() paths, which are already time-bounded.
+	// fgaHTTPClient carries no client-level Timeout BY DESIGN (the per-operation
+	// budgets differ by an order of magnitude — see openfga_transport.go), so an
+	// OpenFGA that accepts the TCP connection but stops responding (GC pause /
+	// overload / half-open TCP after a partition) would otherwise hang the
+	// authz-interceptor goroutine forever instead of failing closed within the FGA
+	// budget (D-47 "FGA outage → Unavailable"). Mirrors the sibling
+	// CheckWithContext / c.do() paths, which are already time-bounded.
 	cctx, cancel := context.WithTimeout(ctx, c.checkTimeout())
 	defer cancel()
 	body, _ := json.Marshal(openfgaCheckRequest{
@@ -141,7 +143,7 @@ func (c *OpenFGAHTTPClient) check(ctx context.Context, subject, relation, object
 		fmt.Sprintf("http://%s/stores/%s/check", c.Endpoint, c.StoreID),
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fgaHTTPClient.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("openfga check: %w", err)
 	}
@@ -266,7 +268,8 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 	}
 	err := applyWithConflictRetry(ctx, func(ctx context.Context) error {
 		// Bound EVERY attempt to the configured WriteTimeout (default 1s):
-		// http.DefaultClient has no Timeout, so an OpenFGA that accepts the
+		// fgaHTTPClient carries no client-level Timeout BY DESIGN (see
+		// openfga_transport.go), so an OpenFGA that accepts the
 		// TCP connection but stops responding (GC pause / overload / half-open
 		// TCP after a partition) would otherwise hang the calling goroutine
 		// forever — especially harmful for the detached, deadline-less
@@ -279,7 +282,7 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 			fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID),
 			bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := fgaHTTPClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("openfga write: %w", err)
 		}

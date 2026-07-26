@@ -55,11 +55,10 @@ func TestMigration0063_FGAOutbox_CarriesBothClaimIndexes(t *testing.T) {
 	}{
 		{
 			name:    "partition_head",
-			what:    "correlated NOT EXISTS — partition-predecessor lookup (migration 0061)",
-			keyDesc: "((payload->>'object'), id)",
+			what:    "correlated NOT EXISTS — partition-predecessor lookup (migration 0067)",
+			keyDesc: "(tuple_key, id)",
 			contains: []string{
-				"payload ->> 'object'::text",
-				", id)",
+				"btree (tuple_key, id)",
 				"WHERE (sent_at IS NULL)",
 			},
 		},

@@ -765,38 +765,7 @@ func runServe(cfg config.Config) error {
 	fgaDrainerLogger := logger.With(slog.String("component", "fga_outbox_drainer"))
 	fgaDrainer, derr := drainer.New[clients.FGAOutboxEvent](
 		pool,
-		drainer.Config{
-			Table:        "kacho_iam.fga_outbox",
-			Channel:      "kacho_iam_fga_outbox",
-			BatchSize:    32,
-			PollFallback: 30 * time.Second,
-			MaxAttempts:  10,
-			BackoffMin:   1 * time.Second,
-			BackoffMax:   30 * time.Second,
-			ApplyTimeout: 5 * time.Second,
-			// Order-preserving concurrent drain. iam's fga_outbox carries BOTH tuple
-			// WRITES (grant / label-register) AND DELETES (revoke / label-remove /
-			// delete-stale) of the SAME (user,relation,object) — NOT commutative.
-			// ApplyConcurrency>1 alone does NOT preserve order (and the claim
-			// ORDER BY (attempt_count,id) splits a bumped WRITE and a fresh DELETE into
-			// different batches), so a naive N=16 let a DELETE apply before its
-			// predecessor WRITE → delete-before-write → the tuple survives the revoke →
-			// authz OVER-GRANT / cross-account leak (observed: authz-deny + iam-role
-			// foreign-Get 200-not-404). PartitionColumn makes the claim
-			// partition-head-only: a row is never claimed while a DELIVERABLE
-			// same-object predecessor with a smaller id is unsent, so per-object FIFO
-			// holds cross-batch AND cross-replica and at most one row per object is in
-			// flight — safe to raise the revoke/membership drain to N=16. Requires
-			// migration 0061's partial index ((payload->>'object'),id) WHERE sent_at IS
-			// NULL for the claim's NOT EXISTS. See drainer.Config.PartitionColumn.
-			ApplyConcurrency: 16,
-			PartitionColumn:  "payload->>'object'",
-			// Per-partition head-of-line wedge attribution: a persistently-transient
-			// object head blocks its successors until the peer recovers (temporary, by
-			// design — leak-safety over per-partition liveness). WedgeWarnAfter surfaces
-			// WHICH object is stuck, beyond the table-wide oldest-pending-age gauge.
-			WedgeWarnAfter: 60 * time.Second,
-		},
+		fgaOutboxDrainerConfig(),
 		clients.DecodeFGAOutboxEvent,
 		clients.NewFGAApplier(svcs.relationStore),
 		fgaDrainerLogger,
