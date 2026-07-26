@@ -274,7 +274,16 @@ func (uc *InviteUserUseCase) doInvite(
 				out.userIsNew = true
 			}
 
-			// Optional bind-to-Project (idempotent через ON CONFLICT DO UPDATE).
+			// Optional bind-to-Project. The insert is STRICT create, NOT idempotent:
+			// the `ON CONFLICT DO UPDATE SET id = access_bindings.id` this comment used
+			// to describe was deliberately removed (see abWriter.Insert in
+			// internal/repo/kacho/pg/access_binding_repo.go — the silent upsert hid a
+			// real duplicate grant and polluted the audit chain). Re-inviting into a
+			// project the subject already holds an ACTIVE grant on collides on the
+			// partial UNIQUE access_bindings_active_grant_uniq (migration 0003, the
+			// 5-tuple + target digest WHERE revoked_at IS NULL) → SQLSTATE 23505 →
+			// ErrAlreadyExists, and since this runs inside the invite writer-tx the
+			// WHOLE invite rolls back with it. Do not "restore" idempotency here.
 			//
 			// The AccessBinding subject must be the SAME user-row that the
 			// api-gateway resolves the invitee's JWT to (InternalIAMService.

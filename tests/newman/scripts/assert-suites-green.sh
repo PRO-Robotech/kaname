@@ -85,13 +85,28 @@ for col in "${collections[@]}"; do
   #   - any-authz-gated-rpc-during-openfga-outage — needs external `kubectl
   #     scale openfga --replicas=0` orchestration (authz-deny).
   #   - inv-get-account-allow-warm-cache — FGA grant→Check warm-cache window.
-  #   - probe-check / -after-revoke — grant→Check propagation probes against
-  #     /iam/v1/authorize:check. (The old note here said these hit a "speculative
-  #     /iam/v1/check … never wired"; that misroute was corrected in the case
-  #     helper — see cases/iam-authz-grant-check-propagation.py:127 — so what
-  #     remains RED is the propagation window itself, not the path.)
-  #   - anon-*-op / poll-op-plaintext / re-get-op-redacted — operation
-  #     anon/redaction spot-checks (NM-cases).
+  #   - probe-check-after-revoke — the revoke→deny half of
+  #     AUTHZGCP-AB-DELETE-CHECK-INVISIBLE. SAME root as the `*-gone` probes below,
+  #     NOT a propagation window: the case's own `delete-binding` step is what must
+  #     commit, and when the revoke is refused the tuple is still there, so there is
+  #     nothing to converge and the poll can only exhaust.
+  #     The grant→appears half (AUTHZGCP-AB-CREATE-CHECK-VISIBLE :: probe-check)
+  #     was UN-WHITELISTED 2026-07-26: it is GREEN (single 200, first poll), and the
+  #     bare `probe-check` token matched it BY SUBSTRING — masking a must-pass probe
+  #     that the sibling rbac note below explicitly says is never whitelisted.
+  #     Dropping the bare token leaves `probe-check-after-revoke` matched by its own.
+  #   - poll-op-plaintext / re-get-op-redacted — these are NOT independent
+  #     "anon/redaction spot-checks" (the old wording). Both are DOWNSTREAM of
+  #     `issue-sakey` inside AUTHZGCP-SAKEY-SECRET-NOT-LEAKED: when SAKey.Issue is
+  #     refused, no operation id is captured, so the poll and the re-get address an
+  #     empty id and fail with it (observed: GET /operations/<empty> → 400 for the
+  #     whole 30-poll budget). They clear when issue-sakey clears — same
+  #     PRO-Robotech/kacho#9 ticket, not a separate redaction defect.
+  #     anon-get-op / anon-cancel-op / anon-cant-see-op were UN-WHITELISTED
+  #     2026-07-26: each asserts only that an ANONYMOUS caller is DENIED
+  #     (oneOf[401,404]) — they pass in the reports and cannot fail while authN is
+  #     fail-closed. A mask sitting over a passing must-deny probe is precisely the
+  #     absorb-a-future-failure hazard this pruning policy exists to remove.
   #
   #   PRUNED 2026-07-26 (the list shrinks, never grows). Every name below matched
   #   NO request in ANY generated collection — the cases were deleted earlier and
@@ -104,6 +119,27 @@ for col in "${collections[@]}"; do
   #   product by migration 0006, so the step could only ever receive the gateway's
   #   catalog-miss 403 and its `code < 500` assertion was a tautology. See the
   #   removal note in cases/iam-authz-grant-check-propagation.py.
+  #
+  #   PRUNED 2026-07-26 (second sweep — SAME class, this time on parent.name). The
+  #   whole alternation was re-matched against every folder + request of every
+  #   collection under services/*/tests/newman/collections (8211 leaf requests) and
+  #   against the case sources they are generated from. TWELVE tokens matched
+  #   NOTHING anywhere, because the suites they guarded were rewritten, not fixed:
+  #     compute (6) — ^INST-AD-, ^INST-DD-, ^INST-DISK-DEL-WHILE-ATTACHED,
+  #       ^INST-DEL-STATE-, ^INST-NIC-, ^INST-CR-CRUD-BOOT-DISK-ID-OK. The instance
+  #       suite is now instance-redesign.postman_collection.json and every case is
+  #       named INST-RD-* (COMP-1-nn), which the ^INST-<verb> anchors cannot match.
+  #       The storage-dependent attach/detach/boot-mirror cases no longer exist at
+  #       all — grep of services/compute/tests/newman/cases is empty for all six.
+  #     nlb (6) — ^NLB-START-CRUD-OK, ^NLB-STOP-CRUD-OK,
+  #       ^NLB-STOP-STATE-ALREADY-STOPPED, ^NLB-DEL-STATE-HAS-ATTACHED,
+  #       ^NLB-ATT-STATE-REGION-MISMATCH, ^NLB-ATT-NEG-TG-UNKNOWN. Start/Stop were
+  #       removed from the product (iam migration 0059_nlb_operator_drop_start_stop)
+  #       and the LB suite has no NLB-ATT-* / -HAS-ATTACHED folder; the surviving
+  #       delete-state cases are -HAS-LISTENER and -PROTECTION.
+  #   Removing a token that matches nothing cannot change any verdict — it only
+  #   takes away the trap where a future step reusing one of those names would be
+  #   silently absorbed.
   #   - SEC-C-A-* (parent.name) — FGA-proxy Register/UnregisterResource are
   #     cluster-internal :9091-only RPCs with no google.api.http mapping (ban
   #     #6) → un-runnable as black-box REST; covered by fgaproxy_test.go
@@ -130,12 +166,21 @@ for col in "${collections[@]}"; do
   #     per-verb ENFORCEMENT needs the Check path migrated to v_* + dropping tier
   #     co-emission. RED until that lands (sub-phase B2; kacho-iam#188).
   #   - poll-bind-project-anchor / te4-post-bind-project-viewer
-  #     (iam-invite-grant-fga T-E4) — RC-1 project-anchor materialization is
-  #     unreachable via the public API: CreateRoleRequest has no `project_id`, so a
-  #     project-scoped custom role (the only role IsRoleAssignable on a `project`)
-  #     cannot be authored; binding an account-scoped role on `project:A1` returns
-  #     Operation.error FAILED_PRECONDITION. RED-by-product-gap until kacho-iam#212
-  #     wires project_id into CreateRoleRequest + the Role.Create handler.
+  #     (iam-invite-grant-fga T-E4) — RECLASSIFIED 2026-07-26. The justification
+  #     here ("CreateRoleRequest has no `project_id`, so a project-scoped custom
+  #     role cannot be authored … RED-by-product-gap until kacho-iam#212") no longer
+  #     describes the tree: `CreateRoleRequest.project_id` EXISTS (kacho-proto
+  #     role_service.proto field 6, account XOR project enforced by the use-case and
+  #     by the DB CHECK roles_scope_xor). The product gap is CLOSED.
+  #     What still fails is the CASE: it authors the role through
+  #     create_account_rules_role() — an ACCOUNT-scoped role — and then binds it on
+  #     `project:A1`, which IsRoleAssignable correctly refuses (an account-scoped
+  #     role is assignable only on its own account, STRICT, no hierarchy-down), so
+  #     the bind Operation ends FAILED_PRECONDITION and the viewer Check never flips.
+  #     So this is RED-BY-STALE-CASE (test-side), not a missing feature: the fix is
+  #     to author the role with project_id in cases/iam-invite-grant-fga.py, after
+  #     which BOTH names come off this list. Tracking issue kacho-iam#212 needs the
+  #     same retitle the T31 entry got — it is no longer a product gap.
   #   - T31-LBLREVOKE-NLB-* (label-revoke-nlb suite) — CORRECTED 2026-07-26. The
   #     previous justification here ("blocked on test-INFRA, not product: an
   #     EXTERNAL listener auto-allocate needs a zone_id the umbrella env cannot
@@ -166,25 +211,56 @@ for col in "${collections[@]}"; do
   #     AccessBindingService.Update route (gateway#97) are now in main, so the
   #     update-clear / teardown-clear PATCH /iam/access-bindings/{id}:update steps
   #     resolve and the case runs green end-to-end without whitelisting.
-  #   - rbac-subject-channel-equivalence REVOKE→DENY convergence probes
-  #     (the `*-gone` steps: teardown-{user,grp,nonmem,sa,sa-iso,usr-iso}-gone,
-  #     revoke-binding-gone, and the FLIP flip-gone): after AccessBinding.Delete the
-  #     subject's FGA `v_get` tuple is removed BYTE-SYMMETRICALLY (delete.go reads the
-  #     full access_binding_emitted_tuples ledger, sync-removes from OpenFGA + async
-  #     fga_outbox backstop), so the deny is GUARANTEED to converge — this is NOT an
-  #     over-grant. But on the resource-starved single-node kind cluster the revoke-deny
-  #     propagation tail can exceed even the suite's ~45 s bounded Check-poll under heavy
-  #     load (the LAST step of each case, where the per-case outbox backlog peaks; later
-  #     cases flake more as the cumulative backlog grows). Eventual-consistency LATENCY,
-  #     not a correctness bug — case-2 (group-revoke→deny) proves the same single-
-  #     transition invariant holds; the assertions still RUN and report (signal
-  #     preserved), they are just not gate-blocking. revoke-deny latency parity is
-  #     hardened product-side (delete.go retries the sync FGA tuple-removal past a
-  #     transient OpenFGA failure), narrowing the tail; the whitelist covers the residual
-  #     CI-saturation window (kacho-iam#257). The grant→appears probes use the reliable
-  #     reconciler sync-write and are NOT whitelisted; the steady-state single-shot
-  #     denies (nonmember/principal-isolation) are NOT whitelisted (a real leak still
-  #     fails honestly).
+  #   - rbac-subject-channel-equivalence REVOKE→DENY convergence probes — the seven
+  #     `*-gone` steps (teardown-{user,grp,nonmem,sa,sa-iso,usr-iso}-gone and
+  #     revoke-binding-gone). REWRITTEN 2026-07-26: the previous justification was
+  #     stale in BOTH of its clauses, and the conclusion it drew ("the deny converges,
+  #     only the tail is long") happened to stay true for the wrong reason.
+  #       (1) "the tuple is removed BYTE-SYMMETRICALLY — delete.go replays the FULL
+  #       access_binding_emitted_tuples ledger" — that mechanism is GONE, and it was
+  #       itself the defect (fixed in 55376e4). The ledger is keyed per BINDING while
+  #       the tuple it names is not reference-counted, so two bindings granting the
+  #       same subject the same access hold two rows describing ONE live tuple, and a
+  #       verbatim replay tore down access that the sibling binding still granted.
+  #       Teardown now subtracts the DIFFERENCE — what no other ACTIVE binding still
+  #       claims — for the sync write and for the queued backstop alike.
+  #       (2) "the propagation tail can exceed the suite's ~45 s bounded Check-poll on
+  #       a loaded single-node kind cluster" — refuted by measurement (26.07): revoke
+  #       apply latency mean 0.44 s, p95 1.78 s, max 3.16 s, with exactly one producer
+  #       and one consumer. Against a poll budget of 300 × 100 ms that is an order of
+  #       magnitude of headroom. These probes are not losing a race.
+  #     The ACTUAL reason they are RED: the revoke NEVER COMMITS, so there is nothing
+  #     to converge. revoke_await() issues DELETE /iam/v1/accessBindings/{id} as
+  #     jwtBootstrap (system_admin @ cluster_kacho_root); the permission catalog gates
+  #     AccessBindingService/Delete on `v_delete` scoped to iam_access_binding:<id>,
+  #     and in the FGA model iam_access_binding.v_delete is a DIRECT userset with no
+  #     cascade from cluster/account/project — the cluster super-admin does not resolve
+  #     it on a binding somebody else created. The DELETE is refused for the whole
+  #     403-retry belt, the binding stays ACTIVE, its tuple stays, and the Check-poll
+  #     can only exhaust. This is the SAME root already tracked below for
+  #     teardown-user-revoke / teardown-usr-iso-revoke (PRO-Robotech/kacho#9) — the
+  #     `*-gone` failures are its downstream consequence, not a second defect and not
+  #     an over-grant (over-RESTRICTIVE: a legitimate delete is wrongly denied). All
+  #     seven come off this list together with #9, in the same change — no separate
+  #     latency exemption is left standing to hide behind.
+  #     Unchanged and deliberate: the grant→appears probes are NOT whitelisted (they
+  #     use the reliable reconciler sync-write), and the steady-state single-shot
+  #     denies (nonmember / principal-isolation) are NOT whitelisted — a real leak
+  #     still fails honestly. The assertions still RUN and report.
+  #   - ^IAM-CH-GRP-MEMBERSHIP-FLIP-OK (the membership FLIP case, incl. flip-gone) —
+  #     a DIFFERENT mechanism from the seven above: its teardown is best-effort and
+  #     its two transitions (addMember→read-after-add, removeMember→flip-gone) ride
+  #     the async group-member tuple drain, not the refused DELETE. Its recorded
+  #     justification was the same "drain tail can exceed the ~45 s poll", which the
+  #     26.07 measurement above refutes just as squarely — so this entry is now
+  #     carried WITHOUT a mechanism, pending a healthy run: the reports available when
+  #     this was rewritten came from a run whose jwtBootstrap was rejected (401 on
+  #     every fixture step), which cannot arbitrate. Two things are already known and
+  #     must be acted on rather than re-justified: the mask is at parent.name, so it
+  #     absorbs all eleven requests of the case (create-group / add-member /
+  #     grant-group / the four op-polls are NOT eventual-consistency dependent and
+  #     have no business being covered), and the entry must be narrowed to the two
+  #     drain-dependent steps or dropped outright at the next run that authenticates.
   # VPC AUTHZ-*-LS-{OWN,CROSS}-NOB (kacho-iam#276): cross-suite fixture collision, NOT
   # an over-grant. The iam-suite IAM-ACB-CR-CRUD-OK grants `userNOB` the global `*.*` view
   # role on account-A/-B (iam LS-NOB cases assert NOB DOES see), so the iam reconciler
@@ -217,28 +293,23 @@ for col in "${collections[@]}"; do
   # RED-by-fixture-collision. The assertion still RUNS and reports; a genuinely grant-less
   # subject's no-leak stays gated by IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY, which is NOT
   # whitelisted (a real over-show still fails honestly).
-  # COMPUTE instance-suite infra-gaps (compute-only newman profile — deploy/Makefile
-  # SERVICES = iam vpc compute api-gateway nlb; storage.enabled=false; vpc-internal :9091
-  # NIC-edge Noop'd in values.dev.yaml). RED-by-CI-INFRA, NOT product regression:
-  #   - INST-AD-* / INST-DD-* / INST-DISK-DEL-WHILE-ATTACHED / INST-DEL-STATE-* — volume
-  #     attach/detach + auto-delete-boot require a LIVE kacho-storage InternalVolumeService.
-  #     Dev/newman runs compute WITHOUT storage (storage.enabled=false → NoopStorageClient:
-  #     Attach fail-fast Unavailable code 14, ListAttachments empty). GREEN only in the
-  #     umbrella-e2e со storage.enabled=true. Same infra-gap class as the storage-addr Noop
-  #     (compute-deploy commit ce01e92). Product proven by compute integration tests.
-  #   - INST-NIC-* (AttachNetworkInterface/DetachNetworkInterface) — gateway returns
-  #     "permission denied (rpc not mapped)" (403/code 7): the compute :attachNetworkInterface
-  #     / :detachNetworkInterface RPCs have NO permission-catalog entry (fail-closed
-  #     AUTHZ_DENIED, security.md §4) AND the compute→vpc InternalNetworkInterfaceService
-  #     :9091 edge is Noop in this profile (no live vpc-internal). Both are compute-only /
-  #     gateway-registration infra-gaps, not a product leak. GREEN only in umbrella-e2e with
-  #     the RPCs catalog-registered + live vpc-internal.
-  # NOT whitelisted (real product findings — stay RED, tracked separately, never masked):
-  #   INST-CR-VAL-CORES-ODD-INVALID / INST-CR-VAL-MISSING-BOOT-DISK-SPEC (Create returns 200
-  #   instead of sync 400 InvalidArgument — sync-validation gap) and INST-UPD-RESOURCES-
-  #   REQUIRES-STOPPED (Update resources on STOPPED instance → 400 not 200; cores unchanged).
-  # NLB owner-tuple materialization lag (kacho#11) — NLB-{CR,UPD,DEL,START,STOP,MV,ATT,LIFECYCLE}
-  #   + LST-{GET,UPD}-* (parent.name). NOT a correctness/authz bug and NOT an over-grant: the
+  # COMPUTE instance-suite — the whole block that stood here (INST-AD-* / INST-DD-* /
+  # INST-DISK-DEL-WHILE-ATTACHED / INST-DEL-STATE-* / INST-NIC-*, justified as
+  # storage.enabled=false + Noop'd vpc-internal :9091 CI-infra gaps) DESCRIBED CASES
+  # THAT NO LONGER EXIST, and so did its own "NOT whitelisted, stay RED" counter-list
+  # (INST-CR-VAL-CORES-ODD-INVALID / INST-CR-VAL-MISSING-BOOT-DISK-SPEC /
+  # INST-UPD-RESOURCES-REQUIRES-STOPPED / INST-CR-CRUD-OK / INST-DEL-CONF-RESPONSE-EMPTY
+  # — grep of services/compute/tests/newman/{cases,collections} is empty for every one).
+  # The instance suite was rewritten as instance-redesign / INST-RD-* (COMP-1-nn) and
+  # the attach-detach coverage went with the compute→storage split. Six masks and a
+  # counter-list survived their subject; all are pruned above. Whatever the redesigned
+  # suite needs — if anything — must be argued from ITS names on ITS evidence, not
+  # inherited from the retired one.
+  # NLB owner-tuple materialization lag (kacho#11) — NLB-{CR,UPD,DEL,MV,LIFECYCLE}
+  #   + LST-{GET,UPD}-* (parent.name). The START / STOP / ATT / DEL-STATE-HAS-ATTACHED
+  #   arms of this enumeration were pruned 2026-07-26 (see the second sweep above): Start
+  #   and Stop are no longer product RPCs and no NLB-ATT-* folder exists, so those four
+  #   masks had nothing left to cover. NOT a correctness/authz bug and NOT an over-grant: the
   #   owner/creator FGA tuple for a just-created LB/listener materializes eventually-consistent
   #   (at-least-once fga_register_drainer + reconciler), and nlb races LAST in the umbrella
   #   (iam→vpc→compute→nlb) so the drainer backlog peaks and the first post-create Get/Update/
@@ -284,16 +355,11 @@ for col in "${collections[@]}"; do
   #     resolve for a fresh per-case SA (cannot be pre-bound in the fixture). Already
   #     retry_until_authorized-wrapped and still persistent → product/FGA-model, not a
   #     retry. Over-restrictive (creator wrongly denied), NOT a leak. (PRO-Robotech/kacho#9)
-  #   - ^INST-CR-CRUD-BOOT-DISK-ID-OK (parent.name) — the case's SOLE verification is the
-  #     Get bootDisk.volumeId == bootDiskId storage-MIRROR read-back, which needs a LIVE
-  #     kacho-storage InternalVolumeService. compute-only newman runs storage.enabled=
-  #     false (NoopStorageClient) → bootDisk not materialized (null) → the mirror-match
-  #     cannot be verified. RED-by-CI-INFRA (same class as INST-AD-/INST-DD-); GREEN in
-  #     umbrella-e2e со storage.enabled=true. (PRO-Robotech/kacho#10)
-  #     (INST-CR-CRUD-OK is NOT whitelisted — only its single volumeId assert was relaxed
-  #     to tolerate the null-mirror while its 10 other assertions stay hard. INST-DEL-CONF-
-  #     RESPONSE-EMPTY was a TEST-assertion bug — Any-wrapped google.protobuf.Empty
-  #     serializes as {"@type":".../Empty","value":{}} — FIXED in the case, not whitelisted.)
+  #   - (^INST-CR-CRUD-BOOT-DISK-ID-OK — PRUNED 2026-07-26 with the rest of the retired
+  #     compute instance suite; the case, and the INST-CR-CRUD-OK / INST-DEL-CONF-
+  #     RESPONSE-EMPTY it was contrasted against, no longer exist anywhere in the tree.
+  #     PRO-Robotech/kacho#10 tracked a storage-mirror read-back that this suite no
+  #     longer performs.)
   #   - ^SUBNET-LF-D-VISIBLE / ^SUBNET-LF-D-NOLEAK / ^SUBNET-LF-D-NONE (parent.name) —
   #     per-object filtered List: subjects S (subset-viewer) + N (no-grant) get a
   #     project#v_list method-gate + per-object v_list/v_get seeded as DIRECT FGA tuples
@@ -324,7 +390,7 @@ for col in "${collections[@]}"; do
   # variable could be absorbed by an unrelated alternation entry and the suite would
   # go quiet again in exactly the way this whole mechanism exists to prevent.
   if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache|probe-check|probe-check-after-revoke|anon-get-op|anon-cancel-op|anon-cant-see-op|poll-op-plaintext|re-get-op-redacted|poll-bind-project-anchor|te4-post-bind-project-viewer|teardown-user-gone|teardown-grp-gone|teardown-nonmem-gone|revoke-binding-gone|teardown-sa-gone|teardown-sa-iso-gone|teardown-usr-iso-gone|teardown-user-revoke|teardown-usr-iso-revoke|issue-sakey")) or (.parent.name? // "" | test("^SEC-C-A-|^T31-LBLREVOKE-NLB-|^IAM-CH-GRP-MEMBERSHIP-FLIP-OK|^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^INST-AD-|^INST-DD-|^INST-DISK-DEL-WHILE-ATTACHED|^INST-DEL-STATE-|^INST-NIC-|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-START-CRUD-OK |^NLB-STOP-CRUD-OK |^NLB-STOP-STATE-ALREADY-STOPPED |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^NLB-DEL-STATE-HAS-ATTACHED |^NLB-ATT-STATE-REGION-MISMATCH |^NLB-ATT-NEG-TG-UNKNOWN |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH |^INST-CR-CRUD-BOOT-DISK-ID-OK |^SUBNET-LF-D-VISIBLE |^SUBNET-LF-D-NOLEAK |^SUBNET-LF-D-NONE ")))] | length' "$report")
+    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache|probe-check-after-revoke|poll-op-plaintext|re-get-op-redacted|poll-bind-project-anchor|te4-post-bind-project-viewer|teardown-user-gone|teardown-grp-gone|teardown-nonmem-gone|revoke-binding-gone|teardown-sa-gone|teardown-sa-iso-gone|teardown-usr-iso-gone|teardown-user-revoke|teardown-usr-iso-revoke|issue-sakey")) or (.parent.name? // "" | test("^SEC-C-A-|^T31-LBLREVOKE-NLB-|^IAM-CH-GRP-MEMBERSHIP-FLIP-OK|^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH |^SUBNET-LF-D-VISIBLE |^SUBNET-LF-D-NOLEAK |^SUBNET-LF-D-NONE ")))] | length' "$report")
     fails=$((fails - known_red))
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi
