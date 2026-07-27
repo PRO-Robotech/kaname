@@ -15,35 +15,50 @@ package pg_test
 //     SQL — not a copy. Used to prove 0033 Up is a no-op on already-scalar rows.
 
 import (
-	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
+// setupTestDBNoUp hands the caller an EMPTY database on the package's shared
+// Postgres — no migrations applied.
+//
+// The migration tests replay one migration body by hand against a bare schema, so
+// they cannot use the migrated template setupTestDB clones from. They do not need
+// a container of their own either: an empty database on the shared server is the
+// same starting point, without paying for a server start per test.
 func setupTestDBNoUp(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
+	if sharedBaseDSN == "" {
+		t.Fatal("shared Postgres was not started — a migration test ran under -short " +
+			"without skipping (see TestMain)")
+	}
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
+	name := fmt.Sprintf("kacho_iam_bare%03d", testDBSeq.Add(1))
 
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
+	admin, err := sql.Open("pgx", sharedBaseDSN)
 	require.NoError(t, err)
-	return appendSearchPathOptions(dsn)
+	defer func() { _ = admin.Close() }()
+
+	_, err = admin.Exec(`CREATE DATABASE ` + name)
+	require.NoError(t, err, "create bare database %s", name)
+
+	t.Cleanup(func() {
+		drop, derr := sql.Open("pgx", sharedBaseDSN)
+		if derr != nil {
+			return
+		}
+		defer func() { _ = drop.Close() }()
+		_, _ = drop.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`)
+	})
+
+	return appendSearchPathOptions(dsnForDB(name))
 }
 
 // applyMigrationUpBody reads <prefix>_*.sql, extracts the `-- +goose Up` body and

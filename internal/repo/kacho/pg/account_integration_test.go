@@ -32,47 +32,57 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
+// setupTestDB hands the caller its own migrated database on the package's shared
+// Postgres, and returns the DSN for it.
+//
+// It clones the template TestMain migrated once, rather than starting a container
+// and replaying every migration per call — see testmain_test.go for why. The
+// caller still gets a database of its own: nothing is shared between tests but
+// the server process, so row-level contention inside a test behaves exactly as it
+// did when each test owned a container.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
+	if sharedBaseDSN == "" {
+		// Only reachable if a test forgets its own -short skip: TestMain starts the
+		// container for every non-short run. Fail loudly rather than hand back a DSN
+		// pointing at nothing.
+		t.Fatal("shared Postgres was not started — an integration test ran under -short " +
+			"without skipping (see TestMain)")
+	}
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
+	name := fmt.Sprintf("kacho_iam_t%03d", testDBSeq.Add(1))
+
+	admin, err := sql.Open("pgx", sharedBaseDSN)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
+	defer func() { _ = admin.Close() }()
 
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	_, err = admin.Exec(`CREATE DATABASE ` + name + ` TEMPLATE ` + templateDB)
+	require.NoError(t, err, "clone %s from %s", name, templateDB)
 
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		drop, derr := sql.Open("pgx", sharedBaseDSN)
+		if derr != nil {
+			return
+		}
+		defer func() { _ = drop.Close() }()
+		// WITH (FORCE) evicts connections a test left open; without it a leaked
+		// pool would keep the database alive for the rest of the run.
+		_, _ = drop.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`)
+	})
 
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
-	return appendSearchPathOptions(dsn)
+	return appendSearchPathOptions(dsnForDB(name))
 }
 
 func appendSearchPathOptions(dsn string) string {
