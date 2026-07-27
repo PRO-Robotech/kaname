@@ -66,6 +66,7 @@ func (c Config) Validate() error {
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
+		errs = multierr.Append(errs, c.validateProductionTrustedForwarders())
 
 		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
 		// IAM data (user/SA records, session-revocation + token rows, the
@@ -122,6 +123,45 @@ func (c Config) validateProductionBootstrapMint() error {
 			"MintBootstrapToken issues a cluster system_admin token and must be restricted to explicit client-certificate SPIFFE SANs; "+
 			"set the allow-list or unset the signing key",
 		c.AuthN.BootstrapMint.ResolveSigningKeyEnv())
+}
+
+// validateProductionTrustedForwarders refuses to start a production binary that
+// has not narrowed the circle of senders permitted to FORWARD an end-user
+// identity.
+//
+// Both listeners build CertIdentityExtract →
+// TrustedPrincipalExtract(WithTrustedForwarders(cfg.AuthN.TrustedForwarders())).
+// The corelib contract (pkg/grpcsrv principalIsTrusted) narrows that circle ONLY
+// on a non-empty list; on an empty one it answers "trusted" for ANY peer that
+// passed client-certificate verification, and the forwarded metadata identity
+// becomes the subject of every authorization decision iam then makes. Both ports
+// are ordinary Services in the namespace, the TLS layer checks the issuing
+// authority rather than the name, and the only NetworkPolicy that selects the iam
+// pod covers the internal port and is off outside production — so this list is the
+// only thing that narrows.
+//
+// The consequence is not abstract: on :9090 iam deliberately does NOT re-ReBAC
+// the end user (the api-gateway is the single authZ front door), so a neighbour
+// with its own legitimate certificate would read and mutate any tenant's
+// accounts, projects, groups, roles and grants, and mint personal tokens and
+// service-account keys, as the named victim.
+//
+// The result of TrustedForwarders() is checked, not the raw field length: blank
+// entries are dropped in the very place the narrowing happens, so `SANS=","`
+// must not pass the guard and hand back the hole.
+//
+// dev deliberately tolerates empty (in-process fixtures) — and only there: on a
+// DEPLOYED stand the dev posture is forbidden by a separate rule
+// (production-mode EVERYWHERE).
+func (c Config) validateProductionTrustedForwarders() error {
+	if len(c.AuthN.TrustedForwarders()) > 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"production mode: authn.trusted-forwarder-sans is empty (env override " +
+			"KACHO_IAM_AUTHN__TRUSTED_FORWARDER_SANS) — an empty list lets ANY certificate-verified peer " +
+			"forward an end-user identity, so a neighbouring service can act as any tenant; " +
+			"pin the api-gateway SAN plus the peers that legitimately speak for a user")
 }
 
 // validateMode ensures Mode is a known ENUM value.

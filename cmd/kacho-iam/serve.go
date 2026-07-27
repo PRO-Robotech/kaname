@@ -324,50 +324,55 @@ func runServe(cfg config.Config) error {
 	internalACRFloor := authzguard.NewACRFloor(permRegistry, authzguard.GatewayFrontedInternalRPCs()).
 		WithProductionMode(productionMode)
 
+	// Per-RPC CALLER policy for the PUBLIC listener (:9090) — the sibling of
+	// internalCallerPolicy above, and for the same reason: iam does NOT re-ReBAC
+	// the end user on its own listeners (the api-gateway is the single authZ front
+	// door), so whoever reaches a public RPC with a forwarded identity acts with
+	// that identity's authority. :9090 is NOT gateway-only — five consumer modules
+	// dial ProjectService.Get on their request path and the namespace operator fans
+	// out over AccountService.List → ProjectService.List — but they need exactly
+	// those reads and nothing else. The policy admits the gateway everywhere and
+	// every other verified module only on the RPC that names it
+	// (PublicPeerCallableRPCs), so a compromised neighbour cannot reach the tenant
+	// CRUD, the grant writes or the credential mints at all. prod fail-closed; dev
+	// no-op (the newman stand has no mTLS, hence no verified certificate to decide
+	// on). This is the second half of the narrowing: the forwarder allow-list below
+	// decides WHO MAY SPEAK FOR A USER, this decides ON WHICH RPC.
+	publicCallerPolicy := authzguard.NewPublicCallerPolicy(productionMode, authzguard.PublicPeerCallableRPCs())
+
 	// Anti-anonymous guard перед мутирующими RPC: минимальная защита от
 	// анонимного создания Account/Project/AccessBinding/Group/SA/Role
 	// в дополнение к OpenFGA Check via AuthorizeService.
+	//
+	// Порядок: метрики (оборачивают всё) → recovery → личность вызывающего
+	// (identityUnary: сертификат, затем переданная личность от разрешённого
+	// отправителя) → пер-RPC политика вызывающего → анти-аноним.
+	publicUnary := append([]grpc.UnaryServerInterceptor{
+		// Metrics interceptor first — wraps the full chain so the recorded
+		// latency/code covers the whole RPC (request count + handling
+		// seconds + grpc_code), for every public RPC including authz Check.
+		metricsReg.UnaryServerInterceptor(),
+		// Panic-recovery immediately inside metrics: a panic in any downstream
+		// interceptor or handler becomes a logged codes.Internal for that ONE
+		// request instead of crashing the whole PDP process (metrics still
+		// records the Internal code because recovery is inner of it).
+		grpcmw.UnaryRecovery(logger),
+	}, identityUnary(cfg)...)
+	publicUnary = append(publicUnary,
+		publicCallerPolicy.Unary(),
+		authzguard.AntiAnonymousUnary(logger),
+	)
+	publicStream := append([]grpc.StreamServerInterceptor{
+		grpcmw.StreamRecovery(logger),
+	}, identityStream(cfg)...)
+	publicStream = append(publicStream,
+		publicCallerPolicy.Stream(),
+		authzguard.AntiAnonymousStream(logger),
+	)
 	grpcSrv := grpcsrv.NewServer(
 		publicServerCreds,
-		grpc.ChainUnaryInterceptor(
-			// Metrics interceptor first — wraps the full chain so the recorded
-			// latency/code covers the whole RPC (request count + handling
-			// seconds + grpc_code), for every public RPC including authz Check.
-			metricsReg.UnaryServerInterceptor(),
-			// Panic-recovery immediately inside metrics: a panic in any downstream
-			// interceptor or handler becomes a logged codes.Internal for that ONE
-			// request instead of crashing the whole PDP process (metrics still
-			// records the Internal code because recovery is inner of it).
-			grpcmw.UnaryRecovery(logger),
-			// Public listener — trust-aware principal extraction (anti-spoof). The
-			// forwarded x-kacho-principal-* metadata is exposed downstream ONLY when
-			// the peer passed mTLS client-cert verification (UnaryCertIdentityExtract
-			// sets the verified flag; UnaryTrustedPrincipalExtract drops the metadata
-			// on an unverified/cert-less peer → SystemPrincipal fallback). Without
-			// this a peer reaching :9090 could FORGE an arbitrary user identity.
-			//
-			// NO gateway-only forwarder allow-list: :9090 is a MULTI-forwarder
-			// listener — besides the api-gateway (JWT-fronted user requests), every
-			// verified consumer module (kacho-vpc/compute/nlb/geo) dials the
-			// tenant-facing ProjectService.Get and forwards the end-user principal for
-			// the tenant scope-filter. Pinning gateway-only would break that
-			// cross-service project validation. The internal CA + RequireAndVerify
-			// ClientCert on :9090 already gates the listener to verified kacho modules;
-			// this layer only ensures an UNVERIFIED peer cannot forge a principal.
-			//
-			// On the insecure dev listener (no TLS) the trust invariant is inapplicable
-			// and the principal is accepted as before (backward-compat, byte-identical
-			// to the newman stand). CertIdentityExtract MUST run before Trusted.
-			grpcsrv.UnaryCertIdentityExtract(),
-			grpcsrv.UnaryTrustedPrincipalExtract(),
-			authzguard.AntiAnonymousUnary(logger),
-		),
-		grpc.ChainStreamInterceptor(
-			grpcmw.StreamRecovery(logger),
-			grpcsrv.StreamCertIdentityExtract(),
-			grpcsrv.StreamTrustedPrincipalExtract(),
-			authzguard.AntiAnonymousStream(logger),
-		),
+		grpc.ChainUnaryInterceptor(publicUnary...),
+		grpc.ChainStreamInterceptor(publicStream...),
 	)
 	// Internal listener (port 9091) — network-segregated, but NOT trusted:
 	// authN+authZ are enforced on EVERY internal RPC (security.md "authN+authZ
@@ -377,14 +382,16 @@ func runServe(cfg config.Config) error {
 	//  1. UnaryCertIdentityExtract — verified mTLS client-cert SAN (module
 	//     identity) → ctx; insecure listener (dev) → no-op.
 	//  2. UnaryTrustedPrincipalExtract — x-kacho-principal-* metadata → ctx, but
-	//     trust-gated on the FD-4 invariant: the forwarded end-user principal is
-	//     exposed downstream (operations.principal_* / audit / granted_by) ONLY
-	//     when step 1 proved the peer mTLS-verified. On an unverified TLS peer the
-	//     metadata is DROPPED (carrier falls back to SystemPrincipal) so a caller
-	//     reaching :9091 without a verified client-cert cannot FORGE the audit
-	//     principal (anti-spoof). On the insecure dev listener it stays accepted
-	//     (backward-compat). NOT trusted for authZ — the gateway already did
-	//     per-user authZ. MUST run after UnaryCertIdentityExtract.
+	//     trust-gated on the FD-4 invariant AND on the forwarder allow-list: the
+	//     forwarded end-user principal is exposed downstream
+	//     (operations.principal_* / audit / granted_by) ONLY when step 1 proved the
+	//     peer mTLS-verified AND its certificate identity is one the operator
+	//     listed in authn.trusted-forwarder-sans. On any other peer the metadata is
+	//     DROPPED (carrier falls back to SystemPrincipal) so neither a cert-less
+	//     caller nor a neighbouring module with its own legitimate certificate can
+	//     FORGE the audit principal (anti-spoof). On the insecure dev listener it
+	//     stays accepted (backward-compat). NOT trusted for authZ — the gateway
+	//     already did per-user authZ. MUST run after UnaryCertIdentityExtract.
 	//  3. internalCallerPolicy — per-RPC caller policy: floor (verified module
 	//     cert on EVERY RPC) + gateway-only (privileged admin RPCs only from the
 	//     api-gateway SA) — prod fail-closed, dev no-op — PLUS the SAN-restricted
@@ -406,31 +413,33 @@ func runServe(cfg config.Config) error {
 	//     UnaryTrustedPrincipalExtract (sets acr) + internalCallerPolicy (which
 	//     denies a non-gateway SAN on a gateway-fronted RPC first, so the SA
 	//     exemption cannot be abused).
+	internalUnary := append([]grpc.UnaryServerInterceptor{
+		// Metrics interceptor first — observe every internal RPC (the
+		// per-RPC authz-gate InternalIAMService.Check hot path lives here).
+		metricsReg.UnaryServerInterceptor(),
+		// Panic-recovery immediately inside metrics — same rationale as the
+		// public chain: a handler/interceptor panic on the PDP hot path must
+		// not crash the process (fail-closed cluster-wide); it degrades to a
+		// logged codes.Internal for that one request.
+		grpcmw.UnaryRecovery(logger),
+	}, identityUnary(cfg)...)
+	internalUnary = append(internalUnary,
+		internalCallerPolicy.Unary(),
+		internalSystemViewerFloor.Unary(),
+		internalACRFloor.Unary(),
+	)
+	internalStream := append([]grpc.StreamServerInterceptor{
+		grpcmw.StreamRecovery(logger),
+	}, identityStream(cfg)...)
+	internalStream = append(internalStream,
+		internalCallerPolicy.Stream(),
+		internalSystemViewerFloor.Stream(),
+		internalACRFloor.Stream(),
+	)
 	internalSrv := grpcsrv.NewServer(
 		internalServerCreds,
-		grpc.ChainUnaryInterceptor(
-			// Metrics interceptor first — observe every internal RPC (the
-			// per-RPC authz-gate InternalIAMService.Check hot path lives here).
-			metricsReg.UnaryServerInterceptor(),
-			// Panic-recovery immediately inside metrics — same rationale as the
-			// public chain: a handler/interceptor panic on the PDP hot path must
-			// not crash the process (fail-closed cluster-wide); it degrades to a
-			// logged codes.Internal for that one request.
-			grpcmw.UnaryRecovery(logger),
-			grpcsrv.UnaryCertIdentityExtract(),
-			grpcsrv.UnaryTrustedPrincipalExtract(),
-			internalCallerPolicy.Unary(),
-			internalSystemViewerFloor.Unary(),
-			internalACRFloor.Unary(),
-		),
-		grpc.ChainStreamInterceptor(
-			grpcmw.StreamRecovery(logger),
-			grpcsrv.StreamCertIdentityExtract(),
-			grpcsrv.StreamTrustedPrincipalExtract(),
-			internalCallerPolicy.Stream(),
-			internalSystemViewerFloor.Stream(),
-			internalACRFloor.Stream(),
-		),
+		grpc.ChainUnaryInterceptor(internalUnary...),
+		grpc.ChainStreamInterceptor(internalStream...),
 	)
 	logger.Info("kacho-iam listener mTLS",
 		"public_mtls", mtlsCfg.PublicServerMTLS.Enable,
@@ -972,4 +981,43 @@ func runServe(cfg config.Config) error {
 	})
 	cancel()
 	return err
+}
+
+// identityUnary / identityStream — цепочка извлечения личности вызывающего,
+// ОДНА на оба листенера.
+//
+// Пара, а не одиночный извлекатель: сначала классифицируется транспорт и
+// снимается личность клиентского сертификата (CertIdentityExtract), и только
+// потом переданная в метаданных личность конечного пользователя принимается —
+// и только от пира, чья личность сертификата перечислена оператором.
+//
+// Список отправителей приходит ТОЛЬКО из конфигурации и никогда не задаётся
+// здесь литералом: пустой список для corelib означает не «никому», а «любому
+// пиру с проверенным сертификатом» (pkg/grpcsrv principalIsTrusted сужает круг
+// лишь на непустом списке), и переданная личность становится субъектом решения о
+// правах. Боевой режим на пустом списке не стартует (config.Validate →
+// validateProductionTrustedForwarders).
+//
+// Почему список ОБЩИЙ на оба листенера. Законные отправители ходят и туда, и
+// туда: api-gateway держит адреса обоих портов (KACHO_API_GATEWAY_IAM_GRPC :9090
+// и ..._IAM_INTERNAL_GRPC :9091), consumer-модули берут проект на :9090 и зовут
+// Check / fga-proxy на :9091, оператор пространств имён читает аккаунты и проекты
+// на :9090. Внутренний периметр от сужения не освобождён — «internal = trusted»
+// у нас запрещённое допущение. НА КАКОМ RPC отправитель вправе появиться,
+// решают пер-RPC политики вызывающего (authzguard.PublicCallerPolicy на :9090,
+// authzguard.CallerPolicy на :9091) — это ортогональный, второй слой.
+func identityUnary(cfg config.Config) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{
+		grpcsrv.UnaryCertIdentityExtract(),
+		grpcsrv.UnaryTrustedPrincipalExtract(
+			grpcsrv.WithTrustedForwarders(cfg.AuthN.TrustedForwarders()...)),
+	}
+}
+
+func identityStream(cfg config.Config) []grpc.StreamServerInterceptor {
+	return []grpc.StreamServerInterceptor{
+		grpcsrv.StreamCertIdentityExtract(),
+		grpcsrv.StreamTrustedPrincipalExtract(
+			grpcsrv.WithTrustedForwarders(cfg.AuthN.TrustedForwarders()...)),
+	}
 }

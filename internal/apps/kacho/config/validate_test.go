@@ -12,6 +12,12 @@ import (
 
 // goodEndpoints — a Config seeded with the non-secret invariants already
 // satisfied (mode-agnostic), so the secret/AuthN checks are the only variable.
+//
+// The trusted-forwarder allow-list is seeded here for the same reason the
+// endpoints are: it is a production invariant that every positive path must
+// satisfy, and leaving it empty would make unrelated tests fail on it. Tests
+// that are ABOUT the allow-list overwrite the field explicitly
+// (trusted_forwarders_test.go).
 func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 	return config.Config{
 		APIServer: config.APIServerConfig{
@@ -24,7 +30,10 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 				SSLMode: sslMode,
 			},
 		},
-		AuthN: config.AuthNConfig{Mode: mode},
+		AuthN: config.AuthNConfig{
+			Mode:                 mode,
+			TrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
+		},
 		// Positive cache knobs so the (unrelated) conditions validation passes;
 		// RegisterDefaults sets these in the real load path.
 		Conditions: config.ConditionsConfig{CacheSize: 1000, CacheTTLSeconds: 60},

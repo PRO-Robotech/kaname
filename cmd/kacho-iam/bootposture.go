@@ -26,13 +26,21 @@ import (
 //     InternalIAMService.Check, а гейтит свои RPC внутренними floor'ами
 //     (caller-policy / system_viewer / acr), опирающимися на relation-store
 //     (OpenFGA). Поэтому здесь — факт проводки этого backend'а, не адрес.
+//   - trusted_forwarders — сужен ли круг отправителей, которым разрешено
+//     передавать личность конечного пользователя. Берётся из
+//     cfg.AuthN.TrustedForwarders() — ровно того значения, что уходит в
+//     grpcsrv.WithTrustedForwarders на ОБОИХ листенерах, — а не из сырого поля:
+//     corelib отбрасывает пустые записи, поэтому список из одних пустых записей
+//     вырождается там в «доверяем любому», и рапортовать его как сужение значило
+//     бы отчитываться о намерении вместо исхода.
 func bootPosture(cfg config.Config, mtlsCfg config.MTLSConfig, authzCheckWired bool) observability.BootPosture {
 	return observability.BootPosture{
-		Service:      "iam",
-		AuthMode:     cfg.AuthN.Mode.String(),
-		DBSSLMode:    coredb.SSLModeFromDSN(cfg.DSN()),
-		PublicMTLS:   mtlsCfg.PublicServerMTLS.Enable,
-		InternalMTLS: mtlsCfg.InternalServerMTLS.Enable,
-		AuthZCheck:   authzCheckWired,
+		Service:           "iam",
+		AuthMode:          cfg.AuthN.Mode.String(),
+		DBSSLMode:         coredb.SSLModeFromDSN(cfg.DSN()),
+		PublicMTLS:        mtlsCfg.PublicServerMTLS.Enable,
+		InternalMTLS:      mtlsCfg.InternalServerMTLS.Enable,
+		AuthZCheck:        authzCheckWired,
+		TrustedForwarders: len(cfg.AuthN.TrustedForwarders()) > 0,
 	}
 }
