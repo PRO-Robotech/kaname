@@ -12,13 +12,13 @@ import (
 	"go.uber.org/multierr"
 )
 
-// Condition — folder-scoped reusable CEL-like expression (served by
+// Condition — project-scoped reusable CEL-like expression (served by
 // `ConditionsService`). Distinct from the legacy per-binding condition overlay
 // (the `cond_…` AccessBindingConditionID link on AccessBinding):
 //
 //   - the legacy overlay was bound 1:1 to one AccessBinding via the
 //     `binding_id` FK and carried a whitelisted `expression` (mfa_fresh, …).
-//   - `Condition` is a standalone, folder-scoped resource that stores a
+//   - `Condition` is a standalone, project-scoped resource that stores a
 //     free-form CEL expression + JSON-Schema for its parameters. Referenced
 //     by `AccessBinding.condition_ref.condition_id` (oneof) and evaluated by
 //     OpenFGA Conditions on every Check.
@@ -26,7 +26,7 @@ import (
 // Resource id prefix: `cnd`.
 type Condition struct {
 	ID               ConditionID
-	FolderID         string
+	ProjectID        string
 	CreatedAt        time.Time
 	Name             string
 	Description      string
@@ -44,10 +44,10 @@ type Condition struct {
 func (c Condition) Validate() error {
 	var errs error
 	errs = multierr.Append(errs, c.ID.Validate())
-	if c.FolderID == "" {
-		errs = multierr.Append(errs, fmt.Errorf("Illegal argument folder_id: required"))
-	} else if len(c.FolderID) > 20 {
-		errs = multierr.Append(errs, fmt.Errorf("Illegal argument folder_id: length must be <=20"))
+	if c.ProjectID == "" {
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument project_id: required"))
+	} else if len(c.ProjectID) > 20 {
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument project_id: length must be <=20"))
 	}
 	if c.Name == "" {
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument name: required"))

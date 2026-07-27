@@ -18,7 +18,7 @@ func TestConditionToProto_TruncatesCreatedAtToSeconds(t *testing.T) {
 
 	pb := service.ConditionToProto(domain.Condition{
 		ID:        "cnd_test_1234567890abcd",
-		FolderID:  "fld_test",
+		ProjectID: "fld_test",
 		Name:      "cond-a",
 		Status:    domain.ConditionStatusActive,
 		CreatedAt: created,

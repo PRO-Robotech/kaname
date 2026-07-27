@@ -720,6 +720,12 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// carries only non-secret compliance dimensions (actor / condition_id /
 	// expression name), never the opaque params blob.
 	condSvc.WithAuditEmitter(kachopg.NewAuditOutboxEmitter(pool), kachopg.NewPoolTxBeginner(pool))
+	// Hierarchy pointer — `iam_condition:<id> # project @ project:<projectId>`,
+	// co-committed with the row and retracted on Delete. `type iam_condition`
+	// derives its super-admin from `super_admin from project`, so without this
+	// tuple the cloud administrator, the bootstrap identity and the account
+	// administrator all resolve to nothing on a Condition.
+	condSvc.WithRelationOutbox(kachopg.NewFGAOutboxEmitter())
 	conditionsH := conditionsapp.NewHandler(condSvc)
 
 	return authzServiceBundle{

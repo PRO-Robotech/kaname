@@ -3,7 +3,7 @@
 
 // conditions_crud_service.go — ConditionsService CRUD use-cases.
 //
-// Standalone Condition resource (cnd_…) folder-scoped, referenced from
+// Standalone Condition resource (cnd…) project-scoped, referenced from
 // AccessBinding.condition_ref.condition_id (oneof). Lifecycle:
 //
 //   - Create → status=CREATING; Operation worker runs `doCreate`:
@@ -75,8 +75,16 @@ type ConditionsCRUDService struct {
 	// audit — durable audit_outbox emitter. nil → no audit row. Shared
 	// service.AuditOutboxEmitter port (governance_ports.go) — no per-resource copy.
 	audit AuditOutboxEmitter
+	// hierarchy — fga_outbox emitter carrying the condition's structural pointer
+	// at its project. `type iam_condition` derives its top tier of super-access
+	// as `super_admin from project`, so the tuple
+	// `iam_condition:<id> # project @ project:<projectID>` is what makes the
+	// cloud administrator / bootstrap identity / account administrator reach a
+	// Condition at all. Emitted in the SAME worker-tx as the row (ban #10) and
+	// retracted on Delete. nil → no pointer is emitted.
+	hierarchy RelationOutboxEmitter
 	// relations — FGA relation-Check port authorizing every read/write against
-	// the condition's owning project (folder) scope. nil → fail-closed (every
+	// the condition's owning project scope. nil → fail-closed (every
 	// non-cluster-admin read/write is denied), so an unwired composition root is
 	// safe by default. Wired via WithRelationStore.
 	relations authzguard.RelationChecker
@@ -88,13 +96,29 @@ func NewConditionsCRUDService(repo ConditionsRepoPort, ops operations.Repo, eval
 }
 
 // WithRelationStore wires the FGA relation-Check port used to authorize
-// ConditionsService reads and mutations against the owning project(folder)
-// scope. Conditions are project-scoped: read requires `viewer` and mutation
-// requires `editor` on `project:<folder_id>` (cluster-admin short-circuits both,
+// ConditionsService reads and mutations against the owning project scope.
+// Conditions are project-scoped: read requires `viewer` and mutation
+// requires `editor` on `project:<project_id>` (cluster-admin short-circuits both,
 // via authzguard). Composition-root only. Without it the service fails closed
 // (deny) — it never fails open. Returns the receiver for chaining.
 func (s *ConditionsCRUDService) WithRelationStore(relations authzguard.RelationChecker) *ConditionsCRUDService {
 	s.relations = relations
+	return s
+}
+
+// WithRelationOutbox wires the fga_outbox emitter that carries the condition's
+// structural pointer at its project, in the same worker-tx as the mutation.
+// Without it the `super_admin from project` cascade on `iam_condition` resolves
+// to nothing and no super-admin tier can reach a Condition. Composition-root
+// only. Returns the receiver for chaining.
+//
+// The pointer rides the worker-tx, so this emitter is only reached on the
+// tx path — i.e. it does nothing unless WithAuditEmitter is ALSO wired. The
+// composition root wires both; a caller that wires only this one gets an
+// emitter that is silently inert, which is why the regression test builds the
+// service the way the composition root does rather than in isolation.
+func (s *ConditionsCRUDService) WithRelationOutbox(emitter RelationOutboxEmitter) *ConditionsCRUDService {
+	s.hierarchy = emitter
 	return s
 }
 
@@ -119,7 +143,7 @@ func (s *ConditionsCRUDService) auditEnabled() bool {
 // Get — fetch single Condition.
 //
 // Authz (BOLA / defense-in-depth): the caller must hold `viewer` on the
-// condition's owning project(folder) scope OR be a cluster-admin. Otherwise —
+// condition's owning project scope OR be a cluster-admin. Otherwise —
 // including anonymous / unwired relation-store — NotFound (hide existence, no
 // enumeration leak; same posture as the sibling Project/Account Get).
 func (s *ConditionsCRUDService) Get(ctx context.Context, id domain.ConditionID) (domain.Condition, error) {
@@ -130,57 +154,73 @@ func (s *ConditionsCRUDService) Get(ctx context.Context, id domain.ConditionID) 
 	if err != nil {
 		return domain.Condition{}, err
 	}
-	if !s.canReadFolder(ctx, c.FolderID) {
+	if !s.canReadProject(ctx, c.ProjectID) {
 		return domain.Condition{}, iamerr.Wrapf(iamerr.ErrNotFound, "Condition %s not found", id)
 	}
 	return c, nil
 }
 
-// List — page over conditions in a folder.
+// List — page over conditions in a project.
 //
-// Authz (BOLA): anonymous → empty. An empty folder_id enumerates EVERY folder's
+// Authz (BOLA): anonymous → empty. An empty project_id enumerates EVERY project's
 // conditions and is a cluster-admin-only operation; a non-cluster-admin gets an
 // empty page (no cross-tenant enumeration). A scoped list requires `viewer` on
-// `project:<folder_id>`; an unauthorized caller gets an empty page (no existence
+// `project:<project_id>`; an unauthorized caller gets an empty page (no existence
 // leak, never PermissionDenied — mirrors Project/Account List).
 func (s *ConditionsCRUDService) List(ctx context.Context, filter condition.ListFilter) ([]domain.Condition, string, error) {
 	if authzguard.IsAnonymous(ctx) {
 		return nil, "", nil
 	}
-	if filter.FolderID == "" {
+	if filter.ProjectID == "" {
 		if !authzguard.IsClusterAdmin(ctx, s.relations) {
 			return nil, "", nil
 		}
-	} else if !s.canReadFolder(ctx, filter.FolderID) {
+	} else if !s.canReadProject(ctx, filter.ProjectID) {
 		return nil, "", nil
 	}
 	return s.repo.List(ctx, filter)
 }
 
-// canReadFolder reports whether the ctx principal may read conditions in the
-// project(folder) scope — cluster-admin OR `viewer` on `project:<folderID>`.
-// Fail-closed: nil relation-store / anonymous / empty folder / Check error →
+// canReadProject reports whether the ctx principal may read conditions in the
+// project scope — cluster-admin OR `viewer` on `project:<projectID>`.
+// Fail-closed: nil relation-store / anonymous / empty project / Check error →
 // false.
-func (s *ConditionsCRUDService) canReadFolder(ctx context.Context, folderID string) bool {
-	if folderID == "" {
+func (s *ConditionsCRUDService) canReadProject(ctx context.Context, projectID string) bool {
+	if projectID == "" {
 		return false
 	}
-	return authzguard.AllowsVerb(ctx, s.relations, "viewer", "project", folderID)
+	return authzguard.AllowsVerb(ctx, s.relations, "viewer", "project", projectID)
 }
 
-// requireFolderWrite gates a mutation on `editor` (⊇ admin) authority over the
-// project(folder) scope — cluster-admin short-circuits via authzguard. Returns
+// requireProjectWrite gates a mutation on `editor` (⊇ admin) authority over the
+// project scope — cluster-admin short-circuits via authzguard. Returns
 // PermissionDenied when unauthorized; fail-closed on a nil relation-store.
-func (s *ConditionsCRUDService) requireFolderWrite(ctx context.Context, folderID string) error {
-	if folderID != "" && authzguard.AllowsVerb(ctx, s.relations, "editor", "project", folderID) {
+func (s *ConditionsCRUDService) requireProjectWrite(ctx context.Context, projectID string) error {
+	if projectID != "" && authzguard.AllowsVerb(ctx, s.relations, "editor", "project", projectID) {
 		return nil
 	}
 	return authzguard.PermissionDenied()
 }
 
+// conditionHierarchyTuple — the condition's structural pointer at its project:
+//
+//	iam_condition:<id> # project @ project:<projectID>
+//
+// This is the triple `type iam_condition { define project: [project] }` accepts,
+// and the only thing that makes `define super_admin: super_admin from project`
+// resolve. Any other relation or object type is refused by the model, so the
+// shape is asserted verbatim by the regression test rather than approximated.
+func conditionHierarchyTuple(c domain.Condition) []RelationTuple {
+	return []RelationTuple{{
+		User:     "project:" + c.ProjectID,
+		Relation: "project",
+		Object:   "iam_condition:" + string(c.ID),
+	}}
+}
+
 // CreateRequest — input.
 type CreateConditionRequest struct {
-	FolderID         string
+	ProjectID        string
 	Name             string
 	Description      string
 	Labels           map[string]string
@@ -194,7 +234,7 @@ func (s *ConditionsCRUDService) Create(ctx context.Context, req CreateConditionR
 	// Sync validation.
 	c := domain.Condition{
 		ID:               domain.ConditionID(ids.NewID(domain.PrefixConditionResource)),
-		FolderID:         req.FolderID,
+		ProjectID:        req.ProjectID,
 		Name:             req.Name,
 		Description:      req.Description,
 		Labels:           req.Labels,
@@ -205,14 +245,14 @@ func (s *ConditionsCRUDService) Create(ctx context.Context, req CreateConditionR
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	// Authz: only a principal with `editor` on the target folder scope may add a
-	// condition to it (the folder gate is checked BEFORE any Operation is minted).
-	if err := s.requireFolderWrite(ctx, req.FolderID); err != nil {
+	// Authz: only a principal with `editor` on the target project scope may add a
+	// condition to it (the project gate is checked BEFORE any Operation is minted).
+	if err := s.requireProjectWrite(ctx, req.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
-		fmt.Sprintf("Create condition (%s in folder %s)", c.Name, c.FolderID),
+		fmt.Sprintf("Create condition (%s in project %s)", c.Name, c.ProjectID),
 		&iamv1.CreateConditionMetadata{ConditionId: string(c.ID)},
 	)
 	if err != nil {
@@ -246,7 +286,7 @@ func (s *ConditionsCRUDService) doCreate(ctx context.Context, c domain.Condition
 	}
 
 	// Audit-atomic path: Insert + flip-to-ACTIVE + audit row all commit in ONE
-	// tx (запрет #10). A rolled-back Insert (e.g. conditions_folder_name_uniq
+	// tx (запрет #10). A rolled-back Insert (e.g. conditions_project_name_uniq
 	// 23505) leaves neither the condition row nor an orphan audit row. Status
 	// flips to ACTIVE in the same tx — the row alone is usable for admin
 	// Evaluate; the full FGA model re-write is the bootstrap-job's job.
@@ -275,6 +315,14 @@ func (s *ConditionsCRUDService) doCreate(ctx context.Context, c domain.Condition
 	}); aerr != nil {
 		return nil, aerr
 	}
+	// The project pointer is co-committed with the row, as every sibling IAM
+	// resource does it (role/group/project Create). It is the hierarchy edge the
+	// super-admin cascade reads; it grants nothing by itself.
+	if s.hierarchy != nil {
+		if ferr := s.hierarchy.EmitWriteTx(ctx, tx, conditionHierarchyTuple(inserted)); ferr != nil {
+			return nil, ferr
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -301,8 +349,8 @@ func (s *ConditionsCRUDService) Update(ctx context.Context, req UpdateConditionR
 	// Validate mask vs known set.
 	patch := condition.UpdatePatch{}
 	maskSet := normaliseMask(req.UpdateMask)
-	if maskSet["name"] || maskSet["folder_id"] {
-		return nil, fmt.Errorf("Illegal argument update_mask: name and folder_id are immutable after Create")
+	if maskSet["name"] || maskSet["project_id"] {
+		return nil, fmt.Errorf("Illegal argument update_mask: name and project_id are immutable after Create")
 	}
 	for path := range maskSet {
 		switch path {
@@ -347,17 +395,17 @@ func (s *ConditionsCRUDService) Update(ctx context.Context, req UpdateConditionR
 		}
 	}
 
-	// Load current for authz (folder scope) and, when the caller didn't supply an
+	// Load current for authz (project scope) and, when the caller didn't supply an
 	// expected version, the read-then-CAS baseline. A missing condition surfaces
-	// as NotFound here — BEFORE the authz gate — so the gate never leaks folder
+	// as NotFound here — BEFORE the authz gate — so the gate never leaks project
 	// existence for a non-existent id.
 	cur, err := s.repo.Get(ctx, req.ID)
 	if err != nil {
 		return nil, err
 	}
 	// Authz: mutating a condition (which can flip an AccessBinding's predicate)
-	// requires `editor` on the owning folder scope.
-	if err := s.requireFolderWrite(ctx, cur.FolderID); err != nil {
+	// requires `editor` on the owning project scope.
+	if err := s.requireProjectWrite(ctx, cur.ProjectID); err != nil {
 		return nil, err
 	}
 	expected := req.ExpectedVersion
@@ -427,15 +475,15 @@ func (s *ConditionsCRUDService) Delete(ctx context.Context, id domain.ConditionI
 	if err := id.Validate(); err != nil {
 		return nil, err
 	}
-	// Load current for the authz folder scope. A missing condition is NotFound
-	// (before the authz gate) so the gate never leaks folder existence.
+	// Load current for the authz project scope. A missing condition is NotFound
+	// (before the authz gate) so the gate never leaks project existence.
 	cur, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	// Authz: deleting a condition (removing an AccessBinding's predicate)
-	// requires `editor` on the owning folder scope.
-	if err := s.requireFolderWrite(ctx, cur.FolderID); err != nil {
+	// requires `editor` on the owning project scope.
+	if err := s.requireProjectWrite(ctx, cur.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := operations.NewFromContext(ctx,
@@ -515,6 +563,15 @@ func (s *ConditionsCRUDService) doDelete(ctx context.Context, id domain.Conditio
 			actor, string(id), "", cur.Expression, nil),
 	}); aerr != nil {
 		return nil, aerr
+	}
+	// Retract exactly the pointer Create wrote, in the same tx as the hard-delete
+	// — a removed Condition must not leave a live hierarchy edge behind. The
+	// siblings do not yet do this for their own pointers; conditions do, because
+	// an orphan pointer keeps a deleted object reachable through the cascade.
+	if s.hierarchy != nil {
+		if ferr := s.hierarchy.EmitDeleteTx(ctx, tx, conditionHierarchyTuple(cur)); ferr != nil {
+			return nil, ferr
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -618,7 +675,7 @@ func marshalEmpty() (*anypb.Any, error) {
 func ConditionToProto(c domain.Condition) *iamv1.Condition {
 	pb := &iamv1.Condition{
 		Id:          string(c.ID),
-		FolderId:    c.FolderID,
+		ProjectId:   c.ProjectID,
 		Name:        c.Name,
 		Description: c.Description,
 		Labels:      c.Labels,

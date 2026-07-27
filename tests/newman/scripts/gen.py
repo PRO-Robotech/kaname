@@ -327,10 +327,17 @@ def save_from_response(jsonpath: str, env_var: str) -> List[str]:
 
 
 def assert_operation_envelope() -> List[str]:
+    """An async mutation returned an Operation envelope with an IAM operation id.
+
+    The prefix is `iop` (domain.PrefixOperationIAM). It used to read `epd` here —
+    the COMPUTE operation prefix, copied in with the generator — which this suite
+    can never produce, so every case using this helper failed on an assertion that
+    was wrong rather than on the behaviour it was written to pin.
+    """
     return [
         "pm.test('Operation envelope returned', () => {",
         "  const j = pm.response.json();",
-        "  pm.expect(j.id, 'operation.id').to.match(/^epd[a-z0-9]+$/);",
+        "  pm.expect(j.id, 'operation.id').to.match(/^iop[a-z0-9]+$/);",
         "  pm.expect(j.metadata, 'operation.metadata').to.be.an('object');",
         "});",
     ]

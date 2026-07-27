@@ -60,7 +60,7 @@ func TestConditionRefFK_DeleteReferencedCondition_Restricted(t *testing.T) {
 
 	condID := string(domain.ConditionID(ids.NewID(domain.PrefixConditionResource)))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO conditions (id, folder_id, name, expression, status)
+		INSERT INTO conditions (id, project_id, name, expression, status)
 		VALUES ($1, 'prj_crfk2', 'ref-cond', 'current_time < valid_until', 'ACTIVE')`,
 		condID)
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestConditionRefFK_ConcurrentAttachVsDelete_ExactlyOneWins(t *testing.T) {
 
 	condID := string(domain.ConditionID(ids.NewID(domain.PrefixConditionResource)))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO conditions (id, folder_id, name, expression, status)
+		INSERT INTO conditions (id, project_id, name, expression, status)
 		VALUES ($1, 'prj_crfk3', 'race-cond', 'current_time < valid_until', 'ACTIVE')`,
 		condID)
 	require.NoError(t, err)

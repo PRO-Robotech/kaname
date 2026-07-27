@@ -7,13 +7,13 @@
 // Conditions are project(folder)-scoped CEL policy expressions referenced by
 // AccessBindings. Before this hardening the ConditionsService performed NO
 // principal-based authorization: Get returned any condition by id, List with an
-// empty folder_id enumerated EVERY tenant's conditions, and Create/Update/Delete
+// empty project_id enumerated EVERY tenant's conditions, and Create/Update/Delete
 // let any authenticated principal tamper with a folder's conditions (which could
 // flip an AccessBinding's predicate). These tests pin the secure behaviour:
 //
 //   - Get: caller must hold `viewer` on the owning project scope (or be a
 //     cluster-admin); otherwise NotFound (hide existence, no enumeration leak).
-//   - List: anonymous → empty; a non-cluster-admin with an empty folder_id gets
+//   - List: anonymous → empty; a non-cluster-admin with an empty project_id gets
 //     an empty page (no cross-tenant enumeration); a scoped list requires
 //     `viewer` on that folder.
 //   - Create/Update/Delete: caller must hold `editor` on the owning project
@@ -72,7 +72,7 @@ func userCtx(id string) context.Context {
 func sampleCond(id, folder string) domain.Condition {
 	return domain.Condition{
 		ID:         domain.ConditionID(id),
-		FolderID:   folder,
+		ProjectID:  folder,
 		Name:       "n-" + id,
 		Expression: "non_expired",
 		Status:     domain.ConditionStatusActive,
@@ -141,7 +141,7 @@ func TestGetAuthz_ViewerOnOtherFolder_NotFound(t *testing.T) {
 
 // ── List ─────────────────────────────────────────────────────────────────────
 
-// RED: List with an empty folder_id returns every tenant's conditions. GREEN: a
+// RED: List with an empty project_id returns every tenant's conditions. GREEN: a
 // non-cluster-admin gets an empty page (no cross-tenant enumeration).
 func TestListAuthz_EmptyFolder_NonAdmin_NoEnumeration(t *testing.T) {
 	repo := repoWith(
@@ -150,11 +150,11 @@ func TestListAuthz_EmptyFolder_NonAdmin_NoEnumeration(t *testing.T) {
 	)
 	h := NewHandler(newSvc(repo, nil)) // no relations → not a cluster-admin
 
-	resp, err := h.List(userCtx("usr_scanner"), &iamv1.ListConditionsRequest{FolderId: ""})
+	resp, err := h.List(userCtx("usr_scanner"), &iamv1.ListConditionsRequest{ProjectId: ""})
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Empty(t, resp.GetConditions(), "empty folder_id must not enumerate across tenants")
+	assert.Empty(t, resp.GetConditions(), "empty project_id must not enumerate across tenants")
 }
 
 // A viewer on the requested folder lists that folder's conditions only.
@@ -166,11 +166,11 @@ func TestListAuthz_ScopedFolder_ViewerGranted(t *testing.T) {
 	checker := allowRel("viewer", "project:prj_a")
 	h := NewHandler(newSvc(repo, checker))
 
-	resp, err := h.List(userCtx("usr_a"), &iamv1.ListConditionsRequest{FolderId: "prj_a"})
+	resp, err := h.List(userCtx("usr_a"), &iamv1.ListConditionsRequest{ProjectId: "prj_a"})
 
 	require.NoError(t, err)
 	require.Len(t, resp.GetConditions(), 1)
-	assert.Equal(t, "prj_a", resp.GetConditions()[0].GetFolderId())
+	assert.Equal(t, "prj_a", resp.GetConditions()[0].GetProjectId())
 }
 
 // A caller with no grant on the requested folder gets an empty page (no leak).
@@ -178,7 +178,7 @@ func TestListAuthz_ScopedFolder_Unauthorized_Empty(t *testing.T) {
 	repo := repoWith(sampleCond("cnd000000000000scpC1", "prj_a"))
 	h := NewHandler(newSvc(repo, nil))
 
-	resp, err := h.List(userCtx("usr_x"), &iamv1.ListConditionsRequest{FolderId: "prj_a"})
+	resp, err := h.List(userCtx("usr_x"), &iamv1.ListConditionsRequest{ProjectId: "prj_a"})
 
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetConditions())
@@ -192,7 +192,7 @@ func TestCreateAuthz_Unauthorized_PermissionDenied(t *testing.T) {
 	h := NewHandler(newSvc(repoWith(), nil))
 
 	op, err := h.Create(userCtx("usr_intruder"), &iamv1.CreateConditionRequest{
-		FolderId:   "prj_victim",
+		ProjectId:  "prj_victim",
 		Name:       "evil",
 		Expression: "non_expired",
 	})
