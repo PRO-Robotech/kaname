@@ -210,6 +210,13 @@ else
   run_one "label-revoke-vpc"
   run_one "label-revoke-compute"
   run_one "label-revoke-nlb"
+  # label-revoke-storage — the OWNER-side analogue of label-revoke-compute. Block
+  # storage belongs to kacho-storage, but the label-revoke evidence existed only for
+  # the compute duplicate; retiring that duplicate would have retired the only proof
+  # with it. Same shape, storage FGA types (storage_volume / storage_snapshot /
+  # storage_image). It is currently RED on the revoke half — see docs/RESULTS.md
+  # "label-remove does not revoke on storage" — and is deliberately NOT whitelisted.
+  run_one "label-revoke-storage"
   # label-revoke-iam — the IAM-NATIVE analogue: a label clear via
   # ProjectService.Update(update_mask=labels, empty body) must CLEAR the labels
   # (not a silent no-op) and REVOKE the ARM_LABELS grant on iam.project (v_list
