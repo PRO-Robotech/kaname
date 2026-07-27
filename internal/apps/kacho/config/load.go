@@ -108,6 +108,12 @@ func applyLegacyEnv(v *viper.Viper) {
 		// Flat alias for the User-token redact grace window — mirror of the SA-key
 		// alias above. Value is a Go duration ("120s").
 		{"KACHO_IAM_USERTOKEN_REDACT_GRACE", "authn.usertoken-redact-grace"},
+		// SA-key lifetime discipline — flat aliases the deploy chart sets.
+		// Values are Go durations ("2160h" / "8760h" / "15m").
+		{"KACHO_IAM_SAKEY_DEFAULT_TTL", "authn.sakey-default-ttl"},
+		{"KACHO_IAM_SAKEY_MAX_TTL", "authn.sakey-max-ttl"},
+		{"KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL", "authn.sakey-access-token-ttl"},
+		{"KACHO_IAM_SAKEY_BIND_DPOP", "authn.sakey-bind-dpop"},
 		// ConditionsService evaluator cache — flat aliases for the documented env
 		// knobs (moved out of the service layer's os.Getenv into viper config).
 		{"KACHO_IAM_CONDITIONS_CACHE_SIZE", "conditions.cache-size"},

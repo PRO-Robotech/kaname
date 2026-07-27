@@ -9,7 +9,8 @@ package cluster
 // happy-path cases.
 //
 // Flow (synchronous within Execute):
-//  1. Sync validation: subject_type must be USER, subject_id format.
+//  1. Sync validation: subject_type (USER | SERVICE_ACCOUNT) + per-type
+//     subject_id format.
 //  2. Begin TX → Revoke (CAS with self-revoke / last-admin / already-revoked guards) →
 //     EmitDeleteTx (FGA outbox) → commit.
 //  3. Map sentinel errors (ErrSelfRevoke → FailedPrecondition,
@@ -91,19 +92,15 @@ func (uc *RevokeAdminUseCase) Execute(
 	if err := requireClusterSystemAdmin(ctx, uc.adminCheck); err != nil {
 		return nil, err
 	}
-	// D-2: only USER is supported in this version.
-	if subjectType != iamv1.ClusterGrantSubjectType_USER {
-		return nil, shared.InvalidArg("subject_type",
-			"only 'user' supported in this version")
+	// Subject: USER or SERVICE_ACCOUNT, with a per-type id-format check.
+	// A machine subject MUST be revocable — the platform seeds a permanent
+	// cluster-admin grant for the bootstrap-admin ServiceAccount (migration
+	// 0058), and refusing SERVICE_ACCOUNT here made that grant unrevocable
+	// through the interface (see resolveSubject).
+	styp, sid, err := resolveSubject(subjectType, subjectID)
+	if err != nil {
+		return nil, err
 	}
-	if subjectID == "" {
-		return nil, shared.InvalidArg("subject_id", "required")
-	}
-	if !subjectIDRe.MatchString(subjectID) {
-		return nil, shared.InvalidArg("subject_id",
-			fmt.Sprintf("must match ^usr[0-9a-hjkmnp-tv-z]{17}$ (got %q)", subjectID))
-	}
-	sid := domain.SubjectID(subjectID)
 
 	// Principal (for D-5 self-revoke guard). The authZ gate above already
 	// proved a non-empty authenticated principal — no anonymous→bootstrap
@@ -111,7 +108,7 @@ func (uc *RevokeAdminUseCase) Execute(
 	principal := authzguard.PrincipalUserID(ctx)
 
 	// Perform domain mutation synchronously.
-	grant, err := uc.doRevoke(ctx, sid, principal)
+	grant, err := uc.doRevoke(ctx, styp, sid, principal)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +124,7 @@ func (uc *RevokeAdminUseCase) Execute(
 
 	op, oerr := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
-		fmt.Sprintf("Revoke cluster admin from user %s", subjectID),
+		fmt.Sprintf("Revoke cluster admin from %s %s", styp, subjectID),
 		&iamv1.RevokeClusterAdminMetadata{
 			ClusterAdminGrantId: string(grant.ID),
 			SubjectId:           subjectID,
@@ -153,6 +150,7 @@ func (uc *RevokeAdminUseCase) Execute(
 // doRevoke — runs revoke (with D-5/D-6/D-12 guards) within a single TX.
 func (uc *RevokeAdminUseCase) doRevoke(
 	ctx context.Context,
+	subjectType domain.GrantSubjectType,
 	subject domain.SubjectID,
 	principalID string,
 ) (domain.ClusterAdminGrant, error) {
@@ -162,7 +160,7 @@ func (uc *RevokeAdminUseCase) doRevoke(
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
-	grant, rerr := uc.writer.Revoke(ctx, tx, subject, principalID)
+	grant, rerr := uc.writer.Revoke(ctx, tx, subjectType, subject, principalID)
 	if rerr != nil {
 		// Map sentinel errors to gRPC codes before shared.MapRepoErr, because
 		// ErrSelfRevoke and ErrLastAdmin are their own sentinels (not wrapped in
@@ -180,7 +178,7 @@ func (uc *RevokeAdminUseCase) doRevoke(
 	}
 
 	// Emit FGA delete-tuple outbox row in same TX (запрет #10 — atomicity).
-	if err := uc.relations.EmitDeleteTx(ctx, tx, systemAdminTuples(string(subject))); err != nil {
+	if err := uc.relations.EmitDeleteTx(ctx, tx, systemAdminTuples(subjectType, string(subject))); err != nil {
 		return domain.ClusterAdminGrant{}, fmt.Errorf("fga emit delete: %w", err)
 	}
 

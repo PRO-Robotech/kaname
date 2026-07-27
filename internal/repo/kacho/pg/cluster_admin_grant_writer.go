@@ -87,7 +87,7 @@ const revokeSerializeLockKey = "iam:cluster-admin-revoke:" + domain.ClusterSingl
 //	space, so naming it on ON CONFLICT is sufficient.
 func (w *ClusterAdminGrantWriter) Grant(
 	ctx context.Context, txh service.Tx,
-	subject domain.SubjectID, grantedBy string,
+	subjectType domain.GrantSubjectType, subject domain.SubjectID, grantedBy string,
 ) (domain.ClusterAdminGrant, bool, error) {
 	tx := txAsPgx(txh)
 
@@ -95,10 +95,10 @@ func (w *ClusterAdminGrantWriter) Grant(
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO kacho_iam.cluster_admin_grants
 		    (id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until)
-		VALUES ($1, $2, 'user', $3, $4, now(), NULL)
+		VALUES ($1, $2, $5, $3, $4, now(), NULL)
 		ON CONFLICT ON CONSTRAINT cluster_admin_grants_cluster_subject_uniq
 		DO NOTHING`,
-		id, domain.ClusterSingletonID, string(subject), grantedBy)
+		id, domain.ClusterSingletonID, string(subject), grantedBy, string(subjectType))
 	if err != nil {
 		return domain.ClusterAdminGrant{}, false, fmt.Errorf("cluster_admin_grants insert: %w", err)
 	}
@@ -106,7 +106,7 @@ func (w *ClusterAdminGrantWriter) Grant(
 	if tag.RowsAffected() == 1 {
 		// Fresh INSERT — read back the row we just wrote (in same tx) so the
 		// caller sees the server-set granted_at.
-		existing, gerr := getCAGBySubjectTx(ctx, tx, subject)
+		existing, gerr := getCAGBySubjectTx(ctx, tx, subjectType, subject)
 		if gerr != nil {
 			return domain.ClusterAdminGrant{}, false, fmt.Errorf("cluster_admin_grants read-after-insert: %w", gerr)
 		}
@@ -115,7 +115,7 @@ func (w *ClusterAdminGrantWriter) Grant(
 
 	// Conflict — fetch the row that already existed (active OR revoked
 	// history; caller interprets).
-	existing, gerr := getCAGBySubjectTx(ctx, tx, subject)
+	existing, gerr := getCAGBySubjectTx(ctx, tx, subjectType, subject)
 	if gerr != nil {
 		return domain.ClusterAdminGrant{}, false, fmt.Errorf("cluster_admin_grants read-existing: %w", gerr)
 	}
@@ -138,20 +138,19 @@ func (w *ClusterAdminGrantWriter) Grant(
 // DISTINCT admin (write-skew — see revokeSerializeLockKey). The lock
 // auto-releases at COMMIT/ROLLBACK.
 //
-// Reach of guard 2 since migration 0058: the count spans EVERY active grant,
-// including the permanent one the migration seeds for the bootstrap-admin
-// ServiceAccount, while this UPDATE only ever targets `subject_type='user'`
-// rows. So on a stock database the last USER admin IS revocable (count 2 > 1)
-// and ErrLastAdmin only fires once that seeded grant has been decommissioned.
-// That is intended: the invariant D-6 defends is "the cluster never reaches
-// zero admins / locks itself out", and the bootstrap SA is exactly the
-// non-interactive recovery principal that keeps it administrable. The guard
-// stays as the fail-safe for a cluster whose bootstrap SA is gone — do not
-// "fix" it by narrowing the count to user rows, which would re-introduce a
-// refusal that protects nothing.
+// Reach of guard 2: the count spans EVERY active grant regardless of
+// subject_type — including the permanent one migration 0058 seeds for the
+// bootstrap-admin ServiceAccount — and the UPDATE now targets the caller-
+// supplied `subject_type` (user OR service_account), so a machine grant is
+// revocable through the same guarded path as a human one. The invariant D-6
+// defends is "the cluster never reaches zero admins / locks itself out": with
+// a human admin and the bootstrap SA both active, either one is revocable
+// (count 2 > 1) and the SECOND revoke is refused, whichever order they are
+// attempted in. Do not narrow the count to one subject_type — that would let
+// the cluster be emptied of admins from the other type.
 func (w *ClusterAdminGrantWriter) Revoke(
 	ctx context.Context, txh service.Tx,
-	subject domain.SubjectID, principalID string,
+	subjectType domain.GrantSubjectType, subject domain.SubjectID, principalID string,
 ) (domain.ClusterAdminGrant, error) {
 	tx := txAsPgx(txh)
 
@@ -165,7 +164,7 @@ func (w *ClusterAdminGrantWriter) Revoke(
 	const q = `
 		UPDATE kacho_iam.cluster_admin_grants
 		   SET granted_until = now()
-		 WHERE subject_type = 'user'
+		 WHERE subject_type = $3
 		   AND subject_id   = $1
 		   AND granted_until IS NULL
 		   AND subject_id  != $2  -- D-5 self-revoke guard
@@ -173,7 +172,7 @@ func (w *ClusterAdminGrantWriter) Revoke(
 		          FROM kacho_iam.cluster_admin_grants
 		         WHERE granted_until IS NULL) > 1  -- D-6 last-admin guard
 		RETURNING id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until`
-	row := tx.QueryRow(ctx, q, string(subject), principalID)
+	row := tx.QueryRow(ctx, q, string(subject), principalID, string(subjectType))
 	out, err := scanCAG(row)
 	if err == nil {
 		return out, nil
@@ -185,7 +184,7 @@ func (w *ClusterAdminGrantWriter) Revoke(
 
 	// 0 rows updated — diagnose which guard fired (in same tx to see the
 	// authoritative state).
-	return domain.ClusterAdminGrant{}, diagnoseRevokeMiss(ctx, tx, subject, principalID)
+	return domain.ClusterAdminGrant{}, diagnoseRevokeMiss(ctx, tx, subjectType, subject, principalID)
 }
 
 // diagnoseRevokeMiss — runs the same checks as the CAS WHERE clause, in
@@ -198,7 +197,7 @@ func (w *ClusterAdminGrantWriter) Revoke(
 // Order matters: a caller revoking SELF when they are the last admin should
 // see "cannot revoke own cluster admin grant" (the self-protection message
 // is more actionable than the last-admin message).
-func diagnoseRevokeMiss(ctx context.Context, tx pgx.Tx, subject domain.SubjectID, principalID string) error {
+func diagnoseRevokeMiss(ctx context.Context, tx pgx.Tx, subjectType domain.GrantSubjectType, subject domain.SubjectID, principalID string) error {
 	// 1. self-revoke?
 	if string(subject) == principalID {
 		return iamerr.Wrapf(iamerr.ErrSelfRevoke, "cannot revoke own cluster admin grant")
@@ -208,12 +207,13 @@ func diagnoseRevokeMiss(ctx context.Context, tx pgx.Tx, subject domain.SubjectID
 	var n int
 	if err := tx.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
-		   WHERE subject_type = 'user' AND subject_id = $1 AND granted_until IS NULL`,
-		string(subject)).Scan(&n); err != nil {
+		   WHERE subject_type = $2 AND subject_id = $1 AND granted_until IS NULL`,
+		string(subject), string(subjectType)).Scan(&n); err != nil {
 		return fmt.Errorf("cluster_admin_grants diag-active: %w", err)
 	}
 	if n == 0 {
-		return iamerr.Wrapf(iamerr.ErrNotFound, "User %s is not an active cluster admin", subject)
+		return iamerr.Wrapf(iamerr.ErrNotFound, "%s %s is not an active cluster admin",
+			subjectDisplayName(subjectType), subject)
 	}
 
 	// 3. Active row exists but count overall is 1 ⇒ last-admin.
@@ -241,13 +241,13 @@ func diagnoseRevokeMiss(ctx context.Context, tx pgx.Tx, subject domain.SubjectID
 // active row; after a Grant idempotent-conflict with revoked history, reads
 // the revoked row (caller sees !IsActive). LIMIT 1 + ORDER BY granted_at DESC
 // gives deterministic single-row result.
-func getCAGBySubjectTx(ctx context.Context, tx pgx.Tx, subject domain.SubjectID) (domain.ClusterAdminGrant, error) {
+func getCAGBySubjectTx(ctx context.Context, tx pgx.Tx, subjectType domain.GrantSubjectType, subject domain.SubjectID) (domain.ClusterAdminGrant, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until
 		  FROM kacho_iam.cluster_admin_grants
-		 WHERE subject_type = 'user' AND subject_id = $1
+		 WHERE subject_type = $2 AND subject_id = $1
 		 ORDER BY (granted_until IS NULL) DESC, granted_at DESC
-		 LIMIT 1`, string(subject))
+		 LIMIT 1`, string(subject), string(subjectType))
 	return scanCAG(row)
 }
 
@@ -267,7 +267,7 @@ func getCAGBySubjectTx(ctx context.Context, tx pgx.Tx, subject domain.SubjectID)
 // `created=false` (idempotent).
 func (w *ClusterAdminGrantWriter) Reactivate(
 	ctx context.Context, txh service.Tx,
-	subject domain.SubjectID, grantedBy string,
+	subjectType domain.GrantSubjectType, subject domain.SubjectID, grantedBy string,
 ) (domain.ClusterAdminGrant, error) {
 	tx := txAsPgx(txh)
 	const q = `
@@ -275,11 +275,11 @@ func (w *ClusterAdminGrantWriter) Reactivate(
 		   SET granted_until = NULL,
 		       granted_by    = $2,
 		       granted_at    = now()
-		 WHERE subject_type = 'user'
+		 WHERE subject_type = $3
 		   AND subject_id   = $1
 		   AND granted_until IS NOT NULL   -- CAS: only revoked rows
 		RETURNING id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until`
-	row := tx.QueryRow(ctx, q, string(subject), grantedBy)
+	row := tx.QueryRow(ctx, q, string(subject), grantedBy, string(subjectType))
 	out, err := scanCAG(row)
 	if err == nil {
 		return out, nil
@@ -288,7 +288,7 @@ func (w *ClusterAdminGrantWriter) Reactivate(
 		return domain.ClusterAdminGrant{}, fmt.Errorf("cluster_admin_grants reactivate: %w", err)
 	}
 	// 0 rows — concurrent winner already reactivated; read back the active row.
-	existing, gerr := getCAGBySubjectTx(ctx, tx, subject)
+	existing, gerr := getCAGBySubjectTx(ctx, tx, subjectType, subject)
 	if gerr != nil {
 		return domain.ClusterAdminGrant{}, fmt.Errorf("cluster_admin_grants reactivate read-back: %w", gerr)
 	}
@@ -296,3 +296,14 @@ func (w *ClusterAdminGrantWriter) Reactivate(
 }
 
 // (scanCAG lives in iam_core_repos.go and is shared between repos.)
+
+// subjectDisplayName renders the subject type for the NOT_FOUND message tone
+// ("<Resource> <id> not found" family, api-conventions.md). The stored value is
+// a snake_case token; the message says "User"/"ServiceAccount" so the text
+// stays in the established contract tone for both subject types.
+func subjectDisplayName(t domain.GrantSubjectType) string {
+	if t == domain.GrantSubjectTypeServiceAccount {
+		return "ServiceAccount"
+	}
+	return "User"
+}

@@ -67,6 +67,19 @@ type HydraOAuthClient struct {
 	// e.g. "15m0s"). Empty → Hydra's global default. Set for the bootstrap client
 	// so its minted tokens are deliberately short-lived (#58, IBT-09).
 	AccessTokenLifespan string `json:"access_token_lifespan,omitempty"`
+	// DPoPBoundAccessTokens — RFC 9449 §5.2 client-registration metadata. True →
+	// tokens minted for this client are sender-constrained: they carry a `cnf.jkt`
+	// and are usable only by the holder of the matching key.
+	//
+	// Sender-constraining is per-client metadata, not a global switch (the global
+	// `oauth2.dpop` config block does not exist in the pinned provider version),
+	// so it MUST be requested here at registration. Omitted when false — an
+	// existing client registration is untouched.
+	DPoPBoundAccessTokens bool `json:"dpop_bound_access_tokens,omitempty"`
+	// TLSClientCertificateBoundAccessTokens — RFC 8705 §3.4 counterpart: binds
+	// minted tokens to the client's TLS certificate (`cnf.x5t#S256`). Reserved
+	// for mTLS-authenticating clients; kacho-iam SA keys use DPoP.
+	TLSClientCertificateBoundAccessTokens bool `json:"tls_client_certificate_bound_access_tokens,omitempty"`
 }
 
 // CreateOAuthClientRequest — input for HydraAdminClient.CreateOAuthClient.
@@ -102,6 +115,11 @@ type CreateOAuthClientRequest struct {
 	// AccessTokenLifespan — per-client access-token lifetime (Go duration string).
 	// Empty → Hydra's global default.
 	AccessTokenLifespan string
+	// DPoPBoundAccessTokens — request sender-constrained (RFC 9449) tokens for
+	// this client. See the field of the same name on HydraOAuthClient.
+	DPoPBoundAccessTokens bool
+	// TLSClientCertificateBoundAccessTokens — RFC 8705 mTLS-bound tokens.
+	TLSClientCertificateBoundAccessTokens bool
 }
 
 // CreateOAuthClient registers a new client_credentials OAuth2 client with
@@ -133,6 +151,9 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 		TokenEndpointAuthSigningAlg: req.TokenEndpointAuthSigningAlg,
 		JWKS:                        req.JWKS,
 		AccessTokenLifespan:         req.AccessTokenLifespan,
+
+		DPoPBoundAccessTokens:                 req.DPoPBoundAccessTokens,
+		TLSClientCertificateBoundAccessTokens: req.TLSClientCertificateBoundAccessTokens,
 	}
 	// #nosec G117 -- client_secret is a legitimate field of the Hydra OAuth2 client-registration payload, not a leaked credential.
 	body, err := json.Marshal(payload)

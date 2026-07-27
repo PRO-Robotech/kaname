@@ -141,6 +141,24 @@ type PostgresConfig struct {
 //	UserTokenRedactGrace  — то же для UserTokenService.Issue (персональные токены
 //	                        пользователя). Default 120s; override
 //	                        KACHO_IAM_USERTOKEN_REDACT_GRACE.
+//	SAKeyDefaultTTL       — срок жизни SA-ключа, когда вызывающий не передал
+//	                        ttl_seconds. Машинный принципал освобождён от
+//	                        усиленного входа (у машины нет второго фактора) —
+//	                        это защитимо лишь пока сам ключ ограничен по времени,
+//	                        поэтому умолчание конечно, а не «никогда».
+//	                        Default 2160h (90d); override KACHO_IAM_SAKEY_DEFAULT_TTL.
+//	SAKeyMaxTTL           — включительный потолок ttl_seconds. Запрос сверх него
+//	                        отвергается InvalidArgument ДО регистрации клиента.
+//	                        Default 8760h (365d); override KACHO_IAM_SAKEY_MAX_TTL.
+//	SAKeyBindDPoP         — регистрировать OAuth2-клиент SA-ключа так, чтобы
+//	                        провайдер выпускал ТОЛЬКО sender-constrained токены
+//	                        (RFC 9449 `cnf.jkt`). Половина «выпуска» контроля
+//	                        привязки; половина «проверки» живёт на api-gateway.
+//	                        Default false; override KACHO_IAM_SAKEY_BIND_DPOP.
+//	SAKeyAccessTokenTTL   — per-client access_token_lifespan, проставляемый на
+//	                        OAuth2-клиенте SA-ключа. 0 → поле не отправляется и
+//	                        действует глобальный дефолт провайдера. Задаётся
+//	                        профилем деплоя; override KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
 	Mode                     Mode          `mapstructure:"mode"`
 	Domain                   string        `mapstructure:"domain"`
@@ -156,6 +174,10 @@ type AuthNConfig struct {
 	HooksHTTPEndpoint        string        `mapstructure:"hooks-http-endpoint"`
 	SAKeyRedactGrace         time.Duration `mapstructure:"sakey-redact-grace"`
 	UserTokenRedactGrace     time.Duration `mapstructure:"usertoken-redact-grace"`
+	SAKeyDefaultTTL          time.Duration `mapstructure:"sakey-default-ttl"`
+	SAKeyMaxTTL              time.Duration `mapstructure:"sakey-max-ttl"`
+	SAKeyAccessTokenTTL      time.Duration `mapstructure:"sakey-access-token-ttl"`
+	SAKeyBindDPoP            bool          `mapstructure:"sakey-bind-dpop"`
 	// BootstrapMint — caller gate + key source for
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`

@@ -139,6 +139,32 @@ type IssueSAKeyUseCase struct {
 	DefaultScope string
 	// AudiencePrefix — appended with `/<svaID>` as Hydra audience.
 	AudiencePrefix string
+	// MaxTTL — inclusive ceiling on `ttl_seconds`. A request above it is
+	// refused with InvalidArgument before any Hydra client is registered.
+	// Zero → no ceiling (degraded/legacy wiring); the composition root sets it
+	// from config so the machine credential cannot outlive policy.
+	MaxTTL time.Duration
+	// DefaultTTL — lifetime applied when the caller omits `ttl_seconds`.
+	// Zero → the legacy non-expiring behaviour is kept (so an un-migrated
+	// deployment is unchanged until the knob is wired). A non-zero value is
+	// what turns "0 means never expires" into "0 means the policy default".
+	DefaultTTL time.Duration
+	// BindDPoP — register the key's OAuth2 client so the provider mints
+	// SENDER-CONSTRAINED access tokens (RFC 9449 `cnf.jkt`) instead of plain
+	// bearers. Binding is per-client registration metadata, so it must be
+	// requested at issue time; a key registered before this was enabled keeps
+	// minting unbound tokens until it is rotated.
+	//
+	// Default false. This is the issuance half of the control whose enforcement
+	// half lives at the edge (api-gateway
+	// KACHO_API_GATEWAY_AUTHN_REQUIRE_MACHINE_TOKEN_BINDING) — enforcement
+	// without issuance can only reject, so issuance is enabled first.
+	BindDPoP bool
+	// AccessTokenLifespan — per-client `access_token_lifespan` stamped on the
+	// Hydra OAuth2 client registered for this key, so tokens minted from a
+	// machine credential do not silently inherit the provider-global default.
+	// Zero → field omitted (provider default applies).
+	AccessTokenLifespan time.Duration
 	// RegistryAudience — the configured registry service audience (the same
 	// value the `/iam/token` Docker-Registry shim requests from Hydra during the
 	// client_credentials exchange, sourced from
@@ -259,6 +285,14 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	}
 	if in.TTLSeconds < 0 {
 		return nil, status.Error(codes.InvalidArgument, "ttl_seconds must be >= 0")
+	}
+	// Ceiling. A machine credential is exempt from interactive re-authentication
+	// (a machine has no second factor), which is only defensible while the
+	// credential is bounded in time — so the bound is enforced here, not left to
+	// the caller's discretion. Inclusive: exactly MaxTTL is allowed.
+	if u.MaxTTL > 0 && time.Duration(in.TTLSeconds)*time.Second > u.MaxTTL {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"ttl_seconds must be <= %d (%s)", int64(u.MaxTTL.Seconds()), u.MaxTTL)
 	}
 	if len(in.Description) > 256 {
 		return nil, status.Error(codes.InvalidArgument, "description too long (max 256)")
@@ -525,6 +559,14 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		JWKS:                        &clients.JWKS{Keys: []clients.JWK{key.JWK}},
 	}
 	hydraReq.Audience = u.resolveAudience(in)
+	// Pin the per-client access-token lifetime. Without it every token minted
+	// from a machine credential inherits the provider-global default, which is
+	// set by whatever the identity provider happens to ship with.
+	hydraReq.AccessTokenLifespan = u.accessTokenLifespan()
+	// Ask for sender-constrained tokens. Without this the minted token is an
+	// ordinary bearer: whoever holds the bytes can replay it, and the asymmetric
+	// key that authenticated the client is irrelevant to that replay.
+	hydraReq.DPoPBoundAccessTokens = u.BindDPoP
 	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
 	if err != nil {
 		return nil, u.hydraUnavailable(ctx, "create-client", err)
@@ -542,9 +584,8 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		Name:            domain.OAuthClientName(in.Name),
 		Labels:          in.Labels,
 	}
-	if in.TTLSeconds > 0 {
-		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
-		row.ExpiresAt = &t
+	if exp := u.resolveExpiry(in); exp != nil {
+		row.ExpiresAt = exp
 	}
 	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, key.Algorithm)
 	if err != nil {
@@ -648,6 +689,14 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		JWKS: nil,
 	}
 	hydraReq.Audience = u.resolveAudience(in)
+	// Pin the per-client access-token lifetime. Without it every token minted
+	// from a machine credential inherits the provider-global default, which is
+	// set by whatever the identity provider happens to ship with.
+	hydraReq.AccessTokenLifespan = u.accessTokenLifespan()
+	// Ask for sender-constrained tokens. Without this the minted token is an
+	// ordinary bearer: whoever holds the bytes can replay it, and the asymmetric
+	// key that authenticated the client is irrelevant to that replay.
+	hydraReq.DPoPBoundAccessTokens = u.BindDPoP
 	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
 	if err != nil {
 		return nil, u.hydraUnavailable(ctx, "create-client", err)
@@ -677,9 +726,8 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		Name:            domain.OAuthClientName(in.Name),
 		Labels:          in.Labels,
 	}
-	if in.TTLSeconds > 0 {
-		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
-		row.ExpiresAt = &t
+	if exp := u.resolveExpiry(in); exp != nil {
+		row.ExpiresAt = exp
 	}
 	// Federated rows carry no kacho-held key material — key_algorithm is "".
 	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, "")
@@ -736,13 +784,48 @@ func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInp
 	return nil
 }
 
-// trustGrantExpiry — the trust-grant lifetime: the SA-key's expiry when set,
-// otherwise a long-lived default (the federation binding lives as long as the key).
+// trustGrantExpiry — the trust-grant lifetime tracks the SA-key's own expiry:
+// the federation binding must not outlive the credential it backs.
+//
+// The fallback used to be TEN YEARS, reached by the *default* call shape (no
+// ttl_seconds). It is now the configured DefaultTTL; only when no default is
+// configured either does the long-lived fallback remain, and then it matches
+// the key, which is likewise non-expiring in that degraded wiring.
 func (u *IssueSAKeyUseCase) trustGrantExpiry(in IssueInput) time.Time {
-	if in.TTLSeconds > 0 {
-		return u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+	if exp := u.resolveExpiry(in); exp != nil {
+		return *exp
 	}
 	return u.now().Add(10 * 365 * 24 * time.Hour)
+}
+
+// resolveExpiry returns the absolute expiry for the key being issued, or nil
+// when the key is non-expiring.
+//
+// Precedence: an explicit `ttl_seconds` wins; otherwise the configured
+// DefaultTTL applies. nil is returned ONLY when the caller omitted the TTL and
+// no default is configured — the legacy behaviour, preserved so wiring the knob
+// is what changes behaviour rather than this refactor.
+func (u *IssueSAKeyUseCase) resolveExpiry(in IssueInput) *time.Time {
+	var d time.Duration
+	switch {
+	case in.TTLSeconds > 0:
+		d = time.Duration(in.TTLSeconds) * time.Second
+	case u.DefaultTTL > 0:
+		d = u.DefaultTTL
+	default:
+		return nil
+	}
+	t := u.now().Add(d)
+	return &t
+}
+
+// accessTokenLifespan renders the per-client `access_token_lifespan` for the
+// Hydra registration. Empty string → field omitted → provider default.
+func (u *IssueSAKeyUseCase) accessTokenLifespan() string {
+	if u.AccessTokenLifespan <= 0 {
+		return ""
+	}
+	return u.AccessTokenLifespan.String()
 }
 
 // commitMapping persists the SA-OAuth-client mapping row in a fresh tx and

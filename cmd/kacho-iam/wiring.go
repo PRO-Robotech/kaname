@@ -594,6 +594,20 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// (docker-login / CI / UI) должен успеть прочитать ключ из op.response до его
 	// вычистки. Без окна затирание выигрывало гонку и клиент получал "<redacted>".
 	issueUC.WithRedactGrace(cfg.AuthN.SAKeyRedactGrace)
+	// Lifetime discipline for the machine credential. A service-account key is
+	// what a machine authenticates with, and machine principals are exempt from
+	// step-up (a machine has no second factor) — that exemption holds only while
+	// the credential itself is time-bounded. DefaultTTL replaces the old
+	// "ttl_seconds omitted ⇒ never expires"; MaxTTL is the inclusive ceiling;
+	// AccessTokenLifespan pins the per-client token TTL so minted tokens do not
+	// inherit whatever the identity provider defaults to.
+	issueUC.DefaultTTL = cfg.AuthN.SAKeyDefaultTTL
+	issueUC.MaxTTL = cfg.AuthN.SAKeyMaxTTL
+	issueUC.AccessTokenLifespan = cfg.AuthN.SAKeyAccessTokenTTL
+	// Sender-constrained tokens for the machine credential. Issuance half of the
+	// binding control; the gateway enforces the other half. Must be enabled
+	// FIRST — enforcement without issuance can only reject.
+	issueUC.BindDPoP = cfg.AuthN.SAKeyBindDPoP
 	// Surface redaction failures (error / give-up / recovered panic) of the
 	// detached redaction goroutine — the only place a key can stay un-redacted.
 	issueUC.WithLogger(logger)

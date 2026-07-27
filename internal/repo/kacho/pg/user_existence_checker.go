@@ -51,3 +51,21 @@ func (c *UserExistenceChecker) ExistsUser(ctx context.Context, userID string) er
 	}
 	return fmt.Errorf("user existence check: %w", err)
 }
+
+// ExistsServiceAccount — the service_account half of the polymorphic guard:
+// returns nil if the ServiceAccount row exists, ErrInvalidArg-wrapped error if
+// not. Needed since cluster-admin grants are issuable to (and revocable from)
+// machine principals — the platform seeds exactly such a grant for the
+// bootstrap-admin ServiceAccount in migration 0058.
+func (c *UserExistenceChecker) ExistsServiceAccount(ctx context.Context, svaID string) error {
+	var x int
+	err := c.pool.QueryRow(ctx,
+		`SELECT 1 FROM kacho_iam.service_accounts WHERE id = $1 LIMIT 1`, svaID).Scan(&x)
+	if err == nil {
+		return nil
+	}
+	if err == pgx.ErrNoRows {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "ServiceAccount %s not found", svaID)
+	}
+	return fmt.Errorf("service account existence check: %w", err)
+}

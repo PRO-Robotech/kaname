@@ -76,6 +76,26 @@ func RegisterDefaults(v *viper.Viper) {
 	// поллит Operation.Get, чтобы его забрать. Grace-окно выдерживает это окно.
 	// Override — KACHO_IAM_USERTOKEN_REDACT_GRACE.
 	v.SetDefault("authn.usertoken-redact-grace", 120*time.Second)
+	// SA-key lifetime discipline. A service-account key IS the machine's
+	// credential, and machine principals are exempt from step-up (a machine has
+	// no second factor) — "exempt" is only defensible while the credential is
+	// bounded in time. So the omitted-ttl_seconds case resolves to a finite
+	// default instead of "never expires", and requests carry an inclusive
+	// ceiling. Overrides: KACHO_IAM_SAKEY_DEFAULT_TTL / KACHO_IAM_SAKEY_MAX_TTL.
+	v.SetDefault("authn.sakey-default-ttl", 90*24*time.Hour)
+	v.SetDefault("authn.sakey-max-ttl", 365*24*time.Hour)
+	// Per-client access_token_lifespan for the SA-key OAuth2 client. Default 0 =
+	// omit the field and inherit the provider-global TTL, so an existing
+	// deployment is unchanged until its profile pins a value (values.prod.yaml
+	// does). Override: KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL.
+	v.SetDefault("authn.sakey-access-token-ttl", time.Duration(0))
+	// Sender-constrained (RFC 9449) tokens for SA keys. Binding is per-client
+	// REGISTRATION metadata, so it takes effect only for keys issued after it is
+	// enabled — pre-existing keys keep minting plain bearers until rotated.
+	// Default false; the edge enforcement knob must be turned on only AFTER this
+	// one, otherwise every existing service-account token is rejected.
+	// Override: KACHO_IAM_SAKEY_BIND_DPOP.
+	v.SetDefault("authn.sakey-bind-dpop", false)
 	// bootstrap-mint — the cluster-admin token mint (#58). The signing key lives
 	// in a k8s Secret, referenced BY ENV NAME here (never inlined in YAML). The
 	// caller allow-list defaults to EMPTY = nobody may mint: the mint has no

@@ -551,3 +551,164 @@ func TestCluster_6_12_GrantAdmin_UserNotInDB(t *testing.T) {
 
 // anypb is used via extractGrantMeta; keep the import alive.
 var _ = (*anypb.Any)(nil)
+
+// ── machine-subject grants: visible AND revocable ───────────────────────────
+
+// TestCluster_6_20_RevokeAdmin_BootstrapServiceAccountGrant — the permanent
+// cluster-admin grant migration 0058 seeds for the bootstrap-admin
+// ServiceAccount must be revocable through the RPC.
+//
+// This is the observable proof for the whole machine-subject fix: it does not
+// construct the grant, it revokes the one the PLATFORM issues. Before the fix
+// the use-case answered InvalidArgument ("only 'user' supported") and, even had
+// it not, every write statement was pinned to `subject_type='user'` and would
+// have matched no row — granted authority that could not be taken back.
+func TestCluster_6_20_RevokeAdmin_BootstrapServiceAccountGrant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// The migration-seeded machine admin, and a human admin so the last-admin
+	// guard (count > 1) is satisfied and cannot mask the result.
+	sva := bootstrapSeedSubject(t, ctx, pool)
+	caller := mustSeedUser(t, ctx, pool, "revoker")
+	seedClusterAdmin(t, ctx, pool, caller)
+
+	h := buildHandler(t, dsn)
+	pctx := withPrincipal(ctx, string(caller))
+
+	// Precondition: the machine grant is VISIBLE on the admin list.
+	before, err := h.ListAdmins(pctx, &iamv1.ListClusterAdminsRequest{})
+	require.NoError(t, err)
+	require.True(t, containsAdminSubject(before.GetAdmins(), sva),
+		"the seeded bootstrap-SA grant must be visible before revoke")
+
+	// Revoke it.
+	op, err := h.RevokeAdmin(pctx, &iamv1.RevokeClusterAdminRequest{
+		SubjectType: iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT,
+		SubjectId:   sva,
+	})
+	require.NoError(t, err,
+		"the machine cluster-admin grant the platform seeds must be revocable")
+	require.True(t, op.GetDone())
+
+	// The row is actually revoked (not merely reported as such).
+	var active int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_id = $1 AND granted_until IS NULL`, sva).Scan(&active))
+	require.Zero(t, active, "the seeded machine grant must no longer be active")
+
+	// It disappears from the admin list.
+	after, err := h.ListAdmins(pctx, &iamv1.ListClusterAdminsRequest{})
+	require.NoError(t, err)
+	require.False(t, containsAdminSubject(after.GetAdmins(), sva),
+		"a revoked machine grant must not be listed as an active cluster admin")
+
+	// And the relation removal names the MACHINE subject — a `user:<sva…>`
+	// delete would remove a tuple that never existed, leaving the relation
+	// backend still granting cluster-admin while the DB says revoked.
+	var tuples int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox
+		  WHERE event_type = 'fga.tuple.delete'
+		    AND payload->>'user'     = $1
+		    AND payload->>'relation' = 'system_admin'
+		    AND payload->>'object'   = $2`,
+		"service_account:"+sva, "cluster:"+domain.ClusterSingletonID).Scan(&tuples))
+	require.Equal(t, 1, tuples,
+		"exactly one system_admin tuple removal must be queued for the machine subject")
+}
+
+// TestCluster_6_21_RevokeAdmin_HumanPathUnaffected — regression: widening the
+// accepted subject type must not disturb the human path. A user grant is still
+// revoked, and still removes a `user:<id>` tuple.
+func TestCluster_6_21_RevokeAdmin_HumanPathUnaffected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	caller := mustSeedUser(t, ctx, pool, "caller")
+	target := mustSeedUser(t, ctx, pool, "target")
+	seedClusterAdmin(t, ctx, pool, caller)
+	seedClusterAdmin(t, ctx, pool, target)
+
+	h := buildHandler(t, dsn)
+	pctx := withPrincipal(ctx, string(caller))
+
+	op, err := h.RevokeAdmin(pctx, &iamv1.RevokeClusterAdminRequest{
+		SubjectType: iamv1.ClusterGrantSubjectType_USER,
+		SubjectId:   string(target),
+	})
+	require.NoError(t, err)
+	require.True(t, op.GetDone())
+
+	var active int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_id = $1 AND granted_until IS NULL`, string(target)).Scan(&active))
+	require.Zero(t, active)
+
+	var tuples int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox
+		  WHERE event_type = 'fga.tuple.delete'
+		    AND payload->>'user'   = $1
+		    AND payload->>'object' = $2`,
+		"user:"+string(target), "cluster:"+domain.ClusterSingletonID).Scan(&tuples))
+	require.Equal(t, 1, tuples)
+}
+
+// TestCluster_6_22_RevokeAdmin_MachineGrant_NotReachableAsUser — the type is
+// part of the address, not decoration: asking to revoke the machine subject
+// under subject_type=USER must not silently hit the service_account row.
+func TestCluster_6_22_RevokeAdmin_MachineGrant_NotReachableAsUser(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	sva := bootstrapSeedSubject(t, ctx, pool)
+	caller := mustSeedUser(t, ctx, pool, "caller")
+	seedClusterAdmin(t, ctx, pool, caller)
+
+	h := buildHandler(t, dsn)
+	pctx := withPrincipal(ctx, string(caller))
+
+	_, err = h.RevokeAdmin(pctx, &iamv1.RevokeClusterAdminRequest{
+		SubjectType: iamv1.ClusterGrantSubjectType_USER,
+		SubjectId:   sva,
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err),
+		"an sva… id under subject_type=USER is malformed, not a shortcut to the machine row")
+
+	var active int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_id = $1 AND granted_until IS NULL`, sva).Scan(&active))
+	require.Equal(t, 1, active, "the machine grant must be untouched by the rejected call")
+}
+
+// containsAdminSubject reports whether the listed admins include subjectID.
+func containsAdminSubject(admins []*iamv1.ClusterAdminEntry, subjectID string) bool {
+	for _, a := range admins {
+		if a.GetSubjectId() == subjectID {
+			return true
+		}
+	}
+	return false
+}

@@ -208,7 +208,7 @@ func TestGrant_Idempotent(t *testing.T) {
 	// 1st Grant — fresh INSERT, created=true.
 	tx1, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	g1, created1, err := w.Grant(ctx, tx1, domain.SubjectID(target), string(caller))
+	g1, created1, err := w.Grant(ctx, tx1, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, err)
 	require.NoError(t, tx1.Commit(ctx))
 	require.True(t, created1, "first Grant must return created=true")
@@ -219,7 +219,7 @@ func TestGrant_Idempotent(t *testing.T) {
 	// 2nd Grant on same subject — no-op, created=false, same id returned.
 	tx2, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	g2, created2, err := w.Grant(ctx, tx2, domain.SubjectID(target), string(caller))
+	g2, created2, err := w.Grant(ctx, tx2, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, err)
 	require.NoError(t, tx2.Commit(ctx))
 	require.False(t, created2, "second Grant must return created=false (idempotent)")
@@ -265,7 +265,7 @@ func TestGrant_ConcurrentSameSubject(t *testing.T) {
 				errs <- ierr
 				return
 			}
-			g, created, ierr := w.Grant(ctx, tx, domain.SubjectID(target), string(caller))
+			g, created, ierr := w.Grant(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 			if ierr != nil {
 				_ = tx.Rollback(ctx)
 				errs <- ierr
@@ -341,7 +341,7 @@ func TestRevoke_LastAdmin_Sequential(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	_, rerr := w.Revoke(ctx, tx, domain.SubjectID(s1), string(caller))
+	_, rerr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(s1), string(caller))
 	_ = tx.Rollback(ctx)
 	require.Error(t, rerr)
 	require.True(t, stderrors.Is(rerr, iamerr.ErrLastAdmin),
@@ -394,7 +394,7 @@ func TestRevoke_LastUserAdmin_BootstrapSAKeepsClusterAdministrable(t *testing.T)
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	g, rerr := w.Revoke(ctx, tx, domain.SubjectID(only), string(caller))
+	g, rerr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(only), string(caller))
 	require.NoError(t, rerr,
 		"the last USER admin is revocable — the bootstrap-SA grant satisfies count>1")
 	require.NoError(t, tx.Commit(ctx))
@@ -451,7 +451,7 @@ func TestRevoke_ConcurrentLastAdmin(t *testing.T) {
 			out <- res{err: ierr}
 			return
 		}
-		g, ierr := w.Revoke(ctx, tx, domain.SubjectID(s2), string(s1))
+		g, ierr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(s2), string(s1))
 		if ierr != nil {
 			_ = tx.Rollback(ctx)
 		} else {
@@ -468,7 +468,7 @@ func TestRevoke_ConcurrentLastAdmin(t *testing.T) {
 			out <- res{err: ierr}
 			return
 		}
-		g, ierr := w.Revoke(ctx, tx, domain.SubjectID(s1), string(s2))
+		g, ierr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(s1), string(s2))
 		if ierr != nil {
 			_ = tx.Rollback(ctx)
 		} else {
@@ -571,7 +571,7 @@ func TestRevoke_ConcurrentLastAdmin_WriteSkew(t *testing.T) {
 			out <- res{err: ierr}
 			return
 		}
-		g, ierr := w.Revoke(ctx, tx, domain.SubjectID(subject), string(principal))
+		g, ierr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(subject), string(principal))
 		// Hold the tx open to widen the write-skew window (see `window`).
 		time.Sleep(window)
 		if ierr != nil {
@@ -641,7 +641,7 @@ func TestRevoke_Self(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	_, rerr := w.Revoke(ctx, tx, domain.SubjectID(s), string(s))
+	_, rerr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(s), string(s))
 	_ = tx.Rollback(ctx)
 
 	require.Error(t, rerr)
@@ -677,7 +677,7 @@ func TestRevoke_NotAdmin(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	_, rerr := w.Revoke(ctx, tx, domain.SubjectID(never), string(admin))
+	_, rerr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(never), string(admin))
 	_ = tx.Rollback(ctx)
 
 	require.Error(t, rerr)
@@ -710,7 +710,7 @@ func TestRevoke_AlreadyRevoked(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	_, rerr := w.Revoke(ctx, tx, domain.SubjectID(target), string(admin))
+	_, rerr := w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(admin))
 	_ = tx.Rollback(ctx)
 
 	require.Error(t, rerr)
@@ -771,7 +771,7 @@ func TestGrantRevoke_ConcurrentSameSubject(t *testing.T) {
 			out <- res{"grant", ierr}
 			return
 		}
-		_, _, ierr = w.Grant(ctx, tx, domain.SubjectID(u2), string(caller))
+		_, _, ierr = w.Grant(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(u2), string(caller))
 		if ierr != nil {
 			_ = tx.Rollback(ctx)
 		} else {
@@ -786,7 +786,7 @@ func TestGrantRevoke_ConcurrentSameSubject(t *testing.T) {
 			out <- res{"revoke", ierr}
 			return
 		}
-		_, ierr = w.Revoke(ctx, tx, domain.SubjectID(u2), string(caller))
+		_, ierr = w.Revoke(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(u2), string(caller))
 		if ierr != nil {
 			_ = tx.Rollback(ctx)
 		} else {
@@ -926,7 +926,7 @@ func TestGrant_OpenFGAOutage(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1. Insert cluster_admin_grants row via Writer.Grant.
-	_, created, err := w.Grant(ctx, tx, domain.SubjectID(target), string(caller))
+	_, created, err := w.Grant(ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, err)
 	require.True(t, created)
 
@@ -974,7 +974,7 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 	// — Step 1: Grant ————————————————————————————————
 	tx1, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	g1, created1, err := w.Grant(ctx, tx1, domain.SubjectID(target), string(caller))
+	g1, created1, err := w.Grant(ctx, tx1, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, err)
 	require.True(t, created1)
 	require.NoError(t, emit.EmitWriteTx(ctx, tx1, fgaTuplesGrantSystemAdmin(string(target))))
@@ -985,7 +985,7 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 	// — Step 2: Revoke ———————————————————————————————
 	tx2, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	g2, err := w.Revoke(ctx, tx2, domain.SubjectID(target), string(caller))
+	g2, err := w.Revoke(ctx, tx2, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, err)
 	require.NoError(t, emit.EmitDeleteTx(ctx, tx2, fgaTuplesGrantSystemAdmin(string(target))))
 	require.NoError(t, tx2.Commit(ctx))
@@ -1000,14 +1000,14 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 	tx3, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	// Grant returns created=false because the row already exists (UNIQUE conflict).
-	g3, created3, err := w.Grant(ctx, tx3, domain.SubjectID(target), string(caller))
+	g3, created3, err := w.Grant(ctx, tx3, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, err)
 	// The Grant path returns the existing (revoked) row: !IsActive → caller invokes Reactivate.
 	require.False(t, created3, "re-grant of previously-revoked subject must return created=false")
 	require.False(t, g3.IsActive(), "Grant on revoked row returns the revoked state pre-Reactivate")
 
 	// Caller calls Reactivate inside the same tx.
-	g3r, rerr := w.Reactivate(ctx, tx3, domain.SubjectID(target), string(caller))
+	g3r, rerr := w.Reactivate(ctx, tx3, domain.GrantSubjectTypeUser, domain.SubjectID(target), string(caller))
 	require.NoError(t, rerr)
 	require.True(t, g3r.IsActive(), "Reactivate must return active row")
 	require.Equal(t, g1.ID, g3r.ID, "Reactivate must update the existing row (same id)")

@@ -106,8 +106,9 @@ func (r *ClusterAdminGrantReader) ListActive(ctx context.Context) ([]domain.Clus
 // Returns iamerr.ErrNotFound (via Wrapf) when no row exists for the subject
 // at all.
 func (r *ClusterAdminGrantReader) GetBySubject(
-	ctx context.Context, txh service.Tx, subject domain.SubjectID,
+	ctx context.Context, txh service.Tx,
+	subjectType domain.GrantSubjectType, subject domain.SubjectID,
 ) (domain.ClusterAdminGrant, error) {
 	tx := txAsPgx(txh)
-	return getCAGBySubjectTx(ctx, tx, subject)
+	return getCAGBySubjectTx(ctx, tx, subjectType, subject)
 }

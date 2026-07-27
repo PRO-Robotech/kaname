@@ -6,8 +6,8 @@ package cluster
 // grant_admin.go — GrantAdminUseCase (InternalClusterService.GrantAdmin).
 //
 // Flow (synchronous within Execute):
-//  1. Sync validations: subject_type USER only, subject_id format,
-//     user exists in kacho_iam.users.
+//  1. Sync validations: subject_type (USER | SERVICE_ACCOUNT), per-type
+//     subject_id format, subject exists in kacho_iam.{users,service_accounts}.
 //  2. Persist Operation (done=false) so the returned id is always queryable.
 //  3. Begin TX → Grant → if !created && !active → Reactivate →
 //     EmitWriteTx (FGA outbox) → commit. On failure → MarkError the op.
@@ -103,26 +103,27 @@ func (uc *GrantAdminUseCase) Execute(
 	if err := requireClusterSystemAdmin(ctx, uc.adminCheck); err != nil {
 		return nil, err
 	}
-	// Only USER is supported in this version.
-	if subjectType != iamv1.ClusterGrantSubjectType_USER {
-		return nil, shared.InvalidArg("subject_type",
-			"only 'user' supported in this version")
+	// Subject: USER or SERVICE_ACCOUNT, with a per-type id-format check.
+	// Grant accepts the machine type for symmetry with Revoke: an asymmetric
+	// pair (grant one shape, revoke another) is precisely how an unrevocable
+	// grant is manufactured. See resolveSubject.
+	styp, sid, err := resolveSubject(subjectType, subjectID)
+	if err != nil {
+		return nil, err
 	}
-	// subject_id: required.
-	if subjectID == "" {
-		return nil, shared.InvalidArg("subject_id", "required")
-	}
-	// subject_id: format validation.
-	if !subjectIDRe.MatchString(subjectID) {
-		return nil, shared.InvalidArg("subject_id",
-			fmt.Sprintf("must match ^usr[0-9a-hjkmnp-tv-z]{17}$ (got %q)", subjectID))
-	}
-	sid := domain.SubjectID(subjectID)
 
-	// User must exist in kacho_iam.users.
+	// Subject must exist in this DB — per type, since subject_id is polymorphic
+	// and no FK can cover it.
 	if uc.userCheck != nil {
-		if err := uc.userCheck.ExistsUser(ctx, subjectID); err != nil {
-			return nil, shared.MapRepoErr(err)
+		var cerr error
+		switch styp {
+		case domain.GrantSubjectTypeServiceAccount:
+			cerr = uc.userCheck.ExistsServiceAccount(ctx, subjectID)
+		default:
+			cerr = uc.userCheck.ExistsUser(ctx, subjectID)
+		}
+		if cerr != nil {
+			return nil, shared.MapRepoErr(cerr)
 		}
 	}
 
@@ -143,7 +144,7 @@ func (uc *GrantAdminUseCase) Execute(
 	// full metadata (with grant.ID) is written on MarkDone.
 	op, oerr := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
-		fmt.Sprintf("Grant cluster admin to user %s", subjectID),
+		fmt.Sprintf("Grant cluster admin to %s %s", styp, subjectID),
 		&iamv1.GrantClusterAdminMetadata{SubjectId: subjectID},
 	)
 	if oerr != nil {
@@ -154,7 +155,7 @@ func (uc *GrantAdminUseCase) Execute(
 	}
 
 	// Perform domain mutation synchronously.
-	grant, err := uc.doGrant(ctx, sid, principal)
+	grant, err := uc.doGrant(ctx, styp, sid, principal)
 	if err != nil {
 		// Record the terminal failure on the already-persisted op so a poll sees a
 		// real error, not NotFound; still surface the gRPC error to the caller.
@@ -187,6 +188,7 @@ func (uc *GrantAdminUseCase) Execute(
 // doGrant — runs grant (and optional reactivate) within a single TX.
 func (uc *GrantAdminUseCase) doGrant(
 	ctx context.Context,
+	subjectType domain.GrantSubjectType,
 	subject domain.SubjectID,
 	grantedBy string,
 ) (domain.ClusterAdminGrant, error) {
@@ -196,7 +198,7 @@ func (uc *GrantAdminUseCase) doGrant(
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
-	grant, created, gerr := uc.writer.Grant(ctx, tx, subject, grantedBy)
+	grant, created, gerr := uc.writer.Grant(ctx, tx, subjectType, subject, grantedBy)
 	if gerr != nil {
 		return domain.ClusterAdminGrant{}, gerr
 	}
@@ -209,7 +211,7 @@ func (uc *GrantAdminUseCase) doGrant(
 	changed := created
 	if !created && !grant.IsActive() {
 		// Reactivate: revoked history row — update in-place.
-		grant, gerr = uc.writer.Reactivate(ctx, tx, subject, grantedBy)
+		grant, gerr = uc.writer.Reactivate(ctx, tx, subjectType, subject, grantedBy)
 		if gerr != nil {
 			return domain.ClusterAdminGrant{}, gerr
 		}
@@ -217,7 +219,7 @@ func (uc *GrantAdminUseCase) doGrant(
 	}
 
 	// Emit FGA outbox row (write in same TX for atomicity — запрет #10).
-	if err := uc.relations.EmitWriteTx(ctx, tx, systemAdminTuples(string(subject))); err != nil {
+	if err := uc.relations.EmitWriteTx(ctx, tx, systemAdminTuples(subjectType, string(subject))); err != nil {
 		return domain.ClusterAdminGrant{}, fmt.Errorf("fga emit write: %w", err)
 	}
 
@@ -239,15 +241,4 @@ func (uc *GrantAdminUseCase) doGrant(
 		return domain.ClusterAdminGrant{}, fmt.Errorf("commit: %w", err)
 	}
 	return grant, nil
-}
-
-// systemAdminTuples — FGA tuple shape for cluster system_admin grant.
-func systemAdminTuples(subjectID string) []service.RelationTuple {
-	return []service.RelationTuple{
-		{
-			User:     "user:" + subjectID,
-			Relation: "system_admin",
-			Object:   "cluster:" + domain.ClusterSingletonID,
-		},
-	}
 }
