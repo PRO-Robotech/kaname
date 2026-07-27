@@ -349,7 +349,13 @@
                   "  pm.expect(j.zones, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.zones.length, 'at least one seeded zone').to.be.greaterThan(0);",
                   "});",
-                  "if (j.zones && j.zones.length > 0) { pm.environment.set('_t31sZoneId', j.zones[0].id); }"
+                  "pm.test('the seeded zone names its region (placement coherence needs it)', () => {",
+                  "  pm.expect(j.zones[0].regionId, JSON.stringify(j.zones[0])).to.be.a('string').and.not.empty;",
+                  "});",
+                  "if (j.zones && j.zones.length > 0) {",
+                  "  pm.environment.set('_t31sZoneId', j.zones[0].id);",
+                  "  pm.environment.set('_t31sRegionId', j.zones[0].regionId);",
+                  "}"
                 ]
               }
             }
@@ -407,7 +413,10 @@
                   "  pm.expect(j.regions, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.regions.length, 'at least one seeded region').to.be.greaterThan(0);",
                   "});",
-                  "if (j.regions && j.regions.length > 0) { pm.environment.set('_t31sRegionId', j.regions[0].id); }"
+                  "pm.test('the zone-derived region is in the catalog', () => {",
+                  "  const want = pm.environment.get('_t31sRegionId');",
+                  "  pm.expect(j.regions.map(r => r.id), JSON.stringify(j)).to.include(want);",
+                  "});"
                 ]
               }
             }
@@ -472,7 +481,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-VOLUME-03 :: create-volume-volume-rya1",
+          "name": "T31-LBLREVOKE-STORAGE-VOLUME-03 :: create-volume-volume-rya37",
           "request": {
             "method": "POST",
             "header": [
@@ -1599,7 +1608,13 @@
                   "  pm.expect(j.zones, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.zones.length, 'at least one seeded zone').to.be.greaterThan(0);",
                   "});",
-                  "if (j.zones && j.zones.length > 0) { pm.environment.set('_t31sZoneId', j.zones[0].id); }"
+                  "pm.test('the seeded zone names its region (placement coherence needs it)', () => {",
+                  "  pm.expect(j.zones[0].regionId, JSON.stringify(j.zones[0])).to.be.a('string').and.not.empty;",
+                  "});",
+                  "if (j.zones && j.zones.length > 0) {",
+                  "  pm.environment.set('_t31sZoneId', j.zones[0].id);",
+                  "  pm.environment.set('_t31sRegionId', j.zones[0].regionId);",
+                  "}"
                 ]
               }
             }
@@ -1657,7 +1672,10 @@
                   "  pm.expect(j.regions, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.regions.length, 'at least one seeded region').to.be.greaterThan(0);",
                   "});",
-                  "if (j.regions && j.regions.length > 0) { pm.environment.set('_t31sRegionId', j.regions[0].id); }"
+                  "pm.test('the zone-derived region is in the catalog', () => {",
+                  "  const want = pm.environment.get('_t31sRegionId');",
+                  "  pm.expect(j.regions.map(r => r.id), JSON.stringify(j)).to.include(want);",
+                  "});"
                 ]
               }
             }
@@ -1722,7 +1740,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-volume-snapsrc-rya2",
+          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-volume-snapsrc-rya38",
           "request": {
             "method": "POST",
             "header": [
@@ -1872,7 +1890,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-snapshot-rya3",
+          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-snapshot-rya39",
           "request": {
             "method": "POST",
             "header": [
@@ -2999,7 +3017,13 @@
                   "  pm.expect(j.zones, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.zones.length, 'at least one seeded zone').to.be.greaterThan(0);",
                   "});",
-                  "if (j.zones && j.zones.length > 0) { pm.environment.set('_t31sZoneId', j.zones[0].id); }"
+                  "pm.test('the seeded zone names its region (placement coherence needs it)', () => {",
+                  "  pm.expect(j.zones[0].regionId, JSON.stringify(j.zones[0])).to.be.a('string').and.not.empty;",
+                  "});",
+                  "if (j.zones && j.zones.length > 0) {",
+                  "  pm.environment.set('_t31sZoneId', j.zones[0].id);",
+                  "  pm.environment.set('_t31sRegionId', j.zones[0].regionId);",
+                  "}"
                 ]
               }
             }
@@ -3057,7 +3081,10 @@
                   "  pm.expect(j.regions, JSON.stringify(j)).to.be.an('array');",
                   "  pm.expect(j.regions.length, 'at least one seeded region').to.be.greaterThan(0);",
                   "});",
-                  "if (j.regions && j.regions.length > 0) { pm.environment.set('_t31sRegionId', j.regions[0].id); }"
+                  "pm.test('the zone-derived region is in the catalog', () => {",
+                  "  const want = pm.environment.get('_t31sRegionId');",
+                  "  pm.expect(j.regions.map(r => r.id), JSON.stringify(j)).to.include(want);",
+                  "});"
                 ]
               }
             }
@@ -3122,7 +3149,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-volume-imgsrc-rya4",
+          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-volume-imgsrc-rya40",
           "request": {
             "method": "POST",
             "header": [
@@ -3272,7 +3299,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-image-rya5",
+          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-image-rya41",
           "request": {
             "method": "POST",
             "header": [

@@ -226,10 +226,17 @@ def bind_role_on_account(role_var, bind_op_var, subject_var, name_suffix):
 
 
 def discover_placement(suffix):
-    """GET the geo + storage catalogs (public reads) and stash a zone, a region and a
+    """GET the geo + storage catalogs (public reads) and stash a zone, its region and a
     disk type into suite-local vars. The iam env defines none of them; the migrations
     seed all three, so the first entry of each is a valid Create input. Idempotent —
-    only the first discovery in a run sets the values."""
+    only the first discovery in a run sets the values.
+
+    The region is taken from the CHOSEN ZONE's own regionId, not from the first entry
+    of the region list. The volume this suite creates lives in that zone and the image
+    it captures is regional, and the two must be placement-coherent — picking the two
+    independently made the fixture coherent only by the accident of both lists being
+    ordered the same way. It is also the only correct way to obtain a zone's region:
+    the owner of Geography reports it, it is never inferred from a name."""
     return [
         Step(name=f"discover-zone-{suffix}", method="GET", path="/geo/v1/zones",
              auth="jwtBootstrap",
@@ -240,7 +247,13 @@ def discover_placement(suffix):
                  "  pm.expect(j.zones, JSON.stringify(j)).to.be.an('array');",
                  "  pm.expect(j.zones.length, 'at least one seeded zone').to.be.greaterThan(0);",
                  "});",
-                 "if (j.zones && j.zones.length > 0) { pm.environment.set('_t31sZoneId', j.zones[0].id); }",
+                 "pm.test('the seeded zone names its region (placement coherence needs it)', () => {",
+                 "  pm.expect(j.zones[0].regionId, JSON.stringify(j.zones[0])).to.be.a('string').and.not.empty;",
+                 "});",
+                 "if (j.zones && j.zones.length > 0) {",
+                 "  pm.environment.set('_t31sZoneId', j.zones[0].id);",
+                 "  pm.environment.set('_t31sRegionId', j.zones[0].regionId);",
+                 "}",
              ]),
         Step(name=f"discover-region-{suffix}", method="GET", path="/geo/v1/regions",
              auth="jwtBootstrap",
@@ -251,7 +264,10 @@ def discover_placement(suffix):
                  "  pm.expect(j.regions, JSON.stringify(j)).to.be.an('array');",
                  "  pm.expect(j.regions.length, 'at least one seeded region').to.be.greaterThan(0);",
                  "});",
-                 "if (j.regions && j.regions.length > 0) { pm.environment.set('_t31sRegionId', j.regions[0].id); }",
+                 "pm.test('the zone-derived region is in the catalog', () => {",
+                 "  const want = pm.environment.get('_t31sRegionId');",
+                 "  pm.expect(j.regions.map(r => r.id), JSON.stringify(j)).to.include(want);",
+                 "});",
              ]),
         Step(name=f"discover-disktype-{suffix}", method="GET", path="/storage/v1/diskTypes",
              auth="jwtBootstrap",
