@@ -171,6 +171,37 @@ func TestBuildBindingTuples_LegacyNarrowRole_LeafAnchorUnchanged(t *testing.T) {
 	}, "a leaf anchor is not a cascade source")
 }
 
+// A MIXED role is the route the first version of this cap left open: one
+// permission names the account with a read verb, another carries an admin verb
+// and never mentions the account. Testing only that SOME permission covers the
+// anchor would let the second one set the tier — the same synthesis, one
+// indirection further out.
+func TestBuildBindingTuples_LegacyMixedRole_TierComesFromTheCoveringHalf(t *testing.T) {
+	b := bindingOn("account", "acc_legacy_test00007")
+	got, err := buildBindingTuples(b, legacyRole("iam.account.*.get", "vpc.network.*.*"))
+	require.NoError(t, err)
+
+	access := tierTuples(t, got, "account:acc_legacy_test00007")
+	require.Len(t, access, 1, "exactly one tier tuple on the anchor")
+	assert.Equal(t, "viewer", access[0].Relation,
+		"the permission that NAMES the account carries a read verb; the admin verb "+
+			"belongs to one that never mentions it and must not reach this anchor")
+}
+
+// The mirror image: the covering half is the strong one, so it keeps its rung
+// even though the role also carries a weaker permission elsewhere.
+func TestBuildBindingTuples_LegacyMixedRole_CoveringHalfStrong_KeepsAdmin(t *testing.T) {
+	b := bindingOn("account", "acc_legacy_test00008")
+	got, err := buildBindingTuples(b, legacyRole("iam.account.*.*", "vpc.network.*.get"))
+	require.NoError(t, err)
+
+	assert.Contains(t, got, abrepo.RelationTuple{
+		User:     "user:usr_legacy_test00001",
+		Relation: "admin",
+		Object:   "account:acc_legacy_test00008",
+	}, "the covering permission authors the delegation, so its rung stands")
+}
+
 // The cap moves one rung down the declared ladder, it does not erase the grant.
 // A read-only role on an account it does not name keeps viewer — capping admin is
 // a reduction, not a rewrite of every tier.

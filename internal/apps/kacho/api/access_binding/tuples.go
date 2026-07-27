@@ -130,8 +130,15 @@ func capSynthesizedAccountAdmin(
 	if strings.ToLower(string(b.ResourceType)) != accountAnchor {
 		return relations
 	}
-	if len(authzmap.PermissionsCoveringType(permissions, accountAnchor)) > 0 {
-		return relations // the role names the account: the delegation is authored
+	if covering := authzmap.PermissionsCoveringType(permissions, accountAnchor); len(covering) > 0 {
+		// The role names the account, so the delegation is authored — but the TIER
+		// must come from the permissions that name it, not from the role as a whole.
+		// Checking only that SOME permission covers the anchor leaves the hole open
+		// by a different route: a role carrying `iam.account.*.get` alongside
+		// `vpc.network.*.*` covers the account with a read verb, while the admin tier
+		// arrives from a permission that never mentions it. That is the same
+		// synthesis, one indirection further out.
+		return authzmap.PermissionsToRelations(covering)
 	}
 	out := make([]authzmap.Relation, 0, len(relations))
 	for _, r := range relations {

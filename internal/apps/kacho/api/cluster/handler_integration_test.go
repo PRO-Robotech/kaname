@@ -768,8 +768,11 @@ func TestCluster_6_23_GrantAdmin_ServiceAccountSubject(t *testing.T) {
 		    AND payload->>'user'   = $1
 		    AND payload->>'object' = $2`,
 		"service_account:"+sva, "cluster:"+domain.ClusterSingletonID).Scan(&tuples))
-	require.GreaterOrEqual(t, tuples, 1,
-		"granting a machine subject must queue a service_account: tuple")
+	require.GreaterOrEqual(t, tuples, 2,
+		"granting a machine subject must queue a service_account: tuple. TWO, not one: "+
+			"the bootstrap seed already writes exactly this row for this very subject "+
+			"(migration 0058), so a floor of one is satisfied by the seed alone and the "+
+			"assertion would hold even if the emitter always wrote user:")
 }
 
 // TestCluster_6_24_GrantAdmin_UnknownServiceAccount_Rejected — the existence

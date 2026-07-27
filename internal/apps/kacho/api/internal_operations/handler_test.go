@@ -171,3 +171,50 @@ func TestListIamOperations_Anonymous_PermissionDenied(t *testing.T) {
 		t.Fatalf("anonymous must be PermissionDenied, got %s", got)
 	}
 }
+
+// ── the gate must name the principal it checks ──────────────────────────────
+//
+// This gate is the second copy of the cluster-administration check (the first
+// lives in the cluster use-cases). Both spelled their subject as the literal
+// "user:" joined to the principal id, and both were corrected together — but
+// only the first was locked. Every case above builds a USER principal, for which
+// the old and the new form produce a byte-identical subject, so a regression here
+// would leave the whole package green.
+//
+// The consequence of that regression: a machine holding cluster administration
+// (its tuple names a service account) is asked about as a user that does not
+// exist, misses, and is refused. Granted and unusable.
+
+func machineCtx(id string) context.Context {
+	return operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: "service_account", ID: id})
+}
+
+func TestListIamOperations_MachinePrincipal_NamedAsServiceAccount(t *testing.T) {
+	ops := &internalOpsRepo{ops: []operations.Operation{{ID: "iop00000000000000009"}}}
+	checker := &clusterCheckStub{allow: map[string]bool{
+		"service_account:sva-runner|system_admin|" + clusterObj(): true,
+	}}
+	h := newHandler(ops, checker)
+
+	resp, err := h.ListIamOperations(machineCtx("sva-runner"),
+		&iamv1.ListIamOperationsRequest{PageSize: 100})
+	require.NoError(t, err,
+		"a machine granted cluster administration must be checked as a machine; "+
+			"asking about user:<id> names nobody, so the grant can never be used")
+	assert.Len(t, resp.GetOperations(), 1)
+}
+
+func TestListIamOperations_UnknownPrincipalType_FailClosed(t *testing.T) {
+	checker := &clusterCheckStub{allow: map[string]bool{
+		"user:rbt-x|system_admin|" + clusterObj():  true,
+		"robot:rbt-x|system_admin|" + clusterObj(): true,
+	}}
+	h := newHandler(&internalOpsRepo{}, checker)
+
+	_, err := h.ListIamOperations(
+		operations.WithPrincipal(context.Background(), operations.Principal{Type: "robot", ID: "rbt-x"}),
+		&iamv1.ListIamOperationsRequest{PageSize: 100})
+	require.Error(t, err, "an unresolvable principal must be refused, not promoted to a user")
+	assert.Equal(t, codes.PermissionDenied, grpcstatus.Code(err))
+}
