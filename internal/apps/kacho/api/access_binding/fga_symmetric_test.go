@@ -179,8 +179,13 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 		accountID = "acc_test_account"
 	)
 
-	// Admin-class wildcard permissions → relation "admin".
-	perms := domain.Permissions{"iam.access_bindings.admin"}
+	// Admin-class permissions → relation "admin". The permission NAMES the account
+	// on purpose: level 3 on an account anchor is only emitted when the role covers
+	// iam.account, because account:<A>#admin is a cascade source (see
+	// tuples.go::capSynthesizedAccountAdmin). The subject of this test is the
+	// create/delete symmetry of the emitted set, so it wants the strongest tier —
+	// authored rather than synthesized.
+	perms := domain.Permissions{"iam.account.admin"}
 	repo := newABFakeRepo(ownerID, accountID, resID, roleID, roleName, perms)
 	opsRepo := newFakeOpsRepo()
 	fga := newRecordingFGA()
@@ -191,7 +196,7 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
 		RoleID:       domain.RoleID(roleID),
-		ResourceType: "account", // NOT project → no hierarchy tuple
+		ResourceType: "account", // account anchor — emits its own `account`-parent pointer
 		ResourceID:   resID,
 	}
 	_, err := createUC.Execute(ctx, binding)

@@ -69,6 +69,89 @@ func PermissionsToRelations(permissions []string) []Relation {
 	}
 }
 
+// PermissionsCoveringType keeps only the permissions that actually name the given
+// FGA object type, resolved over the closed (module, resource) table.
+//
+// # Why the caller needs this
+//
+// PermissionsToRelations answers "how strong is this role?" and deliberately
+// ignores the module and resource segments — the tier comes from the verb. That
+// is the right answer for the question it asks, and the wrong one for the
+// question a tuple builder asks, which is "what may this role grant ON THIS
+// OBJECT?". Applied to a hierarchy anchor the difference is not cosmetic:
+// `vpc.network.*.*` is a verb-position wildcard, so the whole role reads as the
+// admin tier, and `account:<A>#admin` accepts direct subjects and derives
+// `project.super_admin: admin from account`, which every leaf type reads as
+// `super_admin from project`. A role that only ever named vpc networks would
+// hand over every resource in the account.
+//
+// The rules path never had the gap — a rule carries (module, resource) and the
+// anchor arm matches only when it covers the anchor's own type. This restores the
+// same discipline on the legacy permissions-only path.
+//
+// # Matching
+//
+// A permission is `module.resource.<group>.<verb>` (the seeded form, e.g.
+// "vpc.network.*.*"); only the first two segments are read here. A `*` in either
+// position broadens the pattern, and the closed table decides what it expands to
+// — never a substring or prefix guess, so `iam.*` covers the account because
+// "iam.account" is in the table, not because the strings look alike.
+//
+// Returns nil when nothing covers the type. Callers must treat that as "grants
+// nothing here" and NOT hand the empty slice to PermissionsToRelations, whose
+// empty-input contract is the least-privilege viewer fallback — that fallback is
+// for a role with no permissions at all, and reusing it here would turn "grants
+// nothing on this anchor" into "grants read on this anchor".
+func PermissionsCoveringType(permissions []string, fgaType string) []string {
+	if fgaType == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range permissions {
+		if permissionCoversType(p, fgaType) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// permissionCoversType — does one permission's (module, resource) reach fgaType?
+func permissionCoversType(permission, fgaType string) bool {
+	seg := strings.Split(permission, ".")
+	if len(seg) < 2 {
+		return false // not a module.resource-shaped token — covers nothing
+	}
+	module, resource := seg[0], seg[1]
+
+	switch {
+	case module == wildcardSegment && resource == wildcardSegment:
+		return true
+	case module == wildcardSegment || resource == wildcardSegment:
+		// One side is concrete: the pattern covers fgaType iff SOME entry of the
+		// closed table matches the concrete side and maps to fgaType.
+		for dotted, typ := range objectTypes {
+			if typ != fgaType {
+				continue
+			}
+			m, r, ok := SplitObjectType(dotted)
+			if !ok {
+				continue
+			}
+			if (module == wildcardSegment || module == m) &&
+				(resource == wildcardSegment || resource == r) {
+				return true
+			}
+		}
+		return false
+	default:
+		typ, ok := ObjectType(module, resource)
+		return ok && typ == fgaType
+	}
+}
+
+// wildcardSegment — the `*` segment of a permission token.
+const wildcardSegment = "*"
+
 type verbClassKind int
 
 const (

@@ -92,8 +92,55 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) ([]abrepo.Rela
 	for i, p := range role.Permissions {
 		permissions[i] = string(p)
 	}
-	relations := authzmap.PermissionsToRelations(permissions)
+	relations := capSynthesizedAccountAdmin(b, permissions, authzmap.PermissionsToRelations(permissions))
 	return tuplesForBinding(b, relations), nil
+}
+
+// capSynthesizedAccountAdmin keeps the legacy whole-role projection from
+// SYNTHESIZING the third tier of super-access.
+//
+// `account:<A>#admin` is level 3 — the account administrator, who may do
+// everything within the account. Since the cascade landed it is a real cascade
+// source: the model derives `project.super_admin: admin from account`, and every
+// leaf type reads `super_admin from project`. One tuple is therefore every
+// resource in the account.
+//
+// The legacy projection picks its tier from the VERB alone and ignores which
+// module and resource the permission names — correct for the question
+// PermissionsToRelations asks ("how strong is this role?"), wrong for the one a
+// tuple builder asks ("what may it grant HERE"). A verb-position wildcard such as
+// `vpc.network.*.*` reads as the admin tier, so a role that only ever named vpc
+// networks would land level 3 on the account anchor. Before the cascade that tuple
+// reached the account object and stopped; afterwards it reaches everything.
+//
+// Level 3 is DELEGATED, never derived as a side effect: it is kept when the role
+// actually covers `iam.account`, and otherwise the anchor takes the next rung of
+// the same ladder. That is a strict reduction — the model declares `admin ⇒ editor
+// ⇒ viewer`, so the capped grant is a subset of what was emitted before, and
+// `account:<A>#editor` is a source of nothing (no type derives from it).
+//
+// Scope of the cap is deliberately the ACCOUNT anchor only. `project:<P>#admin` is
+// not a cascade source (the project's own admin is excluded by design — project
+// scope and below stay flat), so the established legacy semantics of a
+// scope-anchored tier is left exactly as it is everywhere else.
+func capSynthesizedAccountAdmin(
+	b domain.AccessBinding, permissions []string, relations []authzmap.Relation,
+) []authzmap.Relation {
+	const accountAnchor = "account"
+	if strings.ToLower(string(b.ResourceType)) != accountAnchor {
+		return relations
+	}
+	if len(authzmap.PermissionsCoveringType(permissions, accountAnchor)) > 0 {
+		return relations // the role names the account: the delegation is authored
+	}
+	out := make([]authzmap.Relation, 0, len(relations))
+	for _, r := range relations {
+		if r == "admin" {
+			r = "editor"
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // tuplesForBinding builds the FGA tuple set for an AccessBinding given the
