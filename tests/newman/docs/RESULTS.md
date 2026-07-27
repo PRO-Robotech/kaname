@@ -178,6 +178,35 @@ still fires the gate. It fires the gate honestly; leave RED until the product/fi
 |---|---|---|---|---|
 | `iam-user` | `IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY::list-nonmember` (honest canary — intentionally NOT whitelisted) | `jwtNoBindings` lists `?accountId=accountA` → 200 + **1 user** (a PENDING invitee) instead of empty. Root: `nob_preclean_account_a` cannot strip NOB's residual account-A viewer left by the #276 cross-suite collision because **`GET /iam/v1/accessBindings:listBySubject?subjectId={userNOB}` as `jwtAccountAdminA` → `403 permission denied`** (listBySubject is self/cluster-admin-scoped; an account-admin listing *another* subject is denied), so the pre-clean is a no-op. | Compound: **#276 cross-suite fixture pollution** (IAM-ACB-CR-CRUD-OK grants `userNOB` a global `*.*` viewer on account-A) + the `listBySubject` non-self 403 leaves the pollution un-cleanable. Also documented as an env-flake that clears on re-run. Real fix = de-share the umbrella account across suites and/or a resource-scoped bindings-list the account-admin may call. | `kacho-iam#276` |
 
+## Known failing — label-remove does not revoke on storage (NOT whitelisted)
+
+`label-revoke-storage` was added as the OWNER-side analogue of `label-revoke-compute`
+before the block-storage duplicate in kacho-compute is deleted. Same shape, same
+account, same clean-subject discipline; only the resources differ.
+
+**Observed (live umbrella, 2026-07-27):** the grant half works on all three storage
+resources — a fresh service account with no other binding goes from DENY to
+`allowed:true` on `storage_volume` / `storage_snapshot` / `storage_image` once the
+ARM_LABELS role is bound. The revoke half does not: after
+`Update(update_mask=labels, labels={})` the resource really does come back with
+`labels={}`, and the Check **stays `allowed:true`**. It is not a materialization tail —
+the grant was still live on re-probe minutes after the bounded poll gave up.
+
+**Why this is a product finding and not a test-timing one:** `label-revoke-compute`
+ran GREEN (75/75) on the same stand, in the same account, with the same identity, the
+same bounded poll and the same emit-on-Update mechanic, minutes apart. The difference
+is the resource family, not the environment.
+
+**Disposition: left RED, deliberately NOT whitelisted.** This is an over-GRANT shape —
+access survives the removal of the label it was granted through — so masking it would
+mask exactly the class the gate exists for. The compute duplicate is the only place
+where this behaviour is currently proven at all, which is precisely why the check had
+to exist on the owner before the duplicate is removed.
+
+| Suite | Cases / step | Signature (observed) | Root (product) |
+|---|---|---|---|
+| `label-revoke-storage` | `T31-LBLREVOKE-STORAGE-{VOLUME,SNAPSHOT,IMAGE}-03::*-post-revoke-deny` | after label removal the resource reports `labels={}` yet Check `v_list` on `storage_{volume,snapshot,image}:<id>` stays `{"allowed":true}`; persists well past the poll budget | emit-on-Update does not withdraw the ARM_LABELS selection for storage resources (compute equivalent green on the same run) |
+
 ## Known failing — test-timing (bounded-poll tail)
 
 | Suite | Case / step | Class | Why |
