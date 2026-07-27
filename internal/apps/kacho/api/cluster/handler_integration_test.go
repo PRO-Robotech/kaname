@@ -712,3 +712,100 @@ func containsAdminSubject(admins []*iamv1.ClusterAdminEntry, subjectID string) b
 	}
 	return false
 }
+
+// TestCluster_6_23_GrantAdmin_ServiceAccountSubject — the grant direction for a
+// machine subject, including the per-type existence guard.
+//
+// Grant and Revoke must accept the same subject types: an asymmetric pair
+// (grantable but not revocable, or the reverse) is how an unrevocable grant is
+// manufactured in the first place. This drives the SERVICE_ACCOUNT branch of the
+// existence guard (kacho_iam.service_accounts, not kacho_iam.users — subject_id
+// is polymorphic and no FK can cover it).
+func TestCluster_6_23_GrantAdmin_ServiceAccountSubject(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	sva := bootstrapSeedSubject(t, ctx, pool)
+	caller := mustSeedUser(t, ctx, pool, "granter")
+	seedClusterAdmin(t, ctx, pool, caller)
+
+	h := buildHandler(t, dsn)
+	pctx := withPrincipal(ctx, string(caller))
+
+	// Revoke the seeded machine grant, then grant it back — the reactivate path
+	// for a machine subject, which the subject_type-pinned writer could not reach.
+	_, err = h.RevokeAdmin(pctx, &iamv1.RevokeClusterAdminRequest{
+		SubjectType: iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT,
+		SubjectId:   sva,
+	})
+	require.NoError(t, err)
+
+	op, err := h.GrantAdmin(pctx, &iamv1.GrantClusterAdminRequest{
+		SubjectType: iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT,
+		SubjectId:   sva,
+	})
+	require.NoError(t, err, "a machine subject must be re-grantable after revoke")
+	require.True(t, op.GetDone())
+
+	var active int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants
+		  WHERE subject_id = $1 AND subject_type = 'service_account'
+		    AND granted_until IS NULL`, sva).Scan(&active))
+	require.Equal(t, 1, active, "the machine grant must be active again")
+
+	// The write-tuple must name the machine subject (mirror of the revoke case).
+	var tuples int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox
+		  WHERE event_type = 'fga.tuple.write'
+		    AND payload->>'user'   = $1
+		    AND payload->>'object' = $2`,
+		"service_account:"+sva, "cluster:"+domain.ClusterSingletonID).Scan(&tuples))
+	require.GreaterOrEqual(t, tuples, 1,
+		"granting a machine subject must queue a service_account: tuple")
+}
+
+// TestCluster_6_24_GrantAdmin_UnknownServiceAccount_Rejected — the existence
+// guard must read the SERVICE_ACCOUNTS table for a machine subject. Checking
+// kacho_iam.users for an `sva…` id would never match, turning a well-formed
+// request into a confusing failure; skipping the check entirely would let a
+// cluster-admin grant be written for a subject that does not exist.
+func TestCluster_6_24_GrantAdmin_UnknownServiceAccount_Rejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	caller := mustSeedUser(t, ctx, pool, "granter")
+	seedClusterAdmin(t, ctx, pool, caller)
+
+	h := buildHandler(t, dsn)
+	pctx := withPrincipal(ctx, string(caller))
+
+	const absentSA = "sva0000000000000000z"
+	_, err = h.GrantAdmin(pctx, &iamv1.GrantClusterAdminRequest{
+		SubjectType: iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT,
+		SubjectId:   absentSA,
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err),
+		"a cluster-admin grant must not be written for a ServiceAccount that does not exist")
+	require.Contains(t, status.Convert(err).Message(), "ServiceAccount",
+		"the message must name the subject type actually looked up")
+
+	var rows int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.cluster_admin_grants WHERE subject_id = $1`,
+		absentSA).Scan(&rows))
+	require.Zero(t, rows, "no grant row may exist for a rejected subject")
+}
