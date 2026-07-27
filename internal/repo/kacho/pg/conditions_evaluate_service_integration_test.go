@@ -69,7 +69,7 @@ func setupEvaluateHandler(t *testing.T) (*condhandler.Handler, domain.ConditionI
 	id := domain.ConditionID(ids.NewID(domain.PrefixConditionResource))
 	seeded, err := repo.Insert(ctx, domain.Condition{
 		ID:         id,
-		FolderID:   "fld_evalsvc",
+		ProjectID:  "fld_evalsvc",
 		Name:       "ip-corp",
 		Expression: "source_ip_in_range",
 		Status:     domain.ConditionStatusCreating,

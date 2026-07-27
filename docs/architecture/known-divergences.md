@@ -203,7 +203,7 @@ resource (Account/Project/User/ServiceAccount/Group/Role/AccessBinding) follows.
 **Divergence**: the conditions feature hand-rolls its projection
 (`service.ConditionToProto` / `conditionStatusToProto` in
 `conditions_crud_service.go`) instead of a registered `toproto/condition.go`, and
-validates required fields (`folder_id` / `name` / `expression`, and `context` on
+validates required fields (`project_id` / `name` / `expression`, and `context` on
 Evaluate) **inline in the transport handler**
 (`internal/apps/kacho/api/conditions/handler.go`) rather than in a
 `domain.Condition` constructor.

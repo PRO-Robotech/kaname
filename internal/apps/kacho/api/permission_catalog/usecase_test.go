@@ -226,14 +226,17 @@ func TestListPermissionCatalog_WildcardPolicyParity(t *testing.T) {
 
 // TestListPermissionCatalog_HasListEndpoint_FromClosedTable — hasListEndpoint
 // is deterministic from the curated backend table. Public-listable leaves →
-// true; iam.condition → false (RPC exists in proto but NOT registered on the
-// external gateway mux).
+// true; the only remaining exception is vpc.addressPool, whose List is
+// Internal-only (asserted separately below).
 func TestListPermissionCatalog_HasListEndpoint_FromClosedTable(t *testing.T) {
 	resp := callCatalog(t)
 	pairs := responsePairs(resp)
 
 	wantTrue := []string{
 		"iam.role", "iam.account", "iam.project", "iam.serviceAccount", "iam.group", "iam.accessBinding",
+		// iam.condition — ConditionsService.List is now mounted on the external
+		// mux (GET /iam/v1/conditions), so the former exception is gone.
+		"iam.condition",
 		"vpc.subnet", "vpc.network", "compute.instance",
 	}
 	for _, key := range wantTrue {
@@ -247,11 +250,6 @@ func TestListPermissionCatalog_HasListEndpoint_FromClosedTable(t *testing.T) {
 		}
 	}
 
-	// iam.condition: ConditionsService.List exists in proto but is NOT on the
-	// external mux → false.
-	if r := pairs["iam.condition"]; r == nil || r.GetHasListEndpoint() {
-		t.Errorf("iam.condition must be present with hasListEndpoint=false (not on external mux)")
-	}
 }
 
 // TestListPermissionCatalog_AddressPool_GrantableButInternalOnlyList

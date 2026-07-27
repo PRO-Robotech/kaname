@@ -5,14 +5,32 @@
 `kacho-iam` поддерживает ABAC-условия двух уровней:
 
 1. **`AccessBindingCondition`** — overlay 1:1 на AccessBinding. Хранит
-   `expression_kind` (whitelist) + `params_json` (JSONB). Привязывается в
-   момент `AccessBinding.Create` через `condition_id` / `builtin_condition`
-   (logical-oneof) и проверяется на каждом `Check`.
-2. **`Condition`** (отдельный folder-scoped resource) — переиспользуемое
-   CEL-выражение + JSON-schema для параметров. AccessBinding ссылается на
-   него через `condition_ref.condition_id`. Выражение pre-компилируется в
-   OpenFGA Authorization Model на `WriteAuthorizationModel` и evaluated
-   OpenFGA Conditions при каждом Check.
+   `expression_kind` (whitelist) + `params_json` (JSONB).
+2. **`Condition`** (отдельный project-scoped resource) — переиспользуемое
+   выражение + JSON-schema для параметров.
+
+> [!warning] Этот раздел описывает ЗАМЫСЕЛ, а не то, что делает код
+> Ни один из двух уровней сегодня не участвует в решении о доступе. Что
+> проверено по коду (2026-07-27):
+>
+> - `AccessBindingService.Create` **не читает** ни `condition_id`, ни
+>   `builtin_condition` — сгенерированные геттеры не имеют вызывающих;
+>   `Update` их тоже не меняет. Привязки «в момент Create» не происходит.
+> - `access_binding_conditions` **никто не пишет** в проде: единственный
+>   production-INSERT отсутствует, а единственный production-SELECT — refcount
+>   в `ConditionsRepo.CountReferences`, который поэтому всегда возвращает 0.
+> - `AccessBinding.condition_id` (`^cond_…`) ссылается на **другую** таблицу и
+>   другое id-пространство, чем `conditions` (`^cnd…`) — два дизайна так и не
+>   соединили.
+> - `Evaluate` — **не CEL**: `cel-go` не в зависимостях, это сопоставление
+>   подстрок. Свободное выражение возвращает `ErrUnsupportedExpression`, который
+>   use-case проглатывает в `200 {allowed:false}` — молчаливый deny под видом
+>   результата вычисления.
+> - В модели объявлены шесть FGA-условий, но `with`-ссылку имеет только
+>   `mfa_fresh`, и ни один production-writer не прикрепляет условие к tuple.
+>
+> Соединительная ткань отсутствует во всех четырёх стыках. Ниже — целевой
+> дизайн; сверяйся с кодом, прежде чем на него опираться.
 
 Оба типа дают **ABAC**-слой поверх REBAC-bindings: «binding активен только
 если у subject MFA fresh» или «только из подсети 10.0.0.0/16».
@@ -60,8 +78,8 @@ storage.
 | Поле                | Тип                          | Обязательное | Immutable | Описание                                  |
 |---------------------|------------------------------|--------------|-----------|-------------------------------------------|
 | `id`                | `ConditionID` (`cnd_…`)      | да           | да        | `cnd_<…>`.                                 |
-| `folder_id`         | string (≤20)                 | да           | да        | Owning project (имя поля legacy).         |
-| `name`              | string (`^[a-z][-a-z0-9]*$`) | да           | да        | `len≤63`, UNIQUE within folder.           |
+| `project_id`        | string (≤20)                 | да           | да        | Owning project.                           |
+| `name`              | string (`^[a-z][-a-z0-9]*$`) | да           | да        | `len≤63`, UNIQUE within project.          |
 | `description`       | string                       | нет          | нет       | `len≤256`.                                |
 | `labels`            | map<str,str>                 | нет          | нет       | k/v.                                       |
 | `expression`        | string CEL                   | да           | нет       | ≤2048.                                    |
@@ -82,7 +100,7 @@ sequenceDiagram
     participant DB
     participant FGA as OpenFGA
 
-    Admin->>IAM: Create<br/>{folder_id:"prj_x", name:"weekday-only", expression:"context.weekday in [1,2,3,4,5]"}
+    Admin->>IAM: Create<br/>{project_id:"prj_x", name:"weekday-only", expression:"context.weekday in [1,2,3,4,5]"}
     IAM->>DB: INSERT conditions (status=CREATING)
     IAM->>FGA: WriteAuthorizationModel (pre-compile CEL)
     alt CEL compile error
@@ -122,9 +140,9 @@ sequenceDiagram
 | RPC        | Sync/Async | Описание                                                       |
 |------------|------------|----------------------------------------------------------------|
 | `Get`      | sync       | Получить Condition по id.                                       |
-| `List`     | sync       | Filter by `folder_id` (+ label/name).                          |
+| `List`     | sync       | Filter by `project_id` (+ label/name).                         |
 | `Create`   | async      | Standalone Condition. CEL валидируется FGA-движком.            |
-| `Update`   | async      | UpdateMask: `description`, `labels`, `expression`, `parameters_schema`. `name`/`folder_id` immutable. OCC по `resource_version`. |
+| `Update`   | async      | UpdateMask: `description`, `labels`, `expression`, `parameters_schema`. `name`/`project_id` immutable. OCC по `resource_version` (внутренняя колонка, не на wire). |
 | `Delete`   | async      | FailedPrecondition если binding'и еще ссылаются.              |
 | `Evaluate` | sync       | Admin/diagnostic: прогнать CEL против input-context без FGA.   |
 
@@ -153,7 +171,7 @@ OpenFGA endpoint и Check/Write-timeouts — см. [`19-authorize.md`](19-author
 # Standalone Condition.
 curl -X POST http://localhost:18080/iam/v1/conditions \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"folder_id":"prj_xxx","name":"weekday-only","expression":"context.weekday in [1,2,3,4,5]"}'
+  -d '{"projectId":"prj_xxx","name":"weekday-only","expression":"context.weekday in [1,2,3,4,5]"}'
 # → Operation, после poll → cnd_id.
 
 # AccessBinding с reference на standalone Condition.
@@ -198,7 +216,7 @@ go test -short -timeout 120s -run "TestConditions" ./internal/repo/kacho/pg/...
   `conditions_evaluator.go` (builtin evaluator) + `conditions_audit.go`.
 - **Repo:** `internal/repo/kacho/pg/conditions_repo.go`.
 - **DB:** `access_binding_conditions(id, binding_id, expression_kind, params_json, created_at)`;
-  `conditions(id, folder_id, name, description, labels JSONB, expression, parameters_schema JSONB, status, resource_version, created_at)`.
+  `conditions(id, project_id, name, description, labels JSONB, expression, parameters_schema JSONB, status, resource_version, created_at)`.
 - **CASCADE:** `access_binding_conditions.binding_id → access_bindings(id) ON DELETE CASCADE`.
 
 ## Gotchas / известные ограничения

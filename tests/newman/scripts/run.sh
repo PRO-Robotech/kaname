@@ -170,6 +170,11 @@ else
   # run here, else the gate reports `iam-permission-catalog(no-report)` as a
   # phantom failure.
   run_one "iam-permission-catalog"
+  # iam-condition — ConditionsService CRUD over the conventional projectId scope.
+  # gen.py emits collections/iam-condition.json from cases/iam-condition.py, and the
+  # CI `assert all suites green` step parses EVERY collections/*.json — so without
+  # running it here the gate reports `iam-condition(no-report)` as a phantom failure.
+  run_one "iam-condition"
   # The atomic grant→FGA-Check propagation suite (AccessBinding/JIT/BG
   # paths). The CI `assert all suites green` step parses every
   # collections/*.postman_collection.json, so the report for this suite MUST

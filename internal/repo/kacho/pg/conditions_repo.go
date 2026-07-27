@@ -50,7 +50,7 @@ func NewConditionsRepo(pool *pgxpool.Pool) *ConditionsRepo {
 	return &ConditionsRepo{pool: pool}
 }
 
-const condCols = `id, folder_id, created_at, name, description, labels,
+const condCols = `id, project_id, created_at, name, description, labels,
                   expression, parameters_schema, status, resource_version`
 
 // Get — single condition lookup. Returns ErrNotFound if missing or DELETING.
@@ -71,7 +71,7 @@ func (r *ConditionsRepo) Get(ctx context.Context, id domain.ConditionID) (domain
 	return out, nil
 }
 
-// List — page over conditions in a folder, excluding DELETING tombstones.
+// List — page over conditions in a project, excluding DELETING tombstones.
 func (r *ConditionsRepo) List(ctx context.Context, f condition.ListFilter) ([]domain.Condition, string, error) {
 	pageSize := int64(f.PageSize)
 	if pageSize <= 0 {
@@ -83,9 +83,9 @@ func (r *ConditionsRepo) List(ctx context.Context, f condition.ListFilter) ([]do
 	conditions := []string{"status != 'DELETING'"}
 	args := []any{}
 	argIdx := 1
-	if f.FolderID != "" {
-		conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIdx))
-		args = append(args, f.FolderID)
+	if f.ProjectID != "" {
+		conditions = append(conditions, fmt.Sprintf("project_id = $%d", argIdx))
+		args = append(args, f.ProjectID)
 		argIdx++
 	}
 	if f.Filter != "" {
@@ -172,7 +172,7 @@ func countConditionReferences(ctx context.Context, q condQuerier, id domain.Cond
 }
 
 // Insert — create new Condition row. SQLSTATE 23505 (unique violation) on
-// duplicate (folder_id, name) → ErrAlreadyExists.
+// duplicate (project_id, name) → ErrAlreadyExists.
 func (r *ConditionsRepo) Insert(ctx context.Context, c domain.Condition) (domain.Condition, error) {
 	return insertCondition(ctx, r.pool, c)
 }
@@ -185,7 +185,7 @@ func (r *ConditionsRepo) InsertTx(ctx context.Context, txh service.Tx, c domain.
 
 const insertConditionQ = `
 	INSERT INTO conditions (
-	    id, folder_id, created_at, name, description, labels,
+	    id, project_id, created_at, name, description, labels,
 	    expression, parameters_schema, status, resource_version
 	) VALUES ($1, $2, COALESCE($3, now()), $4, $5,
 	          COALESCE($6::jsonb, '{}'::jsonb),
@@ -195,7 +195,7 @@ const insertConditionQ = `
 
 func insertCondition(ctx context.Context, q condQuerier, c domain.Condition) (domain.Condition, error) {
 	row := q.QueryRow(ctx, insertConditionQ,
-		string(c.ID), c.FolderID, nullableTime(c.CreatedAt),
+		string(c.ID), c.ProjectID, nullableTime(c.CreatedAt),
 		c.Name, c.Description, jsonBytesOrEmpty(labelsToJSON(c.Labels)),
 		c.Expression, jsonBytesOrEmpty([]byte(c.ParametersSchema)),
 		string(c.Status),
@@ -336,7 +336,7 @@ func scanConditionResource(row pgx.Row) (domain.Condition, error) {
 		status                     string
 	)
 	if err := row.Scan(
-		(*string)(&c.ID), &c.FolderID, &createdAt, &c.Name, &c.Description,
+		(*string)(&c.ID), &c.ProjectID, &createdAt, &c.Name, &c.Description,
 		&labelsRaw, &c.Expression, &paramsSchemaRaw, &status, &c.ResourceVersion,
 	); err != nil {
 		return domain.Condition{}, err

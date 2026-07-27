@@ -213,13 +213,13 @@ func assertNoCondSecrets(t *testing.T, payloadRaw string) {
 
 // findCreatedCondID returns the id of the (single) ACTIVE/CREATING condition in
 // the given folder — the Create RPC mints the id internally.
-func findCreatedCondID(ctx context.Context, t *testing.T, pool *pgxpool.Pool, folderID string) string {
+func findCreatedCondID(ctx context.Context, t *testing.T, pool *pgxpool.Pool, projectID string) string {
 	t.Helper()
 	var id string
 	require.Eventually(t, func() bool {
 		return pool.QueryRow(ctx,
-			`SELECT id FROM kacho_iam.conditions WHERE folder_id = $1 AND status != 'DELETING' LIMIT 1`,
-			folderID).Scan(&id) == nil
+			`SELECT id FROM kacho_iam.conditions WHERE project_id = $1 AND status != 'DELETING' LIMIT 1`,
+			projectID).Scan(&id) == nil
 	}, 5*time.Second, 20*time.Millisecond, "created condition must persist")
 	return id
 }
@@ -237,18 +237,18 @@ func TestConditionsAudit_CreateEmits(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid := ids.NewID(domain.PrefixUser)
-	folderID := "prj_cond_create"
+	projectID := "prj_cond_create"
 	svc := buildCondSvc(pool)
 
 	op, err := svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       "ip-corp",
 		Expression: "non_expired",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, op)
 
-	condID := findCreatedCondID(ctx, t, pool, folderID)
+	condID := findCreatedCondID(ctx, t, pool, projectID)
 	awaitCondAudit(ctx, t, pool, "iam.condition.created", condID)
 
 	rows := condAuditRows(ctx, t, pool, "iam.condition.created", condID)
@@ -275,16 +275,16 @@ func TestConditionsAudit_UpdateEmits(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid := ids.NewID(domain.PrefixUser)
-	folderID := "prj_cond_update"
+	projectID := "prj_cond_update"
 	svc := buildCondSvc(pool)
 
 	_, err = svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       "to-update",
 		Expression: "non_expired",
 	})
 	require.NoError(t, err)
-	condID := findCreatedCondID(ctx, t, pool, folderID)
+	condID := findCreatedCondID(ctx, t, pool, projectID)
 	awaitConditionStatus(ctx, t, pool, condID, "ACTIVE")
 
 	newDesc := "patched description"
@@ -327,16 +327,16 @@ func TestConditionsAudit_DeleteEmits(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid := ids.NewID(domain.PrefixUser)
-	folderID := "prj_cond_delete"
+	projectID := "prj_cond_delete"
 	svc := buildCondSvc(pool)
 
 	_, err = svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       "to-delete",
 		Expression: "non_expired",
 	})
 	require.NoError(t, err)
-	condID := findCreatedCondID(ctx, t, pool, folderID)
+	condID := findCreatedCondID(ctx, t, pool, projectID)
 	awaitConditionStatus(ctx, t, pool, condID, "ACTIVE")
 
 	_, err = svc.Delete(withCondPrincipal(ctx, uid), domain.ConditionID(condID))
@@ -373,24 +373,24 @@ func TestConditionsAudit_CreateRollbackNoOrphan(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid := ids.NewID(domain.PrefixUser)
-	folderID := "prj_cond_rollback"
+	projectID := "prj_cond_rollback"
 	svc := buildCondSvc(pool)
 
 	// First Create succeeds.
 	_, err = svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       "dup-name",
 		Expression: "non_expired",
 	})
 	require.NoError(t, err)
-	firstID := findCreatedCondID(ctx, t, pool, folderID)
+	firstID := findCreatedCondID(ctx, t, pool, projectID)
 	awaitCondAudit(ctx, t, pool, "iam.condition.created", firstID)
 
 	// Second Create with the SAME (folder, name) — the Insert hits
 	// conditions_folder_name_uniq (23505) → the worker-tx rolls back. No second
 	// condition row and no orphan audit row may exist.
 	dupOp, err := svc.Create(withCondPrincipal(ctx, uid), service.CreateConditionRequest{
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       "dup-name",
 		Expression: "non_expired",
 	})
@@ -406,8 +406,8 @@ func TestConditionsAudit_CreateRollbackNoOrphan(t *testing.T) {
 
 	var condCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.conditions WHERE folder_id = $1 AND name = 'dup-name' AND status != 'DELETING'`,
-		folderID).Scan(&condCount))
+		`SELECT count(*) FROM kacho_iam.conditions WHERE project_id = $1 AND name = 'dup-name' AND status != 'DELETING'`,
+		projectID).Scan(&condCount))
 	require.Equal(t, 1, condCount, "duplicate Create must not create a second condition row")
 
 	var auditCount int
@@ -429,16 +429,16 @@ func TestConditionsAudit_ActorFromPrincipal(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	principal := ids.NewID(domain.PrefixUser)
-	folderID := "prj_cond_actor"
+	projectID := "prj_cond_actor"
 	svc := buildCondSvc(pool)
 
 	_, err = svc.Create(withCondPrincipal(ctx, principal), service.CreateConditionRequest{
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       "actor-test",
 		Expression: "non_expired",
 	})
 	require.NoError(t, err)
-	condID := findCreatedCondID(ctx, t, pool, folderID)
+	condID := findCreatedCondID(ctx, t, pool, projectID)
 	awaitCondAudit(ctx, t, pool, "iam.condition.created", condID)
 
 	rows := condAuditRows(ctx, t, pool, "iam.condition.created", condID)

@@ -8,10 +8,10 @@ package pg_test
 //
 // Coverage:
 // - Insert + Get round-trip.
-// - Insert duplicate name in folder → ErrAlreadyExists (UNIQUE).
+// - Insert duplicate name in project → ErrAlreadyExists (UNIQUE).
 // - UpdateMutable CAS — happy path, version conflict.
 // - SetStatus + Delete tombstone semantics (Get → NotFound when DELETING).
-// - List pagination + folder filter.
+// - List pagination + project filter.
 // - CountReferences — returns 0 by default; non-zero after we sprinkle
 // access_binding_conditions row referring to our condition.
 
@@ -31,10 +31,10 @@ import (
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
-func newTestCondition(folderID, name string) domain.Condition {
+func newTestCondition(projectID, name string) domain.Condition {
 	return domain.Condition{
 		ID:         domain.ConditionID(ids.NewID(domain.PrefixConditionResource)),
-		FolderID:   folderID,
+		ProjectID:  projectID,
 		Name:       name,
 		Expression: `current_time < valid_until`,
 		Status:     domain.ConditionStatusCreating,
@@ -52,11 +52,11 @@ func TestCondition_IamExt_Insert_Get_RoundTrip(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	repo := kachopg.NewConditionsRepo(pool)
-	in := newTestCondition("prj_test_folder", "ip-corp")
+	in := newTestCondition("prj_test_scope", "ip-corp")
 	out, err := repo.Insert(ctx, in)
 	require.NoError(t, err)
 	require.Equal(t, in.ID, out.ID)
-	require.Equal(t, "prj_test_folder", out.FolderID)
+	require.Equal(t, "prj_test_scope", out.ProjectID)
 	require.Equal(t, "ip-corp", out.Name)
 	require.Equal(t, domain.ConditionStatusCreating, out.Status)
 	require.EqualValues(t, 1, out.ResourceVersion)
@@ -77,11 +77,11 @@ func TestCondition_IamExt_Insert_DuplicateName_AlreadyExists(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	repo := kachopg.NewConditionsRepo(pool)
-	first := newTestCondition("prj_folder", "name-uniq")
+	first := newTestCondition("prj_scope", "name-uniq")
 	_, err = repo.Insert(ctx, first)
 	require.NoError(t, err)
 
-	dup := newTestCondition("prj_folder", "name-uniq") // same folder + name
+	dup := newTestCondition("prj_scope", "name-uniq") // same project + name
 	_, err = repo.Insert(ctx, dup)
 	require.Error(t, err)
 	require.True(t, stderrors.Is(err, iamerr.ErrAlreadyExists), "expected ErrAlreadyExists; got %v", err)
@@ -143,7 +143,7 @@ func TestCondition_IamExt_Delete_Tombstone(t *testing.T) {
 	require.True(t, stderrors.Is(repo.Delete(ctx, in.ID), iamerr.ErrNotFound))
 }
 
-func TestCondition_IamExt_List_PaginationAndFolderScope(t *testing.T) {
+func TestCondition_IamExt_List_PaginationAndProjectScope(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration")
 	}
@@ -155,30 +155,30 @@ func TestCondition_IamExt_List_PaginationAndFolderScope(t *testing.T) {
 
 	repo := kachopg.NewConditionsRepo(pool)
 
-	// Insert 5 in folder A, 2 in folder B.
+	// Insert 5 in project A, 2 in project B.
 	for _, name := range []string{"a-1", "a-2", "a-3", "a-4", "a-5"} {
-		_, err := repo.Insert(ctx, newTestCondition("folder-a", name))
+		_, err := repo.Insert(ctx, newTestCondition("prj-a", name))
 		require.NoError(t, err)
 	}
 	for _, name := range []string{"b-1", "b-2"} {
-		_, err := repo.Insert(ctx, newTestCondition("folder-b", name))
+		_, err := repo.Insert(ctx, newTestCondition("prj-b", name))
 		require.NoError(t, err)
 	}
 
-	// List folder-a — all 5.
-	rows, next, err := repo.List(ctx, condition.ListFilter{FolderID: "folder-a", PageSize: 100})
+	// List prj-a — all 5.
+	rows, next, err := repo.List(ctx, condition.ListFilter{ProjectID: "prj-a", PageSize: 100})
 	require.NoError(t, err)
 	require.Empty(t, next)
 	require.Len(t, rows, 5)
 
-	// Paginate folder-a by 2.
-	rows, next, err = repo.List(ctx, condition.ListFilter{FolderID: "folder-a", PageSize: 2})
+	// Paginate prj-a by 2.
+	rows, next, err = repo.List(ctx, condition.ListFilter{ProjectID: "prj-a", PageSize: 2})
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.NotEmpty(t, next)
 
-	// Filter folder-b only — 2 rows.
-	rows, _, err = repo.List(ctx, condition.ListFilter{FolderID: "folder-b", PageSize: 100})
+	// Filter prj-b only — 2 rows.
+	rows, _, err = repo.List(ctx, condition.ListFilter{ProjectID: "prj-b", PageSize: 100})
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 }

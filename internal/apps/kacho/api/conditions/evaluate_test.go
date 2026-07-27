@@ -38,9 +38,9 @@ import (
 // regression).
 type fakeConditionsRepo struct {
 	byID map[domain.ConditionID]domain.Condition
-	// listRows — rows returned by List. Filtered by FolderID when the filter
+	// listRows — rows returned by List. Filtered by ProjectID when the filter
 	// carries one (mirrors the repo's folder-scope predicate) so the authz
-	// tests can distinguish an empty-folder_id global scan from a scoped list.
+	// tests can distinguish an empty-project_id global scan from a scoped list.
 	listRows []domain.Condition
 }
 
@@ -53,12 +53,12 @@ func (f *fakeConditionsRepo) Get(_ context.Context, id domain.ConditionID) (doma
 }
 
 func (f *fakeConditionsRepo) List(_ context.Context, filter condition.ListFilter) ([]domain.Condition, string, error) {
-	if filter.FolderID == "" {
+	if filter.ProjectID == "" {
 		return f.listRows, "", nil
 	}
 	out := make([]domain.Condition, 0, len(f.listRows))
 	for _, c := range f.listRows {
-		if c.FolderID == filter.FolderID {
+		if c.ProjectID == filter.ProjectID {
 			out = append(out, c)
 		}
 	}
@@ -133,7 +133,7 @@ func TestEvaluate_SourceIPInRange_Allowed(t *testing.T) {
 	// Given a stored source_ip_in_range condition.
 	cond := domain.Condition{
 		ID:         "cnd00000000000000aaa",
-		FolderID:   "fld_eval",
+		ProjectID:  "fld_eval",
 		Name:       "ip-corp",
 		Expression: "source_ip_in_range",
 		Status:     domain.ConditionStatusActive,
@@ -159,7 +159,7 @@ func TestEvaluate_SourceIPInRange_Allowed(t *testing.T) {
 func TestEvaluate_SourceIPInRange_Denied(t *testing.T) {
 	cond := domain.Condition{
 		ID:         "cnd00000000000000bbb",
-		FolderID:   "fld_eval",
+		ProjectID:  "fld_eval",
 		Name:       "ip-corp",
 		Expression: "source_ip_in_range",
 		Status:     domain.ConditionStatusActive,
@@ -183,7 +183,7 @@ func TestEvaluate_SourceIPInRange_Denied(t *testing.T) {
 func TestEvaluate_BusinessHours_ParamsDriveVerdict(t *testing.T) {
 	cond := domain.Condition{
 		ID:         "cnd00000000000000ccc",
-		FolderID:   "fld_eval",
+		ProjectID:  "fld_eval",
 		Name:       "biz-hours",
 		Expression: "business_hours",
 		Status:     domain.ConditionStatusActive,
@@ -215,7 +215,7 @@ func TestEvaluate_BusinessHours_ParamsDriveVerdict(t *testing.T) {
 func TestEvaluate_FreeFormExpression_NotAllowedWithTrace(t *testing.T) {
 	cond := domain.Condition{
 		ID:         "cnd00000000000000ddd",
-		FolderID:   "fld_eval",
+		ProjectID:  "fld_eval",
 		Name:       "free-form",
 		Expression: `request.auth.claims.dept == "eng"`,
 		Status:     domain.ConditionStatusActive,
@@ -255,7 +255,7 @@ func TestEvaluate_UnknownConditionID_NotFound(t *testing.T) {
 func TestEvaluate_MissingContext_InvalidArgument(t *testing.T) {
 	cond := domain.Condition{
 		ID:         "cnd00000000000000eee",
-		FolderID:   "fld_eval",
+		ProjectID:  "fld_eval",
 		Name:       "ip-corp",
 		Expression: "source_ip_in_range",
 		Status:     domain.ConditionStatusActive,

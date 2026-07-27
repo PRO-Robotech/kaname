@@ -1288,7 +1288,7 @@
     "required_relation": "editor",
     "scope_extractor": {
       "object_type": "project",
-      "from_request_field": "folder_id"
+      "from_request_field": "project_id"
     },
     "required_acr_min": "1"
   },
@@ -1328,7 +1328,7 @@
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
-      "from_request_field": "folder_id"
+      "from_request_field": "project_id"
     },
     "required_acr_min": "1"
   },

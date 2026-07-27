@@ -49,7 +49,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetConditionRequest) (*iam
 // List — see iamv1.ConditionsServiceServer.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListConditionsRequest) (*iamv1.ListConditionsResponse, error) {
 	rows, next, err := h.svc.List(ctx, condition.ListFilter{
-		FolderID:  req.GetFolderId(),
+		ProjectID: req.GetProjectId(),
 		PageSize:  safeconv.ClampNonNegInt32(req.GetPageSize()),
 		PageToken: req.GetPageToken(),
 		Filter:    req.GetFilter(),
@@ -66,8 +66,8 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListConditionsRequest) (*
 
 // Create — see iamv1.ConditionsServiceServer.
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateConditionRequest) (*operationpb.Operation, error) {
-	if req.GetFolderId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Illegal argument folder_id: required")
+	if req.GetProjectId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Illegal argument project_id: required")
 	}
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument name: required")
@@ -83,7 +83,7 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateConditionRequest)
 		}
 	}
 	op, err := h.svc.Create(ctx, service.CreateConditionRequest{
-		FolderID:         req.GetFolderId(),
+		ProjectID:        req.GetProjectId(),
 		Name:             req.GetName(),
 		Description:      req.GetDescription(),
 		Labels:           req.GetLabels(),

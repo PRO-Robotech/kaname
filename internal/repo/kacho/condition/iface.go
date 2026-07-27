@@ -13,7 +13,7 @@ import (
 
 type ReaderIface interface {
 	Get(ctx context.Context, id domain.ConditionID) (domain.Condition, error)
-	// List — page conditions in a folder, exclude DELETING tombstones.
+	// List — page conditions in a project, exclude DELETING tombstones.
 	List(ctx context.Context, filter ListFilter) ([]domain.Condition, string, error)
 	// CountReferences — best-effort count of access_bindings rows referencing
 	// `condition_id` via the legacy access_binding_conditions table.
@@ -35,9 +35,9 @@ type WriterIface interface {
 	Delete(ctx context.Context, id domain.ConditionID) error
 }
 
-// ListFilter — pagination + optional folder scope.
+// ListFilter — pagination + optional project scope.
 type ListFilter struct {
-	FolderID  string
+	ProjectID string
 	PageSize  int32
 	PageToken string
 	Filter    string // YC-style label= / name= filter (best-effort).

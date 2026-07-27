@@ -45,8 +45,6 @@ package permission_catalog
 var noPublicListEndpoint = map[string]bool{
 	// AddressPool — Internal-only admin resource (List on :9091, not external).
 	"vpc.addressPool": true,
-	// ConditionsService.List exists in proto but is NOT on the external mux.
-	"iam.condition": true,
 }
 
 // hasPublicListEndpoint reports whether (module,resource) has a PUBLIC per-object
