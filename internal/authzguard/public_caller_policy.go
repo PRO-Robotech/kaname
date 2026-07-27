@@ -13,8 +13,10 @@
 //
 // :9090 is not gateway-only, though. Five consumer services dial it on their
 // request path (ProjectService.Get — project existence + owning account before a
-// Create), and the namespace operator fans out over AccountService.List →
-// ProjectService.List. All of them present a client certificate from the same
+// Create) and four of them ask it the per-page visibility question behind their
+// own List (AuthorizeService.BatchCheck); the namespace operator fans out over
+// AccountService.List → ProjectService.List. All of them present a client
+// certificate from the same
 // internal authority as the gateway, and the port is an ordinary Service inside
 // the namespace with no NetworkPolicy of its own. So before this policy, ANY
 // pod holding an internal-CA certificate could reach ANY public RPC and — since
@@ -29,7 +31,7 @@
 //     "anyone with a certificate" down to "our modules" — but a module in that
 //     list could still speak for a user on EVERY public RPC.
 //   - this policy decides WHO MAY CALL WHICH RPC. It narrows the peers down to
-//     the read edges they actually use, so a compromised neighbour cannot reach
+//     the query edges they actually use, so a compromised neighbour cannot reach
 //     the credential-issuing and grant-writing surface at all.
 //
 // Arms (evaluated in order):
@@ -38,7 +40,7 @@
 //     dev (no verified cert) → no-op, mirroring CallerPolicy / RelationWriteGate.
 //  2. Gateway — the api-gateway SA may call everything: it is the front door, and
 //     the per-user ReBAC decision the whole design rests on happens there.
-//  3. Peer-callable — a small, static, READ-ONLY table naming, per RPC, which
+//  3. Peer-callable — a small, static, MUTATION-FREE table naming, per RPC, which
 //     other module SAs may call it. Anything not in it is gateway-only.
 //     prod → PermissionDenied; dev → no-op.
 //
