@@ -35,9 +35,21 @@ import (
 //     (parity с verbatim-формой error-сообщений);
 //   - иначе — Internal с переданным err-текстом (StripSentinel снимает
 //     sentinel-prefix чтобы клиент не увидел "not found: ...").
+//
+// Порядок веток — сначала pass-through, потом sentinel-switch (форма kacho-nlb).
+// Он несущий, а не косметический: pkg/validate кладёт имя поля ТОЛЬКО в
+// google.rpc.BadRequest-details, сообщение остаётся общим «invalid argument».
+// Пересборка статуса в sentinel-ветке (`status.Error(code, StripSentinel(err))`)
+// детали теряет, поэтому ошибка, обёрнутая через `%w` на iamerr.Err*, обязана
+// пройти pass-through ПЕРВОЙ. status с codes.Unknown под pass-through НЕ попадает
+// (guard `!= Unknown`) — он падает в sentinel-switch и дальше в фиксированный
+// INTERNAL, без leak'а.
 func MapRepoErr(err error) error {
 	if err == nil {
 		return nil
+	}
+	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
+		return err
 	}
 	switch {
 	case stderrors.Is(err, iamerr.ErrNotFound):
@@ -61,9 +73,6 @@ func MapRepoErr(err error) error {
 		// wrapped detail (a wrapped ErrInternal may embed subject/principal ids,
 		// row-counts or pgx/SQL text). Detail stays in the error chain for logs.
 		return status.Error(codes.Internal, "internal error")
-	}
-	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
-		return err
 	}
 	if strings.HasPrefix(err.Error(), "Illegal argument") {
 		return status.Error(codes.InvalidArgument, err.Error())
