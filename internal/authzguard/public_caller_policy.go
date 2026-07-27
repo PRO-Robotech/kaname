@@ -71,6 +71,14 @@ const (
 	// projects it may view.
 	publicProjectListMethod = "/kacho.cloud.iam.v1.ProjectService/List"
 	publicAccountListMethod = "/kacho.cloud.iam.v1.AccountService/List"
+	// publicBatchCheckMethod — the per-object visibility filter every List
+	// handler in vpc/compute/nlb/storage runs (internal/authzfilter): it asks,
+	// for the ids of ONE page, which the end user may see. The service→service
+	// edge is meant to live on the internal listener, and most profiles put it
+	// there — but at least one deployment profile points it at the public
+	// address, so the public listener must admit it or the filter fails closed
+	// and tenants lose their own List results.
+	publicBatchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
 )
 
 // Module service short-names (as ServiceNameFromSAN resolves them) that appear in
@@ -87,10 +95,12 @@ const (
 // PublicPeerCallableRPCs returns the public RPCs a NON-gateway module may call,
 // mapped to the exact module service short-names permitted to call each.
 //
-// Every entry is a READ, and that is a rule rather than a coincidence: a mutating
+// Every entry is a QUERY, and that is a rule rather than a coincidence: a mutating
 // RPC here would hand a neighbouring service the ability to change tenant data in
 // a forwarded user's name, which is the very hole this policy closes. The lock
-// TestPublicPeerCallableRPCs_OnlyReads enforces it.
+// TestPublicPeerCallableRPCs_CarryNoMutation enforces it against the proto
+// itself — in Kachō a mutation is exactly an RPC that returns an Operation, so the
+// check reads the contract rather than a naming habit.
 //
 // The api-gateway is deliberately absent — it is admitted by its own arm, and
 // naming it here too would create a second source of truth that drifts.
@@ -102,11 +112,18 @@ const (
 //   - AccountService/List → ProjectService/List — the namespace operator's
 //     read-only fan-out (SEC-G); iam seeds its module SA with exactly
 //     `iam.projectses.*.list` and cluster system_viewer for this.
+//   - AuthorizeService/BatchCheck — the per-page visibility filter in
+//     vpc/compute/nlb/storage (internal/authzfilter, the sole AuthorizeService
+//     method any of them calls). Its edge belongs on the internal listener and
+//     most profiles put it there, but a profile pointing it at the public address
+//     exists, and a denial there would fail the filter closed and empty a
+//     tenant's own List.
 func PublicPeerCallableRPCs() map[string][]string {
 	return map[string][]string{
 		publicProjectGetMethod:  {svcVPC, svcCompute, svcNLB, svcStorage, svcRegistry},
 		publicAccountListMethod: {svcVPCOperator},
 		publicProjectListMethod: {svcVPCOperator},
+		publicBatchCheckMethod:  {svcVPC, svcCompute, svcNLB, svcStorage},
 	}
 }
 

@@ -21,6 +21,9 @@ package authzguard
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -35,7 +38,13 @@ const (
 	// storageSAN / operatorSAN — соседи с законным сертификатом внутреннего
 	// центра. storage ходит на :9090 за ProjectService.Get; оператор — за
 	// AccountService.List → ProjectService.List (SEC-G).
-	storageSAN  = "spiffe://kacho.cloud/ns/kacho/sa/kacho-storage"
+	//
+	// Обе строки взяты из чартов, которые эти сертификаты выдают, а не написаны по
+	// образцу: сегмент пространства имён у них СВОЙ. Здесь это не влияет на исход —
+	// политика читает только сегмент учётной записи, — но списку отправителей
+	// (точное совпадение) такая описка стоила бы молчаливого отказа рабочему пути,
+	// поэтому привычка брать строку из чарта заводится сразу.
+	storageSAN  = "spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage"
 	operatorSAN = "spiffe://kacho.cloud/ns/kacho-vpc-operator/sa/kacho-vpc-operator"
 
 	// projectGetMethod — единственный публичный RPC, который зовут ВСЕ
@@ -55,6 +64,11 @@ const (
 	accessBindingCreateMethod = "/kacho.cloud.iam.v1.AccessBindingService/Create"
 	// projectDeleteMethod — третий: необратимая мутация тенантского ресурса.
 	projectDeleteMethod = "/kacho.cloud.iam.v1.ProjectService/Delete"
+
+	// batchCheckMethod — пер-страничный фильтр видимости List у vpc/compute/nlb/
+	// storage (internal/authzfilter). Единственный метод AuthorizeService, который
+	// кто-либо из них зовёт.
+	batchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
 )
 
 func newStorageCtx() context.Context {
@@ -140,6 +154,19 @@ func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 			t.Fatalf("the namespace operator was denied on %s: %v — SEC-G fan-out read", method, err)
 		}
 	}
+	// Пер-страничный фильтр видимости: без него List у тенанта отвечает пустотой
+	// (фильтр падает закрыто), хотя ресурсы у него есть.
+	for _, san := range []string{
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc",
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-compute",
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-nlb",
+		storageSAN,
+	} {
+		ctx := grpcsrv.WithCertIdentity(context.Background(), san, true)
+		if err := p.allow(ctx, batchCheckMethod); err != nil {
+			t.Fatalf("%s denied on %s: %v — это пер-страничный фильтр видимости List", san, batchCheckMethod, err)
+		}
+	}
 }
 
 // TestPublicCallerPolicy_PeerReadEdgeIsPerRPCNotPerCaller — допуск выдан на
@@ -218,17 +245,64 @@ func TestPublicCallerPolicy_Stream_Denies(t *testing.T) {
 
 // ── состав таблицы ─────────────────────────────────────────────────────────
 
-// TestPublicPeerCallableRPCs_OnlyReads — таблица допусков соседям обязана
-// оставаться ЧИТАЮЩЕЙ. Мутация, попавшая сюда, отдала бы соседу право менять
+// TestPublicPeerCallableRPCs_CarryNoMutation — таблица допусков соседям обязана
+// оставаться ЗАПРАШИВАЮЩЕЙ. Мутация, попавшая сюда, отдала бы соседу право менять
 // тенантские данные от чужого имени — то самое, что правка закрывает.
-func TestPublicPeerCallableRPCs_OnlyReads(t *testing.T) {
+//
+// Проверяем по КОНТРАКТУ, а не по привычке именования: в Kachō мутация — это в
+// точности RPC, возвращающий Operation. Суффиксный список («только Get и List»)
+// был бы формой без содержания — он развалился бы на первом же законном
+// запрашивающем методе с другим именем (BatchCheck) и при этом пропустил бы
+// мутацию, названную, скажем, `ApplyList`.
+func TestPublicPeerCallableRPCs_CarryNoMutation(t *testing.T) {
+	returns := protoReturnTypes(t)
 	for method := range PublicPeerCallableRPCs() {
-		name := method[strings.LastIndex(method, "/")+1:]
-		if name != "Get" && name != "List" {
-			t.Fatalf("%s is in the peer-callable table but is not a read: a neighbour would mutate "+
-				"tenant data in a forwarded user's name", method)
+		ret, ok := returns[method]
+		if !ok {
+			t.Fatalf("%s отсутствует в proto — таблица допусков разошлась с контрактом", method)
+		}
+		if strings.Contains(ret, "Operation") {
+			t.Fatalf("%s возвращает %s, то есть МУТИРУЕТ: сосед менял бы тенантские данные от "+
+				"имени переданного пользователя — ровно та дыра, которую политика закрывает", method, ret)
 		}
 	}
+}
+
+// protoReturnTypes читает `Service/Method → тип ответа` прямо из .proto — из
+// источника истины контракта, а не из копии, которую пришлось бы поддерживать.
+func protoReturnTypes(t *testing.T) map[string]string {
+	t.Helper()
+	dir := filepath.Join("..", "..", "..", "..", "proto", "kacho", "cloud", "iam", "v1")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read proto dir %s: %v", dir, err)
+	}
+	svcRe := regexp.MustCompile(`^service\s+(\w+)`)
+	rpcRe := regexp.MustCompile(`^\s*rpc\s+(\w+)\s*\([^)]*\)\s*returns\s*\(\s*([\w.]+)`)
+	out := map[string]string{}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".proto" {
+			continue
+		}
+		b, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		if rerr != nil {
+			t.Fatalf("read %s: %v", e.Name(), rerr)
+		}
+		svc := ""
+		for _, ln := range strings.Split(string(b), "\n") {
+			if m := svcRe.FindStringSubmatch(ln); m != nil {
+				svc = m[1]
+				continue
+			}
+			if m := rpcRe.FindStringSubmatch(ln); m != nil && svc != "" {
+				out["/kacho.cloud.iam.v1."+svc+"/"+m[1]] = m[2]
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("не разобрано ни одного rpc из %s — страж потерял источник истины", dir)
+	}
+	return out
 }
 
 // TestPublicPeerCallableRPCs_NamesNoGateway — gateway разрешён отдельной ветвью;
