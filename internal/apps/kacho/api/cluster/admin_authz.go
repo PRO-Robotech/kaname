@@ -45,9 +45,17 @@ type adminChecker = authzguard.RelationChecker
 // requireClusterSystemAdmin enforces the defense-in-depth gate. Returns
 // PermissionDenied (verbatim, non-leaking) on every failure mode.
 func requireClusterSystemAdmin(ctx context.Context, checker adminChecker) error {
-	// 1. authenticated principal required (anonymous / empty ctx → deny).
-	principal := authzguard.PrincipalUserID(ctx)
-	if principal == "" || authzguard.IsAnonymous(ctx) {
+	// 1. authenticated principal required, and it must be NAMEABLE (anonymous /
+	//    empty ctx / unknown principal type / an id carrying an FGA separator →
+	//    deny).
+	//
+	//    The subject was previously spelled as "user:" joined to the principal id.
+	//    That is a string, not a policy: a machine granted cluster administration
+	//    holds `service_account:<id>`, so asking about `user:<id>` named nobody and
+	//    the grant could be issued and never used. PrincipalSubject resolves the
+	//    principal to its own type, and fails closed on anything it cannot name.
+	subject, ok := authzguard.PrincipalSubject(ctx)
+	if !ok {
 		return authzguard.PermissionDenied()
 	}
 	// 2. nil checker → fail closed (never silently allow an unwired gate).
@@ -55,7 +63,7 @@ func requireClusterSystemAdmin(ctx context.Context, checker adminChecker) error 
 		return authzguard.PermissionDenied()
 	}
 	allowed, err := checker.Check(ctx,
-		"user:"+principal,
+		subject,
 		"system_admin",
 		"cluster:"+domain.ClusterSingletonID,
 	)

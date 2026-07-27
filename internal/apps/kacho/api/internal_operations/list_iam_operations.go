@@ -72,15 +72,18 @@ func (u *ListIamOperationsUseCase) Execute(ctx context.Context, accountID string
 // checker, checker backend error, or explicit deny. Mirrors
 // cluster.requireClusterSystemAdmin (the highest-blast pattern).
 func (u *ListIamOperationsUseCase) requireClusterSystemAdmin(ctx context.Context) error {
-	principal := authzguard.PrincipalUserID(ctx)
-	if principal == "" || authzguard.IsAnonymous(ctx) {
+	// The subject is resolved to the principal's own type — see
+	// cluster.requireClusterSystemAdmin for why "user:" joined to the id is a
+	// string rather than a policy.
+	subject, ok := authzguard.PrincipalSubject(ctx)
+	if !ok {
 		return authzguard.PermissionDenied()
 	}
 	if u.checker == nil {
 		return authzguard.PermissionDenied()
 	}
 	allowed, err := u.checker.Check(ctx,
-		"user:"+principal,
+		subject,
 		"system_admin",
 		"cluster:"+domain.ClusterSingletonID,
 	)

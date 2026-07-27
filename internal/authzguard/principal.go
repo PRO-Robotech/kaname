@@ -12,9 +12,18 @@ package authzguard
 
 import (
 	"context"
+	"strings"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
+
+// fgaReservedChars — characters that carry meaning inside an FGA subject string
+// and therefore may never appear inside the id half of one: ':' moves the
+// type/id boundary, '#' turns the token into a userset reference, '@' and
+// whitespace are separators in the tuple grammar. Mirrors the set the shared
+// subject formatter sanitises; here the id is refused outright instead, because
+// a principal that cannot be named must not be checked.
+const fgaReservedChars = ":#@ \t\n"
 
 // PrincipalUserID returns the principal's user-id for user / service-account
 // / system-bootstrap principals; empty string for anonymous or empty ctx.
@@ -49,7 +58,11 @@ func PrincipalUserID(ctx context.Context) string {
 // types to "user:" (a latent over-grant). Callers must treat ok=false as "no
 // resolvable subject → deny".
 func SubjectFromPrincipal(p operations.Principal) (string, bool) {
-	if p.ID == "" {
+	if p.ID == "" || strings.ContainsAny(p.ID, fgaReservedChars) {
+		// An id carrying a separator would change what the subject string MEANS
+		// rather than who it names: `usr#member` reads as a userset reference and
+		// `a:b` moves the type boundary. Refuse rather than sanitise — a caller
+		// that cannot be named must not be checked.
 		return "", false
 	}
 	switch p.Type {
