@@ -260,10 +260,12 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// call is a separate, earlier step — so a registration without a row
 			// is a state that genuinely occurs; that is precisely the case this
 			// branch answers, rather than one it assumes away. Refusing here
-			// is also what makes key revocation take effect at commit: revoke
-			// deletes the row first and asks the provider to delete the client
-			// second, so a client that outlives that second step arrives here and
-			// is turned away — with no dependence on the provider being reachable.
+			// is also what stops a revoked key from obtaining anything further at
+			// commit: revoke deletes the row first and asks the provider to delete
+			// the client second, so a client that outlives that second step
+			// arrives here and is turned away — with no dependence on the provider
+			// being reachable. Tokens ALREADY minted are self-contained and are
+			// not reached from here; they lapse with their own lifetime.
 			//
 			// INTERACTIVE request: a human authenticated at the identity
 			// provider and their kacho mirror is provisioned ASYNCHRONOUSLY (the
