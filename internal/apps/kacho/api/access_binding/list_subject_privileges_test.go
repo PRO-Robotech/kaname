@@ -11,7 +11,9 @@ package access_binding
 //   self-view (caller == subject, no admin role) → allowed
 //   malformed subject_id / prefix↔type mismatch → INVALID_ARGUMENT (first stmt)
 //   unknown subject_type → INVALID_ARGUMENT
-//   well-formed-but-nonexistent subject → NOT_FOUND
+//   well-formed-but-nonexistent subject, caller may read it → NOT_FOUND
+//   (a caller who may NOT read it gets the cross-account answer instead —
+//    list_subject_privileges_existence_test.go)
 //   account-admin (FGA admin on subject's home account) → allowed
 //   ServiceAccount subject + admin of its home account → allowed
 //   cross-account caller → PERMISSION_DENIED
@@ -134,11 +136,14 @@ func TestListSubjectPrivileges_1_3_05_UnknownSubjectType_InvalidArgument(t *test
 	}
 }
 
-// ── well-formed-but-nonexistent subject → NOT_FOUND ──────────────────────────
+// ── well-formed-but-nonexistent subject, caller MAY read it → NOT_FOUND ──────
+// The authority is explicit (cluster-admin): absence is reported only to a
+// caller entitled to it, so this case must not be seeded with an all-allowing
+// fake — that would make the assertion true for a reason the test does not name.
 func TestListSubjectPrivileges_1_3_06_UnknownSubject_NotFound(t *testing.T) {
 	repo := spRepo()
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(newRecordingFGA(), nil)
-	ctx := userCtxAB(spOwnerID)
+	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(onlyClusterAdmin(), nil)
+	ctx := clusterAdminCtx(spOwnerID)
 
 	ghost := domain.SubjectID("usr0000000000ghost01") // well-formed usr-id, not seeded
 	_, _, err := uc.Execute(ctx, domain.SubjectTypeUser, ghost, repoab.PageFilter{})
@@ -147,11 +152,11 @@ func TestListSubjectPrivileges_1_3_06_UnknownSubject_NotFound(t *testing.T) {
 	}
 }
 
-// ── nonexistent SA subject → NOT_FOUND ───────────────────────────────────────
+// ── nonexistent SA subject, caller MAY read it → NOT_FOUND ───────────────────
 func TestListSubjectPrivileges_1_3_06_UnknownServiceAccount_NotFound(t *testing.T) {
 	repo := spRepo()
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(newRecordingFGA(), nil)
-	ctx := userCtxAB(spOwnerID)
+	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(onlyClusterAdmin(), nil)
+	ctx := clusterAdminCtx(spOwnerID)
 
 	ghost := domain.SubjectID("sva000000000ghost001")
 	_, _, err := uc.Execute(ctx, domain.SubjectTypeServiceAccount, ghost, repoab.PageFilter{})
@@ -356,11 +361,11 @@ func TestListSubjectPrivileges_1_3b_03_GroupIDAsUser_PrefixMismatch_InvalidArgum
 	}
 }
 
-// ── well-formed-but-nonexistent group subject → NOT_FOUND ────────────────────
+// ── nonexistent group subject, caller MAY read it → NOT_FOUND ────────────────
 func TestListSubjectPrivileges_1_3b_04_UnknownGroup_NotFound(t *testing.T) {
 	repo := spRepo()
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(newRecordingFGA(), nil)
-	ctx := userCtxAB(spOwnerID)
+	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(onlyClusterAdmin(), nil)
+	ctx := clusterAdminCtx(spOwnerID)
 
 	ghost := domain.SubjectID("grp00000000000ghost1") // well-formed grp-id, not seeded
 	_, _, err := uc.Execute(ctx, domain.SubjectTypeGroup, ghost, repoab.PageFilter{})

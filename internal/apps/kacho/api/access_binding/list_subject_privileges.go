@@ -19,12 +19,23 @@ package access_binding
 //  2. prefix↔type validation  → InvalidArgument FIRST statement (before repo).
 //  3. anti-anonymous guard    → PermissionDenied (catalog is cluster-floor;
 //     the precise self/account-admin policy is authoritative here).
-//  4. subject existence resolve (Users().Get / ServiceAccounts().Get) →
-//     NotFound for a well-formed-but-nonexistent subject; also yields the
-//     home account_id needed for the authz check.
-//  5. authz: IsSelf OR account-admin (owner of home Account OR FGA admin) →
-//     PermissionDenied on cross-account.
-//  6. repo JOIN read (access_bindings ⋈ roles), keyset paginated.
+//  4. subject resolve (Users().Get / ServiceAccounts().Get / Groups().Get) —
+//     yields the home account_id the authz check needs. A subject that does not
+//     resolve does NOT answer here: its NotFound is HELD BACK (step 6).
+//  5. authz: IsSelf OR account-admin (owner of home Account OR FGA admin) OR
+//     cluster-admin → PermissionDenied otherwise. Decided BEFORE existence is
+//     allowed to shape the reply.
+//  6. only now, for a caller who may read the subject: a subject that did not
+//     resolve → NotFound.
+//  7. repo JOIN read (access_bindings ⋈ roles), keyset paginated.
+//
+// Why authority precedes existence (and not the other way round): the subject id
+// is caller-supplied and every id in the cluster is a legal probe. Answering
+// "no such subject" before deciding whether the caller may read it makes the RPC
+// an enumeration oracle over every user, service account and group — the caller
+// separates "exists, not yours" from "does not exist" by the reply alone. So a
+// caller without authority gets ONE answer for both, and only self /
+// account-admin / cluster-admin are told that the subject is missing.
 
 import (
 	"context"
@@ -84,20 +95,44 @@ func (u *ListSubjectPrivilegesUseCase) Execute(ctx context.Context, subjectType 
 		return nil, "", err
 	}
 
-	// 4. Resolve subject existence + home account (NotFound; yields account_id for authz).
-	homeAccountID, err := u.resolveSubjectHomeAccount(ctx, subjectType, subjectID)
+	// 4. Resolve the subject: yields the home account_id the authz check needs.
+	// A subject that does not resolve is NOT reported here — res.miss is carried
+	// to step 6 and only surfaces to a caller who may read the subject.
+	res, err := u.resolveSubject(ctx, subjectType, subjectID)
 	if err != nil {
+		// A store failure is not a verdict about the subject — surface it as such.
 		return nil, "", err
 	}
 
-	// 5. AuthZ — self OR account-admin of the subject's home Account.
+	// 5. AuthZ — self OR account-admin of the subject's home Account OR
+	// cluster-admin. Decided before existence is allowed to shape the reply.
 	if !authzguard.IsSelf(ctx, string(subjectID)) {
-		if err := u.requireAccountViewAuthority(ctx, homeAccountID); err != nil {
-			return nil, "", err
+		authorized := false
+		if res.found {
+			ok, aerr := u.hasAccountViewAuthority(ctx, res.accountID)
+			if aerr != nil {
+				return nil, "", aerr
+			}
+			authorized = ok
+		} else {
+			// An id that belongs to nobody has no home Account to administer, so
+			// the only authority that can exist over it is the flat cluster-admin
+			// super-gate. Everyone else is refused with the SAME answer they would
+			// get for a subject in a foreign account — that identity of answers is
+			// what closes the oracle.
+			authorized = authzguard.IsClusterAdmin(ctx, u.relations)
+		}
+		if !authorized {
+			return nil, "", authzguard.PermissionDenied()
 		}
 	}
 
-	// 6. Enriched repo read (JOIN role_name, keyset paginated).
+	// 6. Authorized caller, unresolvable subject → the owner's own NotFound.
+	if !res.found {
+		return nil, "", res.miss
+	}
+
+	// 7. Enriched repo read (JOIN role_name, keyset paginated).
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
 		return nil, "", shared.MapRepoErr(err)
@@ -127,30 +162,56 @@ func subjectPrefixAndName(subjectType domain.SubjectType) (prefix, resName strin
 	}
 }
 
-// resolveSubjectHomeAccount reads the subject (User / ServiceAccount / Group) to
-// (a) prove it exists (well-formed-but-nonexistent → NotFound) and (b)
-// return its home account_id for the authz check. All reads are within
-// kacho_iam, same-schema — NOT a cross-domain edge.
-func (u *ListSubjectPrivilegesUseCase) resolveSubjectHomeAccount(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID) (domain.AccountID, error) {
+// subjectResolution — outcome of the subject lookup, with the absence answer
+// held back. `miss` carries the owning repo's OWN NotFound (contract tone
+// "<Resource> <id> not found", never re-composed here — re-composing it is how
+// the hide-existence texts drift apart), and it is returned to the caller only
+// after authority has been established.
+type subjectResolution struct {
+	accountID domain.AccountID
+	found     bool
+	miss      error
+}
+
+// resolveSubject reads the subject (User / ServiceAccount / Group) to return its
+// home account_id for the authz check. All reads are within kacho_iam,
+// same-schema — NOT a cross-domain edge.
+//
+// Three outcomes, deliberately distinct: resolved (found, account id); absent
+// (found=false, miss holds the mapped NotFound — NOT returned as an error here,
+// see the Execute step order); store failure (err — never a statement about the
+// subject).
+func (u *ListSubjectPrivilegesUseCase) resolveSubject(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID) (subjectResolution, error) {
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
-		return "", shared.MapRepoErr(err)
+		return subjectResolution{}, shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
+
+	resolved := func(accountID domain.AccountID) (subjectResolution, error) {
+		return subjectResolution{accountID: accountID, found: true}, nil
+	}
+	// classify splits "no such row" (deferred answer) from a real store failure.
+	classify := func(gerr error) (subjectResolution, error) {
+		if errors.Is(gerr, iamerr.ErrNotFound) {
+			return subjectResolution{miss: shared.MapRepoErr(gerr)}, nil
+		}
+		return subjectResolution{}, shared.MapRepoErr(gerr)
+	}
 
 	switch subjectType {
 	case domain.SubjectTypeUser:
 		usr, gerr := rd.Users().Get(ctx, domain.UserID(subjectID))
 		if gerr != nil {
-			return "", shared.MapRepoErr(gerr)
+			return classify(gerr)
 		}
-		return usr.AccountID, nil
+		return resolved(usr.AccountID)
 	case domain.SubjectTypeServiceAccount:
 		sa, gerr := rd.ServiceAccounts().Get(ctx, domain.ServiceAccountID(subjectID))
 		if gerr != nil {
-			return "", shared.MapRepoErr(gerr)
+			return classify(gerr)
 		}
-		return sa.AccountID, nil
+		return resolved(sa.AccountID)
 	case domain.SubjectTypeGroup:
 		// A Group is Account-scoped (groups.account_id FK), so its
 		// home account is the gate scope — same self/account-admin policy as User
@@ -158,53 +219,52 @@ func (u *ListSubjectPrivilegesUseCase) resolveSubjectHomeAccount(ctx context.Con
 		// owner/account-admin path.
 		grp, gerr := rd.Groups().Get(ctx, domain.GroupID(subjectID))
 		if gerr != nil {
-			return "", shared.MapRepoErr(gerr)
+			return classify(gerr)
 		}
-		return grp.AccountID, nil
+		return resolved(grp.AccountID)
 	default:
 		// Unreachable — subjectPrefixAndName already rejected other types.
-		return "", authzguard.PermissionDenied()
+		return subjectResolution{}, authzguard.PermissionDenied()
 	}
 }
 
-// requireAccountViewAuthority — the caller may view another
+// hasAccountViewAuthority — the caller may view another
 // subject's privileges iff they administer the subject's home Account. Authority
 // holds when EITHER:
 //   - the caller owns the home Account (DB owner_user_id == principal), OR
 //   - the caller holds an FGA `admin` relation on account:<homeAccountID>
-//     (delegated admin who is not the owner).
+//     (delegated admin who is not the owner; fgaHoldsAdmin short-circuits the
+//     flat cluster-admin super-gate).
 //
 // This is the read-side mirror of requireGrantAuthority on the SUBJECT's home
-// account (so "who may grant" == "who may view"). A non-existent
-// account (dangling home account) surfaces as PermissionDenied (no leak), not
-// NotFound — existence of the SUBJECT was already proven in step 4.
-func (u *ListSubjectPrivilegesUseCase) requireAccountViewAuthority(ctx context.Context, accountID domain.AccountID) error {
+// account (so "who may grant" == "who may view"). A dangling home account is
+// simply "no owner-path" — false, never a statement about the subject.
+//
+// Returns (false, nil) for "no authority" and (false, err) only for a store
+// failure: the caller must not read an unreachable store as a denial.
+func (u *ListSubjectPrivilegesUseCase) hasAccountViewAuthority(ctx context.Context, accountID domain.AccountID) (bool, error) {
 	if accountID == "" {
-		return authzguard.PermissionDenied()
+		return false, nil
 	}
 
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
-		return shared.MapRepoErr(err)
+		return false, shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
 	// Path 1 — owner of the home Account.
 	acct, gerr := rd.Accounts().Get(ctx, accountID)
 	if gerr == nil && acct.OwnerUserID != "" && authzguard.IsSelf(ctx, string(acct.OwnerUserID)) {
-		return nil
+		return true, nil
 	}
 	// A missing account row is treated as "no owner-path" — fall through to the
-	// FGA delegated-admin path; ultimately PermissionDenied if neither holds.
+	// FGA delegated-admin path; ultimately unauthorized if neither holds.
 	if gerr != nil && !errors.Is(gerr, iamerr.ErrNotFound) {
-		return shared.MapRepoErr(gerr)
+		return false, shared.MapRepoErr(gerr)
 	}
 
 	// Path 2 — delegated admin: principal holds `admin` on account:<id> in FGA
 	// (shared predicate — the single fgaHoldsAdmin used by every authority gate).
-	if fgaHoldsAdmin(ctx, u.relations, "account", string(accountID)) {
-		return nil
-	}
-
-	return authzguard.PermissionDenied()
+	return fgaHoldsAdmin(ctx, u.relations, "account", string(accountID)), nil
 }
