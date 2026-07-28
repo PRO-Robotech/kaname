@@ -186,8 +186,9 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	require.NotEqual(t, http.StatusInternalServerError, w.Code,
-		"a missing assertion is not a server error; body: %s", w.Body.String())
+	require.Equal(t, http.StatusForbidden, w.Code,
+		"the client resolves to nothing, so the request is refused — and a missing assertion is not what "+
+			"decides that, nor is it a server error; body: %s", w.Body.String())
 	saPort.mu.Lock()
 	defer saPort.mu.Unlock()
 	require.Len(t, saPort.lookups, 0, "federated lookup must NOT happen for client_credentials")

@@ -189,46 +189,82 @@ func TestTokenHook_MissingSubject_BadRequest(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "missing_subject")
 }
 
-func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing.T) {
-	audit := &fakeAudit{}
-	h := newTokenHookHandler(t, &fakeUserLookup{}, audit)
-
-	// client_credentials (RFC 6749 §4.4) несёт пустой subject — end-user'а нет.
-	// kacho-принципал — это ServiceAccount за OAuth2-клиентом, поэтому handler
-	// обязан взять client_id как subject (а не отвергать 400 missing_subject),
-	// чтобы enricher резолвил SA через LookupByOAuthClientID.
-	//
-	// This handler is wired with no SA port, so the client resolves to nothing and
-	// the request is refused (see token_hook_unmapped_client_test.go). That refusal
-	// is not what this test is about — what it pins is that the client id was
-	// adopted as the subject instead of the request being rejected as subjectless.
-	// The audit record of the refusal names the subject the handler actually used,
-	// which evidences the fallback more directly than a status code ever did.
-	payload := map[string]any{
+// emptySubjectClientCredentialsPayload — client_credentials (RFC 6749 §4.4)
+// carries no end user, so the subject the provider states is empty and the
+// client id has to be adopted in its place.
+func emptySubjectClientCredentialsPayload(clientID string) map[string]any {
+	return map[string]any{
 		"session": map[string]any{
-			"client_id": "cc-client-uuid",
+			"client_id": clientID,
 			"id_token":  map[string]any{"subject": ""},
 		},
 		"request": map[string]any{
-			"client_id": "cc-client-uuid",
-			"payload":   map[string][]string{"grant_type": {"client_credentials"}},
+			"client_id":   clientID,
+			"grant_types": []string{"client_credentials"},
+			"payload":     map[string][]string{"grant_type": {"client_credentials"}},
 		},
 	}
-	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest("POST", "/iam/v1/hooks/token", strings.NewReader(string(body)))
-	req.Header.Set("X-Kacho-Hook-Token", "secret-hook-token")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+}
 
-	require.NotEqual(t, http.StatusBadRequest, w.Code,
+// TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID — the kacho
+// principal of such a token is the service account behind the OAuth client, so
+// the handler must adopt the client id as the subject rather than reject the
+// request as subjectless.
+//
+// The client is MAPPED here on purpose. That is what makes the test say what it
+// is about and nothing else: the enricher can only find that service account by
+// looking the client id up as the subject, so a mint carrying its principal id
+// IS the evidence of the fallback — and the outcome is an exact status that
+// does not move with the refusal of unresolvable credentials. The unmapped
+// variant of this same body is the test below.
+func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing.T) {
+	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{
+		found: true,
+		soc: domain.ServiceAccountOAuthClient{
+			ID:            "soc_01abcdefghjkmnpqr",
+			SvaID:         "sva_01abcdefghjkmnpqr",
+			OAuthClientID: "cc-client-uuid",
+		},
+		sa: domain.ServiceAccount{
+			ID:        "sva_01abcdefghjkmnpqr",
+			AccountID: "acc_01abcdefghjkmnpqr",
+		},
+	}, &fakeAudit{})
+
+	w := postHookPayload(t, h, emptySubjectClientCredentialsPayload("cc-client-uuid"))
+
+	require.Equal(t, http.StatusOK, w.Code,
 		"empty-subject client_credentials must fall back to client_id, not be rejected as subjectless; body: %s",
 		w.Body.String())
 	assert.NotContains(t, w.Body.String(), "missing_subject")
+	claims := extClaimsOf(t, w)
+	assert.Equal(t, "cc-client-uuid", claims["kacho_external_id"],
+		"the subject the handler proceeded with is the client id it fell back to")
+	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kacho_principal_id"],
+		"only a lookup keyed on the adopted client id could have reached this service account")
+}
+
+// TestTokenHook_ClientCredentials_EmptySubject_UnmappedClient_Refused — the same
+// body with nothing behind the client. The fallback still happens; what changes
+// is that the adopted subject resolves to no principal, and the answer to that
+// is a refusal naming client authentication as what failed.
+func TestTokenHook_ClientCredentials_EmptySubject_UnmappedClient_Refused(t *testing.T) {
+	audit := &fakeAudit{}
+	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, audit)
+
+	w := postHookPayload(t, h, emptySubjectClientCredentialsPayload("cc-client-uuid"))
+
+	require.Equal(t, http.StatusForbidden, w.Code,
+		"a client that resolves to no principal must not mint; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "invalid_client")
+	assert.NotContains(t, w.Body.String(), "missing_subject",
+		"the request was refused for what its credential resolves to, not for lacking a subject")
 
 	events := audit.Events()
 	require.Len(t, events, 1)
+	assert.Equal(t, "authn.token.denied", events[0].EventType)
 	assert.Equal(t, "cc-client-uuid", events[0].Payload["subject"],
-		"the subject the handler proceeded with is the client id it fell back to")
+		"the record names the subject the handler proceeded with — the client id it fell back to")
 }
 
 func TestTokenHook_UserNotFound_EmitsMinimalClaims(t *testing.T) {
