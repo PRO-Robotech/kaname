@@ -22,7 +22,7 @@ package authzguard_test
 
 import (
 	"context"
-	"crypto/md5" //nolint:gosec // deterministic id derivation, not security
+	"crypto/md5"
 	"encoding/hex"
 	"errors"
 	"testing"
@@ -37,8 +37,12 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
+// sva derives the deterministic ServiceAccount id for a module svc-name
+// (`'sva' || substr(md5('kacho-<svc>'), 1, 17)`), matching the seed migration.
+// md5 here is an id-derivation function chosen to agree with Postgres `md5()`,
+// not a security primitive — the digest guards nothing.
 func sva(svc string) string {
-	sum := md5.Sum([]byte("kacho-" + svc)) //nolint:gosec // deterministic id
+	sum := md5.Sum([]byte("kacho-" + svc))
 	return "sva" + hex.EncodeToString(sum[:])[:17]
 }
 

@@ -452,7 +452,7 @@ func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 	if scopeI < 0 || scopeI > 3 {
 		sp.Scope = domain.ScopeUnspecified
 	} else {
-		sp.Scope = domain.Scope(scopeI) //nolint:gosec // bound-checked above
+		sp.Scope = domain.Scope(scopeI)
 	}
 	return sp, nil
 }
@@ -930,7 +930,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	if scopeI < 0 || scopeI > 3 {
 		ab.Scope = domain.ScopeUnspecified
 	} else {
-		ab.Scope = domain.Scope(scopeI) //nolint:gosec // bound-checked above
+		ab.Scope = domain.Scope(scopeI)
 	}
 	return ab, nil
 }

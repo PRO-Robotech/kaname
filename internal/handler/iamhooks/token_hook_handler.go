@@ -69,7 +69,11 @@ func NewTokenHookHandler(
 // there is no end user in the exchange (RFC 6749 §4.4, RFC 7523 §2.1).
 const (
 	grantTypeClientCredentials = "client_credentials"
-	grantTypeJWTBearer         = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+	// #nosec G101 -- grant-type URN from RFC 7523 §2.1. The scanner matches the
+	// "bearer" substring inside the identifier; the string names an exchange and
+	// carries no secret. This finding gates the build, so the suppression is
+	// written in the only dialect gosec reads — see .github/scripts/check-gosec-dialect.sh.
+	grantTypeJWTBearer = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 )
 
 // hydraTokenHookRequest — payload от Hydra (subset per Hydra v2 hook contract).
