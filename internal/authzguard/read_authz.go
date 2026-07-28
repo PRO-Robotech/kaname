@@ -23,23 +23,34 @@ package authzguard
 // never PermissionDenied — no enumeration / existence leak).
 //
 // Fail-closed on every degraded mode: anonymous / empty principal, a nil FGA
-// port (unit tests / unwired), or a Check transport error → false (never
-// fail-open). The resource body is returned by the caller ONLY when this returns
-// true.
+// port (unit tests / unwired) → (false, nil). The resource body is returned by
+// the caller ONLY on (true, nil).
+//
+// A Check that could NOT BE ASKED (transport error) is reported as an error, not
+// as a denial. "The store said no" and "the store did not answer" are different
+// facts and must not share one return value: a denial is hidden behind NotFound
+// (existence-hiding), so folding an outage into it makes every iam read a
+// terminal 404 for the whole cluster — the owner included — for as long as the
+// store is down, and a 404 is a claim the client acts on (cache eviction,
+// cleanup, "it is gone, recreate it"). The neighbouring page-filter
+// (internal/authzfilter) draws the same line explicitly; this gate now matches
+// it. Callers map the error to UNAVAILABLE.
 
 import "context"
 
 // AllowsVGet reports whether the ctx principal may read the object
 // `<fgaType>:<id>`: it is a cluster-admin (flat super-gate, D-9) OR it holds the
 // `v_get` relation on the object (owner-binding materializes it for the owner; an
-// explicit `iam.<res>.get` grant materializes it for a delegate). Fail-closed:
-// anonymous / empty subject / nil checker / Check error → false.
+// explicit `iam.<res>.get` grant materializes it for a delegate).
+//
+// (false, nil) is a decision (hide existence); (false, err) means the decision
+// could not be made (map to UNAVAILABLE, never to NotFound).
 //
 // fgaType is the OpenFGA object_type (e.g. "account", "project", "iam_user");
 // id is the bare resource id (no type prefix). The object string is composed as
 // `<fgaType>:<id>` — the SAME object the reconciler materializes and the gateway
 // Check's against.
-func AllowsVGet(ctx context.Context, checker RelationChecker, fgaType, id string) bool {
+func AllowsVGet(ctx context.Context, checker RelationChecker, fgaType, id string) (bool, error) {
 	return AllowsVerb(ctx, checker, "v_get", fgaType, id)
 }
 
@@ -47,19 +58,36 @@ func AllowsVGet(ctx context.Context, checker RelationChecker, fgaType, id string
 // super-gate OR the ctx principal holds `relation` on `<fgaType>:<id>`. AllowsVGet
 // is the get-specialization (relation == "v_get"). Kept generic so a future read
 // path (e.g. a v_list object-existence probe) reuses the same fail-closed posture.
-func AllowsVerb(ctx context.Context, checker RelationChecker, relation, fgaType, id string) bool {
+//
+// An allow is returned as soon as ONE question answers yes, even if the other
+// failed — an allow needs no second opinion. A non-allow is only reported as a
+// decision when EVERY question this gate asked was actually answered; otherwise
+// the error of the unanswered one is returned.
+func AllowsVerb(ctx context.Context, checker RelationChecker, relation, fgaType, id string) (bool, error) {
 	if checker == nil {
-		return false
+		return false, nil
 	}
 	subject, ok := PrincipalSubject(ctx) // fail-closed: anon / empty / unknown type → ""
 	if !ok {
-		return false
+		return false, nil
 	}
 	// Cluster-admin short-circuit (D-9): a cluster-admin reads ANY object even
-	// without a per-object tuple. SubjectIsClusterAdmin is itself fail-closed.
-	if SubjectIsClusterAdmin(ctx, checker, subject) {
-		return true
+	// without a per-object tuple.
+	admin, adminErr := subjectIsClusterAdminE(ctx, checker, subject)
+	if admin {
+		return true, nil
 	}
 	allowed, err := checker.Check(ctx, subject, relation, fgaType+":"+id)
-	return err == nil && allowed
+	if err != nil {
+		return false, err
+	}
+	if allowed {
+		return true, nil
+	}
+	// The verb question answered "no". If the super-gate probe never answered,
+	// this is not a complete denial — report the outage.
+	if adminErr != nil {
+		return false, adminErr
+	}
+	return false, nil
 }

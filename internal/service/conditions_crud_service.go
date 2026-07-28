@@ -154,7 +154,11 @@ func (s *ConditionsCRUDService) Get(ctx context.Context, id domain.ConditionID) 
 	if err != nil {
 		return domain.Condition{}, err
 	}
-	if !s.canReadProject(ctx, c.ProjectID) {
+	readable, azErr := s.canReadProject(ctx, c.ProjectID)
+	if azErr != nil {
+		return domain.Condition{}, iamerr.Wrapf(iamerr.ErrUnavailable, "authorization store unavailable")
+	}
+	if !readable {
 		return domain.Condition{}, iamerr.Wrapf(iamerr.ErrNotFound, "Condition %s not found", id)
 	}
 	return c, nil
@@ -175,28 +179,49 @@ func (s *ConditionsCRUDService) List(ctx context.Context, filter condition.ListF
 		if !authzguard.IsClusterAdmin(ctx, s.relations) {
 			return nil, "", nil
 		}
-	} else if !s.canReadProject(ctx, filter.ProjectID) {
-		return nil, "", nil
+	} else {
+		readable, azErr := s.canReadProject(ctx, filter.ProjectID)
+		if azErr != nil {
+			// An empty page here would read as "there are no conditions" — a
+			// statement about the data, made while the gate was unreachable.
+			return nil, "", iamerr.Wrapf(iamerr.ErrUnavailable, "authorization store unavailable")
+		}
+		if !readable {
+			return nil, "", nil
+		}
 	}
 	return s.repo.List(ctx, filter)
 }
 
 // canReadProject reports whether the ctx principal may read conditions in the
 // project scope — cluster-admin OR `viewer` on `project:<projectID>`.
-// Fail-closed: nil relation-store / anonymous / empty project / Check error →
-// false.
-func (s *ConditionsCRUDService) canReadProject(ctx context.Context, projectID string) bool {
+// Fail-closed: nil relation-store / anonymous / empty project → (false, nil).
+//
+// A relation store that could not be asked returns (false, err): callers must
+// answer Unavailable rather than hiding the resource, because "not found" and
+// "empty page" are claims the caller acts on and neither is true during an
+// outage.
+func (s *ConditionsCRUDService) canReadProject(ctx context.Context, projectID string) (bool, error) {
 	if projectID == "" {
-		return false
+		return false, nil
 	}
 	return authzguard.AllowsVerb(ctx, s.relations, "viewer", "project", projectID)
 }
 
 // requireProjectWrite gates a mutation on `editor` (⊇ admin) authority over the
 // project scope — cluster-admin short-circuits via authzguard. Returns
-// PermissionDenied when unauthorized; fail-closed on a nil relation-store.
+// PermissionDenied when unauthorized, Unavailable when the decision could not be
+// made (fail-closed for mutations: no write proceeds on an unanswered gate), and
+// fail-closed on a nil relation-store.
 func (s *ConditionsCRUDService) requireProjectWrite(ctx context.Context, projectID string) error {
-	if projectID != "" && authzguard.AllowsVerb(ctx, s.relations, "editor", "project", projectID) {
+	if projectID == "" {
+		return authzguard.PermissionDenied()
+	}
+	allowed, err := authzguard.AllowsVerb(ctx, s.relations, "editor", "project", projectID)
+	if err != nil {
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "authorization store unavailable")
+	}
+	if allowed {
 		return nil
 	}
 	return authzguard.PermissionDenied()

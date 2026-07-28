@@ -62,7 +62,13 @@ func (u *GetAccountUseCase) Execute(ctx context.Context, id domain.AccountID) (d
 	if err != nil {
 		return domain.Account{}, shared.MapRepoErr(err)
 	}
-	if !authzguard.AllowsVGet(ctx, u.relations, "account", string(id)) {
+	allowed, azErr := authzguard.AllowsVGet(ctx, u.relations, "account", string(id))
+	if azErr != nil {
+		// The read gate could not be evaluated. Not a denial, and above all not
+		// "does not exist" — say so, and let the client retry.
+		return domain.Account{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	if !allowed {
 		return domain.Account{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id))
 	}
 	return a, nil

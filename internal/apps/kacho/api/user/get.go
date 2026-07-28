@@ -67,7 +67,13 @@ func (u *GetUserUseCase) Execute(ctx context.Context, id domain.UserID) (domain.
 		return got, nil
 	}
 	// Cross-user: v_get on iam_user:<id> OR cluster-admin.
-	if authzguard.AllowsVGet(ctx, u.relations, "iam_user", string(id)) {
+	allowed, azErr := authzguard.AllowsVGet(ctx, u.relations, "iam_user", string(id))
+	if azErr != nil {
+		// The read gate could not be evaluated. Not a denial, and above all not
+		// "does not exist" — say so, and let the client retry.
+		return domain.User{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	if allowed {
 		return got, nil
 	}
 	return domain.User{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id))

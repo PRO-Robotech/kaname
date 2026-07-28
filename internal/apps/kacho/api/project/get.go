@@ -55,7 +55,13 @@ func (u *GetProjectUseCase) Execute(ctx context.Context, id domain.ProjectID) (d
 	if err != nil {
 		return domain.Project{}, shared.MapRepoErr(err)
 	}
-	if !authzguard.AllowsVGet(ctx, u.relations, "project", string(id)) {
+	allowed, azErr := authzguard.AllowsVGet(ctx, u.relations, "project", string(id))
+	if azErr != nil {
+		// The read gate could not be evaluated. Not a denial, and above all not
+		// "does not exist" — say so, and let the client retry.
+		return domain.Project{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	if !allowed {
 		return domain.Project{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "Project %s not found", id))
 	}
 	return p, nil

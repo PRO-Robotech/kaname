@@ -47,9 +47,24 @@ func IsClusterAdmin(ctx context.Context, checker RelationChecker) bool {
 // subject ("user:usr_xxx" / "service_account:sva_xxx") rather than a ctx
 // principal. fail-closed: nil checker / empty subject / Check error → false.
 func SubjectIsClusterAdmin(ctx context.Context, checker RelationChecker, subject string) bool {
+	admin, _ := subjectIsClusterAdminE(ctx, checker, subject)
+	return admin
+}
+
+// subjectIsClusterAdminE is SubjectIsClusterAdmin with the reason kept: it
+// separates "the store answered: not an admin" (false, nil) from "the store
+// could not be asked" (false, err). Gates that turn a non-allow into a 404 need
+// that distinction — see AllowsVerb. The bool-only wrappers above stay for the
+// decision sites that are ALREADY fail-closed by construction (a super-gate that
+// cannot be evaluated simply does not fire, and the ordinary per-object path
+// still runs and still reports its own outage).
+func subjectIsClusterAdminE(ctx context.Context, checker RelationChecker, subject string) (bool, error) {
 	if checker == nil || subject == "" {
-		return false
+		return false, nil
 	}
 	allowed, err := checker.Check(ctx, subject, "system_admin", "cluster:"+domain.ClusterSingletonID)
-	return err == nil && allowed
+	if err != nil {
+		return false, err
+	}
+	return allowed, nil
 }

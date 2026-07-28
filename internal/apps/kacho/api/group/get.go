@@ -52,7 +52,13 @@ func (u *GetGroupUseCase) Execute(ctx context.Context, id domain.GroupID) (domai
 	if err != nil {
 		return domain.Group{}, shared.MapRepoErr(err)
 	}
-	if !authzguard.AllowsVGet(ctx, u.relations, "iam_group", string(id)) {
+	allowed, azErr := authzguard.AllowsVGet(ctx, u.relations, "iam_group", string(id))
+	if azErr != nil {
+		// The read gate could not be evaluated. Not a denial, and above all not
+		// "does not exist" — say so, and let the client retry.
+		return domain.Group{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	if !allowed {
 		return domain.Group{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "Group %s not found", id))
 	}
 	return g, nil

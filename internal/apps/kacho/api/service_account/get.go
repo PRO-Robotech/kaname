@@ -52,7 +52,13 @@ func (u *GetServiceAccountUseCase) Execute(ctx context.Context, id domain.Servic
 	if err != nil {
 		return domain.ServiceAccount{}, shared.MapRepoErr(err)
 	}
-	if !authzguard.AllowsVGet(ctx, u.relations, "iam_service_account", string(id)) {
+	allowed, azErr := authzguard.AllowsVGet(ctx, u.relations, "iam_service_account", string(id))
+	if azErr != nil {
+		// The read gate could not be evaluated. Not a denial, and above all not
+		// "does not exist" — say so, and let the client retry.
+		return domain.ServiceAccount{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	if !allowed {
 		return domain.ServiceAccount{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id))
 	}
 	return sa, nil
