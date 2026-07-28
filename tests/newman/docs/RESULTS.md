@@ -153,20 +153,35 @@ Triaged the clean-seed umbrella CI artifact (`na4/iam/.../out/*.json`). Findings
   port-forward-only newman CI (env limitation, not a leak); `iam-rbac-scope-grant` (7) not
   triaged this round.
 
-## Known failing — confirmed product-bug-floor (round-4: WHITELISTED, over-restrictive, cannot leak)
+## Resolved 2026-07-28 — the round-4 "product-bug floor" was no longer there
 
-These are **confirmed product defects**, each tracked by a GitHub issue, that are
-**over-RESTRICTIVE** (a legitimate call is wrongly DENIED — the opposite of a leak).
-Round-4 consolidation whitelists them in `assert-suites-green.sh` so the gate is not
-blocked by a non-leak product gap; the assertions **still RUN and report** (signal
-preserved) and the subtraction **clamps to 0** — the moment the product fix lands the
-case self-heals to GREEN and any genuine regression re-widens the diff and re-fires the
-gate. Whitelisting is safe here **only because none of these can mask an over-show / leak**.
+Everything this section described has been fixed, and the entries that named it are
+gone from `assert-suites-green.sh`. It is kept, shortened, as a record of what was
+believed and what turned out to be true — the previous text is in git history.
 
-| Suite | Case / step | Signature (observed) | Root (product) | Issue |
-|---|---|---|---|---|
-| `rbac-subject-channel-equivalence` | `IAM-CH-USER-EQUIV-OK::teardown-user-revoke`, `IAM-CH-USER-SA-ISOLATION-DENY::teardown-usr-iso-revoke` | `DELETE /iam/v1/accessBindings/{id}` as **`jwtBootstrap`** (`system_admin@cluster_kacho_root`) → **`403 {"code":7,"message":"permission denied"}`**. The retry belt exhausts → persistent, NOT a materialization race. Across the umbrella run `DELETE accessBindings/{id}` = **652×403 vs 32×200** (the 200s are normal principals with a materialized per-object `v_delete`; the 403s are the cluster-admin path). | **Cluster-admin short-circuit is NOT honored at the gateway for `AccessBindingService/Delete`.** Object-scoped authz checks the caller's `v_delete` on the binding's scope; `system_admin@cluster_kacho_root` does **not** cascade to `v_delete` on `iam_access_binding:<id>` (FGA-model / permission-catalog gap). Because the revoke never commits, the downstream whitelisted `*-gone` Check-polls stay allowed=true (consequence, not a second bug). Fix = FGA cascade `iam_access_binding#v_delete ⇐ cluster#system_admin`, or a gateway super-admin short-circuit. | `PRO-Robotech/kacho#9` |
-| `iam-authz-grant-check-propagation` | `AUTHZGCP-SAKEY-SECRET-NOT-LEAKED::issue-sakey` (the other 8 failures are anon-op / speculative-`/iam/v1/check` spot-checks already whitelisted) | `POST /iam/v1/serviceAccounts/{sva}/keys` as **`jwtAccountAdminA`** (the SA's own creator) → **`403 … lacks relation "v_update" on iam_service_account:<sva>`**. Already `retry_until_authorized`-wrapped and still persistent. | Same **hierarchical-cascade** family as #9: AAA holds `editor` on `account:A` (owner) but the **account-editor → `iam_service_account`-`v_update`** cascade for a fresh per-case SA does not resolve on the request path. Per-case SA (cannot be pre-bound in the fixture) → **product/FGA-model**, not a test retry. | `PRO-Robotech/kacho#9` |
+The claim was that a cluster administrator could not delete an access binding
+somebody else had created (`652 x 403 vs 32 x 200` across an umbrella run), and that
+an account administrator could not issue a key for a service account they had just
+created; both were attributed to inherited access simply not existing for those
+types. The inherited-access change of **2026-07-27** removed that cause.
+
+Re-measured **2026-07-28** on the kind stand, by running the suites:
+
+| Suite | Step | Was declared | Observed 2026-07-28 |
+|---|---|---|---|
+| `rbac-subject-channel-equivalence` | `teardown-user-revoke`, `teardown-usr-iso-revoke` | permanent 403 | **HTTP 200** |
+| `rbac-subject-channel-equivalence` | the seven `*-gone` convergence probes | red, downstream of the refused revoke | **all pass** |
+| `rbac-subject-channel-equivalence` | `IAM-CH-GRP-MEMBERSHIP-FLIP-OK` | red, drain tail | **case passes end to end** |
+| `iam-authz-grant-check-propagation` | `issue-sakey` | permanent 403 | **HTTP 200** |
+| `iam-authz-grant-check-propagation` | `probe-check-after-revoke`, `poll-op-plaintext`, `re-get-op-redacted` | red, downstream of `issue-sakey` | **all pass** |
+| `iam-invite-grant-fga` | `poll-bind-project-anchor`, `te4-post-bind-project-viewer` | red (product gap, later restated as a stale case) | **49/49, zero failures** |
+
+`PRO-Robotech/kacho#9`, `kacho-iam#212` and `kacho-iam#217` should be closed as fixed.
+
+One red in `iam-authz-grant-check-propagation` is **not** covered by any of this and is
+**not** masked: `AUTHZGCP-BIND-LIST-BY-SUBJECT-FOREIGN-DENY :: inv-lists-aaa-subject`
+denies correctly, but the response carries no error detail, so the case cannot tell a
+scoped denial from a missing catalog entry. That is worth its own fix.
 
 ## Known failing — honest must-DENY canary (NOT whitelisted, NOT masked)
 
@@ -206,12 +221,13 @@ decides what the gate tolerates, that a live over-grant exists; anyone reading i
 either goes hunting for a defect that is already closed or learns that a red revoke
 check is something this suite lives with. Both are worse than saying nothing.
 
-## Known failing — test-timing (bounded-poll tail)
+## Resolved 2026-07-28 — the "bounded-poll tail" entries
 
-| Suite | Case / step | Class | Why |
-|---|---|---|---|
-| `rbac-subject-channel-equivalence` | `IAM-CH-GRP-MEMBERSHIP-FLIP-OK` (`read-after-add` / `flip-gone`) | async fga_outbox drain tail | Two-transition membership flip (grant-on-empty-group → addMember→appears → removeMember→gone). Both transitions depend on the async fga_outbox drain of the group binding tuple. Under heavy umbrella-CI load the drain can exceed even the ~45 s bounded poll → transient flake (deterministically green on healthy runs). NOT a product bug — addMember/removeMember DO drive access. The assertions still RUN and report (signal preserved); they are just not gate-blocking. |
-| `rbac-subject-channel-equivalence` | revoke→deny convergence probes — the `*-gone` Check-polls (`teardown-{user,grp,nonmem,sa,sa-iso,usr-iso}-gone`, `revoke-binding-gone`) | revoke-deny propagation tail | After `AccessBinding.Delete` the subject's `v_get` tuple is removed **byte-symmetrically** (`delete.go` reads the full `access_binding_emitted_tuples` ledger, sync-removes from OpenFGA + async `fga_outbox` backstop) → the deny is **guaranteed to converge** (NOT an over-grant; revoke is byte-symmetric). But on the resource-starved single-node kind cluster the revoke-deny propagation can exceed the suite's ~45 s bounded Check-poll under heavy load — these `*-gone` probes are the **last** step of each case (peak per-case outbox backlog) and later cases flake more as the cumulative backlog grows. Eventual-consistency **latency**, not a correctness bug: `IAM-CH-GRP-EQUIV-OK`'s group-revoke→deny proves the same single-transition invariant holds. `delete.go` retries the synchronous FGA tuple-removal past a transient OpenFGA failure (parity with the reliable grant sync-write), narrowing the tail; the whitelist covers the residual CI-saturation window. The `grant→appears` probes (reliable reconciler sync-write) and the steady-state single-shot denies (nonmember / principal-isolation) are **NOT** whitelisted — a real leak still fails honestly. |
+Both rows that stood here (`IAM-CH-GRP-MEMBERSHIP-FLIP-OK`, and the seven `*-gone`
+revoke-to-deny probes) explained themselves as an eventual-consistency tail on a loaded
+cluster. Neither explanation survived: the tail was measured at sub-second on 2026-07-26,
+and on 2026-07-28 every one of these steps passes. They are removed from the gate rather
+than re-justified — see the section above.
 
 ## Product findings (cases omitted, not RED)
 
@@ -258,8 +274,8 @@ umbrella run):
   the first `pm.response.json()`. Fix: `check_step` now carries the same
   `_internal_url_override` pre-request URL rewrite to `{{internalBaseUrl}}` (:18081) that
   `label-revoke-vpc.py` uses (proven to reach 200 in the very same CI run). The 2 TE4
-  `poll-bind-project-anchor` / `te4-post-bind-project-viewer` failures remain
-  whitelisted-RED (**#212** project-anchor role-authoring gap — unchanged).
+  `poll-bind-project-anchor` / `te4-post-bind-project-viewer` failures are GREEN as of
+  2026-07-28 (whole suite 49/49) and are no longer whitelisted; **#212** is closed.
 
 - **`label-revoke-{vpc,compute}` — cross-service create against a PHANTOM project
   (round-3 root).** Round-2 fixed the create-`403` by granting AAA an explicit
@@ -291,8 +307,8 @@ umbrella run):
   `gen.py`; runtime GREEN pending an umbrella run). Belt-and-suspenders: `setup.sh` gained
   a **non-fatal** post-create diagnostic that GETs `project:A1` and logs a loud `WARN` if
   it does not resolve, so a future phantom is diagnosable instead of hiding behind green
-  FGA tuples. `label-revoke-nlb` create-half stays whitelisted-RED (unchanged — needs the
-  umbrella to seed nlb external resources).
+  FGA tuples. `label-revoke-nlb` is GREEN as of 2026-07-28 (47/47 requests, 23/23 assertions,
+  including the revoke-side deny) and is no longer whitelisted.
 
 ---
 
