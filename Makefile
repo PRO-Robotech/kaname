@@ -92,7 +92,17 @@ proto-gen: proto-vendor
 # поэтому iam собирается standalone. Полный catalog по транзитивному набору всех
 # доменных service.proto собирается в api-gateway (catalog god-node) — обновление
 # этого зеркала прилетает оттуда. Локально это no-op.
+# Копия каталога у iam ОБЯЗАНА побайтово совпадать с копией шлюза — это один
+# источник истины, и гейт `make -C ../../gateway permission-catalog-check` роняет
+# сборку при расхождении. Раньше цель печатала два предложения и выходила с нулём:
+# после регенерации у шлюза её вызывали, она сообщала «всё уже на месте», и копии
+# расходились ровно тогда, когда синхронизация и требовалась. Теперь цель делает
+# то, что называет, и проверяет результат.
+GATEWAY_CATALOG := ../../gateway/internal/middleware/embed/permission_catalog.json
+IAM_CATALOG_EMBED := internal/apps/kacho/seed/embedded/permission_catalog.json
 .PHONY: sync-permission-catalog
 sync-permission-catalog:
-	@echo "sync-permission-catalog is a no-op — permission_catalog.json is committed"
-	@echo "and embedded at internal/apps/kacho/seed/embedded/permission_catalog.json."
+	@test -f "$(GATEWAY_CATALOG)" || { echo "нет копии шлюза: $(GATEWAY_CATALOG) — нужен полный чекаут монорепо"; exit 1; }
+	cp "$(GATEWAY_CATALOG)" "$(IAM_CATALOG_EMBED)"
+	@cmp -s "$(GATEWAY_CATALOG)" "$(IAM_CATALOG_EMBED)" || { echo "копии разошлись после копирования"; exit 1; }
+	@echo "каталог прав синхронизирован из копии шлюза (побайтово)."
