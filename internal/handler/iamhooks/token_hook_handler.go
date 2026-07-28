@@ -73,14 +73,24 @@ const (
 )
 
 // hydraTokenHookRequest — payload от Hydra (subset per Hydra v2 hook contract).
+//
+// The body of THIS hook is `{session, request}` — it has no top-level subject.
+// The identity of the human the exchange is for lives inside the token-shaped
+// part of the session (`session.id_token.subject`), which is why it is read
+// from there and from nowhere else: a field with no producer is silently empty
+// forever, and here that emptiness reads as "no end user", which is the very
+// question the machine-credential refusal turns on. The sibling refresh hook
+// DOES carry a top-level subject — a different body, decoded by its own type.
 type hydraTokenHookRequest struct {
 	Session struct {
 		ClientID string `json:"client_id"`
 		AuthTime int64  `json:"auth_time"`
 		AMR      []any  `json:"amr"`
 		ACR      string `json:"acr"`
-		Subject  string `json:"subject"`
-		Cnf      struct {
+		IDToken  struct {
+			Subject string `json:"subject"`
+		} `json:"id_token"`
+		Cnf struct {
 			Jkt     string `json:"jkt"`
 			X5tS256 string `json:"x5t#S256"`
 		} `json:"cnf"`
@@ -91,9 +101,7 @@ type hydraTokenHookRequest struct {
 		GrantedScopes   []string            `json:"granted_scopes"`
 		GrantedAudience []string            `json:"granted_audience"`
 		Payload         map[string][]string `json:"payload"`
-		RequestedAt     string              `json:"requested_at"`
 	} `json:"request"`
-	Subject string `json:"subject"`
 }
 
 // isMachineCredentialRequest reports whether this token request has no human
@@ -157,10 +165,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// endUserSubject — the identity of the human this token is for, as the
 	// provider stated it. Empty means the request has no end user at all.
-	endUserSubject := payload.Subject
-	if endUserSubject == "" {
-		endUserSubject = payload.Session.Subject
-	}
+	endUserSubject := payload.Session.IDToken.Subject
 	subject := endUserSubject
 	// client_credentials (RFC 6749 §4.4) не несёт end-user subject — Hydra
 	// отдаёт его пустым. kacho-принципал такого токена — ServiceAccount за

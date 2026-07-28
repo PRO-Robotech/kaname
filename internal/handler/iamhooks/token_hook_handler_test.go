@@ -105,9 +105,9 @@ func TestTokenHook_HappyPath_EnrichesClaims(t *testing.T) {
 	h := newTokenHookHandler(t, users, audit)
 
 	payload := map[string]any{
-		"subject": "kratos-uuid-1",
 		"session": map[string]any{
 			"client_id": "kacho-ui",
+			"id_token":  map[string]any{"subject": "kratos-uuid-1"},
 			"auth_time": int64(1700000000),
 			"acr":       "2",
 			"cnf": map[string]any{
@@ -205,8 +205,10 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 	// The audit record of the refusal names the subject the handler actually used,
 	// which evidences the fallback more directly than a status code ever did.
 	payload := map[string]any{
-		"subject": "",
-		"session": map[string]any{"client_id": "cc-client-uuid", "subject": ""},
+		"session": map[string]any{
+			"client_id": "cc-client-uuid",
+			"id_token":  map[string]any{"subject": ""},
+		},
 		"request": map[string]any{
 			"client_id": "cc-client-uuid",
 			"payload":   map[string][]string{"grant_type": {"client_credentials"}},
@@ -234,7 +236,7 @@ func TestTokenHook_UserNotFound_EmitsMinimalClaims(t *testing.T) {
 	audit := &fakeAudit{}
 	h := newTokenHookHandler(t, users, audit)
 
-	body := []byte(`{"subject":"unknown-sub","session":{},"request":{}}`)
+	body := []byte(`{"session":{"id_token":{"subject":"unknown-sub"}},"request":{}}`)
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/token", strings.NewReader(string(body)))
 	req.Header.Set("X-Kacho-Hook-Token", "secret-hook-token")
 	w := httptest.NewRecorder()

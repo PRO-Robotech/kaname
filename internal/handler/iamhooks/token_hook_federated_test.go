@@ -98,12 +98,11 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 		"iss": "https://token.actions.githubusercontent.com",
 		"sub": "repo:acme/infra:ref:refs/heads/main",
 	})
-	// External assertion's `sub` ends up as Hydra session.subject.
+	// External assertion's `sub` ends up as the session's token subject.
 	payload := map[string]any{
-		"subject": "repo:acme/infra:ref:refs/heads/main",
 		"session": map[string]any{
 			"client_id": "hydra-cli-fake",
-			"subject":   "repo:acme/infra:ref:refs/heads/main",
+			"id_token":  map[string]any{"subject": "repo:acme/infra:ref:refs/heads/main"},
 			"cnf":       map[string]any{},
 		},
 		"request": map[string]any{
@@ -169,8 +168,11 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 		logger,
 	)
 	payload := map[string]any{
-		"subject": "hydra-cli-fake",
-		"session": map[string]any{"client_id": "hydra-cli-fake", "subject": "hydra-cli-fake", "cnf": map[string]any{}},
+		"session": map[string]any{
+			"client_id": "hydra-cli-fake",
+			"id_token":  map[string]any{"subject": "hydra-cli-fake"},
+			"cnf":       map[string]any{},
+		},
 		"request": map[string]any{
 			"client_id": "hydra-cli-fake",
 			"payload": map[string][]string{
