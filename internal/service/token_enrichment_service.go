@@ -20,6 +20,16 @@ import (
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
+// ErrCredentialExpired — the OAuth2 client behind this token request maps to a
+// kacho credential (SA key / personal access token) whose stated expiry has
+// passed. The token hook translates it into a 403, which is how Hydra is told
+// to deny the token request.
+//
+// It is deliberately NOT an iamerr sentinel: the hook's not-found branch falls
+// back to MinimalClaims and still mints, so an expired credential collapsing
+// into "not found" would defeat the gate.
+var ErrCredentialExpired = stderrors.New("credential expired")
+
 // TokenEnrichmentUserPort — read-side dependency: resolve a User mirror by its
 // external identity subject (Kratos `sub`).
 type TokenEnrichmentUserPort interface {
@@ -159,6 +169,11 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	if s.sas != nil && hookCtx.GrantType == "urn:ietf:params:oauth:grant-type:jwt-bearer" && hookCtx.ExternalIssuer != "" {
 		soc, err := s.sas.FindByExternalSubject(ctx, hookCtx.ExternalIssuer, subject)
 		if err == nil {
+			// Terminal on expiry — never fall through to the bare-SA branch
+			// below, which would mint for a credential we just refused.
+			if s.expired(soc.ExpiresAt) {
+				return nil, fmt.Errorf("federated sa-key %s: %w", soc.ID, ErrCredentialExpired)
+			}
 			sa, saErr := s.sas.GetServiceAccount(ctx, soc.SvaID)
 			if saErr != nil && !stderrors.Is(saErr, iamerr.ErrNotFound) {
 				return nil, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
@@ -183,6 +198,9 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 		}
 		soc, err := s.sas.LookupByOAuthClientID(ctx, domain.OAuthClientID(lookupID))
 		if err == nil {
+			if s.expired(soc.ExpiresAt) {
+				return nil, fmt.Errorf("sa-key %s: %w", soc.ID, ErrCredentialExpired)
+			}
 			sa, saErr := s.sas.GetServiceAccount(ctx, soc.SvaID)
 			if saErr != nil && !stderrors.Is(saErr, iamerr.ErrNotFound) {
 				return nil, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
@@ -206,6 +224,9 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	if s.userTokens != nil {
 		uoc, err := s.userTokens.LookupByOAuthClientID(ctx, domain.OAuthClientID(subject))
 		if err == nil {
+			if s.expired(uoc.ExpiresAt) {
+				return nil, fmt.Errorf("user-token %s: %w", uoc.ID, ErrCredentialExpired)
+			}
 			u, uErr := s.userTokens.GetUser(ctx, uoc.UserID)
 			if uErr != nil && !stderrors.Is(uErr, iamerr.ErrNotFound) {
 				return nil, fmt.Errorf("get user %s: %w", uoc.UserID, uErr)
@@ -227,6 +248,28 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	}
 
 	return nil, iamerr.Wrapf(iamerr.ErrNotFound, "subject %s not found (neither user nor service-account oauth client)", subject)
+}
+
+// expired reports whether a credential with this stated expiry may no longer
+// mint tokens.
+//
+// Two decisions are load-bearing here, both matching
+// registry_token.SAKeyValidator so a key cannot be alive on the docker path and
+// dead on the provider path (or the reverse) at the same instant:
+//
+//   - nil means NON-EXPIRING, not invalid. The bootstrap-admin mapping (#58) is
+//     inserted with no expiry, as is every row predating the SA-key TTL knobs;
+//     reading nil as invalid would take the cluster-admin credential and all
+//     legacy keys offline at once. Bounding those lifetimes is the issuer's job
+//     (KACHO_IAM_SAKEY_DEFAULT_TTL), not a retroactive reinterpretation here.
+//   - the boundary instant is EXPIRED (`!After(now)`, not `Before(now)`): at
+//     exactly expires_at the credential is spent.
+//
+// The comparison is on time.Time instants, so a timestamptz decoded into any
+// location compares correctly; it uses the service clock (not the database's)
+// so every path in this process agrees on "now".
+func (s *TokenEnrichmentService) expired(expiresAt *time.Time) bool {
+	return expiresAt != nil && !expiresAt.After(s.now())
 }
 
 // userClaims assembles the ext_claims map for a User subject.

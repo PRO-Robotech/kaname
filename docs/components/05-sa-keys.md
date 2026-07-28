@@ -57,7 +57,7 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 | `description`         | TEXT                 | нет          | —         | Free-form, ≤256 chars.                    |
 | `created_by_user_id`  | TEXT                 | да           | да        | Admin, выпустивший ключ (audit).          |
 | `created_at`          | TIMESTAMPTZ          | да (server)  | да        | UTC.                                      |
-| `expires_at`          | TIMESTAMPTZ          | нет          | —         | TTL-reminder (опц.).                      |
+| `expires_at`          | TIMESTAMPTZ          | нет          | —         | Срок жизни ключа. **Энфорсится** (см. ниже). NULL = бессрочный. |
 | `last_used_at`        | TIMESTAMPTZ          | нет          | —         | Best-effort touch.                        |
 | `public_key_pem`      | TEXT (SPKI PEM)      | да           | да        | SPKI ECDSA P-256 public key.              |
 | `key_algorithm`       | TEXT                 | да           | да        | `ES256` (`RS256`/`EdDSA` future).         |
@@ -70,6 +70,32 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 **FK contract:** CASCADE delete при удалении SA (в БД); но Hydra clients
 надо явно удалять через `RevokeSAKey` (см. Gotchas).
+
+### Срок жизни ключа (`expires_at`)
+
+Выставляется на Issue: явный `ttl_seconds` → иначе `KACHO_IAM_SAKEY_DEFAULT_TTL`
+(90d) → иначе NULL. Потолок — `KACHO_IAM_SAKEY_MAX_TTL` (365d), запрос сверх него
+отвергается `InvalidArgument` до регистрации клиента в Hydra.
+
+Энфорсится на **обоих** путях обмена ключа на токен, одним предикатом
+(`expires_at != NULL && expires_at <= now`):
+
+| Путь | Точка проверки | Что видит клиент |
+|---|---|---|
+| Провайдер: `client_assertion` → Hydra `/oauth2/token` | token-hook (`TokenEnrichmentService`) → 403 | Hydra отказывает в выдаче |
+| Docker-token `/iam/token` | `registry_token.SAKeyValidator` | `401 invalid_credentials` |
+
+Граница включительная: в момент `expires_at` ключ уже мёртв. Сравнение — по
+инстанту (не по настенным полям), поэтому зона хранения роли не играет.
+
+**`NULL` = бессрочный, а не невалидный.** Так лежит bootstrap-admin-маппинг (#58)
+и все строки, созданные до появления TTL-ручек. Ограничивать их время — работа
+выдающей стороны (`SAKEY_DEFAULT_TTL`), а не проверяющей.
+
+Уже выданный access-token переживает истечение ключа: он живёт свой
+`access_token_lifespan` (per-client, `KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL`). Гейт
+закрывает выдачу НОВЫХ токенов, не отзывает старые. Жнеца просроченных строк нет —
+строка остаётся, ключ просто перестаёт работать.
 
 ## Sequence diagram — Issue
 
@@ -123,9 +149,9 @@ sequenceDiagram
 
     Admin->>IAM: SAKeyService.RevokeKey {sak_id}
     IAM->>DB: SELECT hydra_client_id FROM service_account_oauth_clients WHERE id=$sak
+    IAM->>DB: DELETE FROM service_account_oauth_clients WHERE id=$sak (+ audit-row в той же TX)
     IAM->>Hydra: DELETE /admin/clients/{client_id}
     Hydra-->>IAM: 204 No Content
-    IAM->>DB: UPDATE service_account_oauth_clients SET revoked_at=NOW() WHERE id=$sak
     IAM-->>Admin: Operation done=true
     Note over Admin,Hydra: Существующие access_tokens TTL'у живы — Hydra только<br/>refuses NEW token issuance
 ```
@@ -137,7 +163,7 @@ sequenceDiagram
 | RPC          | Sync/Async | Описание                                              |
 |--------------|------------|-------------------------------------------------------|
 | `IssueSAKey` | async      | Выпускает OAuth-ключ. Secret в response (один раз).   |
-| `RevokeSAKey`| async      | Помечает ключ revoked + удаляет Hydra client.         |
+| `RevokeSAKey`| async      | Удаляет строку маппинга + Hydra client.               |
 | `ListSAKeys` | sync       | Список ключей для SA (без секретов).                  |
 
 ### REST mapping
@@ -212,13 +238,13 @@ curl -X DELETE http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys/$KEY_ID
 
 ```bash
 curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys -H "Authorization: Bearer $TOKEN" | jq
-# → [{id, hydra_client_id, scope, audience, created_at, revoked_at}]
+# → [{id, hydraClientId, createdAt, expiresAt, lastUsedAt, name, labels}]
 ```
 
 ### Идемпотентность
 
 `IssueSAKey` НЕ идемпотентен — каждый вызов создает новый client в Hydra.
-`RevokeSAKey` идемпотентен (повторный Revoke на уже revoked → 204 / NotFound graceful).
+`RevokeSAKey` идемпотентен: строка уже удалена → `NotFound` graceful, Hydra 404 → OK.
 
 ### Типичные ошибки
 

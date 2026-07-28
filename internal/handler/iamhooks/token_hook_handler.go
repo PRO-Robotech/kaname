@@ -153,6 +153,21 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	enriched, err := h.enricher.EnrichClaims(ctx, subject, hookCtx)
 	if err != nil {
+		// The credential behind this request is past its stated expiry. Deny —
+		// 403 is the only status Hydra reads as "refuse this token request"
+		// (any other non-2xx becomes a server error), the same lever the
+		// refresh hook pulls for a revoked session. The body is the diagnostic
+		// Hydra surfaces to operators; `invalid_client` per RFC 6749 §5.2,
+		// because what failed is client authentication, not the grant.
+		//
+		// Checked BEFORE the not-found branch on purpose: that branch falls
+		// back to MinimalClaims and still mints, so an expired credential must
+		// never be able to arrive there.
+		if errors.Is(err, service.ErrCredentialExpired) {
+			h.denyExpired(ctx, subject, payload)
+			http.Error(w, `{"error":"invalid_client"}`, http.StatusForbidden)
+			return
+		}
 		// User not found — это не fail; Hydra может вызывать для guest-token
 		// (client_credentials flow); возвращаем minimum ext_claims.
 		if errors.Is(err, iamerr.ErrNotFound) {
@@ -195,6 +210,29 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.logger.Warn("token_hook: encode response failed", "err", err)
+	}
+}
+
+// denyExpired records the refusal. Log-and-continue on an audit-emit failure,
+// mirroring the issued-trail: a dropped authn record must be visible to the
+// operator (OWASP A09 / CWE-778), never silently swallowed. No key material or
+// PII is carried — the client_id and subject correlate the event.
+func (h *TokenHookHandler) denyExpired(ctx context.Context, subject string, payload hydraTokenHookRequest) {
+	h.logger.WarnContext(ctx, "token_hook: credential expired — token request denied",
+		"subject", subject, "client_id", payload.Request.ClientID)
+	if h.audit == nil {
+		return
+	}
+	if emitErr := h.audit.Emit(ctx, AuditEvent{
+		EventType: "authn.token.denied",
+		Payload: map[string]any{
+			"subject":   subject,
+			"reason":    "credential_expired",
+			"client_id": payload.Request.ClientID,
+		},
+	}); emitErr != nil {
+		h.logger.Warn("token_hook: audit emit failed",
+			"event_type", "authn.token.denied", "err", emitErr)
 	}
 }
 

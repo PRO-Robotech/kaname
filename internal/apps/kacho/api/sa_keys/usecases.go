@@ -1001,11 +1001,15 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 	// Delete from Hydra (idempotent — 404 OK).
 	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
 		if !errors.Is(err, clients.ErrHydraClientNotFound) {
-			// The DB delete already committed; this is eventual-consistency — the
-			// Hydra orphan-cleanup worker sweeps the leftover client later. Emit
-			// the promised structured warning (was silently swallowed via `_ =
-			// err`, CWE-390) so the orphan is observable to operators and the
-			// sweep has a signal; keep the RPC successful (non-fatal).
+			// The DB delete already committed, so the RPC stays successful — but
+			// the Hydra client is now an ORPHAN and no sweeper reclaims it: there
+			// is no Hydra orphan-cleanup worker in this service (an earlier
+			// revision of this comment claimed one). Consequence, stated plainly
+			// so the next reader does not assume otherwise: the orphaned client
+			// can still authenticate at the provider, and because its mapping row
+			// is gone the token hook falls through to MinimalClaims — a token
+			// without a kacho principal id. This WARN is the only signal; an
+			// operator must delete the client by hand.
 			if u.logger != nil {
 				u.logger.WarnContext(ctx, "sa-key hydra oauth-client delete failed after DB commit — orphaned client left for the cleanup worker",
 					slog.String("oauth_client_id", string(cur.OAuthClientID)),
