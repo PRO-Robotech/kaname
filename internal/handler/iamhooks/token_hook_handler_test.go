@@ -197,6 +197,13 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 	// kacho-принципал — это ServiceAccount за OAuth2-клиентом, поэтому handler
 	// обязан взять client_id как subject (а не отвергать 400 missing_subject),
 	// чтобы enricher резолвил SA через LookupByOAuthClientID.
+	//
+	// This handler is wired with no SA port, so the client resolves to nothing and
+	// the request is refused (see token_hook_unmapped_client_test.go). That refusal
+	// is not what this test is about — what it pins is that the client id was
+	// adopted as the subject instead of the request being rejected as subjectless.
+	// The audit record of the refusal names the subject the handler actually used,
+	// which evidences the fallback more directly than a status code ever did.
 	payload := map[string]any{
 		"subject": "",
 		"session": map[string]any{"client_id": "cc-client-uuid", "subject": ""},
@@ -211,9 +218,15 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code,
-		"empty-subject client_credentials must fall back to client_id; body: %s", w.Body.String())
+	require.NotEqual(t, http.StatusBadRequest, w.Code,
+		"empty-subject client_credentials must fall back to client_id, not be rejected as subjectless; body: %s",
+		w.Body.String())
 	assert.NotContains(t, w.Body.String(), "missing_subject")
+
+	events := audit.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "cc-client-uuid", events[0].Payload["subject"],
+		"the subject the handler proceeded with is the client id it fell back to")
 }
 
 func TestTokenHook_UserNotFound_EmitsMinimalClaims(t *testing.T) {

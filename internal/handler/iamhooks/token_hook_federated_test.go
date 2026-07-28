@@ -149,6 +149,11 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 // type is client_credentials the handler must NOT attempt to extract an
 // assertion issuer (no assertion present). The federated lookup MUST stay
 // empty so Phase 3a behaviour is preserved.
+//
+// The client used here maps to nothing (fakeSAPort resolves neither lookup), so
+// the request is also refused — see token_hook_unmapped_client_test.go for that
+// contract. What this test pins is the absence of the federated lookup, which
+// holds either way.
 func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	users := &fakeUserLookup{}
 	saPort := &fakeSAPort{}
@@ -179,7 +184,8 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	require.NotEqual(t, http.StatusInternalServerError, w.Code,
+		"a missing assertion is not a server error; body: %s", w.Body.String())
 	saPort.mu.Lock()
 	defer saPort.mu.Unlock()
 	require.Len(t, saPort.lookups, 0, "federated lookup must NOT happen for client_credentials")

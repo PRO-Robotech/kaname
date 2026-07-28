@@ -25,9 +25,12 @@ import (
 // passed. The token hook translates it into a 403, which is how Hydra is told
 // to deny the token request.
 //
-// It is deliberately NOT an iamerr sentinel: the hook's not-found branch falls
-// back to MinimalClaims and still mints, so an expired credential collapsing
-// into "not found" would defeat the gate.
+// It is deliberately NOT an iamerr sentinel. "Expired" and "not found" are
+// different verdicts and the hook owes them different answers: not-found is
+// refused for a machine credential but still mints the reduced claim set for an
+// interactive identity whose mirror has not committed yet. An expired credential
+// collapsing into "not found" would therefore be able to reach that surviving
+// branch, and the gate would be defeated for exactly the requests it exists for.
 var ErrCredentialExpired = stderrors.New("credential expired")
 
 // TokenEnrichmentUserPort — read-side dependency: resolve a User mirror by its
@@ -159,7 +162,11 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 //     either an SA-key or a User-token client, never both). Skipped when the
 //     User-token port is unwired.
 //  4. User by external_id (interactive Kratos sessions).
-//  5. iamerr.ErrNotFound — caller falls back to MinimalClaims.
+//  5. iamerr.ErrNotFound — nothing answers to this subject. What the caller does
+//     with that depends on the request: the token hook refuses a MACHINE
+//     credential (its client is not a kacho credential) and falls back to
+//     MinimalClaims only for an interactive identity whose mirror has not
+//     committed yet.
 func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject string, hookCtx TokenHookContext) (map[string]any, error) {
 	// 1. Federated SA path (Phase 3b). `subject` here is the EXTERNAL
 	//    assertion sub; `hookCtx.OAuthClientID` is the kacho-issued client.
@@ -405,7 +412,19 @@ func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u d
 }
 
 // MinimalClaims returns the reduced ext_claims set for a subject without an
-// active User or SA mapping (legacy / unknown client_credentials clients).
+// active User or SA mapping.
+//
+// Its ONE remaining population is the interactive identity whose kacho mirror
+// has not committed yet: provisioning is asynchronous (the provision hook
+// returns once the Operation is accepted), so a freshly registered human can
+// request their first token before the User row exists. The caller — the token
+// hook — refuses an unresolved MACHINE credential outright instead of coming
+// here, so this set is no longer what an unknown or revoked OAuth client
+// receives.
+//
+// It carries no principal id by construction, which is why it authorizes
+// nothing: the gateway resolves such a token to a diagnostic subject that the
+// permission model denies.
 func (s *TokenEnrichmentService) MinimalClaims(subject string) map[string]any {
 	return map[string]any{
 		"kacho_external_id":       subject,

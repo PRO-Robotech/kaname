@@ -65,6 +65,13 @@ func NewTokenHookHandler(
 	}
 }
 
+// OAuth2 grants in which the credential presented IS the client registration —
+// there is no end user in the exchange (RFC 6749 §4.4, RFC 7523 §2.1).
+const (
+	grantTypeClientCredentials = "client_credentials"
+	grantTypeJWTBearer         = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+)
+
 // hydraTokenHookRequest — payload от Hydra (subset per Hydra v2 hook contract).
 type hydraTokenHookRequest struct {
 	Session struct {
@@ -87,6 +94,39 @@ type hydraTokenHookRequest struct {
 		RequestedAt     string              `json:"requested_at"`
 	} `json:"request"`
 	Subject string `json:"subject"`
+}
+
+// isMachineCredentialRequest reports whether this token request has no human
+// behind it — the credential being presented is the OAuth client itself.
+//
+// It reads three independent signals because no single one is guaranteed to be
+// present, and each covers the others' blind spot:
+//
+//  1. the grant NAMES a machine flow. The primary signal, and the only one that
+//     catches jwt-bearer (whose subject is the external assertion's `sub`, so it
+//     resembles an end-user subject);
+//  2. the payload carried NO end-user subject at all, so `subject` above had to
+//     be recovered from the client id. Reaching that fallback is itself proof
+//     there is no human;
+//  3. the subject IS the client id. This is the shape Hydra sends for
+//     client_credentials, and it holds even when the form payload — which the
+//     provider is under no obligation to forward — reaches us without a
+//     grant_type. An end-user identity is never equal to a client registration
+//     id, so this cannot capture an interactive request.
+//
+// Deliberately a question about the REQUEST, not about the outcome of any
+// lookup: the answer must not change with the state of the mapping stores.
+func (p hydraTokenHookRequest) isMachineCredentialRequest(subject, endUserSubject, grantType string) bool {
+	if grantType == grantTypeClientCredentials || grantType == grantTypeJWTBearer {
+		return true
+	}
+	if endUserSubject == "" {
+		return true
+	}
+	if p.Session.ClientID != "" && subject == p.Session.ClientID {
+		return true
+	}
+	return p.Request.ClientID != "" && subject == p.Request.ClientID
 }
 
 // hydraTokenHookResponse — Hydra ожидает session.access_token.ext_claims в
@@ -115,10 +155,13 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = r.Body.Close() }()
 
-	subject := payload.Subject
-	if subject == "" {
-		subject = payload.Session.Subject
+	// endUserSubject — the identity of the human this token is for, as the
+	// provider stated it. Empty means the request has no end user at all.
+	endUserSubject := payload.Subject
+	if endUserSubject == "" {
+		endUserSubject = payload.Session.Subject
 	}
+	subject := endUserSubject
 	// client_credentials (RFC 6749 §4.4) не несёт end-user subject — Hydra
 	// отдаёт его пустым. kacho-принципал такого токена — ServiceAccount за
 	// OAuth2-клиентом, поэтому fallback на client_id (session, затем request);
@@ -138,7 +181,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	grantType := firstFormValue(payload.Request.Payload, "grant_type")
 	assertionIssuer := ""
-	if grantType == "urn:ietf:params:oauth:grant-type:jwt-bearer" {
+	if grantType == grantTypeJWTBearer {
 		assertionIssuer = decodeAssertionIssuer(firstFormValue(payload.Request.Payload, "assertion"))
 	}
 	hookCtx := service.TokenHookContext{
@@ -160,18 +203,41 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Hydra surfaces to operators; `invalid_client` per RFC 6749 §5.2,
 		// because what failed is client authentication, not the grant.
 		//
-		// Checked BEFORE the not-found branch on purpose: that branch falls
-		// back to MinimalClaims and still mints, so an expired credential must
-		// never be able to arrive there.
+		// Checked BEFORE the not-found branch on purpose: for an INTERACTIVE
+		// request that branch still falls back to MinimalClaims and mints, so an
+		// expired credential must never be able to arrive there.
 		if errors.Is(err, service.ErrCredentialExpired) {
 			h.denyExpired(ctx, subject, payload)
 			http.Error(w, `{"error":"invalid_client"}`, http.StatusForbidden)
 			return
 		}
-		// User not found — это не fail; Hydra может вызывать для guest-token
-		// (client_credentials flow); возвращаем minimum ext_claims.
 		if errors.Is(err, iamerr.ErrNotFound) {
-			h.logger.Info("token_hook: subject not found in users; emitting minimal claims",
+			// Nothing in kacho answers to this subject. What that means — and
+			// therefore what we owe the caller — depends entirely on whether a
+			// human is behind the request.
+			//
+			// MACHINE request: the credential presented IS the OAuth client, and
+			// every client kacho recognises was registered by this service
+			// together with its mapping row (SA key, personal token, bootstrap,
+			// federated subject). No row therefore means "not a kacho
+			// credential", and there is no principal to mint for. Refusing here
+			// is also what makes key revocation take effect at commit: revoke
+			// deletes the row first and asks the provider to delete the client
+			// second, so a client that outlives that second step arrives here and
+			// is turned away — with no dependence on the provider being reachable.
+			//
+			// INTERACTIVE request: a human authenticated at the identity
+			// provider and their kacho mirror is provisioned ASYNCHRONOUSLY (the
+			// provision hook returns once the Operation is accepted; the User row
+			// commits after). Their first token can legitimately be requested
+			// before that row exists, so it is minted with the reduced claim set
+			// and the mirror catches up. Refusing them would break first login.
+			if payload.isMachineCredentialRequest(subject, endUserSubject, grantType) {
+				h.denyUnmappedClient(ctx, subject, payload)
+				http.Error(w, `{"error":"invalid_client"}`, http.StatusForbidden)
+				return
+			}
+			h.logger.Info("token_hook: identity has no kacho mirror yet; emitting minimal claims",
 				"subject", subject)
 			enriched = h.enricher.MinimalClaims(subject)
 		} else {
@@ -213,13 +279,33 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// denyExpired records the refusal. Log-and-continue on an audit-emit failure,
-// mirroring the issued-trail: a dropped authn record must be visible to the
-// operator (OWASP A09 / CWE-778), never silently swallowed. No key material or
-// PII is carried — the client_id and subject correlate the event.
+// denyExpired records the refusal of a credential past its stated expiry.
 func (h *TokenHookHandler) denyExpired(ctx context.Context, subject string, payload hydraTokenHookRequest) {
 	h.logger.WarnContext(ctx, "token_hook: credential expired — token request denied",
 		"subject", subject, "client_id", payload.Request.ClientID)
+	h.auditDenied(ctx, subject, payload, "credential_expired")
+}
+
+// denyUnmappedClient records the refusal of a machine credential that resolves
+// to no kacho principal — its client is not a kacho credential, so there is no
+// principal to mint for.
+//
+// This record is also the standing signal for a provider-side registration that
+// outlived its kacho row (a revoke whose provider-delete failed): it can no
+// longer mint, and every attempt it makes says so by name.
+func (h *TokenHookHandler) denyUnmappedClient(ctx context.Context, subject string, payload hydraTokenHookRequest) {
+	h.logger.WarnContext(ctx, "token_hook: oauth client resolves to no kacho principal — token request denied",
+		"subject", subject, "client_id", payload.Request.ClientID)
+	h.auditDenied(ctx, subject, payload, "principal_not_found")
+}
+
+// auditDenied writes the refusal to the durable trail. The reason distinguishes
+// WHY the credential was turned away — an expired key and one that resolves to
+// nothing call for different operator responses. Log-and-continue on an emit
+// failure, mirroring the issued-trail: a dropped authn record must be visible
+// (OWASP A09 / CWE-778), never silently swallowed. No key material or PII is
+// carried — the client_id and subject correlate the event.
+func (h *TokenHookHandler) auditDenied(ctx context.Context, subject string, payload hydraTokenHookRequest, reason string) {
 	if h.audit == nil {
 		return
 	}
@@ -227,7 +313,7 @@ func (h *TokenHookHandler) denyExpired(ctx context.Context, subject string, payl
 		EventType: "authn.token.denied",
 		Payload: map[string]any{
 			"subject":   subject,
-			"reason":    "credential_expired",
+			"reason":    reason,
 			"client_id": payload.Request.ClientID,
 		},
 	}); emitErr != nil {

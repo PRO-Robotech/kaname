@@ -570,12 +570,26 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 	// Delete из Hydra (idempotent — 404 OK).
 	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
 		if !errors.Is(err, clients.ErrHydraClientNotFound) {
-			// DB-delete уже закоммичен; eventual-consistency — orphan подметёт
-			// Hydra orphan-cleanup позже. Эмитим обещанное structured-warning
-			// (было молча проглочено через `_ = err`, CWE-390), чтобы orphan был
-			// наблюдаем и у sweep'а был сигнал; RPC остаётся успешным (non-fatal).
+			// DB-delete уже закоммичен, поэтому регистрация у провайдера переживает
+			// свою строку. Уборщика здесь нет и он намеренно не заводится: отзыв
+			// считается состоявшимся потому, что учётные данные перестали работать,
+			// а это больше не зависит от успеха данного вызова.
+			//
+			// Строка маппинга — источник истины о том, является ли клиент учётными
+			// данными kacho, и token hook сверяется с ней на КАЖДОЙ выдаче. Строки
+			// нет ⇒ уцелевший клиент не резолвится ни в один принципал ⇒ hook
+			// отказывает (`invalid_client`, 403) и пишет `authn.token.denied` с
+			// причиной `principal_not_found` на каждую попытку (см.
+			// handler/iamhooks/token_hook_handler.go). Токен мёртв в момент
+			// коммита, а не когда провайдер снова станет доступен.
+			//
+			// Компенсация через outbox / sweeper рассмотрена и отклонена: обе
+			// EVENTUAL — окно, которое hook закрывает начисто, они бы не закрыли, а
+			// удаление регистрации, которая уже не может получить токен, — это
+			// гигиена инвентаря, а не безопасность. Этот WARN и есть сигнал о
+			// таком остатке; оператор удаляет его вручную.
 			if u.logger != nil {
-				u.logger.WarnContext(ctx, "user-token hydra oauth-client delete failed after DB commit — orphaned client left for the cleanup worker",
+				u.logger.WarnContext(ctx, "user-token hydra oauth-client delete failed after DB commit — the registration outlives its row (it can no longer mint; delete it by hand)",
 					slog.String("oauth_client_id", string(cur.OAuthClientID)),
 					slog.String("token_id", string(in.TokenID)),
 					slog.String("err", err.Error()),
