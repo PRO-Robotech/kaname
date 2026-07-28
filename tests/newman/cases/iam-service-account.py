@@ -409,8 +409,18 @@ CASES.append(Case(
     steps=[
         Step(
             name="list-ok",
+            # pageSize=1000 — условие осмысленности утверждения «свой свежий SA виден».
+            # Список курсорный, (created_at, id) ASC, страница по умолчанию 50; сервисный
+            # аккаунт, созданный ЭТИМ прогоном, сортируется последним и уезжает за первую
+            # страницу, как только их в аккаунте больше 50. Измерено на стенде 2026-07-29:
+            # 71 SA в account-A, дефолтная страница вернула 50 старейших + nextPageToken.
+            # Не лаг материализации (ретрай не помогает) и не дефект продукта — курсорная
+            # ASC-семантика заявлена контрактом. Тот же класс, что IAM-PRJ-LS-CRUD-OK и
+            # (ранее) IAM-ROL-LS-SYSTEM-PLUS-CUSTOM-WITH-ACCOUNT.
+            # Негативы ниже (LS-AUTHZ-ANON-DENY / LS-AUTHZ-SCOPE-NONMEMBER-EMPTY) страницу
+            # НЕ расширяют: они утверждают 401 и пустой список, размер страницы им безразличен.
             method="GET",
-            path="/iam/v1/serviceAccounts?accountId={{accountAId}}",
+            path="/iam/v1/serviceAccounts?accountId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),

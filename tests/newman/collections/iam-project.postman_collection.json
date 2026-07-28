@@ -1398,14 +1398,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects?accountId={{accountAId}}",
+              "raw": "{{baseUrl}}/iam/v1/projects?accountId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "projects?accountId={{accountAId}}"
+                "projects?accountId={{accountAId}}&pageSize=1000"
               ]
             }
           },
