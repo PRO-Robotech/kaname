@@ -23,8 +23,10 @@ keeping the historical fields working through a two-way projection.
   `AccessTarget` arms (`all_in_scope`/`resources`/`selector`) 1:1. A separate
   field (not extra arms on the legacy oneof) so the two representations are
   wire-distinguishable and a disagreement is detectable.
-- **condition** — out of scope here; `condition_id`/`expires_at`/
-  `builtin_condition` stay exactly as before, with no projection-wrapper.
+- **condition** — out of scope here. UPDATE 2026-07-29: `condition_id` /
+  `builtin_condition` have since been REMOVED from `CreateAccessBindingRequest`
+  (tags 6/7 reserved) — nothing read them; `expires_at` is now honoured
+  end-to-end (request → binding → expiry sweep).
 - **subject** — NOT canonicalized here; flat `subject_type`/`subject_id` stay.
 
 `buf breaking` stays GREEN (additive + deprecate, 0 deletions/renumber) — the
@@ -76,8 +78,11 @@ projected unchanged (out of scope here).
   cross-domain edge — only contract form.
 
 ## Future work
-- A condition oneof-wrapper `Condition{none|expiry|forward}` over the
-  already-populated `condition_id`(9)/`builtin_condition`(14)/`expires_at`(10).
+- A condition oneof-wrapper over the AccessBinding RESOURCE's
+  `condition_id`(9)/`builtin_condition`(14)/`expires_at`(10). Note (2026-07-29):
+  the Create REQUEST no longer carries condition fields at all, and its
+  `expires_at` is honoured — such a wrapper would be introduced by whatever
+  design actually implements conditions, not as a form over unread fields.
 - A future major version may physically remove the deprecated scope/target fields
   (and condition); `buf breaking` would be deliberately red for that coordinated
   major.
