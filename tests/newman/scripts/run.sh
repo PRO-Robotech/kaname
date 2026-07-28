@@ -207,10 +207,11 @@ else
   # block-storage duplicate in kacho-compute it drove (Disk/Image/Snapshot) is retired,
   # and this suite was added ahead of that removal precisely so the evidence would not
   # leave with it. Same shape, storage FGA types (storage_volume / storage_snapshot /
-  # storage_image). It is RED on the revoke half — see docs/RESULTS.md "label-remove
-  # does not revoke on storage" — and is deliberately NOT whitelisted. With the compute
-  # duplicate gone this is now the ONLY carrier of the property, so the red is the
-  # product finding standing on its own rather than beside a passing twin.
+  # storage_image). GREEN and deliberately NOT whitelisted — see docs/RESULTS.md
+  # "Resolved — label-remove on storage revokes". It was red on the revoke half when
+  # written and was fixed the same day; the note here claiming otherwise outlived the
+  # fix. With the compute duplicate gone this is the ONLY carrier of the property, so
+  # a red here is a product finding standing on its own, never a budget to widen.
   run_one "label-revoke-storage"
   # label-revoke-iam — the IAM-NATIVE analogue: a label clear via
   # ProjectService.Update(update_mask=labels, empty body) must CLEAR the labels

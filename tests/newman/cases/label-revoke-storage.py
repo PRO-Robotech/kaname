@@ -54,16 +54,19 @@ resolve to a phantom project id — same discipline as the compute file.
 
 Fixtures: jwtBootstrap, jwtAccountAdminA, accountAId.
 
-CURRENT STATUS — RED ON THE REVOKE HALF, ON PURPOSE. Live run 2026-07-27: the grant
-half passes on all three resources (a clean service account goes DENY → allowed:true
-once the ARM_LABELS role is bound), and the Update really does clear the labels — but
-the post-revoke Check stays allowed:true and keeps staying allowed:true long after the
-bounded poll gives up. label-revoke-compute ran GREEN (75/75) on the same stand, same
-account, same identity, same poll budget, minutes apart, so this is the resource family
-and not the environment. The failure is an over-GRANT (access outlives the label it was
-granted through), which is the one shape that must never be softened away, so these
-cases are left RED and are NOT whitelisted. See docs/RESULTS.md, section
-"label-remove does not revoke on storage".
+CURRENT STATUS — GREEN, AND NOT WHITELISTED. When these cases were written the revoke
+half was red and said so here: storage told the authority holding the label selector
+what a resource's labels were at creation and again at deletion, and nothing in
+between, so a removal never reached the selector and the grant outlived the label it
+came from. That was fixed the same day, and this docstring outlived the fix — the note
+saying otherwise stood for a day after the behaviour it described was gone.
+
+Verified 2026-07-28 on the live umbrella: 87/87 assertions, 0 failed, all three
+*-post-revoke-deny steps included. These cases are NOT whitelisted and must never be.
+What they hold is an over-GRANT shape — access surviving the removal of the label it
+was granted through — and that is the one shape a suite must never learn to tolerate.
+A red here is a product finding, not a poll budget to widen. See docs/RESULTS.md,
+section "Resolved — label-remove on storage revokes".
 """
 
 CASES = []
