@@ -28,6 +28,7 @@ Squash в единый `0001_initial.sql` baseline запланирован в W
 
 - НЕ редактировать примененную миграцию (workspace `CLAUDE.md` запрет #5) —
   только новая миграция с инкрементным номером (следующий — `0025_*`).
-- `make sync-migrations` — no-op: общая `operations` встроена в baseline под
-  схемой `kacho_iam` (re-копирование common-файла создало бы конфликтующий
-  unqualified `public.operations`).
+- Таблица `operations` объявлена в baseline под схемой `kacho_iam`. Цели,
+  которая «подтягивала бы общую operations», больше нет: она ничего не делала
+  ни в одном сервисе, а копия common-файла создала бы конфликтующий
+  unqualified `public.operations`.
