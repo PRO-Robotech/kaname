@@ -1,25 +1,5 @@
 [
   {
-    "fqn": "kacho.cloud.compute.v1.DiskTypeService/Get",
-    "permission": "compute.disk_types.get",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.DiskTypeService/List",
-    "permission": "compute.disk_typeses.list",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.InstanceService/AddOneToOneNat",
     "permission": "compute.instance_one_to_one_nats.addOneToOneNat",
     "required_relation": "v_update",
@@ -246,36 +226,6 @@
     "scope_extractor": {
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InternalDiskTypeService/Create",
-    "permission": "compute.disk_types.create",
-    "required_relation": "system_admin",
-    "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InternalDiskTypeService/Delete",
-    "permission": "compute.disk_types.delete",
-    "required_relation": "system_admin",
-    "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InternalDiskTypeService/Update",
-    "permission": "compute.disk_types.update",
-    "required_relation": "system_admin",
-    "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
     },
     "required_acr_min": "1"
   },
