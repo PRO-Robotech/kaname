@@ -202,14 +202,15 @@ else
   # The CI `assert all suites green` step parses EVERY collections/*.json, so they
   # MUST run here to produce the report the gate expects.
   run_one "label-revoke-vpc"
-  run_one "label-revoke-compute"
   run_one "label-revoke-nlb"
-  # label-revoke-storage — the OWNER-side analogue of label-revoke-compute. Block
-  # storage belongs to kacho-storage, but the label-revoke evidence existed only for
-  # the compute duplicate; retiring that duplicate would have retired the only proof
-  # with it. Same shape, storage FGA types (storage_volume / storage_snapshot /
-  # storage_image). It is currently RED on the revoke half — see docs/RESULTS.md
-  # "label-remove does not revoke on storage" — and is deliberately NOT whitelisted.
+  # label-revoke-storage — the OWNER-side carrier. label-revoke-compute is GONE: the
+  # block-storage duplicate in kacho-compute it drove (Disk/Image/Snapshot) is retired,
+  # and this suite was added ahead of that removal precisely so the evidence would not
+  # leave with it. Same shape, storage FGA types (storage_volume / storage_snapshot /
+  # storage_image). It is RED on the revoke half — see docs/RESULTS.md "label-remove
+  # does not revoke on storage" — and is deliberately NOT whitelisted. With the compute
+  # duplicate gone this is now the ONLY carrier of the property, so the red is the
+  # product finding standing on its own rather than beside a passing twin.
   run_one "label-revoke-storage"
   # label-revoke-iam — the IAM-NATIVE analogue: a label clear via
   # ProjectService.Update(update_mask=labels, empty body) must CLEAR the labels

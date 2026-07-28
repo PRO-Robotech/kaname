@@ -195,13 +195,20 @@ the grant was still live on re-probe minutes after the bounded poll gave up.
 **Why this is a product finding and not a test-timing one:** `label-revoke-compute`
 ran GREEN (75/75) on the same stand, in the same account, with the same identity, the
 same bounded poll and the same emit-on-Update mechanic, minutes apart. The difference
-is the resource family, not the environment.
+was the resource family, not the environment.
 
 **Disposition: left RED, deliberately NOT whitelisted.** This is an over-GRANT shape —
 access survives the removal of the label it was granted through — so masking it would
-mask exactly the class the gate exists for. The compute duplicate is the only place
-where this behaviour is currently proven at all, which is precisely why the check had
-to exist on the owner before the duplicate is removed.
+mask exactly the class the gate exists for.
+
+**Update — the compute duplicate is now gone.** `label-revoke-compute` has been deleted
+along with the Disk/Image/Snapshot duplicate in kacho-compute it drove; this suite is
+now the ONLY carrier of the property, which is why it was written before the removal.
+Two consequences worth stating plainly: the passing twin that showed the mechanic CAN
+work no longer exists, so this red no longer has a same-stand control beside it; and
+the defect is now unmasked — every remaining owner of block storage exhibits it,
+because there is only one owner left. The finding itself did not change: on storage,
+removing the label a grant was made through does not revoke the grant.
 
 | Suite | Cases / step | Signature (observed) | Root (product) |
 |---|---|---|---|

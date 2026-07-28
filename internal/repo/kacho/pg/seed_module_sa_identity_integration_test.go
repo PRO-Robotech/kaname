@@ -28,7 +28,7 @@ package pg_test
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // deterministic seed-id derivation, not security
 	"encoding/hex"
 	"encoding/json"
 	"sort"
@@ -45,7 +45,7 @@ import (
 // svaID derives the deterministic ServiceAccount id for a module svc-name
 // (`'sva' || substr(md5('kacho-<svc>'), 1, 17)`), matching the seed migration.
 func svaID(svc string) string {
-	sum := md5.Sum([]byte("kacho-" + svc))
+	sum := md5.Sum([]byte("kacho-" + svc)) //nolint:gosec // deterministic id, not crypto
 	return "sva" + hex.EncodeToString(sum[:])[:17]
 }
 
@@ -72,7 +72,7 @@ func roleName(svc string) string {
 // rolID derives the deterministic backing-role id for a module
 // (`'rol' || substr(md5(<role-name>), 1, 17)`), matching the seed migration.
 func rolID(svc string) string {
-	sum := md5.Sum([]byte(roleName(svc)))
+	sum := md5.Sum([]byte(roleName(svc))) //nolint:gosec // deterministic id, not crypto
 	return "rol" + hex.EncodeToString(sum[:])[:17]
 }
 
