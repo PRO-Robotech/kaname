@@ -167,6 +167,11 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequ
 		Labels: labelsFromProto(req.GetLabels()),
 		// F8: object-selection under the anchor (allInScope | per-object resources).
 		Target: tgt,
+		// Lifetime. Optional; when set the binding is eager-revoked by the
+		// reconcile sweep once it elapses (status REVOKED + tuple removal), so
+		// what the caller asks for is what actually happens. The floor is enforced
+		// in the use-case, before any Operation is minted.
+		ExpiresAt: expiresAtFromProto(req.GetExpiresAt()),
 	}
 	op, err := h.create.Execute(ctx, b)
 	if err != nil {
@@ -517,6 +522,16 @@ func statusToProto(s domain.AccessBindingStatus) iamv1.AccessBinding_Status {
 	default:
 		return iamv1.AccessBinding_STATUS_UNSPECIFIED
 	}
+}
+
+// expiresAtFromProto maps the request's optional lifetime to the domain's
+// nullable time. Absent stays absent — no lifetime is ever invented.
+func expiresAtFromProto(ts *timestamppb.Timestamp) *time.Time {
+	if ts == nil {
+		return nil
+	}
+	t := ts.AsTime().UTC()
+	return &t
 }
 
 func expiresAtProto(t *time.Time) *timestamppb.Timestamp {

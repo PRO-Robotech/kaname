@@ -26,6 +26,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,6 +44,12 @@ import (
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
+
+// MinExpiresIn — the shortest lifetime AccessBinding.Create accepts. A binding's
+// access is materialised asynchronously within a bounded window, so anything
+// shorter risks being revoked before it is ever usable; such a request is refused
+// by name rather than issued as a grant that cannot be delivered.
+const MinExpiresIn = 5 * time.Minute
 
 // SelectorReconciler — narrow port (γ): materialize a selector binding's
 // membership right after Create commits, so the membership + per-object FGA
@@ -163,6 +170,14 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	}
 	if err := b.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
+	}
+	// Lifetime floor — sync, before any Operation is minted. Access materialises
+	// asynchronously (bounded, seconds), so a binding that elapses sooner than
+	// MinExpiresIn could be revoked before it ever becomes usable: the caller
+	// would be told the grant succeeded and would never see it work. Refuse by
+	// name instead of issuing something that cannot be delivered.
+	if b.ExpiresAt != nil && !b.ExpiresAt.After(time.Now().UTC().Add(MinExpiresIn)) {
+		return nil, shared.InvalidArg("expires_at", "expires_at must be at least "+MinExpiresIn.String()+" in the future")
 	}
 	// Grant-authority on the binding's scope — AUTHZ FIRST, before ANY read of an
 	// object the caller may not own. This RPC is `permission = "<exempt>"` in proto
