@@ -134,20 +134,23 @@ func (p hydraTokenHookRequest) grantType() string {
 // isMachineCredentialRequest reports whether this token request has no human
 // behind it — the credential being presented is the OAuth client itself.
 //
-// It reads three independent signals because no single one is guaranteed to be
-// present, and each covers the others' blind spot:
+// It reads three signals because no single one is guaranteed to be present.
+// They do NOT all cover each other:
 //
-//  1. the grant NAMES a machine flow. The primary signal, and the only one that
-//     catches jwt-bearer (whose subject is the external assertion's `sub`, so it
-//     resembles an end-user subject);
-//  2. the payload carried NO end-user subject at all, so `subject` above had to
+//  1. the grant NAMES a machine flow. The primary signal, and for jwt-bearer the
+//     ONLY one — that grant's subject is the external assertion's `sub`, so it
+//     is neither absent (2) nor equal to a client id (3), and neither can fire.
+//     Lose this reading and a federated assertion belonging to nobody we trust
+//     is indistinguishable from an interactive first login. See grantType for
+//     why it is taken from the provider's own field rather than the client's
+//     submitted form;
+//  2. the request carried NO end-user subject at all, so `subject` above had to
 //     be recovered from the client id. Reaching that fallback is itself proof
 //     there is no human;
 //  3. the subject IS the client id. This is the shape Hydra sends for
-//     client_credentials, and it holds even when the form payload — which the
-//     provider is under no obligation to forward — reaches us without a
-//     grant_type. An end-user identity is never equal to a client registration
-//     id, so this cannot capture an interactive request.
+//     client_credentials, so for THAT grant it is a second reading independent
+//     of the grant name. An end-user identity is never equal to a client
+//     registration id, so this cannot capture an interactive request.
 //
 // Deliberately a question about the REQUEST, not about the outcome of any
 // lookup: the answer must not change with the state of the mapping stores.
@@ -249,10 +252,14 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// human is behind the request.
 			//
 			// MACHINE request: the credential presented IS the OAuth client, and
-			// every client kacho recognises was registered by this service
-			// together with its mapping row (SA key, personal token, bootstrap,
-			// federated subject). No row therefore means "not a kacho
-			// credential", and there is no principal to mint for. Refusing here
+			// the mapping row is what makes a client a kacho credential — it is
+			// the authority every issuance is checked against (SA key, personal
+			// token, bootstrap, federated subject). No row therefore means "not a
+			// kacho credential", and there is no principal to mint for. Note the
+			// registration and its row are NOT written atomically — the provider
+			// call is a separate, earlier step — so a registration without a row
+			// is a state that genuinely occurs; that is precisely the case this
+			// branch answers, rather than one it assumes away. Refusing here
 			// is also what makes key revocation take effect at commit: revoke
 			// deletes the row first and asks the provider to delete the client
 			// second, so a client that outlives that second step arrives here and
@@ -322,9 +329,13 @@ func (h *TokenHookHandler) denyExpired(ctx context.Context, subject string, payl
 // to no kacho principal — its client is not a kacho credential, so there is no
 // principal to mint for.
 //
-// This record is also the standing signal for a provider-side registration that
-// outlived its kacho row (a revoke whose provider-delete failed): it can no
-// longer mint, and every attempt it makes says so by name.
+// The record is where a provider-side registration that outlived its kacho row
+// (a revoke whose provider-delete failed) becomes visible: it can no longer
+// mint, and every attempt it makes is written down. The reason is the shared
+// one for the whole class, so it does NOT single that case out — a client this
+// service never registered is recorded identically. Telling the two apart is
+// the operator's job and needs the client id against the mapping store; what
+// this record affords on its own is noticing that some registration is trying.
 func (h *TokenHookHandler) denyUnmappedClient(ctx context.Context, subject string, payload hydraTokenHookRequest) {
 	h.logger.WarnContext(ctx, "token_hook: oauth client resolves to no kacho principal — token request denied",
 		"subject", subject, "client_id", payload.Request.ClientID)
