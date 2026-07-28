@@ -18,6 +18,8 @@
 package iamhooks_test
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"testing"
 
@@ -25,7 +27,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
+
+// grantJWTBearer — the federated machine grant, spelled the way the protocol
+// spells it (RFC 7523 §2.1).
+const grantJWTBearer = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 
 // providerBody assembles a token-hook body in the provider's shape.
 //
@@ -47,6 +55,27 @@ func providerBody(clientID, endUserSubject string, grantTypes []string, form map
 			"payload":          form,
 		},
 	}
+}
+
+// newTokenHookWithSAPort wires the handler against the recording SA port, so a
+// test can assert whether the federated (issuer, subject) lookup happened.
+func newTokenHookWithSAPort(t *testing.T, users *fakeUserLookup, sas *fakeSAPort, audit *fakeAudit) *iamhooks.TokenHookHandler {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	enricher := service.NewTokenEnrichmentService(
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		users,
+	).WithSAPort(sas)
+	return iamhooks.NewTokenHookHandler(
+		iamhooks.TokenHookConfig{
+			HookSharedSecret: "secret-hook-token",
+			Domain:           "api.test.cloud",
+			HydraIssuer:      "https://hydra.test.cloud",
+		},
+		enricher,
+		audit,
+		logger,
+	)
 }
 
 // TestTokenHook_ProviderBody_InteractiveIdentity_ResolvesToItsUser — the
@@ -107,4 +136,110 @@ func TestTokenHook_ProviderBody_ClientCredentials_NoEndUser_MappedSAKey_StillMin
 	claims := extClaimsOf(t, w)
 	assert.Equal(t, "service_account", claims["kacho_principal_type"])
 	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kacho_principal_id"])
+}
+
+// ───────────── which grant ran: the provider's word, not the client's form ─────────────
+
+// The form the client submitted reaches us only because the provider currently
+// chooses to forward that key; the list of forwarded parameters is its
+// decision, not ours, and it sanitises the form before sending. The grant the
+// exchange actually ran under is a field of the request in its own right. The
+// tests below state ONLY that field, so a handler still reading the echo sees a
+// request with no grant name at all.
+
+// TestTokenHook_ProviderBody_JwtBearer_StatedOnlyAuthoritatively_Refused — the
+// federated machine grant is the one that has no second signal: its subject is
+// the external assertion's, so it neither is the client id nor is missing. Lose
+// the grant name and nothing else in the body says "machine" — an assertion
+// matching no trusted subject mints instead of being refused.
+func TestTokenHook_ProviderBody_JwtBearer_StatedOnlyAuthoritatively_Refused(t *testing.T) {
+	audit := &fakeAudit{}
+	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, audit)
+
+	assertion := mkUnsignedJWT(t, map[string]any{
+		"iss": "https://token.actions.githubusercontent.com",
+		"sub": "repo:stranger/infra:ref:refs/heads/main",
+	})
+	w := postHookPayload(t, h, providerBody(
+		"cli-not-ours",
+		"repo:stranger/infra:ref:refs/heads/main",
+		[]string{grantJWTBearer},
+		map[string][]string{"assertion": {assertion}},
+	))
+
+	require.Equal(t, http.StatusForbidden, w.Code,
+		"an assertion matching no trusted subject must not mint; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "invalid_client")
+}
+
+// TestTokenHook_ProviderBody_JwtBearer_StatedOnlyAuthoritatively_ResolvesFederatedSubject
+// — the same field also decides whether the assertion is opened at all. A
+// federated service account is found by (issuer, subject) taken from inside the
+// assertion, and that only happens for a request recognised as this grant.
+func TestTokenHook_ProviderBody_JwtBearer_StatedOnlyAuthoritatively_ResolvesFederatedSubject(t *testing.T) {
+	saPort := &fakeSAPort{
+		mappingOK: true,
+		mapping: domain.ServiceAccountOAuthClient{
+			ID:    "soc_01abcdefghjkmnpqr",
+			SvaID: "sva_01abcdefghjkmnpqr",
+		},
+		sa: domain.ServiceAccount{
+			ID:        "sva_01abcdefghjkmnpqr",
+			AccountID: "acc_01abcdefghjkmnpqr",
+		},
+	}
+	h := newTokenHookWithSAPort(t, &fakeUserLookup{}, saPort, &fakeAudit{})
+
+	assertion := mkUnsignedJWT(t, map[string]any{
+		"iss": "https://token.actions.githubusercontent.com",
+		"sub": "repo:acme/infra:ref:refs/heads/main",
+	})
+	w := postHookPayload(t, h, providerBody(
+		"hydra-cli-fake",
+		"repo:acme/infra:ref:refs/heads/main",
+		[]string{grantJWTBearer},
+		map[string][]string{"assertion": {assertion}},
+	))
+
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	saPort.mu.Lock()
+	defer saPort.mu.Unlock()
+	require.Len(t, saPort.lookups, 1, "the assertion must have been opened and its issuer looked up")
+	assert.Equal(t, "https://token.actions.githubusercontent.com", saPort.lookups[0].Iss)
+	assert.Equal(t, "repo:acme/infra:ref:refs/heads/main", saPort.lookups[0].Sub)
+}
+
+// TestTokenHook_ProviderBody_ClientCredentials_StatedOnlyAuthoritatively_Refused
+// — same reading for the non-federated machine grant, isolated from the other
+// two signals: the subject is present and is not either client id.
+func TestTokenHook_ProviderBody_ClientCredentials_StatedOnlyAuthoritatively_Refused(t *testing.T) {
+	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, &fakeAudit{})
+
+	w := postHookPayload(t, h, providerBody(
+		"cli-nobody-knows",
+		"a-subject-that-is-not-the-client",
+		[]string{"client_credentials"},
+		map[string][]string{},
+	))
+
+	require.Equal(t, http.StatusForbidden, w.Code,
+		"the grant the provider states is enough to know there is no human; body: %s", w.Body.String())
+}
+
+// TestTokenHook_ProviderBody_FormGrantNameStillHonoured — the echo remains a
+// fallback rather than being dropped: the provider is free to stop forwarding
+// it, but while it does, a request that states the grant ONLY there is still
+// read correctly.
+func TestTokenHook_ProviderBody_FormGrantNameStillHonoured(t *testing.T) {
+	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, &fakeAudit{})
+
+	w := postHookPayload(t, h, providerBody(
+		"cli-nobody-knows",
+		"a-subject-that-is-not-the-client",
+		nil,
+		map[string][]string{"grant_type": {"client_credentials"}},
+	))
+
+	require.Equal(t, http.StatusForbidden, w.Code,
+		"a machine grant named only in the submitted form is still a machine grant; body: %s", w.Body.String())
 }

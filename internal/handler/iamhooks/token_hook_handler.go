@@ -97,11 +97,38 @@ type hydraTokenHookRequest struct {
 		Extra map[string]any `json:"extra"`
 	} `json:"session"`
 	Request struct {
-		ClientID        string              `json:"client_id"`
-		GrantedScopes   []string            `json:"granted_scopes"`
-		GrantedAudience []string            `json:"granted_audience"`
-		Payload         map[string][]string `json:"payload"`
+		ClientID        string   `json:"client_id"`
+		GrantedScopes   []string `json:"granted_scopes"`
+		GrantedAudience []string `json:"granted_audience"`
+		// GrantTypes — the grants the exchange ran under, stated by the provider
+		// from the request it executed. See grantType.
+		GrantTypes []string            `json:"grant_types"`
+		Payload    map[string][]string `json:"payload"`
 	} `json:"request"`
+}
+
+// grantType names the grant this exchange ran under.
+//
+// The provider states it twice and the two are not equally trustworthy. The
+// authoritative statement is the request's own grant list, filled from the
+// grant the provider actually executed. The other is the client's submitted
+// form, which reaches us only for as long as the provider chooses to forward
+// that parameter — the set it forwards is its decision, it sanitises the form
+// before sending, and the day that set narrows the form copy becomes silently
+// empty. Reading the authoritative field first is what keeps this signal alive
+// through such a change; the form stays as a fallback because it is populated
+// today and costs nothing.
+//
+// Load-bearing: this is the ONLY signal that identifies the federated machine
+// grant (see isMachineCredentialRequest), so an empty answer there is not a
+// missing hint but a missing refusal.
+func (p hydraTokenHookRequest) grantType() string {
+	for _, gt := range p.Request.GrantTypes {
+		if gt != "" {
+			return gt
+		}
+	}
+	return firstFormValue(p.Request.Payload, "grant_type")
 }
 
 // isMachineCredentialRequest reports whether this token request has no human
@@ -184,7 +211,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	grantType := firstFormValue(payload.Request.Payload, "grant_type")
+	grantType := payload.grantType()
 	assertionIssuer := ""
 	if grantType == grantTypeJWTBearer {
 		assertionIssuer = decodeAssertionIssuer(firstFormValue(payload.Request.Payload, "assertion"))
