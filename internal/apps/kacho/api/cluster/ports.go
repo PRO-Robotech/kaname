@@ -12,9 +12,27 @@ package cluster
 import (
 	"context"
 
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
+
+// operationRepo — Operation-порт cluster-мутаций. Шире operations.Repo ровно на
+// MetadataFinalizer, и это не удобство, а требование контракта:
+// `{Grant,Revoke}ClusterAdminMetadata.cluster_admin_grant_id` обязано назвать
+// строку cluster_admin_grants, чей id известен ТОЛЬКО после мутации (на
+// идемпотентном повторе это вообще id уже существующей строки), тогда как саму
+// op-строку обязано создавать ДО мутации. `MarkDone` третьим параметром берёт
+// RESPONSE и metadata не трогает — то есть заполнить обещанное поле ею нельзя.
+//
+// Порт объявлен здесь, а не подменён type-assert'ом в рантайме, чтобы
+// composition root не мог собраться с репозиторием, который эту запись не
+// умеет: operations.NewRepo возвращает FullRepo, и несоответствие поймает
+// компилятор.
+type operationRepo interface {
+	operations.Repo
+	operations.MetadataFinalizer
+}
 
 // clusterReader — port for reading the singleton cluster row.
 // Implemented by *kachopg.ClusterReader.

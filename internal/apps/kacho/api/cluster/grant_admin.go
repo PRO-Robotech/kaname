@@ -11,7 +11,9 @@ package cluster
 //  2. Persist Operation (done=false) so the returned id is always queryable.
 //  3. Begin TX → Grant → if !created && !active → Reactivate →
 //     EmitWriteTx (FGA outbox) → commit. On failure → MarkError the op.
-//  4. MarkDone the Operation (done=true, full grant metadata) and return.
+//  4. Complete the Operation (done=true) with the FULL metadata (the grant id is
+//     knowable only now) and the declared response (ClusterAdminGrant), then
+//     return the same terminal envelope to the caller.
 //
 // Idempotency:
 //   - Grant returns (row, false, nil) if ON CONFLICT fires.
@@ -48,7 +50,7 @@ type GrantAdminUseCase struct {
 	reader    grantReader
 	relations relationOutboxEmitter
 	txb       service.TxBeginner
-	opsRepo   operations.Repo
+	opsRepo   operationRepo
 	// userCheck — user-existence guard; nil = skip (tests without user table seed).
 	userCheck userChecker
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate. nil →
@@ -65,7 +67,7 @@ func NewGrantAdminUseCase(
 	r grantReader,
 	relations relationOutboxEmitter,
 	txb service.TxBeginner,
-	opsRepo operations.Repo,
+	opsRepo operationRepo,
 ) *GrantAdminUseCase {
 	return &GrantAdminUseCase{writer: w, reader: r, relations: relations, txb: txb, opsRepo: opsRepo}
 }
@@ -141,7 +143,10 @@ func (uc *GrantAdminUseCase) Execute(
 	// failure non-fatal) left the committed grant with NO pollable Operation row →
 	// OperationService.Get(id) returned NotFound forever (CWE-662). The grant.ID
 	// is not yet known here, so the initial metadata carries only subject_id; the
-	// full metadata (with grant.ID) is written on MarkDone.
+	// full metadata (with grant.ID) is written by the terminal transition below —
+	// which is why this use-case needs MarkDoneWithMetadata and not MarkDone
+	// (MarkDone's third parameter is the RESPONSE; it does not touch metadata, so
+	// with it the contract's cluster_admin_grant_id stayed empty forever).
 	op, oerr := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Grant cluster admin to %s %s", styp, subjectID),
@@ -164,25 +169,43 @@ func (uc *GrantAdminUseCase) Execute(
 		return nil, gerr
 	}
 
-	// Complete the Operation (done=true) with the full grant metadata as response.
-	meta, merr := anypb.New(&iamv1.GrantClusterAdminMetadata{
-		ClusterAdminGrantId: string(grant.ID),
-		SubjectId:           subjectID,
-	})
+	// Complete the Operation: done=true, metadata replaced by the full one (the
+	// grant id exists only now), response = the declared ClusterAdminGrant.
+	meta, resp, merr := grantOperationPayload(subjectID, grant)
 	if merr != nil {
-		return nil, fmt.Errorf("marshal grant metadata: %w", merr)
+		return nil, merr
 	}
-	if err := uc.opsRepo.MarkDone(ctx, op.ID, meta); err != nil {
-		// Non-fatal: the grant committed and the op row exists (done=false) — a
-		// poller keeps polling and the terminal-write is retriable, so this never
-		// degrades to NotFound. Log for traceability (CWE-390: no silent swallow).
+	if err := uc.opsRepo.MarkDoneWithMetadata(ctx, op.ID, meta, resp); err != nil {
+		// Non-fatal for the caller: the grant committed and the row exists, so a
+		// poll answers (done=false) and never NotFound. It is NOT self-healing —
+		// the IAM orphan-resolver has no arm for cluster-admin metadata and skips
+		// such rows — so this is logged loudly, never swallowed (CWE-390).
 		slog.ErrorContext(ctx, "cluster GrantAdmin: operation complete failed",
 			"operation_id", op.ID, "err", err.Error())
 	}
 	op.Done = true
-	op.Response = meta
+	op.Metadata = meta
+	op.Response = resp
 
 	return shared.OperationToProto(&op), nil
+}
+
+// grantOperationPayload — the terminal (metadata, response) pair declared by
+// `InternalClusterService.GrantAdmin` (metadata: GrantClusterAdminMetadata,
+// response: ClusterAdminGrant).
+func grantOperationPayload(subjectID string, grant domain.ClusterAdminGrant) (meta, resp *anypb.Any, err error) {
+	meta, err = anypb.New(&iamv1.GrantClusterAdminMetadata{
+		ClusterAdminGrantId: string(grant.ID),
+		SubjectId:           subjectID,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal grant metadata: %w", err)
+	}
+	resp, err = anypb.New(clusterAdminGrantToProto(grant))
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal grant response: %w", err)
+	}
+	return meta, resp, nil
 }
 
 // doGrant — runs grant (and optional reactivate) within a single TX.

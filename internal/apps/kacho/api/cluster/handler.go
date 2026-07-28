@@ -124,6 +124,19 @@ func clusterGrantSubjectTypeToProto(subjectType string) iamv1.ClusterGrantSubjec
 	}
 }
 
+// clusterAdminGrantToProto — the ClusterAdminGrant resource, as declared for
+// the `response` of GrantAdmin / RevokeAdmin. `rationale` has no column on the
+// row, so it stays empty rather than being invented here.
+func clusterAdminGrantToProto(g domain.ClusterAdminGrant) *iamv1.ClusterAdminGrant {
+	return &iamv1.ClusterAdminGrant{
+		Id:              string(g.ID),
+		SubjectType:     clusterGrantSubjectTypeToProto(string(g.SubjectType)),
+		SubjectId:       string(g.SubjectID),
+		GrantedByUserId: g.GrantedBy,
+		GrantedAt:       timestamppb.New(g.GrantedAt.Truncate(1_000_000_000)),
+	}
+}
+
 func clusterAdminEntryToProto(e domain.ClusterAdminEntry) *iamv1.ClusterAdminEntry {
 	return &iamv1.ClusterAdminEntry{
 		ClusterAdminGrantId: e.ClusterAdminGrantID,
