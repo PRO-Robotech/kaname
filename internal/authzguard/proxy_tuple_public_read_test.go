@@ -37,9 +37,11 @@ func TestValidateProxyTuple_PublicReadGrant(t *testing.T) {
 }
 
 // TestValidateProxyTuple_PublicReadIsWildcardOnly — the read relation is opened
-// for the anonymous wildcard ONLY. A module may still not hand a named subject
-// read access to its resources: that is the AccessBinding flow's decision, made
-// where it can be listed, scoped and revoked.
+// for the anonymous wildcard ONLY, and only on a type whose publicness is a
+// product capability. A module may still not hand a named subject read access to
+// its resources (that is the AccessBinding flow's decision, made where it can be
+// listed, scoped and revoked), and it may not publish an arbitrary resource of
+// its own.
 func TestValidateProxyTuple_PublicReadIsWildcardOnly(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
@@ -50,7 +52,11 @@ func TestValidateProxyTuple_PublicReadIsWildcardOnly(t *testing.T) {
 		wantOK   bool
 	}{
 		{"registry publishes own repository", "registry", "user:*", "v_get", "registry_repository:reg1/app", true},
-		{"registry publishes own registry", "registry", "user:*", "v_get", "registry_registry:reg1", true},
+		// The closed list carries the ONE type whose publicness is a product
+		// capability. A module may not make any other of its resources
+		// world-readable — "anyone may read my network" is not a capability.
+		{"registry-level object is not publishable", "registry", "user:*", "v_get", "registry_registry:reg1", false},
+		{"vpc publishes its own network", "vpc", "user:*", "v_get", "vpc_network:net1", false},
 		{"named user gets read", "registry", "user:usr00000000000000a1", "v_get", "registry_repository:reg1/app", false},
 		{"named service account gets read", "registry", "service_account:sva0000000000000a1", "v_get", "registry_repository:reg1/app", false},
 		{"wildcard of another subject type", "registry", "service_account:*", "v_get", "registry_repository:reg1/app", false},
@@ -62,7 +68,8 @@ func TestValidateProxyTuple_PublicReadIsWildcardOnly(t *testing.T) {
 		{"wildcard read on the cluster", "registry", "user:*", "v_get", "cluster:cluster_kacho_root", false},
 		// dev-mode (caller domain unknown): the domain binding cannot apply, but
 		// the relation and object-type limits still do.
-		{"unknown domain, wildcard read on a module object", "", "user:*", "v_get", "registry_repository:reg1/app", true},
+		{"unknown domain, wildcard read on a publishable object", "", "user:*", "v_get", "registry_repository:reg1/app", true},
+		{"unknown domain, wildcard read on a non-publishable object", "", "user:*", "v_get", "vpc_network:net1", false},
 		{"unknown domain, named subject read", "", "user:usr00000000000000a1", "v_get", "registry_repository:reg1/app", false},
 		{"unknown domain, wildcard read on the cluster", "", "user:*", "v_get", "cluster:cluster_kacho_root", false},
 	} {

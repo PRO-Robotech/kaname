@@ -52,6 +52,19 @@ const (
 	publicReadSubject  = "user:*"
 )
 
+// publicReadObjectTypes — ЗАКРЫТЫЙ список типов, у которых публичность является
+// продуктовой возможностью ресурса. Сужение по субъекту (`user:*`) уже не даёт
+// выдать чтение НАЗВАННОМУ получателю, но без этого списка любой модуль мог бы
+// сделать всемирно-читаемым ЛЮБОЙ свой ресурс — а «мою сеть читает кто угодно»
+// возможностью продукта не является. Тип добавляется сюда осознанно, вместе с
+// той функцией, которая делает публичность частью контракта ресурса.
+var publicReadObjectTypes = map[string]struct{}{
+	// registry: публичный репозиторий — анонимный `docker pull`; существование
+	// tuple'а И ЕСТЬ visibility=PUBLIC (отдельного флага, который бы читал
+	// data-plane, нет).
+	"registry_repository": {},
+}
+
 // forbiddenProxyObjectTypes — типы объектов, которые НИКОГДА не являются ресурсом
 // модуля и поэтому не могут быть объектом proxy-tuple: платформенный `cluster` и
 // сущности домена iam. Запрещены даже в dev-mode (где домен caller неизвестен),
@@ -76,17 +89,6 @@ var forbiddenProxyObjectTypes = map[string]struct{}{
 // разойдётся с его SAN short-name.
 var moduleObjectDomain = map[string]string{}
 
-// proxyRelationAllowed — вправе ли модуль писать пару (subject, relation).
-// Иерархические relation'ы — с любым субъектом; публикация для анонимного чтения
-// (`v_get`) — ТОЛЬКО с подстановочным субъектом `user:*`, чтобы модуль не мог
-// выдать чтение названному пользователю в обход AccessBinding.
-func proxyRelationAllowed(subject, relation string) bool {
-	if _, ok := allowedProxyRelations[relation]; ok {
-		return true
-	}
-	return IsPublicReadGrant(subject, relation)
-}
-
 // IsPublicReadGrant — это пара «ресурс читает кто угодно» (`user:* #v_get`)?
 //
 // Отличается от иерархических intent'ов принципиально: она НЕ описывает состояние
@@ -98,6 +100,19 @@ func proxyRelationAllowed(subject, relation string) bool {
 func IsPublicReadGrant(subject, relation string) bool {
 	return strings.TrimSpace(relation) == publicReadRelation &&
 		strings.TrimSpace(subject) == publicReadSubject
+}
+
+// publicReadAllowed — публикация принимается только для типа из закрытого
+// списка. Проверка типа отделена от IsPublicReadGrant: последний отвечает на
+// вопрос «это намерение — публикация?» (его же задаёт путь применения, чтобы не
+// трогать проекцию ресурса), а список отвечает на вопрос «этому ресурсу
+// публичность вообще положена?».
+func publicReadAllowed(subject, relation, objType string) bool {
+	if !IsPublicReadGrant(subject, relation) {
+		return false
+	}
+	_, ok := publicReadObjectTypes[objType]
+	return ok
 }
 
 // objectDomainForCaller — object-домен, которым модуль вправе владеть. По умолчанию
@@ -123,7 +138,8 @@ func ValidateProxyTuple(callerDomain, subject, relation, object string) error {
 	if relation == "" || object == "" {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
-	if !proxyRelationAllowed(subject, relation) {
+	_, hierarchical := allowedProxyRelations[relation]
+	if !hierarchical && !IsPublicReadGrant(subject, relation) {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	colon := strings.IndexByte(object, ':')
@@ -132,6 +148,12 @@ func ValidateProxyTuple(callerDomain, subject, relation, object string) error {
 	}
 	objType := object[:colon]
 	if _, bad := forbiddenProxyObjectTypes[objType]; bad {
+		return status.Error(codes.PermissionDenied, "permission denied")
+	}
+	// Публикация — только для типа, которому публичность положена (закрытый
+	// список). Иерархические relation'ы этой проверки не проходят: они и так
+	// ограничены доменом caller'а ниже.
+	if !hierarchical && !publicReadAllowed(subject, relation, objType) {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	// Domain-binding: объект обязан принадлежать домену caller (vpc→`vpc_*`,
