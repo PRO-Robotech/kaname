@@ -548,36 +548,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.compute.v1.MaintenanceService/Get",
-    "permission": "compute.maintenances.get",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.MaintenanceService/List",
-    "permission": "compute.maintenanceses.list",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.MaintenanceService/Reschedule",
-    "permission": "compute.reschedule_maintenances.reschedule",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.SnapshotService/Create",
     "permission": "compute.snapshots.create",
     "required_relation": "editor",
