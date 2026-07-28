@@ -8,7 +8,7 @@ MIGRATOR_BIN   := kacho-migrator
 MIGRATOR_CMD   := ./cmd/migrator
 IMAGE          := kacho-iam:dev
 
-.PHONY: build build-migrator test test-short vet lint docker sync-migrations generate
+.PHONY: build build-migrator test test-short vet lint docker generate
 .PHONY: proto-install-plugins proto-vendor proto-lint proto-gen
 
 build:
@@ -33,10 +33,6 @@ lint:
 # встроена inline в internal/migrations/0001_initial.sql под схемой kacho_iam.
 # Re-копирование common-файла создало бы конфликтующий unqualified
 # public.operations — отсюда no-op.
-sync-migrations:
-	@echo "sync-migrations is a no-op — common operations table is inline in"
-	@echo "internal/migrations/0001_initial.sql under schema kacho_iam."
-
 docker:
 	docker build -f Dockerfile -t $(IMAGE) .
 
