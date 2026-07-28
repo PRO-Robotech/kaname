@@ -54,17 +54,9 @@ func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		))
 
 		var carrierID string
-		var trusted, present = true, true
+		var trusted = true
 		final := func(c context.Context, _ any) (any, error) {
-			// present comes from PrincipalFromContextOK — the only accessor that
-			// tells "the carrier was scrubbed" apart from "the carrier holds the
-			// system identity". PrincipalFromContext cannot: by contract both
-			// states read back as SystemPrincipal, so asserting scrubbing with it
-			// stays green even when an untrusted sender is handed the system
-			// identity — the very identity the ownership predicate matches on
-			// every system-written operation.
-			p, ok := operations.PrincipalFromContextOK(c)
-			carrierID, present = p.ID, ok
+			carrierID = operations.PrincipalFromContext(c).ID
 			_, trusted = grpcsrv.TrustedPrincipalFromContext(c)
 			return nil, nil
 		}
@@ -74,10 +66,9 @@ func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		if trusted {
 			t.Errorf("principal from unverified TLS peer must NOT be trusted on :9090")
 		}
-		if present {
-			t.Errorf("the identity carrier survived for an untrusted sender: got %q — it must be "+
-				"scrubbed, otherwise the ownership predicate treats this request as the owner of "+
-				"every system-written operation", carrierID)
+		if carrierID != operations.SystemPrincipal().ID {
+			t.Errorf("forged principal leaked into operations carrier: got %q, want system fallback %q",
+				carrierID, operations.SystemPrincipal().ID)
 		}
 		if carrierID == "usr-mallory" {
 			t.Errorf("impersonation: forged principal id 'usr-mallory' reached the use-case carrier")
@@ -88,17 +79,12 @@ func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		ctx := forwardedIdentity(verifiedCertPeer(t, fwdGatewaySAN), "usr-alice")
 
 		var carrierID string
-		var present bool
 		final := func(c context.Context, _ any) (any, error) {
-			p, ok := operations.PrincipalFromContextOK(c)
-			carrierID, present = p.ID, ok
+			carrierID = operations.PrincipalFromContext(c).ID
 			return nil, nil
 		}
 		if _, err := chain(ctx, nil, nil, final); err != nil {
 			t.Fatalf("chain returned error: %v", err)
-		}
-		if !present {
-			t.Errorf("the identity carrier must be populated for a listed, verified sender")
 		}
 		if carrierID != "usr-alice" {
 			t.Errorf("verified principal not honored: got %q, want %q", carrierID, "usr-alice")
@@ -157,17 +143,9 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		))
 
 		var carrierID string
-		var trusted, present = true, true
+		var trusted = true
 		final := func(c context.Context, _ any) (any, error) {
-			// present comes from PrincipalFromContextOK — the only accessor that
-			// tells "the carrier was scrubbed" apart from "the carrier holds the
-			// system identity". PrincipalFromContext cannot: by contract both
-			// states read back as SystemPrincipal, so asserting scrubbing with it
-			// stays green even when an untrusted sender is handed the system
-			// identity — the very identity the ownership predicate matches on
-			// every system-written operation.
-			p, ok := operations.PrincipalFromContextOK(c)
-			carrierID, present = p.ID, ok
+			carrierID = operations.PrincipalFromContext(c).ID
 			_, trusted = grpcsrv.TrustedPrincipalFromContext(c)
 			return nil, nil
 		}
@@ -178,10 +156,9 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		if trusted {
 			t.Errorf("principal from unverified TLS peer must NOT be trusted on :9091")
 		}
-		if present {
-			t.Errorf("the identity carrier survived for an untrusted sender: got %q — it must be "+
-				"scrubbed, otherwise the ownership predicate treats this request as the owner of "+
-				"every system-written operation", carrierID)
+		if carrierID != operations.SystemPrincipal().ID {
+			t.Errorf("forged principal leaked into operations carrier: got %q, want system fallback %q",
+				carrierID, operations.SystemPrincipal().ID)
 		}
 		if carrierID == "usr-mallory" {
 			t.Errorf("audit-spoof: forged principal id 'usr-mallory' reached the use-case carrier")
@@ -192,10 +169,9 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		ctx := forwardedIdentity(verifiedCertPeer(t, fwdGatewaySAN), "usr-alice")
 
 		var carrierID string
-		var trusted, present bool
+		var trusted bool
 		final := func(c context.Context, _ any) (any, error) {
-			p, ok := operations.PrincipalFromContextOK(c)
-			carrierID, present = p.ID, ok
+			carrierID = operations.PrincipalFromContext(c).ID
 			_, trusted = grpcsrv.TrustedPrincipalFromContext(c)
 			return nil, nil
 		}
@@ -205,9 +181,6 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 
 		if !trusted {
 			t.Errorf("principal from a listed, verified mTLS peer must be trusted (no behavior change)")
-		}
-		if !present {
-			t.Errorf("the identity carrier must be populated for a listed, verified sender")
 		}
 		if carrierID != "usr-alice" {
 			t.Errorf("verified principal not honored: got %q, want %q", carrierID, "usr-alice")

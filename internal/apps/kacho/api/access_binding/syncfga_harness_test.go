@@ -171,7 +171,7 @@ func syncFGATransformModel(t *testing.T, fgaPath string) []byte {
 	dockerHost := os.Getenv("DOCKER_HOST")
 	args := []string{"run", "--rm", "-i", syncFGACLIImage, "model", "transform",
 		string(dsl), "--input-format", "fga", "--output-format", "json"}
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command("docker", args...) //nolint:gosec // fixed image, test-only
 	if dockerHost != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
 	}
