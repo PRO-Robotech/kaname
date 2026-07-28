@@ -35,6 +35,7 @@ import (
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -126,6 +127,19 @@ func (t tupleIntent) objectType() (string, string) {
 	return fgaType, id
 }
 
+// isPureGrant reports whether the intent only opens the object for anonymous
+// read (`user:* #v_get`) instead of describing the object's own state.
+//
+// Such an intent carries no parent scope and no labels — nothing about the
+// resource changed — yet it addresses the SAME object key as the resource's own
+// registration. Feeding it through the projection path would overwrite the
+// resource's parent scope with the empty one it carries and, on withdrawal,
+// delete the projection of a resource that still exists. So a pure grant is
+// applied as a tuple and nothing else.
+func (t tupleIntent) isPureGrant() bool {
+	return authzguard.IsPublicReadGrant(t.subject, t.relation)
+}
+
 // RegisterResourceUseCase orchestrates the FGA-proxy tuple relay + the
 // resource_mirror co-commit (labels + parent-scope of the owner object) + the
 // reconcile-event enqueue and parent_account_id backfill.
@@ -182,6 +196,13 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		return err
 	}
 	objType, objID := t.objectType()
+	if t.isPureGrant() {
+		// Tuple only: no projection write, so no redelivery gate to consult and
+		// no binding fan-out to drive (no binding's desired set depends on the
+		// wildcard tuple).
+		_, err = uc.emitGrant(ctx, t, true)
+		return err
+	}
 	changed, err := uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:      objType,
 		ObjectID:        objID,
@@ -267,6 +288,12 @@ func sourceVersion(in versionedInput) time.Time {
 func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregisterInput) error {
 	t, err := validateTuple(in)
 	if err != nil {
+		return err
+	}
+	if t.isPureGrant() {
+		// Withdrawing the public grant removes the wildcard tuple. The resource
+		// itself is untouched and its projection must survive.
+		_, err = uc.emitGrant(ctx, t, false)
 		return err
 	}
 	objType, objID := t.objectType()
@@ -366,6 +393,34 @@ func validateRelationString(field, v string) error {
 		return shared.InvalidArg(field, "invalid "+field)
 	}
 	return nil
+}
+
+// emitGrant enqueues ONLY the tuple write/delete, in its own writer-tx. Used for
+// a pure grant (see tupleIntent.isPureGrant): there is no projection row to
+// co-commit with, because the intent says nothing about the object's own state.
+// The at-least-once contract is unchanged — the tuple enqueue is durable, and the
+// drainer's idempotent classification makes a repeat a no-op.
+func (uc *RegisterResourceUseCase) emitGrant(ctx context.Context, t tupleIntent, write bool) (bool, error) {
+	tx, err := uc.txb.Begin(ctx)
+	if err != nil {
+		// Same opaque, no-leak contract as emit: retriable Unavailable.
+		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
+
+	tuples := []service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}
+	if write {
+		err = uc.emitter.EmitWriteTx(ctx, tx, tuples)
+	} else {
+		err = uc.emitter.EmitDeleteTx(ctx, tx, tuples)
+	}
+	if err != nil {
+		return false, fmt.Errorf("emit fga outbox: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+	}
+	return true, nil
 }
 
 // emit runs the owner-tuple fga_outbox emit AND the resource_mirror UPSERT/DELETE
