@@ -1314,15 +1314,6 @@
     }
   },
   {
-    "fqn": "kacho.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/GetRoleCompiled",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
