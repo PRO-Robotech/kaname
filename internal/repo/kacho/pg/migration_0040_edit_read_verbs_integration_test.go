@@ -37,7 +37,7 @@ import (
 
 // md5hex17 mirrors the migration/fixture role-id derivation `substr(md5(name),1,17)`.
 func md5hex17(s string) string {
-	sum := md5.Sum([]byte(s)) //nolint:gosec // role-id derivation parity with migration SQL, not a security primitive
+	sum := md5.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])[:17]
 }
 

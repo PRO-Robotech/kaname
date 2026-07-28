@@ -119,7 +119,7 @@ func transformModelToJSON(t *testing.T, fgaPath string) []byte {
 	dockerHost := os.Getenv("DOCKER_HOST")
 	args := []string{"run", "--rm", "-i", openfgaCLIImage, "model", "transform",
 		string(dsl), "--input-format", "fga", "--output-format", "json"}
-	cmd := exec.Command("docker", args...) //nolint:gosec // fixed image, test-only
+	cmd := exec.Command("docker", args...)
 	if dockerHost != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
 	}
