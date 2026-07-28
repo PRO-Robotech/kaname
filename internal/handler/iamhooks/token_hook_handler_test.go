@@ -190,8 +190,9 @@ func TestTokenHook_MissingSubject_BadRequest(t *testing.T) {
 }
 
 // emptySubjectClientCredentialsPayload — client_credentials (RFC 6749 §4.4)
-// carries no end user, so the subject the provider states is empty and the
-// client id has to be adopted in its place.
+// carries no end user. The provider fills the session subject with the client
+// id for exactly that reason; this body omits it entirely, which is the branch
+// where the client id has to be adopted from the request instead.
 func emptySubjectClientCredentialsPayload(clientID string) map[string]any {
 	return map[string]any{
 		"session": map[string]any{

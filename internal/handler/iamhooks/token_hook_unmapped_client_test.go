@@ -131,8 +131,9 @@ func clientCredentialsPayload(clientID string) map[string]any {
 			"cnf":       map[string]any{},
 		},
 		"request": map[string]any{
-			"client_id": clientID,
-			"payload":   map[string][]string{"grant_type": {"client_credentials"}},
+			"client_id":   clientID,
+			"grant_types": []string{"client_credentials"},
+			"payload":     map[string][]string{"grant_type": {"client_credentials"}},
 		},
 	}
 }

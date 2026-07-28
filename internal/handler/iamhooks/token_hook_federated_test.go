@@ -106,7 +106,8 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 			"cnf":       map[string]any{},
 		},
 		"request": map[string]any{
-			"client_id": "hydra-cli-fake",
+			"client_id":   "hydra-cli-fake",
+			"grant_types": []string{"urn:ietf:params:oauth:grant-type:jwt-bearer"},
 			"payload": map[string][]string{
 				"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
 				"assertion":  {assertion},
@@ -174,7 +175,8 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 			"cnf":       map[string]any{},
 		},
 		"request": map[string]any{
-			"client_id": "hydra-cli-fake",
+			"client_id":   "hydra-cli-fake",
+			"grant_types": []string{"client_credentials"},
 			"payload": map[string][]string{
 				"grant_type": {"client_credentials"},
 			},

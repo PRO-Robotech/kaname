@@ -81,6 +81,15 @@ const (
 // forever, and here that emptiness reads as "no end user", which is the very
 // question the machine-credential refusal turns on. The sibling refresh hook
 // DOES carry a top-level subject — a different body, decoded by its own type.
+//
+// KNOWN, NOT FIXED HERE: `auth_time`, `acr` and `amr` are declared at the top of
+// the session below, and the provider carries them one level deeper, alongside
+// the subject. They are therefore empty on every real request, and the claims
+// derived from them are correspondingly blank. Correcting that changes what
+// downstream assurance rules can conclude — it is a behavioural change with its
+// own verification, not a rename — so it is deliberately left for that work
+// rather than folded into the subject fix. Do not read the placement of these
+// three as evidence of where the provider puts them.
 type hydraTokenHookRequest struct {
 	Session struct {
 		ClientID string `json:"client_id"`

@@ -97,6 +97,7 @@ func clientCredentialsHookBody(t *testing.T, clientID string) string {
 		"request": map[string]any{
 			"client_id":      clientID,
 			"granted_scopes": []string{},
+			"grant_types":    []string{"client_credentials"},
 			"payload":        map[string][]string{"grant_type": {"client_credentials"}},
 		},
 	})

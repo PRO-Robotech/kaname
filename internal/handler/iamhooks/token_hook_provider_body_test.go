@@ -107,11 +107,16 @@ func TestTokenHook_ProviderBody_InteractiveIdentity_ResolvesToItsUser(t *testing
 	assert.Equal(t, "acc_01abcdefghjkmnpqr", claims["kacho_active_account"])
 }
 
-// TestTokenHook_ProviderBody_ClientCredentials_NoEndUser_MappedSAKey_StillMints
-// — the machine grant in the same shape. It carries no end user at all, so the
-// subject the provider states is empty and the client id is legitimately
-// adopted in its place; a live mapping row mints.
-func TestTokenHook_ProviderBody_ClientCredentials_NoEndUser_MappedSAKey_StillMints(t *testing.T) {
+// TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey_StillMints
+// — the machine grant, driven through the subjectless branch.
+//
+// The provider actually states the client id as the subject of such an
+// exchange (there is no end user, so it puts the client there), and
+// clientCredentialsPayload models THAT. This body models the other reading the
+// handler tolerates — a session with no subject at all — and pins that the
+// client id is adopted from the request instead, so a live mapping row mints
+// either way.
+func TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey_StillMints(t *testing.T) {
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{
 		found: true,
 		soc: domain.ServiceAccountOAuthClient{

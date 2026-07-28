@@ -63,17 +63,22 @@ func TestMinimalClaims_DoesNotBuyTheMachineExemption(t *testing.T) {
 			"floor like any other person; it presented type %q", principalType)
 }
 
-// TestMinimalClaims_IsNotTypedAsAMachine — the same value gates the other
-// control, which lives at the edge and cannot be exercised from here: a
-// principal of the machine type is required to present a sender-constrained
-// token, and this population's tokens are ordinary bearers. The control is off
-// by default, so the mismatch costs nothing today and rejects every first login
-// on the day it is enabled.
-func TestMinimalClaims_IsNotTypedAsAMachine(t *testing.T) {
+// TestMinimalClaims_IsTypedAsAPerson — the same value gates the other control,
+// which lives at the edge and cannot be exercised from here: a principal of the
+// machine type is required to present a sender-constrained token, and this
+// population's tokens are ordinary bearers.
+//
+// Stated as the exact value rather than as "not the machine one". The type is
+// read by more than that control — it is also what the gateway stamps on the
+// subject it substitutes for a claim set that names nobody — so which value
+// this is, is the contract; "anything but one value" would leave that open.
+func TestMinimalClaims_IsTypedAsAPerson(t *testing.T) {
 	claims := minimalClaimsFor(t, "kratos-identity-just-registered")
 
-	assert.NotEqual(t, grpcsrv.PrincipalTypeServiceAccount, claims["kacho_principal_type"],
-		"a person whose mirror has not committed yet is not a machine")
+	assert.Equal(t, "user", claims["kacho_principal_type"],
+		"a person whose mirror has not committed yet is a person")
+	require.NotEqual(t, grpcsrv.PrincipalTypeServiceAccount, "user",
+		"and the platform's machine value must stay distinct from it")
 }
 
 // TestMinimalClaims_NameNoPrincipal — the invariant the set's own documentation
