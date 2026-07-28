@@ -73,46 +73,93 @@ const (
 )
 
 // hydraTokenHookRequest — payload от Hydra (subset per Hydra v2 hook contract).
+//
+// The body of THIS hook is `{session, request}` — it has no top-level subject.
+// The identity of the human the exchange is for lives inside the token-shaped
+// part of the session (`session.id_token.subject`), which is why it is read
+// from there and from nowhere else: a field with no producer is silently empty
+// forever, and here that emptiness reads as "no end user", which is the very
+// question the machine-credential refusal turns on. The sibling refresh hook
+// DOES carry a top-level subject — a different body, decoded by its own type.
+//
+// KNOWN, NOT FIXED HERE: `auth_time`, `acr` and `amr` are declared at the top of
+// the session below, and the provider carries them one level deeper, alongside
+// the subject. They are therefore empty on every real request, and the claims
+// derived from them are correspondingly blank. Correcting that changes what
+// downstream assurance rules can conclude — it is a behavioural change with its
+// own verification, not a rename — so it is deliberately left for that work
+// rather than folded into the subject fix. Do not read the placement of these
+// three as evidence of where the provider puts them.
 type hydraTokenHookRequest struct {
 	Session struct {
 		ClientID string `json:"client_id"`
 		AuthTime int64  `json:"auth_time"`
 		AMR      []any  `json:"amr"`
 		ACR      string `json:"acr"`
-		Subject  string `json:"subject"`
-		Cnf      struct {
+		IDToken  struct {
+			Subject string `json:"subject"`
+		} `json:"id_token"`
+		Cnf struct {
 			Jkt     string `json:"jkt"`
 			X5tS256 string `json:"x5t#S256"`
 		} `json:"cnf"`
 		Extra map[string]any `json:"extra"`
 	} `json:"session"`
 	Request struct {
-		ClientID        string              `json:"client_id"`
-		GrantedScopes   []string            `json:"granted_scopes"`
-		GrantedAudience []string            `json:"granted_audience"`
-		Payload         map[string][]string `json:"payload"`
-		RequestedAt     string              `json:"requested_at"`
+		ClientID        string   `json:"client_id"`
+		GrantedScopes   []string `json:"granted_scopes"`
+		GrantedAudience []string `json:"granted_audience"`
+		// GrantTypes — the grants the exchange ran under, stated by the provider
+		// from the request it executed. See grantType.
+		GrantTypes []string            `json:"grant_types"`
+		Payload    map[string][]string `json:"payload"`
 	} `json:"request"`
-	Subject string `json:"subject"`
+}
+
+// grantType names the grant this exchange ran under.
+//
+// The provider states it twice and the two are not equally trustworthy. The
+// authoritative statement is the request's own grant list, filled from the
+// grant the provider actually executed. The other is the client's submitted
+// form, which reaches us only for as long as the provider chooses to forward
+// that parameter — the set it forwards is its decision, it sanitises the form
+// before sending, and the day that set narrows the form copy becomes silently
+// empty. Reading the authoritative field first is what keeps this signal alive
+// through such a change; the form stays as a fallback because it is populated
+// today and costs nothing.
+//
+// Load-bearing: this is the ONLY signal that identifies the federated machine
+// grant (see isMachineCredentialRequest), so an empty answer there is not a
+// missing hint but a missing refusal.
+func (p hydraTokenHookRequest) grantType() string {
+	for _, gt := range p.Request.GrantTypes {
+		if gt != "" {
+			return gt
+		}
+	}
+	return firstFormValue(p.Request.Payload, "grant_type")
 }
 
 // isMachineCredentialRequest reports whether this token request has no human
 // behind it — the credential being presented is the OAuth client itself.
 //
-// It reads three independent signals because no single one is guaranteed to be
-// present, and each covers the others' blind spot:
+// It reads three signals because no single one is guaranteed to be present.
+// They do NOT all cover each other:
 //
-//  1. the grant NAMES a machine flow. The primary signal, and the only one that
-//     catches jwt-bearer (whose subject is the external assertion's `sub`, so it
-//     resembles an end-user subject);
-//  2. the payload carried NO end-user subject at all, so `subject` above had to
+//  1. the grant NAMES a machine flow. The primary signal, and for jwt-bearer the
+//     ONLY one — that grant's subject is the external assertion's `sub`, so it
+//     is neither absent (2) nor equal to a client id (3), and neither can fire.
+//     Lose this reading and a federated assertion belonging to nobody we trust
+//     is indistinguishable from an interactive first login. See grantType for
+//     why it is taken from the provider's own field rather than the client's
+//     submitted form;
+//  2. the request carried NO end-user subject at all, so `subject` above had to
 //     be recovered from the client id. Reaching that fallback is itself proof
 //     there is no human;
 //  3. the subject IS the client id. This is the shape Hydra sends for
-//     client_credentials, and it holds even when the form payload — which the
-//     provider is under no obligation to forward — reaches us without a
-//     grant_type. An end-user identity is never equal to a client registration
-//     id, so this cannot capture an interactive request.
+//     client_credentials, so for THAT grant it is a second reading independent
+//     of the grant name. An end-user identity is never equal to a client
+//     registration id, so this cannot capture an interactive request.
 //
 // Deliberately a question about the REQUEST, not about the outcome of any
 // lookup: the answer must not change with the state of the mapping stores.
@@ -157,10 +204,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// endUserSubject — the identity of the human this token is for, as the
 	// provider stated it. Empty means the request has no end user at all.
-	endUserSubject := payload.Subject
-	if endUserSubject == "" {
-		endUserSubject = payload.Session.Subject
-	}
+	endUserSubject := payload.Session.IDToken.Subject
 	subject := endUserSubject
 	// client_credentials (RFC 6749 §4.4) не несёт end-user subject — Hydra
 	// отдаёт его пустым. kacho-принципал такого токена — ServiceAccount за
@@ -179,7 +223,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	grantType := firstFormValue(payload.Request.Payload, "grant_type")
+	grantType := payload.grantType()
 	assertionIssuer := ""
 	if grantType == grantTypeJWTBearer {
 		assertionIssuer = decodeAssertionIssuer(firstFormValue(payload.Request.Payload, "assertion"))
@@ -217,14 +261,20 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// human is behind the request.
 			//
 			// MACHINE request: the credential presented IS the OAuth client, and
-			// every client kacho recognises was registered by this service
-			// together with its mapping row (SA key, personal token, bootstrap,
-			// federated subject). No row therefore means "not a kacho
-			// credential", and there is no principal to mint for. Refusing here
-			// is also what makes key revocation take effect at commit: revoke
-			// deletes the row first and asks the provider to delete the client
-			// second, so a client that outlives that second step arrives here and
-			// is turned away — with no dependence on the provider being reachable.
+			// the mapping row is what makes a client a kacho credential — it is
+			// the authority every issuance is checked against (SA key, personal
+			// token, bootstrap, federated subject). No row therefore means "not a
+			// kacho credential", and there is no principal to mint for. Note the
+			// registration and its row are NOT written atomically — the provider
+			// call is a separate, earlier step — so a registration without a row
+			// is a state that genuinely occurs; that is precisely the case this
+			// branch answers, rather than one it assumes away. Refusing here
+			// is also what stops a revoked key from obtaining anything further at
+			// commit: revoke deletes the row first and asks the provider to delete
+			// the client second, so a client that outlives that second step
+			// arrives here and is turned away — with no dependence on the provider
+			// being reachable. Tokens ALREADY minted are self-contained and are
+			// not reached from here; they lapse with their own lifetime.
 			//
 			// INTERACTIVE request: a human authenticated at the identity
 			// provider and their kacho mirror is provisioned ASYNCHRONOUSLY (the
@@ -290,9 +340,13 @@ func (h *TokenHookHandler) denyExpired(ctx context.Context, subject string, payl
 // to no kacho principal — its client is not a kacho credential, so there is no
 // principal to mint for.
 //
-// This record is also the standing signal for a provider-side registration that
-// outlived its kacho row (a revoke whose provider-delete failed): it can no
-// longer mint, and every attempt it makes says so by name.
+// The record is where a provider-side registration that outlived its kacho row
+// (a revoke whose provider-delete failed) becomes visible: it can no longer
+// mint, and every attempt it makes is written down. The reason is the shared
+// one for the whole class, so it does NOT single that case out — a client this
+// service never registered is recorded identically. Telling the two apart is
+// the operator's job and needs the client id against the mapping store; what
+// this record affords on its own is noticing that some registration is trying.
 func (h *TokenHookHandler) denyUnmappedClient(ctx context.Context, subject string, payload hydraTokenHookRequest) {
 	h.logger.WarnContext(ctx, "token_hook: oauth client resolves to no kacho principal — token request denied",
 		"subject", subject, "client_id", payload.Request.ClientID)

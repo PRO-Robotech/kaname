@@ -98,16 +98,16 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 		"iss": "https://token.actions.githubusercontent.com",
 		"sub": "repo:acme/infra:ref:refs/heads/main",
 	})
-	// External assertion's `sub` ends up as Hydra session.subject.
+	// External assertion's `sub` ends up as the session's token subject.
 	payload := map[string]any{
-		"subject": "repo:acme/infra:ref:refs/heads/main",
 		"session": map[string]any{
 			"client_id": "hydra-cli-fake",
-			"subject":   "repo:acme/infra:ref:refs/heads/main",
+			"id_token":  map[string]any{"subject": "repo:acme/infra:ref:refs/heads/main"},
 			"cnf":       map[string]any{},
 		},
 		"request": map[string]any{
-			"client_id": "hydra-cli-fake",
+			"client_id":   "hydra-cli-fake",
+			"grant_types": []string{"urn:ietf:params:oauth:grant-type:jwt-bearer"},
 			"payload": map[string][]string{
 				"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
 				"assertion":  {assertion},
@@ -169,10 +169,14 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 		logger,
 	)
 	payload := map[string]any{
-		"subject": "hydra-cli-fake",
-		"session": map[string]any{"client_id": "hydra-cli-fake", "subject": "hydra-cli-fake", "cnf": map[string]any{}},
-		"request": map[string]any{
+		"session": map[string]any{
 			"client_id": "hydra-cli-fake",
+			"id_token":  map[string]any{"subject": "hydra-cli-fake"},
+			"cnf":       map[string]any{},
+		},
+		"request": map[string]any{
+			"client_id":   "hydra-cli-fake",
+			"grant_types": []string{"client_credentials"},
 			"payload": map[string][]string{
 				"grant_type": {"client_credentials"},
 			},
@@ -184,8 +188,9 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	require.NotEqual(t, http.StatusInternalServerError, w.Code,
-		"a missing assertion is not a server error; body: %s", w.Body.String())
+	require.Equal(t, http.StatusForbidden, w.Code,
+		"the client resolves to nothing, so the request is refused — and a missing assertion is not what "+
+			"decides that, nor is it a server error; body: %s", w.Body.String())
 	saPort.mu.Lock()
 	defer saPort.mu.Unlock()
 	require.Len(t, saPort.lookups, 0, "federated lookup must NOT happen for client_credentials")

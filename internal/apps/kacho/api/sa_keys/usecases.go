@@ -1012,8 +1012,17 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 			// the row gone the surviving client resolves to no principal, so the
 			// hook refuses it (`invalid_client`, 403) and records an
 			// `authn.token.denied` with reason `principal_not_found` each time it
-			// tries — see handler/iamhooks/token_hook_handler.go. The key is dead
-			// at commit, not whenever the provider is next reachable.
+			// tries — see handler/iamhooks/token_hook_handler.go. So at commit this
+			// key can obtain NOTHING FURTHER, and that no longer waits on the
+			// provider being reachable.
+			//
+			// What it does not do is reach back for what was already handed out. An
+			// access token minted before this commit is self-contained and stays
+			// valid until it expires; revocation bounds the credential, not the
+			// tokens already in flight. The window is therefore the access-token
+			// lifetime — minutes in production, deliberately wider on the local
+			// stand — and that is the property to state when someone asks how fast
+			// a revoke takes effect.
 			//
 			// A compensating outbox or sweeper was considered and rejected: both
 			// are EVENTUAL, so neither would have closed the window the hook closes

@@ -121,15 +121,19 @@ func extClaimsOf(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 	return claims
 }
 
-// clientCredentialsPayload — the shape Hydra sends for `client_credentials`:
-// there is no end user, so the subject IS the client id.
+// clientCredentialsPayload — the shape the provider sends for
+// `client_credentials`: there is no end user, so the subject IS the client id.
 func clientCredentialsPayload(clientID string) map[string]any {
 	return map[string]any{
-		"subject": clientID,
-		"session": map[string]any{"client_id": clientID, "subject": clientID, "cnf": map[string]any{}},
-		"request": map[string]any{
+		"session": map[string]any{
 			"client_id": clientID,
-			"payload":   map[string][]string{"grant_type": {"client_credentials"}},
+			"id_token":  map[string]any{"subject": clientID},
+			"cnf":       map[string]any{},
+		},
+		"request": map[string]any{
+			"client_id":   clientID,
+			"grant_types": []string{"client_credentials"},
+			"payload":     map[string][]string{"grant_type": {"client_credentials"}},
 		},
 	}
 }
@@ -201,10 +205,9 @@ func TestTokenHook_JwtBearer_UnmappedAssertion_Refused(t *testing.T) {
 		"sub": "repo:stranger/infra:ref:refs/heads/main",
 	})
 	w := postHookPayload(t, h, map[string]any{
-		"subject": "repo:stranger/infra:ref:refs/heads/main",
 		"session": map[string]any{
 			"client_id": "cli-not-ours",
-			"subject":   "repo:stranger/infra:ref:refs/heads/main",
+			"id_token":  map[string]any{"subject": "repo:stranger/infra:ref:refs/heads/main"},
 			"cnf":       map[string]any{},
 		},
 		"request": map[string]any{
@@ -230,8 +233,10 @@ func TestTokenHook_ClientIsTheSubject_NoGrantTypeStated_Refused(t *testing.T) {
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, audit)
 
 	w := postHookPayload(t, h, map[string]any{
-		"subject": "cli-nobody-knows",
-		"session": map[string]any{"client_id": "cli-nobody-knows", "subject": "cli-nobody-knows"},
+		"session": map[string]any{
+			"client_id": "cli-nobody-knows",
+			"id_token":  map[string]any{"subject": "cli-nobody-knows"},
+		},
 		"request": map[string]any{"client_id": "cli-nobody-knows"},
 	})
 
@@ -247,8 +252,7 @@ func TestTokenHook_NoSubjectAtAll_UnmappedClient_Refused(t *testing.T) {
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, audit)
 
 	w := postHookPayload(t, h, map[string]any{
-		"subject": "",
-		"session": map[string]any{"client_id": "", "subject": ""},
+		"session": map[string]any{"client_id": "", "id_token": map[string]any{"subject": ""}},
 		"request": map[string]any{"client_id": "cli-nobody-knows"},
 	})
 
@@ -297,10 +301,9 @@ func TestTokenHook_InteractiveFirstLogin_MirrorNotMaterialized_StillMints(t *tes
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, audit)
 
 	w := postHookPayload(t, h, map[string]any{
-		"subject": "kratos-identity-just-registered",
 		"session": map[string]any{
 			"client_id": "kacho-ui",
-			"subject":   "kratos-identity-just-registered",
+			"id_token":  map[string]any{"subject": "kratos-identity-just-registered"},
 			"acr":       "2",
 		},
 		"request": map[string]any{
@@ -323,8 +326,10 @@ func TestTokenHook_InteractiveRefreshOfUnmirroredIdentity_StillMints(t *testing.
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{}, audit)
 
 	w := postHookPayload(t, h, map[string]any{
-		"subject": "kratos-identity-just-registered",
-		"session": map[string]any{"client_id": "kacho-ui", "subject": "kratos-identity-just-registered"},
+		"session": map[string]any{
+			"client_id": "kacho-ui",
+			"id_token":  map[string]any{"subject": "kratos-identity-just-registered"},
+		},
 		"request": map[string]any{
 			"client_id": "kacho-ui",
 			"payload":   map[string][]string{"grant_type": {"refresh_token"}},

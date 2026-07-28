@@ -422,13 +422,33 @@ func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u d
 // here, so this set is no longer what an unknown or revoked OAuth client
 // receives.
 //
-// It carries no principal id by construction, which is why it authorizes
-// nothing: the gateway resolves such a token to a diagnostic subject that the
-// permission model denies.
+// The principal type says `user` because that is what this population is, and
+// because the value is read as a decision, not as a label. Two platform
+// controls treat `service_account` as "there is no person here":
+// grpcsrv.EvaluateStepUp lifts the interactive-authentication floor for it, and
+// the gateway demands a sender-constrained token from it. Stamping it on a
+// human hands them an exemption built for machines and a requirement they
+// cannot meet — their tokens are ordinary bearers.
+//
+// It carries no principal id by construction. Wherever the gateway resolves the
+// subject from the token's OWN claims that is the end of it: nothing resolves,
+// and the request is unauthenticated.
+//
+// One path is not that, and the difference is worth stating rather than
+// implying. With DPoP enabled (off by default) the gateway substitutes the OIDC
+// `sub` as the principal id when the claim set names none, and stamps THIS type
+// on it. A `user`-typed subject then satisfies relations granted to `user:*` —
+// today exactly the global reference catalogue of machine and disk types, which
+// the platform grants to every authenticated subject by design and which this
+// population is about to need. A `service_account`-typed one did not satisfy
+// them, so the change is not neutral there; it admits an authenticated human to
+// data meant for authenticated humans. Stating an untruth about what they are
+// is not the way to withhold it — the substitution is what turns a set that
+// names nobody into a subject, and that belongs to the gateway.
 func (s *TokenEnrichmentService) MinimalClaims(subject string) map[string]any {
 	return map[string]any{
 		"kacho_external_id":       subject,
-		"kacho_principal_type":    "service_account",
+		"kacho_principal_type":    "user",
 		"kacho_device_compliance": "unknown",
 		"kacho_issuer":            s.cfg.HydraIssuer,
 		"kacho_audience":          s.cfg.Domain,
