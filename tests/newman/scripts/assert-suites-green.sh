@@ -14,6 +14,16 @@
 # invite fix (iam#113, migration 0011) only ever reached kacho-iam's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on
 # the very same shared suites that kacho-iam reported GREEN. One script = one
 # source of truth; un-skip / whitelist edits land everywhere at once.
+#
+# THREE OUTCOMES, THREE NAMES. A request ends one of three ways, and this gate
+# reports each separately because folding any of them into another is how a suite
+# goes quiet:
+#   answered + assertion passed — the check ran and said yes;
+#   answered + assertion failed — the check ran and said no       (`failed`);
+#   NOT ANSWERED                — the check did not run           (`UNANSWERED`).
+# Plus the degenerate case of a report containing no assertions at all, which is
+# printed as NOTHING RAN rather than being allowed to read as "nothing failed".
+# UNANSWERED is never subtracted, whitelisted or explained away.
 set -e
 shopt -s nullglob
 
@@ -66,17 +76,33 @@ for col in "${collections[@]}"; do
     continue
   fi
   fails=$(jq -r '.run.stats.assertions.failed // 0' "$report")
-  errors=$(jq -r '.run.stats.requests.failed // 0' "$report")
-
-  # DNS-isolation (KAC-188): iam-internal-only-check probes the advertised
-  # external TLS host api.kacho.local:443, which does not resolve in CI →
-  # EAI_AGAIN counted as a failed request even though the test treats an
-  # unreachable endpoint as PASS (internal-only invariant). Subtract those.
-  if [ "$errors" -gt 0 ]; then
-    dns_skip=$(jq -r '[.run.failures[]? | select(.error.message? // "" | test("EAI_AGAIN|ENOTFOUND|getaddrinfo"))] | length' "$report")
-    errors=$((errors - dns_skip))
-    if [ "$errors" -lt 0 ]; then errors=0; fi
-  fi
+  # UNANSWERED — requests newman attempted that never produced a response (DNS,
+  # refused connection, TLS, timeout). NEVER subtracted, for any reason.
+  #
+  # A request has three possible ends, and this gate used to have names for only
+  # two: a response arrived (whatever its status), an assertion said no, or
+  # NOTHING CAME BACK. The third had no home, so it was filed under the first.
+  #
+  # What stood here was a filter that removed EAI_AGAIN/ENOTFOUND/getaddrinfo
+  # from this count, on the stated grounds that an unreachable endpoint IS the
+  # internal-only invariant being asserted. It is not. "I could not reach it"
+  # and "it refused me" are different findings, and only one of them is evidence.
+  # The filter, together with a case assertion phrased "if the status code is
+  # undefined, return" (a pass) and an execution-coverage check that read a
+  # cursor position as proof of execution, meant all three layers reported
+  # success for eight ban-#6 negatives — the checks that Internal* RPCs are not
+  # reachable on the advertised external endpoint — while none of them ran. The
+  # verdict printed "0 failed requests".
+  #
+  # The harness now reaches the external listener (deploy/scripts/newman-*.sh
+  # forward the api-gateway TLS port and inject externalBaseUrl), so an
+  # unanswered request here means the harness is broken or the endpoint is down.
+  # Either is worth stopping for; neither is a green check.
+  unanswered=$(jq -r '.run.stats.requests.failed // 0' "$report")
+  # ANSWERED/ASSERTED — printed so that "nothing ran" is visibly different from
+  # "nothing failed". Zero of both is the shape every silent failure took.
+  asserts=$(jq -r '.run.stats.assertions.total // 0' "$report")
+  reqs=$(jq -r '.run.stats.requests.total // 0' "$report")
 
   # Known-RED whitelist (RED-by-design, each tracked). Subtraction clamps to 0,
   # so when a case is genuinely fixed the gate still passes; a NEW failure
@@ -375,8 +401,27 @@ for col in "${collections[@]}"; do
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi
 
-  echo "$name: $fails failed assertions (after known-RED skip), $errors failed requests (after DNS-isolation filter)"
-  if [ "$fails" -gt 0 ] || [ "$errors" -gt 0 ]; then
+  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed (after known-RED skip), $unanswered UNANSWERED"
+
+  # Name what did not answer. A count alone cannot be acted on, and the whole
+  # point of separating this category is that somebody reads it.
+  if [ "$unanswered" -gt 0 ]; then
+    jq -r '[.run.failures[]? | select((.error.name? // "") != "AssertionError")
+            | "    NOT EXECUTED: \(.source.name? // "?") <- \(.error.message? // "no response")"]
+           | unique | .[]' "$report" 2>/dev/null || true
+  fi
+
+  # NOTHING RAN. A report with no assertions is not a clean suite, it is a suite
+  # that did not happen — and it reaches this loop reading exactly like a perfect
+  # one (0 failed, 0 unanswered). Distinguishing the two is the reason this line
+  # exists; without it "zero executed" and "zero failed" are the same verdict.
+  empty=0
+  if [ "$asserts" -eq 0 ]; then
+    echo "    NOTHING RAN: $name produced 0 assertions — a suite that asserts nothing cannot pass"
+    empty=1
+  fi
+
+  if [ "$fails" -gt 0 ] || [ "$unanswered" -gt 0 ] || [ "$empty" -gt 0 ]; then
     failed_suites+=("$name")
   fi
 done

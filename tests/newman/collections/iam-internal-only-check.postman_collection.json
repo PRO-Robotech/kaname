@@ -24,7 +24,91 @@
   ],
   "item": [
     {
-      "name": "IAM-INT-NEG-EXT-USER-UPSERT — InternalUserService.UpsertFromIdentity on external TLS endpoint → 404 (internal-only)",
+      "name": "IAM-INT-NEG-EXT-REST-ALIVE — Control: the advertised external TLS listener serves REST (so a 404 below means 'not routed', not 'nothing there')",
+      "description": "class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-NEG-EXT-REST-ALIVE :: public-path-on-external",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/geo/v1/regions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "geo",
+                "v1",
+                "regions"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + '/geo/v1/regions';",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXT-ALIVE: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "// A PUBLIC path on the SAME listener as every negative below. If this is not",
+                  "// 200, the negatives prove nothing and must not be read as isolation.",
+                  "pm.test('EXT-ALIVE: public REST path answers 200 on the external listener', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                  "pm.test('EXT-ALIVE: and it is a real REST body, not an edge error page', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j, JSON.stringify(j)).to.have.property('regions');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-INT-NEG-EXT-USER-UPSERT — InternalUserService.UpsertFromIdentity on the external TLS listener → 404 mux miss (internal-only, ban #6)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
@@ -59,84 +143,8 @@
               }
             }
           },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users:upsertFromIdentity';",
-                  "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
-                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Must be 404 — path not registered on external mux.",
-                  "// If this returns 200 / 201 — CRITICAL: Internal* endpoint is exposed on external!",
-                  "// A DNS/network failure (undefined status) also means the path is NOT exposed — treat as PASS.",
-                  "pm.test('EXT-UPSERT: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal path exposed on external endpoint!').to.equal(404);",
-                  "});",
-                  "// Only probe body content if a real HTTP response arrived.",
-                  "if (pm.response.code !== undefined) {",
-                  "  const j = pm.response.json ? pm.response.json() : null;",
-                  "  pm.test('EXT-UPSERT: no user.id leak in body', () => {",
-                  "    pm.expect(j && j.user && j.user.id, 'user.id must not be in response').to.be.undefined;",
-                  "  });",
-                  "} else {",
-                  "  pm.test('EXT-UPSERT: no user.id leak in body (DNS unreachable = PASS)', () => true);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-INT-NEG-EXT-USER-GET — InternalUserService.Get on external TLS endpoint → 404 (internal-only)",
-      "description": "class:NEG | class:SEC | priority:P1",
-      "item": [
-        {
-          "name": "IAM-INT-NEG-EXT-USER-GET :: get-internal-user-on-external",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/users/usr00000000000000abc",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "internal",
-                "users",
-                "usr00000000000000abc"
-              ]
-            }
+          "protocolProfileBehavior": {
+            "strictSSL": false
           },
           "event": [
             {
@@ -144,19 +152,27 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users/usr00000000000000abc';",
+                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users:upsertFromIdentity';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -165,20 +181,27 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-USER-GET: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal path exposed!').to.equal(404);",
+                  "pm.test('EXT-UPSERT: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
                   "});",
-                  "// Only probe body content if a real HTTP response arrived.",
-                  "if (pm.response.code !== undefined) {",
-                  "  const j = pm.response.json ? pm.response.json() : null;",
-                  "  pm.test('EXT-USER-GET: no user id leak', () => {",
-                  "    pm.expect(j && j.id, 'id must not be in response').to.be.undefined;",
-                  "  });",
-                  "} else {",
-                  "  pm.test('EXT-USER-GET: no user id leak (DNS unreachable = PASS)', () => true);",
-                  "}"
+                  "pm.test('EXT-UPSERT: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss: grpc-gateway answers an",
+                  "// unrouted path with plain text, while iam's own NOT_FOUND is JSON with a",
+                  "// grpc `code`. Only the first is evidence of ban #6.",
+                  "pm.test('EXT-UPSERT: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).code, 'a JSON grpc error here would mean the request REACHED the service')",
+                  "    .to.be.undefined;",
+                  "});",
+                  "pm.test('EXT-UPSERT: no user.id in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).user && j.user.id, 'user.id must not be in the response').to.be.undefined;",
+                  "});"
                 ]
               }
             }
@@ -187,7 +210,7 @@
       ]
     },
     {
-      "name": "IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT — InternalIAMService.LookupSubject on external TLS endpoint → 404 (internal-only)",
+      "name": "IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT — InternalIAMService.LookupSubject on the external TLS listener → 404 mux miss (internal-only, ban #6)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
@@ -222,25 +245,36 @@
               }
             }
           },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:lookupSubject';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -249,20 +283,27 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-LOOKUPSUBJ: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal path exposed!').to.equal(404);",
+                  "pm.test('EXT-LOOKUPSUBJ: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
                   "});",
-                  "// Only probe body content if a real HTTP response arrived.",
-                  "if (pm.response.code !== undefined) {",
-                  "  const j = pm.response.json ? pm.response.json() : null;",
-                  "  pm.test('EXT-LOOKUPSUBJ: no subjectId leak', () => {",
-                  "    pm.expect(j && j.subjectId, 'subjectId must not be in response').to.be.undefined;",
-                  "  });",
-                  "} else {",
-                  "  pm.test('EXT-LOOKUPSUBJ: no subjectId leak (DNS unreachable = PASS)', () => true);",
-                  "}"
+                  "pm.test('EXT-LOOKUPSUBJ: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss: grpc-gateway answers an",
+                  "// unrouted path with plain text, while iam's own NOT_FOUND is JSON with a",
+                  "// grpc `code`. Only the first is evidence of ban #6.",
+                  "pm.test('EXT-LOOKUPSUBJ: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).code, 'a JSON grpc error here would mean the request REACHED the service')",
+                  "    .to.be.undefined;",
+                  "});",
+                  "pm.test('EXT-LOOKUPSUBJ: no subjectId in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).subjectId, 'subjectId must not be in the response').to.be.undefined;",
+                  "});"
                 ]
               }
             }
@@ -271,7 +312,7 @@
       ]
     },
     {
-      "name": "IAM-INT-NEG-EXT-IAM-CHECK — InternalIAMService.Check on external TLS endpoint → 404 (internal-only)",
+      "name": "IAM-INT-NEG-EXT-IAM-CHECK — InternalIAMService.Check on the external TLS listener → 404 mux miss (internal-only, ban #6)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
@@ -306,25 +347,36 @@
               }
             }
           },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:check';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -333,10 +385,26 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-IAM-CHECK: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal Check exposed!').to.equal(404);",
+                  "pm.test('EXT-IAM-CHECK: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-IAM-CHECK: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss: grpc-gateway answers an",
+                  "// unrouted path with plain text, while iam's own NOT_FOUND is JSON with a",
+                  "// grpc `code`. Only the first is evidence of ban #6.",
+                  "pm.test('EXT-IAM-CHECK: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).code, 'a JSON grpc error here would mean the request REACHED the service')",
+                  "    .to.be.undefined;",
+                  "});",
+                  "pm.test('EXT-IAM-CHECK: no allowed verdict in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).allowed, 'allowed verdict must not be in the response').to.be.undefined;",
                   "});"
                 ]
               }
@@ -346,11 +414,86 @@
       ]
     },
     {
-      "name": "IAM-INT-NEG-EXT-IAUTH-WRITETUPLES — InternalAuthorizeService.WriteTuples on external TLS endpoint → 404 (internal-only)",
+      "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS — Unbound Internal* RPCs never succeed on the external TLS listener (fail-closed; NOT a route-isolation proof — see case notes)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
-          "name": "IAM-INT-NEG-EXT-IAUTH-WRITETUPLES :: write-tuples-on-external",
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: nonsense-path-control-on-external",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kacho-no-such-route-{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kacho-no-such-route-{{runId}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + '/kacho-no-such-route-{{runId}}';",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXT-CONTROL: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "// A path that certainly does not exist, on the same listener, with the same",
+                  "// credentials. Whatever the edge answers here is what 'unreachable' looks like",
+                  "// WITHOUT any isolation being involved — the baseline the probes below are",
+                  "// measured against.",
+                  "pm.test('EXT-CONTROL: a certainly-absent path does not succeed', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.be.above(399));",
+                  "pm.environment.set('_extAbsentCode', String(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: ext-writetuples-on-external",
           "request": {
             "method": "POST",
             "header": [
@@ -379,25 +522,36 @@
               }
             }
           },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -406,24 +560,25 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-WRITETUPLES: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal WriteTuples exposed!').to.equal(404);",
+                  "pm.test('EXT-WRITETUPLES: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-WRITETUPLES: InternalAuthorizeService.WriteTuples NEVER succeeds on the external listener', () => {",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+                  "});",
+                  "pm.test('EXT-WRITETUPLES: indistinguishable from an absent path (this probe does NOT prove route isolation — see the family-B note)', () => {",
+                  "  const baseline = pm.environment.get('_extAbsentCode');",
+                  "  pm.expect(String(pm.response.code), 'diverged from the absent-path baseline: the edge changed behaviour and this probe needs re-deriving').to.eql(baseline);",
                   "});"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-INT-NEG-EXT-SR-REVOKE — InternalSessionRevocationsService.Revoke on external TLS endpoint → 404 (internal-only, ban #6)",
-      "description": "class:NEG | class:SEC | priority:P0",
-      "item": [
+        },
         {
-          "name": "IAM-INT-NEG-EXT-SR-REVOKE :: sr-revoke-on-external",
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: ext-sr-revoke-on-external",
           "request": {
             "method": "POST",
             "header": [
@@ -452,25 +607,36 @@
               }
             }
           },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -479,24 +645,25 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-SR-REVOKE: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal Revoke exposed on external endpoint!').to.equal(404);",
+                  "pm.test('EXT-SR-REVOKE: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-SR-REVOKE: InternalSessionRevocationsService.Revoke NEVER succeeds on the external listener', () => {",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+                  "});",
+                  "pm.test('EXT-SR-REVOKE: indistinguishable from an absent path (this probe does NOT prove route isolation — see the family-B note)', () => {",
+                  "  const baseline = pm.environment.get('_extAbsentCode');",
+                  "  pm.expect(String(pm.response.code), 'diverged from the absent-path baseline: the edge changed behaviour and this probe needs re-deriving').to.eql(baseline);",
                   "});"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-INT-NEG-EXT-SR-ISREVOKED — InternalSessionRevocationsService.IsRevoked on external TLS endpoint → 404 (internal-only, ban #6)",
-      "description": "class:NEG | class:SEC | priority:P1",
-      "item": [
+        },
         {
-          "name": "IAM-INT-NEG-EXT-SR-ISREVOKED :: sr-isrevoked-on-external",
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: ext-sr-isrevoked-on-external",
           "request": {
             "method": "POST",
             "header": [
@@ -525,25 +692,36 @@
               }
             }
           },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -552,24 +730,25 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-SR-ISREVOKED: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal IsRevoked exposed!').to.equal(404);",
+                  "pm.test('EXT-SR-ISREVOKED: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-SR-ISREVOKED: InternalSessionRevocationsService.IsRevoked NEVER succeeds on the external listener', () => {",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+                  "});",
+                  "pm.test('EXT-SR-ISREVOKED: indistinguishable from an absent path (this probe does NOT prove route isolation — see the family-B note)', () => {",
+                  "  const baseline = pm.environment.get('_extAbsentCode');",
+                  "  pm.expect(String(pm.response.code), 'diverged from the absent-path baseline: the edge changed behaviour and this probe needs re-deriving').to.eql(baseline);",
                   "});"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-INT-NEG-EXT-IAM-FORCELOGOUT — InternalIAMService.ForceLogout on external TLS endpoint → 404 (internal-only, ban #6)",
-      "description": "class:NEG | class:SEC | priority:P0",
-      "item": [
+        },
         {
-          "name": "IAM-INT-NEG-EXT-IAM-FORCELOGOUT :: iam-forcelogout-on-external",
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: ext-forcelogout-on-external",
           "request": {
             "method": "POST",
             "header": [
@@ -598,25 +777,36 @@
               }
             }
           },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
                   "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalIAMService/ForceLogout';",
                   "} else {",
-                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
-                  "}",
-                  "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-                  "pm.environment.set('_extIsolationStep', 'true');"
+                  "}"
                 ]
               }
             },
@@ -625,10 +815,100 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-FORCELOGOUT: status 404 (path not on external mux)', () => {",
-                  "  const code = pm.response.code;",
-                  "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                  "  pm.expect(code, 'CRITICAL: internal ForceLogout exposed!').to.equal(404);",
+                  "pm.test('EXT-FORCELOGOUT: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-FORCELOGOUT: InternalIAMService.ForceLogout NEVER succeeds on the external listener', () => {",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+                  "});",
+                  "pm.test('EXT-FORCELOGOUT: indistinguishable from an absent path (this probe does NOT prove route isolation — see the family-B note)', () => {",
+                  "  const baseline = pm.environment.get('_extAbsentCode');",
+                  "  pm.expect(String(pm.response.code), 'diverged from the absent-path baseline: the edge changed behaviour and this probe needs re-deriving').to.eql(baseline);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: internal-user-get-by-id-on-external",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/users/usr00000000000000abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "users",
+                "usr00000000000000abc"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users/usr00000000000000abc';",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXT-USER-GET: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-USER-GET: InternalUserService.Get NEVER succeeds on the external listener', () => {",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+                  "});",
+                  "pm.test('EXT-USER-GET: no user id leak', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).id, 'id must not be in the response').to.be.undefined;",
+                  "});",
+                  "pm.test('EXT-USER-GET: indistinguishable from an absent path (does NOT prove route isolation)', () => {",
+                  "  pm.expect(String(pm.response.code)).to.eql(pm.environment.get('_extAbsentCode'));",
                   "});"
                 ]
               }

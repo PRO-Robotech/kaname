@@ -43,17 +43,30 @@ def _collection(tmp, name, items):
     return p
 
 
-def _report(tmp, name, positions, total, assertions_failed=0):
-    """Synthesise a newman JSON report where only `positions` executed."""
+def _report(tmp, name, positions, total, assertions_failed=0, unanswered=()):
+    """Synthesise a newman JSON report where only `positions` executed.
+
+    `unanswered` — positions that newman ATTEMPTED but that never produced a
+    response (DNS failure, refused connection, TLS error, timeout). newman still
+    records an execution for these, at their cursor position, with `response:
+    null` and a `requestError` — which is precisely why they used to read as
+    "executed". They are listed in `positions` too, exactly as newman does it.
+    """
     d = tmp / "out"
     d.mkdir(exist_ok=True)
-    execs = [
-        {"cursor": {"position": p, "length": total, "iteration": 0}, "item": {"name": f"i{p}"}}
-        for p in positions
-    ]
+    execs = []
+    for p in positions:
+        ex = {"cursor": {"position": p, "length": total, "iteration": 0},
+              "item": {"name": f"i{p}"}, "response": {"code": 200}}
+        if p in unanswered:
+            ex["response"] = None
+            ex["requestError"] = {"code": "ENOTFOUND", "syscall": "getaddrinfo",
+                                  "hostname": "api.kacho.local"}
+        execs.append(ex)
     (d / f"{name}.json").write_text(json.dumps({
         "run": {"executions": execs,
-                "stats": {"assertions": {"total": len(execs), "failed": assertions_failed}},
+                "stats": {"assertions": {"total": len(execs), "failed": assertions_failed},
+                          "requests": {"total": len(execs), "failed": len(unanswered)}},
                 "failures": []},
     }))
 
@@ -212,6 +225,61 @@ def test_operation_guard_stays_a_legal_silent_skip(tmp_path):
     r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "1 explained-skip" in r.stdout
+
+
+def test_request_that_never_got_an_answer_is_not_executed(tmp_path):
+    """THE THIRD STATE.
+
+    A request can end three ways, and only two of them were ever counted:
+
+      answered      — a response arrived, whatever its status;
+      failed        — an assertion said no;
+      NOT EXECUTED  — no response arrived at all.
+
+    The third one had no home. A request that dies at transport level (DNS,
+    refused connection, TLS, timeout) still gets an execution record at its
+    cursor position, so this gate called it executed; its assertions run against
+    an empty response and can trivially be written to pass; and the one honest
+    signal left — `requests.failed` — was being SUBTRACTED by the suite gate as
+    "DNS noise". Eight ban-#6 negatives (Internal* must not be reachable on the
+    advertised external endpoint) rode on that for an unknown length of time: the
+    checks never ran and the numbers read "0 failed".
+
+    A check that did not happen is not a check that passed. Position present is
+    not evidence of execution — an ANSWER is."""
+    _collection(tmp_path, "c", [_item(f"i{i}") for i in range(4)])
+    _report(tmp_path, "c", [0, 1, 2, 3], 4, assertions_failed=0, unanswered=[2, 3])
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "2 UNANSWERED" in r.stdout
+    assert "execution-coverage gaps in: c" in r.stderr
+    for named in ("i2", "i3"):
+        assert named in r.stdout
+    # The transport cause must be named, or the reader cannot act on it.
+    assert "ENOTFOUND" in r.stdout
+
+
+def test_unanswered_request_is_not_absorbed_by_a_skip_guard(tmp_path):
+    """A `skipRequest()` guard explains a request that did NOT run. It must not
+    also excuse one that ran and got no answer — otherwise any step carrying a
+    conditional guard becomes a place where transport failure is invisible."""
+    items = [_item("i0"),
+             _item("guarded", prereq=["if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }"])]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [0, 1], 2, unanswered=[1])
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 UNANSWERED" in r.stdout
+
+
+def test_answered_requests_stay_green(tmp_path):
+    """The new state must not redden a healthy run: a response with any status
+    code — including the 4xx that negative cases assert — is an answer."""
+    _collection(tmp_path, "c", [_item(f"i{i}") for i in range(3)])
+    _report(tmp_path, "c", [0, 1, 2], 3)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "UNANSWERED" not in r.stdout
 
 
 def test_report_for_a_different_collection_is_red(tmp_path):

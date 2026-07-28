@@ -57,6 +57,23 @@ class Step:
     # Which env var holds the Operation id this step reads. Only meaningful for
     # the op-poll/assert helpers; drives AUTH_INHERIT_OP resolution.
     op_var: Optional[str] = None
+    # Skip TLS certificate verification FOR THIS STEP ONLY (emitted as the item's
+    # `protocolProfileBehavior.strictSSL`).
+    #
+    # Used by the external-isolation negatives, which talk to the api-gateway TLS
+    # listener through a `kubectl port-forward`. That listener's certificate is
+    # issued by the internal CA for its in-cluster names
+    # (api-gateway.kacho.svc.cluster.local); a forwarded socket is reached as
+    # 127.0.0.1, which no certificate on the stand names — and adding a name to the
+    # host's resolver is exactly the manual, privileged step this harness must not
+    # require. What these steps assert is WHICH ROUTES THE LISTENER SERVES, not the
+    # trust chain of a tunnel that is already not the production network path.
+    #
+    # Deliberately per-step and not a runner-wide `--insecure`: a blanket flag
+    # would also switch off verification for every other request in the suite,
+    # silently and invisibly. Here it is declared on the one item that needs it and
+    # is visible in the generated collection.
+    insecure_tls: bool = False
 
 
 # Sentinel `auth` value: "poll the Operation as whoever MINTED it".
@@ -143,6 +160,48 @@ POLL_CAP = 50
 def assert_status(code: int) -> List[str]:
     return [
         f"pm.test('status {code}', () => pm.expect(pm.response.code).to.eql({code}));",
+    ]
+
+
+def assert_answered(label: str) -> List[str]:
+    """Assert that the request got a RESPONSE AT ALL, before asserting anything
+    about it.
+
+    WHY THIS IS A SEPARATE, EXPLICIT ASSERTION
+    ------------------------------------------
+    When a request dies before an HTTP exchange completes — DNS, refused
+    connection, TLS, timeout — newman still runs the test script, with an empty
+    response. `pm.response.code` is then `undefined`, and this shape
+
+        const code = pm.response.code;
+        if (code === undefined) { return; }   // "unreachable = PASS"
+        pm.expect(code).to.equal(404);
+
+    records a PASSING assertion for a check that never happened. It was written on
+    the reasoning that an unreachable endpoint is itself proof of the isolation
+    being asserted. It is not: "I could not reach it" and "it refused me" are
+    different findings, and only the second is evidence. The first is a broken
+    harness — and one that reads green is worse than one that reads red, because
+    nobody goes looking.
+
+    Eight ban-#6 negatives (Internal* must not be reachable on the advertised
+    external endpoint) carried that shape while the advertised host did not
+    resolve. Every layer agreed nothing was wrong: the assertion passed, the
+    execution-coverage gate saw a cursor position and called it executed, and the
+    suite gate SUBTRACTED the one honest signal (`requests.failed`) as DNS noise.
+
+    So the first thing a probe asserts is that it got an answer. If it did not,
+    this fails, loudly, naming the step — and every assertion after it fails too,
+    because `undefined` does not equal the expected status. That is the intended
+    behaviour: a check that did not happen must not be able to report success.
+    """
+    return [
+        f"pm.test('{label}: request was ANSWERED (a check that did not run is not a check that passed)', () => {{",
+        "  pm.expect(pm.response && pm.response.code,",
+        "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: "
+        "fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+        "    .to.be.a('number');",
+        "});",
     ]
 
 
@@ -1139,6 +1198,8 @@ def step_to_postman(step: Step) -> Dict:
             },
         },
     }
+    if step.insecure_tls:
+        item["protocolProfileBehavior"] = {"strictSSL": False}
     if step.body is not None:
         item["request"]["body"] = {
             "mode": "raw",
@@ -1232,15 +1293,18 @@ def case_to_postman(case: Case) -> Dict:
         if s.auth and s.auth not in ("anonymous", AUTH_INHERIT_OP):
             for var in _captured_op_vars(s.test_script):
                 op_producer[var] = s.auth
-        s2 = Step(
+        # `replace` and NOT a field-by-field `Step(...)`: this rebuild used to
+        # enumerate the fields it copied, so every field added to Step afterwards was
+        # silently dropped here. `insecure_tls` was lost exactly that way — the case
+        # asked for it, the generated collection did not carry it, and the request
+        # failed on certificate verification with no hint that the setting had gone
+        # missing in transit. Copy-by-default; name only what changes.
+        s2 = replace(
+            s,
             name=final_names[idx],
-            method=s.method,
-            path=s.path,
-            body=s.body,
             pre_script=_rewrite_jumps(list(s.pre_script)),
             test_script=_rewrite_jumps(list(s.test_script)),
             auth=auth,
-            op_var=s.op_var,
         )
         items.append(step_to_postman(s2))
 
@@ -1281,6 +1345,7 @@ def load_cases_module(path: Path):
     mod.Step = Step
     mod.Case = Case
     mod.assert_status = assert_status
+    mod.assert_answered = assert_answered
     mod.assert_grpc_code = assert_grpc_code
     mod.assert_field_violation = assert_field_violation
     mod.assert_unscoped_rejected = assert_unscoped_rejected

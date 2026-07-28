@@ -59,6 +59,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 ENV="environments/local.postman_environment.json"
+# Env-файл gitignore-ится (fixture-seed пишет в него живые токены), но НИКТО его
+# не создаёт: patch-env.py/setup.sh только ПАТЧАТ уже существующий и молча
+# пропускают отсутствующий. На свежем клоне суита падала здесь ещё до вызова
+# newman. Материализация — часть пути прогона, а не ручной шаг: копируем
+# закоммиченный шаблон, креды/id допишет fixture-seed. Существующий файл НЕ
+# перетираем — в нём может лежать живая сессия текущего прогона.
+if [[ ! -f "$ENV" && -f "${ENV%.json}.template.json" ]]; then
+  cp "${ENV%.json}.template.json" "$ENV"
+  echo "создан $ENV из ${ENV%.json}.template.json (креды допишет fixture-seed)" >&2
+fi
 [[ -f "$ENV" ]] || { echo "missing env: $ENV"; exit 1; }
 
 # run_one — прогон одной коллекции. Пишет out/<res>.json|.cli|.rc.

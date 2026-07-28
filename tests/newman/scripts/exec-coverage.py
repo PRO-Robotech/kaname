@@ -75,6 +75,28 @@ Per collection, two independent things:
    (the whole tail vanishing) can never be explained, so this catches the entire
    class, not just the one idiom that caused it.
 
+3. ANSWERED — a request that newman attempted but that got NO RESPONSE did not
+   execute, whatever its cursor says.
+
+   THE THIRD STATE (why 2 alone was not enough). A request ends one of three
+   ways: it is ANSWERED (a response arrived, any status), an assertion FAILED,
+   or it is UNANSWERED — nothing came back. Only the first two had a home.
+   newman records an execution for a transport failure too — same cursor
+   position, but `response: null` and a `requestError` (DNS, refused connection,
+   TLS, timeout) — so check 2 above counted it as executed. Meanwhile its test
+   script still runs, against an empty response, where `pm.response.code` is
+   `undefined` and an assertion phrased "if the code is undefined, return" PASSES.
+   And the last honest signal, `.run.stats.requests.failed`, was being SUBTRACTED
+   by the suite gate as DNS noise.
+
+   All three layers agreed that nothing was wrong. Eight ban-#6 negatives — the
+   ones asserting that Internal* RPCs are not reachable on the advertised
+   external endpoint — never ran, and the verdict read "0 failed requests".
+
+   So: an ANSWER is the evidence of execution, not a cursor position. A skip
+   guard explains a request that did not run; it does not excuse one that ran
+   and got nothing back.
+
 Matching is POSITIONAL: generated collections carry no item `id` (newman mints one
 per run), but every execution records `cursor.position` — the index of the item in
 the flattened collection order. `cursor.length` is cross-checked against the leaf
@@ -143,6 +165,35 @@ def _scripts(item, listen=None):
         else:
             out.extend(str(x) for x in exec_)
     return "\n".join(out)
+
+
+def _transport_error(ex):
+    """Return a short description of why this execution got no response, or None
+    if a response arrived.
+
+    newman's JSON reporter writes, for a request that died before an HTTP
+    exchange completed, `response: null` plus a `requestError` object carrying the
+    Node-level cause, e.g.
+
+        {"errno": -3008, "code": "ENOTFOUND", "syscall": "getaddrinfo",
+         "hostname": "api.kacho.local"}
+
+    Both signals are checked: `requestError` is the explicit one, and a null
+    response is the invariant it implies. Either is enough — an execution without
+    a response did not answer, whatever else the report says about it.
+    """
+    err = ex.get("requestError")
+    if err is None and ex.get("response") is not None:
+        return None
+    if isinstance(err, dict):
+        code = err.get("code") or err.get("errno") or "request error"
+        host = err.get("hostname") or err.get("address") or ""
+        syscall = err.get("syscall") or ""
+        detail = " ".join(x for x in (str(code), syscall, host) if x)
+        return detail or "request error"
+    if isinstance(err, str) and err:
+        return err
+    return "no response"
 
 
 def _explained_skippable(leaves):
@@ -225,13 +276,27 @@ def check_collection(col_path, out_dir):
 
     executed = set()
     lengths = set()
+    # position -> transport error, for requests newman attempted but that never
+    # produced a response. These carry a cursor position like any other execution,
+    # which is exactly why "position seen" cannot stand for "request executed".
+    unanswered = {}
     for ex in executions:
         cur = ex.get("cursor") or {}
         pos = cur.get("position")
-        if isinstance(pos, int):
-            executed.add(pos)
         if isinstance(cur.get("length"), int):
             lengths.add(cur["length"])
+        if not isinstance(pos, int):
+            continue
+        err = _transport_error(ex)
+        if err is None:
+            executed.add(pos)
+        else:
+            # A later retry of the same position CAN succeed (self-loop polls);
+            # one answered attempt is enough to call the position executed.
+            unanswered.setdefault(pos, err)
+    for pos in list(unanswered):
+        if pos in executed:
+            del unanswered[pos]
 
     # Cross-check: the report must describe THIS collection.
     if lengths and total not in lengths:
@@ -241,15 +306,33 @@ def check_collection(col_path, out_dir):
         )
 
     reasons = _explained_skippable(leaves)
-    unexplained = [i for i in range(total) if i not in executed and i not in reasons]
-    skipped_ok = [i for i in range(total) if i not in executed and i in reasons]
+    # An unanswered request is NOT explained by a skip guard: the guard says "this
+    # request did not run", the transport error says "it ran and got nothing back".
+    # Folding the second into the first is how the class hid in the first place.
+    unexplained = [i for i in range(total)
+                   if i not in executed and i not in reasons and i not in unanswered]
+    skipped_ok = [i for i in range(total)
+                  if i not in executed and i in reasons and i not in unanswered]
 
     pct = (100.0 * len(executed) / total) if total else 100.0
     line = (
         f"{name}: executed {len(executed)}/{total} ({pct:.0f}%)"
         f"{f', {len(skipped_ok)} explained-skip' if skipped_ok else ''}"
+        f"{f', {len(unanswered)} UNANSWERED' if unanswered else ''}"
         f"{f', {len(unexplained)} UNEXPLAINED' if unexplained else ''}"
     )
+
+    if unanswered:
+        problems.append(
+            f"  {len(unanswered)} request(s) got NO RESPONSE — attempted, but nothing came "
+            f"back (DNS / refused connection / TLS / timeout). This is not a passing check "
+            f"and not a skip: the check did not happen. Fix the harness so it can reach the "
+            f"endpoint, or delete the check — do not let it read as green:"
+        )
+        for i in sorted(unanswered)[:_MAX_REPORTED]:
+            problems.append(f"    [{i}] {leaves[i].get('name','?')}  <- {unanswered[i]}")
+        if len(unanswered) > _MAX_REPORTED:
+            problems.append(f"    ... and {len(unanswered) - _MAX_REPORTED} more")
 
     if unexplained:
         problems.append(

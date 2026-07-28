@@ -12,18 +12,21 @@
   выделенный `internal-rest` listener (:8081), в local/CI port-forward
   {{internalBaseUrl}} = http://localhost:18081. ПУБЛИЧНЫЙ cmux
   ({{baseUrl}} = http://localhost:18080) НЕ отдаёт /iam/v1/internal/* — 404 by
-  design (ban #6). Те же пути должны отдавать 404 и на advertised external TLS
-  endpoint (`{{externalBaseUrl}}` = https://api.kacho.local:443).
+  design (ban #6). Те же пути должны быть недостижимы и на advertised external
+  TLS listener ({{externalBaseUrl}}) — см. разбор ниже: часть путей доказывает
+  это mux-промахом 404, часть — только fail-closed отказом, и кейс различает их.
 
 Coverage:
-  IAM-INT-NEG-EXT-USER-UPSERT          — InternalUserService.UpsertFromIdentity → 404 на external
-  IAM-INT-NEG-EXT-USER-GET             — InternalUserService.Get → 404 на external
-  IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT    — InternalIAMService.LookupSubject → 404 на external
-  IAM-INT-NEG-EXT-IAM-CHECK            — InternalIAMService.Check → 404 на external
-  IAM-INT-NEG-EXT-IAUTH-WRITETUPLES    — InternalAuthorizeService.WriteTuples → 404 на external
-  IAM-INT-NEG-EXT-SR-REVOKE            — InternalSessionRevocationsService.Revoke → 404 на external
-  IAM-INT-NEG-EXT-SR-ISREVOKED         — InternalSessionRevocationsService.IsRevoked → 404 на external
-  IAM-INT-NEG-EXT-IAM-FORCELOGOUT      — InternalIAMService.ForceLogout → 404 на external
+  IAM-INT-NEG-EXT-REST-ALIVE           — CONTROL: external listener отдаёт REST (200 на публичном пути);
+                                         без него любой 404 ниже ничего не значит
+  IAM-INT-NEG-EXT-USER-UPSERT          — InternalUserService.UpsertFromIdentity → 404 mux-miss на external
+  IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT    — InternalIAMService.LookupSubject → 404 mux-miss на external
+  IAM-INT-NEG-EXT-IAM-CHECK            — InternalIAMService.Check → 404 mux-miss на external
+  IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS
+                                       — WriteTuples / SessionRevocations.{Revoke,IsRevoked} /
+                                         ForceLogout / InternalUserService.Get: НИКОГДА не 2xx на
+                                         external + пин к absent-path контролю. НЕ доказывает
+                                         route-изоляцию (см. «TWO FAMILIES» ниже) и прямо это заявляет
   IAM-INT-OK-INT-USER-UPSERT           — UpsertFromIdentity → 200 на internal (positive control)
   IAM-INT-OK-INT-IAM-LOOKUPSUBJECT     — LookupSubject → 200/404 на internal (positive control)
   IAM-INT-OK-INT-IAM-CHECK             — InternalIAMService.Check → 200 на internal
@@ -47,7 +50,8 @@ Why no black-box POSITIVE revoke→IsRevoked case:
   user-level cases; internal/apps/.../{internal_iam,session_revocations}) and the
   integration test internal/repo/kacho/pg/user_token_revocations_repo_integration_test.go.
   The black-box contract that remains is the external-isolation NEGATIVE below
-  (IAM-INT-NEG-EXT-IAM-FORCELOGOUT / IAM-INT-NEG-EXT-SR-REVOKE).
+  (IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS — with the caveat recorded there that it
+  witnesses fail-closed refusal, not route isolation).
 
 Note: TrustPolicyService and OpaBundleService have been removed — the
 corresponding negative cases (IAM-INT-NEG-EXT-TRUST-CREATE,
@@ -64,21 +68,92 @@ Environment requirements:
                          _internal_url_override — Internal* RPCs are served ONLY here. If
                          unset (local dev without the internal-rest port-forward) the
                          positive controls are skipped with a warning (local-dev fallback).
-  {{externalBaseUrl}}  — advertised TLS endpoint (https://api.kacho.local:443 on stend).
-                         Must NOT expose Internal* paths. If not set in env, external
-                         checks are skipped with a warning (local-dev fallback).
+  {{externalBaseUrl}}  — the ADVERTISED EXTERNAL TLS LISTENER of the api-gateway
+                         (`KACHO_API_GATEWAY_TLS_LISTEN_ADDR` = :8443, advertised as
+                         api.kacho.local:443). deploy/scripts/newman-{e2e,parallel}.sh
+                         forward it to https://127.0.0.1:18443 and inject it as
+                         `--env-var externalBaseUrl`. Must NOT expose Internal* paths.
 
-Technique for externalBaseUrl steps:
-  gen.py / step_to_postman() always generates `{{baseUrl}}<path>` as the URL.
-  For external-endpoint steps, we override `pm.request.url` in the prerequest
-  script to point at {{externalBaseUrl}} instead. This is the standard Postman
-  pattern for per-step base-URL overrides.
+WHY externalBaseUrl IS THE :8443 LISTENER AND NOT THE INGRESS HOSTNAME
+----------------------------------------------------------------------
+This variable used to be the literal `https://api.kacho.local:443`, and every
+step below silently did nothing:
+
+  * `api.kacho.local` is not in the host's resolver, and putting it there needs
+    root — a manual, privileged setup step the harness must not depend on;
+  * even resolved, it would not connect: kind maps only node:80 → host:28080, so
+    443 is not published off the node at all;
+  * and even reached, it would prove nothing about REST. That Ingress carries
+    `nginx.ingress.kubernetes.io/backend-protocol: GRPCS`, so it proxies gRPC —
+    measured on the stand, EVERY REST path through it answers 502, public and
+    internal alike. A "404 on external" assertion behind a uniform 502 is the
+    same vacuity in a new costume.
+
+Ban #6 is a property of the LISTENER — which routes it serves — not of the DNS
+name used to find it. So the probes address the TLS listener directly, over a
+forwarded port, exactly as the public and internal probes already do. The
+certificate names the gateway's in-cluster identity and cannot match 127.0.0.1,
+so those steps carry `insecure_tls=True` (per-item `strictSSL:false`, visible in
+the generated collection) — the tunnel's trust chain is not the subject; the
+route table is.
+
+WHAT AN UNAUTHENTICATED PROBE CANNOT SEE (measured 2026-07-28 on kind-kacho)
+---------------------------------------------------------------------------
+On this listener authN and the authz catalog run BEFORE the REST mux. Without a
+token EVERY path answers alike — `/zzz` and `/iam/v1/internal/iam:check` both
+403 — so an unauthenticated probe cannot tell an isolated route from a typo, and
+the 404 these cases assert can never arrive. All external probes therefore carry
+a valid Bearer. That also makes the claim stronger: not merely "a stranger gets
+nothing", but "an AUTHENTICATED external caller still cannot reach Internal*".
+
+TWO FAMILIES, AND ONLY ONE OF THEM DISCRIMINATES
+------------------------------------------------
+Measured, authenticated, on the three listeners (internal :8081 / public :8080 /
+external TLS :8443):
+
+  BOUND REST paths — `/iam/v1/internal/users:upsertFromIdentity`,
+  `iam:lookupSubject`, `iam:check`:
+      internal 200 / 404-from-service / 400-from-service   (the route is real)
+      public   404 "404 page not found"                     (mux miss)
+      external 404 "404 page not found"                     (mux miss)
+  These carry the evidence: the path demonstrably works somewhere, and is
+  demonstrably absent from the external mux. The body is checked too — a
+  grpc-gateway mux miss is plain text, a service-level miss is JSON with a grpc
+  code, and conflating them would let a real 404-from-iam pass as isolation.
+
+  UNBOUND fully-qualified paths — InternalAuthorizeService/WriteTuples,
+  InternalSessionRevocationsService/{Revoke,IsRevoked},
+  InternalIAMService/ForceLogout, and GET /iam/v1/internal/users/{id}:
+      403 on ALL THREE listeners, byte-identical to `/zzz`.
+  They have no catalog entry, so the fail-closed authz gate answers before the
+  mux is consulted — including on the listener where they are supposed to work.
+  A "404 on external" assertion on these could never pass, and "not 404, so not
+  exposed" would be indistinguishable from a misspelt path.
+
+  The docstring here previously claimed these four "are served ONLY by the
+  cluster-internal sub-mux". They are served on no REST listener at all; they are
+  gRPC-only on iam :9091, which the note about SessionRevocations further down
+  already says. The block above them describes replacing an earlier set of
+  invented paths that "404'd everywhere" — and the replacement 403s everywhere,
+  which is the same class one step over.
+
+  So family B asserts what it can actually witness — NEVER 2xx — and pins its
+  code against a nonsense-path control fired at the same listener in the same
+  case. That control is not decoration: it is the case admitting, in the report,
+  that this family does not discriminate. If a route ever appears, the 2xx
+  assertion fires; if the fail-closed behaviour changes, the pin fires.
+
+  IAM-INT-NEG-EXT-REST-ALIVE is the other half. Without a positive control on the
+  SAME endpoint proving it serves REST at all, every 404 below would be satisfied
+  by an endpoint that was simply down — which is precisely how this file spent
+  its time before.
 
 Test-first note (strict TDD):
   Cases are written RED-first. Positive-control (internal) cases fail until the
-  Internal* RPCs are implemented. Negative (external) cases pass immediately if
-  api-gateway correctly rejects /iam/v1/internal/* on the external mux.
-  Do not weaken assertions.
+  Internal* RPCs are implemented. Negative (external) cases pass only when the
+  probe is ANSWERED and the answer is the expected one — an unreachable endpoint
+  is a RED harness, never a green check. Do not weaken assertions, and in
+  particular do not reintroduce `if (pm.response.code === undefined) return;`.
 """
 
 CASES = []
@@ -119,13 +194,252 @@ def _external_url_override(path: str):
     mode, so require_env_url ASSERTS it (naming the variable) before skipping —
     otherwise losing the variable would silently delete these checks and the
     suite would still read GREEN."""
-    return [
-        *require_env_url("externalBaseUrl", path,
-                         "external-isolation negative — Internal* paths must 404 on the "
-                         "advertised TLS endpoint"),
-        "// Mark that this step is an external-isolation check (used in test_script to handle DNS failures).",
-        "pm.environment.set('_extIsolationStep', 'true');",
+    return require_env_url(
+        "externalBaseUrl", path,
+        "external-isolation negative — Internal* paths must not be reachable on "
+        "the advertised external TLS listener")
+
+
+# `_extIsolationStep` used to be set here, described as "used in test_script to
+# handle DNS failures". No test script ever read it, and the DNS handling it
+# referred to was the `code === undefined → PASS` escape that made these checks
+# unfalsifiable. Both are gone.
+
+
+def _external_step(name, method, path, body=None, auth="jwtAccountAdminA", test_script=None):
+    """An external-endpoint probe: authenticated, TLS-verification off for the
+    forwarded port, URL rewritten to {{externalBaseUrl}}, and always asserting it
+    was ANSWERED before it asserts anything about the answer."""
+    return Step(
+        name=name,
+        method=method,
+        path=path,
+        body=body,
+        auth=auth,
+        insecure_tls=True,
+        pre_script=_external_url_override(path),
+        test_script=test_script or [],
+    )
+
+
+# ===========================================================================
+# CONTROL: the external endpoint SERVES REST at all
+#
+# Every negative below reads "this path is not there". That sentence is only
+# worth something if the endpoint answers when a path IS there. Without this
+# control, an endpoint that was simply down would satisfy all eight negatives —
+# which is materially what happened while the advertised host did not resolve.
+# ===========================================================================
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-REST-ALIVE",
+    title="Control: the advertised external TLS listener serves REST (so a 404 below means 'not routed', not 'nothing there')",
+    classes=["SEC"],
+    priority="P0",
+    steps=[
+        _external_step(
+            name="public-path-on-external",
+            method="GET",
+            path="/geo/v1/regions",
+            test_script=[
+                *assert_answered("EXT-ALIVE"),
+                "// A PUBLIC path on the SAME listener as every negative below. If this is not",
+                "// 200, the negatives prove nothing and must not be read as isolation.",
+                "pm.test('EXT-ALIVE: public REST path answers 200 on the external listener', () =>",
+                "  pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                "pm.test('EXT-ALIVE: and it is a real REST body, not an edge error page', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j, JSON.stringify(j)).to.have.property('regions');",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+# ===========================================================================
+# FAMILY A — BOUND Internal* REST paths. These DISCRIMINATE.
+#
+# The path is proven real by the positive controls further down (same path, the
+# internal-rest listener, 200 / service-level 4xx). Here it must be a
+# grpc-gateway MUX MISS: status 404 AND a plain-text body. The body matters —
+# a service-level "not found" is JSON carrying a grpc code, and accepting it
+# here would let a genuine iam 404 masquerade as route isolation.
+# ===========================================================================
+
+def _mux_miss_assertions(label: str, leak_expr: str = None, leak_desc: str = None):
+    out = [
+        *assert_answered(label),
+        f"pm.test('{label}: status 404 — path is not routed on the external mux', () =>",
+        f"  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+        "// Discriminate a MUX miss from a SERVICE miss: grpc-gateway answers an",
+        "// unrouted path with plain text, while iam's own NOT_FOUND is JSON with a",
+        "// grpc `code`. Only the first is evidence of ban #6.",
+        f"pm.test('{label}: 404 is a mux miss, not a service-level NOT_FOUND', () => {{",
+        "  let j = null;",
+        "  try { j = pm.response.json(); } catch (e) { j = null; }",
+        "  pm.expect((j || {}).code, 'a JSON grpc error here would mean the request REACHED the service')",
+        "    .to.be.undefined;",
+        "});",
     ]
+    if leak_expr:
+        out += [
+            f"pm.test('{label}: no {leak_desc} in body', () => {{",
+            "  let j = null;",
+            "  try { j = pm.response.json(); } catch (e) { j = null; }",
+            f"  pm.expect({leak_expr}, '{leak_desc} must not be in the response').to.be.undefined;",
+            "});",
+        ]
+    return out
+
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-USER-UPSERT",
+    title="InternalUserService.UpsertFromIdentity on the external TLS listener → 404 mux miss (internal-only, ban #6)",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _external_step(
+            name="upsert-on-external",
+            method="POST",
+            path="/iam/v1/internal/users:upsertFromIdentity",
+            body={"externalId": "zit-isolation-{{runId}}", "email": "leak@kacho.local"},
+            test_script=_mux_miss_assertions("EXT-UPSERT", "(j || {}).user && j.user.id", "user.id"),
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT",
+    title="InternalIAMService.LookupSubject on the external TLS listener → 404 mux miss (internal-only, ban #6)",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _external_step(
+            name="lookup-subject-on-external",
+            method="POST",
+            path="/iam/v1/internal/iam:lookupSubject",
+            body={"externalId": "zit-anything"},
+            test_script=_mux_miss_assertions("EXT-LOOKUPSUBJ", "(j || {}).subjectId", "subjectId"),
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-IAM-CHECK",
+    title="InternalIAMService.Check on the external TLS listener → 404 mux miss (internal-only, ban #6)",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _external_step(
+            name="iam-check-on-external",
+            method="POST",
+            # CheckRequest names the object field `object` and takes a TYPED FGA
+            # string; there is no `objectId` (that belongs to ExpandAccessRequest).
+            path="/iam/v1/internal/iam:check",
+            body={"subjectId": "user:usr00000000000000abc", "relation": "viewer",
+                  "object": "account:acc00000000000abc"},
+            test_script=_mux_miss_assertions("EXT-IAM-CHECK", "(j || {}).allowed", "allowed verdict"),
+        ),
+    ],
+))
+
+
+# ===========================================================================
+# FAMILY B — UNBOUND / by-id paths. These do NOT discriminate, and the case
+# says so out loud rather than implying otherwise.
+#
+# Measured on all three listeners: 403, byte-identical to a nonsense path,
+# because no catalog entry exists and the fail-closed authz gate answers before
+# the mux. So the honest assertions are:
+#   1. it was ANSWERED (else the harness is broken);
+#   2. it NEVER succeeds — no 2xx, on the external listener, ever;
+#   3. its code equals the nonsense-path control taken at the same listener in
+#      the same case — the explicit admission that this family cannot tell
+#      "isolated" from "misspelt", recorded where a reader will see it.
+# If a route ever appears for these, (2) fires. If fail-closed changes, (3) fires.
+# ===========================================================================
+
+_UNBOUND_PROBES = [
+    ("EXT-WRITETUPLES", "InternalAuthorizeService.WriteTuples", _UNBOUND_WRITE_TUPLES,
+     {"writes": [{"subject": "user:usr00000000000000abc", "relation": "viewer",
+                  "object": "account:acc00000000000abc"}]}),
+    ("EXT-SR-REVOKE", "InternalSessionRevocationsService.Revoke", _UNBOUND_SR_REVOKE,
+     {"userId": "usr00000000000000abc", "tokenJti": "leak-jti", "reason": "x"}),
+    ("EXT-SR-ISREVOKED", "InternalSessionRevocationsService.IsRevoked", _UNBOUND_SR_ISREVOKED,
+     {"tokenJti": "leak-jti"}),
+    ("EXT-FORCELOGOUT", "InternalIAMService.ForceLogout", _UNBOUND_FORCE_LOGOUT,
+     {"userId": "usr00000000000000abc", "reason": "x"}),
+]
+
+_unbound_steps = [
+    # The control FIRST: its code is what the probes are pinned against.
+    _external_step(
+        name="nonsense-path-control-on-external",
+        method="GET",
+        path="/kacho-no-such-route-{{runId}}",
+        test_script=[
+            *assert_answered("EXT-CONTROL"),
+            "// A path that certainly does not exist, on the same listener, with the same",
+            "// credentials. Whatever the edge answers here is what 'unreachable' looks like",
+            "// WITHOUT any isolation being involved — the baseline the probes below are",
+            "// measured against.",
+            "pm.test('EXT-CONTROL: a certainly-absent path does not succeed', () =>",
+            "  pm.expect(pm.response.code, pm.response.text()).to.be.above(399));",
+            "pm.environment.set('_extAbsentCode', String(pm.response.code));",
+        ],
+    ),
+]
+
+for _label, _rpc, _path, _body in _UNBOUND_PROBES:
+    _unbound_steps.append(_external_step(
+        name=f"{_label.lower()}-on-external",
+        method="POST",
+        path=_path,
+        body=_body,
+        test_script=[
+            *assert_answered(_label),
+            f"pm.test('{_label}: {_rpc} NEVER succeeds on the external listener', () => {{",
+            "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+            "});",
+            f"pm.test('{_label}: indistinguishable from an absent path (this probe does NOT "
+            f"prove route isolation — see the family-B note)', () => {{",
+            "  const baseline = pm.environment.get('_extAbsentCode');",
+            "  pm.expect(String(pm.response.code), 'diverged from the absent-path baseline: "
+            "the edge changed behaviour and this probe needs re-deriving').to.eql(baseline);",
+            "});",
+        ],
+    ))
+
+_unbound_steps.append(_external_step(
+    name="internal-user-get-by-id-on-external",
+    method="GET",
+    path="/iam/v1/internal/users/usr00000000000000abc",
+    test_script=[
+        *assert_answered("EXT-USER-GET"),
+        "pm.test('EXT-USER-GET: InternalUserService.Get NEVER succeeds on the external listener', () => {",
+        "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
+        "});",
+        "pm.test('EXT-USER-GET: no user id leak', () => {",
+        "  let j = null;",
+        "  try { j = pm.response.json(); } catch (e) { j = null; }",
+        "  pm.expect((j || {}).id, 'id must not be in the response').to.be.undefined;",
+        "});",
+        "pm.test('EXT-USER-GET: indistinguishable from an absent path (does NOT prove route isolation)', () => {",
+        "  pm.expect(String(pm.response.code)).to.eql(pm.environment.get('_extAbsentCode'));",
+        "});",
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS",
+    title="Unbound Internal* RPCs never succeed on the external TLS listener (fail-closed; NOT a route-isolation proof — see case notes)",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=_unbound_steps,
+))
 
 
 def _internal_url_override(path: str):
@@ -146,277 +460,6 @@ def _internal_url_override(path: str):
         "internalBaseUrl", path,
         "internal-mux positive control — Internal* paths live ONLY on the "
         "cluster-internal REST listener")
-
-
-# ===========================================================================
-# NEGATIVE: Internal-only paths MUST return 404 on the external TLS endpoint
-# ===========================================================================
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-USER-UPSERT
-# InternalUserService.UpsertFromIdentity on external → 404 (path not registered)
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-USER-UPSERT",
-    title="InternalUserService.UpsertFromIdentity on external TLS endpoint → 404 (internal-only)",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="upsert-on-external",
-            method="POST",
-            path="/iam/v1/internal/users:upsertFromIdentity",
-            body={"externalId": "zit-isolation-{{runId}}", "email": "leak@kacho.local"},
-            pre_script=_external_url_override("/iam/v1/internal/users:upsertFromIdentity"),
-            test_script=[
-                "// Must be 404 — path not registered on external mux.",
-                "// If this returns 200 / 201 — CRITICAL: Internal* endpoint is exposed on external!",
-                "// A DNS/network failure (undefined status) also means the path is NOT exposed — treat as PASS.",
-                "pm.test('EXT-UPSERT: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal path exposed on external endpoint!').to.equal(404);",
-                "});",
-                "// Only probe body content if a real HTTP response arrived.",
-                "if (pm.response.code !== undefined) {",
-                "  const j = pm.response.json ? pm.response.json() : null;",
-                "  pm.test('EXT-UPSERT: no user.id leak in body', () => {",
-                "    pm.expect(j && j.user && j.user.id, 'user.id must not be in response').to.be.undefined;",
-                "  });",
-                "} else {",
-                "  pm.test('EXT-UPSERT: no user.id leak in body (DNS unreachable = PASS)', () => true);",
-                "}"
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-USER-GET
-# InternalUserService.Get on external → 404
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-USER-GET",
-    title="InternalUserService.Get on external TLS endpoint → 404 (internal-only)",
-    classes=["NEG", "SEC"],
-    priority="P1",
-    steps=[
-        Step(
-            name="get-internal-user-on-external",
-            method="GET",
-            path="/iam/v1/internal/users/usr00000000000000abc",
-            pre_script=_external_url_override("/iam/v1/internal/users/usr00000000000000abc"),
-            test_script=[
-                "pm.test('EXT-USER-GET: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal path exposed!').to.equal(404);",
-                "});",
-                "// Only probe body content if a real HTTP response arrived.",
-                "if (pm.response.code !== undefined) {",
-                "  const j = pm.response.json ? pm.response.json() : null;",
-                "  pm.test('EXT-USER-GET: no user id leak', () => {",
-                "    pm.expect(j && j.id, 'id must not be in response').to.be.undefined;",
-                "  });",
-                "} else {",
-                "  pm.test('EXT-USER-GET: no user id leak (DNS unreachable = PASS)', () => true);",
-                "}"
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT
-# InternalIAMService.LookupSubject on external → 404
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT",
-    title="InternalIAMService.LookupSubject on external TLS endpoint → 404 (internal-only)",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="lookup-subject-on-external",
-            method="POST",
-            path="/iam/v1/internal/iam:lookupSubject",
-            body={"externalId": "zit-anything"},
-            pre_script=_external_url_override("/iam/v1/internal/iam:lookupSubject"),
-            test_script=[
-                "pm.test('EXT-LOOKUPSUBJ: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal path exposed!').to.equal(404);",
-                "});",
-                "// Only probe body content if a real HTTP response arrived.",
-                "if (pm.response.code !== undefined) {",
-                "  const j = pm.response.json ? pm.response.json() : null;",
-                "  pm.test('EXT-LOOKUPSUBJ: no subjectId leak', () => {",
-                "    pm.expect(j && j.subjectId, 'subjectId must not be in response').to.be.undefined;",
-                "  });",
-                "} else {",
-                "  pm.test('EXT-LOOKUPSUBJ: no subjectId leak (DNS unreachable = PASS)', () => true);",
-                "}"
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-IAM-CHECK
-# InternalIAMService.Check on external → 404
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-IAM-CHECK",
-    title="InternalIAMService.Check on external TLS endpoint → 404 (internal-only)",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="iam-check-on-external",
-            method="POST",
-            path="/iam/v1/internal/iam:check",
-            # CheckRequest names the object field `object` and takes a TYPED FGA
-            # string; there is no `objectId` (that belongs to ExpandAccessRequest).
-            body={"subjectId": "user:usr00000000000000abc", "relation": "viewer",
-                  "object": "account:acc00000000000abc"},
-            pre_script=_external_url_override("/iam/v1/internal/iam:check"),
-            test_script=[
-                "pm.test('EXT-IAM-CHECK: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal Check exposed!').to.equal(404);",
-                "});",
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-IAUTH-WRITETUPLES
-# InternalAuthorizeService.WriteTuples on external → 404
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-IAUTH-WRITETUPLES",
-    title="InternalAuthorizeService.WriteTuples on external TLS endpoint → 404 (internal-only)",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="write-tuples-on-external",
-            method="POST",
-            path=_UNBOUND_WRITE_TUPLES,
-            body={"writes": [{"subject": "user:usr00000000000000abc", "relation": "viewer",
-                              "object": "account:acc00000000000abc"}]},
-            pre_script=_external_url_override(_UNBOUND_WRITE_TUPLES),
-            test_script=[
-                "pm.test('EXT-WRITETUPLES: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal WriteTuples exposed!').to.equal(404);",
-                "});",
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-SR-REVOKE
-# InternalSessionRevocationsService.Revoke on external → 404 (internal-only).
-# Token revocation must never be triggerable from the public edge.
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-SR-REVOKE",
-    title="InternalSessionRevocationsService.Revoke on external TLS endpoint → 404 (internal-only, ban #6)",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="sr-revoke-on-external",
-            method="POST",
-            path=_UNBOUND_SR_REVOKE,
-            body={"userId": "usr00000000000000abc", "tokenJti": "leak-jti", "reason": "x"},
-            pre_script=_external_url_override(_UNBOUND_SR_REVOKE),
-            test_script=[
-                "pm.test('EXT-SR-REVOKE: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal Revoke exposed on external endpoint!').to.equal(404);",
-                "});",
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-SR-ISREVOKED
-# InternalSessionRevocationsService.IsRevoked on external → 404 (internal-only).
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-SR-ISREVOKED",
-    title="InternalSessionRevocationsService.IsRevoked on external TLS endpoint → 404 (internal-only, ban #6)",
-    classes=["NEG", "SEC"],
-    priority="P1",
-    steps=[
-        Step(
-            name="sr-isrevoked-on-external",
-            method="POST",
-            path=_UNBOUND_SR_ISREVOKED,
-            body={"tokenJti": "leak-jti"},
-            pre_script=_external_url_override(_UNBOUND_SR_ISREVOKED),
-            test_script=[
-                "pm.test('EXT-SR-ISREVOKED: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal IsRevoked exposed!').to.equal(404);",
-                "});",
-            ],
-        ),
-    ],
-))
-
-
-# ---------------------------------------------------------------------------
-# IAM-INT-NEG-EXT-IAM-FORCELOGOUT
-# InternalIAMService.ForceLogout on external → 404 (internal-only).
-# Admin force-logout must never be triggerable from the public edge.
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-IAM-FORCELOGOUT",
-    title="InternalIAMService.ForceLogout on external TLS endpoint → 404 (internal-only, ban #6)",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="iam-forcelogout-on-external",
-            method="POST",
-            path=_UNBOUND_FORCE_LOGOUT,
-            body={"userId": "usr00000000000000abc", "reason": "x"},
-            pre_script=_external_url_override(_UNBOUND_FORCE_LOGOUT),
-            test_script=[
-                "pm.test('EXT-FORCELOGOUT: status 404 (path not on external mux)', () => {",
-                "  const code = pm.response.code;",
-                "  if (code === undefined) { return; } // DNS/network error = endpoint not reachable = PASS",
-                "  pm.expect(code, 'CRITICAL: internal ForceLogout exposed!').to.equal(404);",
-                "});",
-            ],
-        ),
-    ],
-))
 
 
 # ===========================================================================
