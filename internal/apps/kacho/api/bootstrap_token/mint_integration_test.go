@@ -86,7 +86,7 @@ func TestMintBootstrapToken_FirstCall_ProvisionsAndMints(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "rs256.jwt.token", ExpiresIn: 900}}
 	uc := buildIntegrationUseCase(t, dsn, hydra, ex)
 
-	res, err := uc.Execute(context.Background(), 0)
+	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "rs256.jwt.token", res.AccessToken)
 	require.Equal(t, "Bearer", res.TokenType)
@@ -113,12 +113,12 @@ func TestMintBootstrapToken_Idempotent_ReusesSA(t *testing.T) {
 	uc := buildIntegrationUseCase(t, dsn, hydra,
 		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok1", ExpiresIn: 900}})
 
-	first, err := uc.Execute(context.Background(), 0)
+	first, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 
 	uc2 := buildIntegrationUseCase(t, dsn, hydra,
 		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok2-fresh", ExpiresIn: 900}})
-	second, err := uc2.Execute(context.Background(), 0)
+	second, err := uc2.Execute(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, first.PrincipalID, second.PrincipalID, "same bootstrap SA")
@@ -149,7 +149,7 @@ func TestMintBootstrapToken_Concurrent_SingleBootstrapSA(t *testing.T) {
 			uc := buildIntegrationUseCase(t, dsn, hydra,
 				&fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 900}})
 			<-start
-			res, err := uc.Execute(context.Background(), 0)
+			res, err := uc.Execute(context.Background())
 			errs[i] = err
 			if err == nil {
 				results[i] = res.PrincipalID

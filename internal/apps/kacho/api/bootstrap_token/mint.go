@@ -19,12 +19,15 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// Bounded TTL defaults (server policy; the request ttl_seconds is CLAMPED to
-// [1, MaxTTL], IBT-09). The client_assertion itself is always ≤ 60s (RFC 7523).
+// Token lifetime. The bootstrap token is SIGNED BY THE ISSUER, and its lifetime
+// is a property of the issuer's client — this service neither signs it nor can
+// shorten it afterwards. MaxTTL is therefore what the client is PROVISIONED with
+// (CreateOAuthClient.AccessTokenLifespan), i.e. the lifetime tokens really get;
+// it is not a number applied to the response afterwards. The response reports
+// what the issuer says the token's lifetime is — see effectiveExpiresIn.
 const (
-	// DefaultTTL — applied when the request ttl_seconds is 0.
-	DefaultTTL = 5 * time.Minute
-	// MaxTTL — hard ceiling on the minted bootstrap token lifetime.
+	// MaxTTL — the access-token lifespan this service provisions its bootstrap
+	// client with, and hence the lifetime of the tokens it mints.
 	MaxTTL = 15 * time.Minute
 	// assertionTTL — the client_assertion lifetime (short, ≤ 60s).
 	assertionTTL = 60 * time.Second
@@ -42,9 +45,9 @@ type Config struct {
 	// GatewayAudience — the requested token `aud` (https://{API_DOMAIN}) — the
 	// audience the production gateway accepts.
 	GatewayAudience string
-	// DefaultTTL / MaxTTL override the package defaults when non-zero.
-	DefaultTTL time.Duration
-	MaxTTL     time.Duration
+	// MaxTTL overrides the package default lifespan the bootstrap OAuth client is
+	// provisioned with (zero → MaxTTL).
+	MaxTTL time.Duration
 }
 
 // Result — the minted bootstrap token (transport-agnostic).
@@ -70,16 +73,10 @@ type MintUseCase struct {
 	logger    *slog.Logger
 }
 
-// NewMintUseCase constructs. DefaultTTL/MaxTTL fall back to the package defaults.
+// NewMintUseCase constructs. MaxTTL falls back to the package default.
 func NewMintUseCase(store BootstrapStore, txb service.TxBeginner, hydra OAuthClientAdmin, exchanger TokenExchanger, cfg Config) *MintUseCase {
-	if cfg.DefaultTTL <= 0 {
-		cfg.DefaultTTL = DefaultTTL
-	}
 	if cfg.MaxTTL <= 0 {
 		cfg.MaxTTL = MaxTTL
-	}
-	if cfg.DefaultTTL > cfg.MaxTTL {
-		cfg.DefaultTTL = cfg.MaxTTL
 	}
 	return &MintUseCase{
 		store:     store,
@@ -103,7 +100,13 @@ func (u *MintUseCase) WithLogger(l *slog.Logger) *MintUseCase { u.logger = l; re
 
 // Execute provisions (idempotently) and mints. Fail-closed: no signing key →
 // UNAVAILABLE; Hydra unreachable/rejected → UNAVAILABLE (no token, no leak).
-func (u *MintUseCase) Execute(ctx context.Context, ttlSeconds int64) (*Result, error) {
+//
+// The lifetime is not a parameter: the issuer decides it (per its client's
+// configured lifespan), so the only thing this service can do about it is REPORT
+// IT HONESTLY. It takes no request lifetime and never reports a shorter one than
+// the token actually has — an understated expiry would leave a live cluster-admin
+// credential in the wild that nobody looks for, because everyone believes it died.
+func (u *MintUseCase) Execute(ctx context.Context) (*Result, error) {
 	if u.cfg.SigningKeyPEM == "" {
 		u.logErr(ctx, "mint disabled", ErrSigningKeyNotConfigured)
 		return nil, status.Error(codes.Unavailable, "bootstrap token minting is not configured")
@@ -151,7 +154,7 @@ func (u *MintUseCase) Execute(ctx context.Context, ttlSeconds int64) (*Result, e
 		return nil, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
 	}
 
-	expiresIn := u.effectiveExpiresIn(ttlSeconds, out.ExpiresIn)
+	expiresIn := u.effectiveExpiresIn(ctx, out.ExpiresIn)
 	return &Result{
 		AccessToken: out.AccessToken,
 		TokenType:   "Bearer",
@@ -244,35 +247,30 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 	return id, nil
 }
 
-// clampTTL clamps the requested ttl to [1s, MaxTTL], defaulting a 0 request to
-// DefaultTTL. Returns seconds.
-func (u *MintUseCase) clampTTL(req int64) int64 {
-	d := u.cfg.DefaultTTL
-	if req > 0 {
-		d = time.Duration(req) * time.Second
+// effectiveExpiresIn is the lifetime REPORTED for the minted token: the one the
+// issuer states. It is never trimmed to a smaller number this service would have
+// preferred — the bearer would still be accepted after the reported expiry, and
+// an expiry that has "already passed" is exactly what stops anyone from revoking
+// or rotating a credential that is still live.
+//
+// The issuer stating no lifetime is the only case with nothing to report; the
+// honest stand-in is then the lifespan this service provisioned the client with.
+// An issuer lifetime LONGER than that means the client was provisioned elsewhere
+// (or reconfigured): it is reported as-is and flagged, because the discrepancy is
+// an operational fact about a privileged credential, not something to round away.
+func (u *MintUseCase) effectiveExpiresIn(ctx context.Context, issuerExpiresIn int) int64 {
+	provisioned := int64(u.cfg.MaxTTL / time.Second)
+	if issuerExpiresIn <= 0 {
+		u.logWarn(ctx, "issuer stated no token lifetime; reporting the provisioned client lifespan",
+			slog.Int64("reported_expires_in", provisioned))
+		return provisioned
 	}
-	if d <= 0 {
-		d = u.cfg.DefaultTTL
+	if int64(issuerExpiresIn) > provisioned {
+		u.logWarn(ctx, "issued bootstrap token outlives the provisioned client lifespan; reporting the real lifetime",
+			slog.Int("issuer_expires_in", issuerExpiresIn),
+			slog.Int64("provisioned_lifespan", provisioned))
 	}
-	if d > u.cfg.MaxTTL {
-		d = u.cfg.MaxTTL
-	}
-	return int64(d / time.Second)
-}
-
-// effectiveExpiresIn = min(clamped-request, hydra-token-lifespan, MaxTTL) — the
-// reported expiry never exceeds the server hard-max (IBT-09) and never overstates
-// the real Hydra token lifetime.
-func (u *MintUseCase) effectiveExpiresIn(reqTTL int64, hydraExpiresIn int) int64 {
-	eff := u.clampTTL(reqTTL)
-	if hydraExpiresIn > 0 && int64(hydraExpiresIn) < eff {
-		eff = int64(hydraExpiresIn)
-	}
-	maxSec := int64(u.cfg.MaxTTL / time.Second)
-	if eff > maxSec || eff <= 0 {
-		eff = maxSec
-	}
-	return eff
+	return int64(issuerExpiresIn)
 }
 
 // mapErr maps a repo error to a gRPC status, never leaking pgx/driver text.
@@ -297,6 +295,13 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 	}
 	u.logErr(ctx, action, err)
 	return status.Error(codes.Internal, "internal error")
+}
+
+// logWarn surfaces an operational fact about the minted credential. nil-safe.
+func (u *MintUseCase) logWarn(ctx context.Context, msg string, attrs ...any) {
+	if u.logger != nil {
+		u.logger.WarnContext(ctx, msg, attrs...)
+	}
 }
 
 func (u *MintUseCase) logErr(ctx context.Context, action string, err error) {

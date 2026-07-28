@@ -126,7 +126,7 @@ func TestMintBootstrapToken_HydraUnavailable_FailClosed(t *testing.T) {
 	uc := newUseCase(t, &fakeStore{}, &fakeHydra{},
 		&fakeExchanger{err: errors.New(rawLeak)}, Config{})
 
-	res, err := uc.Execute(context.Background(), 0)
+	res, err := uc.Execute(context.Background())
 	require.Nil(t, res)
 	require.Error(t, err)
 	st, ok := status.FromError(err)
@@ -141,33 +141,38 @@ func TestMintBootstrapToken_HydraUnavailable_FailClosed(t *testing.T) {
 func TestMintBootstrapToken_IssuerUnavailableSentinel_FailClosed(t *testing.T) {
 	uc := newUseCase(t, &fakeStore{}, &fakeHydra{},
 		&fakeExchanger{err: ErrIssuerUnavailable}, Config{})
-	_, err := uc.Execute(context.Background(), 0)
+	_, err := uc.Execute(context.Background())
 	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
-// ── IBT-09: bounded TTL (clamp to hard-max) ─────────────────────────────────────
+// ── IBT-09: the token lifetime is bounded WHERE IT IS DECIDED ──────────────────
+//
+// The bound lives on the issuer's client (access-token lifespan), not on the
+// number in the response: trimming the response cannot shorten a signed bearer,
+// it only hides how long it stays valid. So the assertions are (a) the client is
+// provisioned with the bounded lifespan, and (b) the response repeats what the
+// issuer says. Truthfulness of the reported value is pinned in
+// mint_truthful_ttl_test.go.
 
-func TestMintBootstrapToken_TTLClampedToMax(t *testing.T) {
-	// Hydra reports a long-lived token; the request asks for a huge TTL.
-	uc := newUseCase(t, &fakeStore{}, &fakeHydra{},
-		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 86400}}, Config{})
+func TestMintBootstrapToken_ClientProvisionedWithBoundedLifespan(t *testing.T) {
+	hydra := &fakeHydra{}
+	uc := newUseCase(t, &fakeStore{}, hydra,
+		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 900}}, Config{})
 
-	res, err := uc.Execute(context.Background(), 86400)
+	_, err := uc.Execute(context.Background())
 	require.NoError(t, err)
-	maxSec := int64(MaxTTL / time.Second)
-	require.LessOrEqual(t, res.ExpiresIn, maxSec, "requested TTL must be clamped to the hard-max")
-	require.Positive(t, res.ExpiresIn)
-	// expiresAt - issuedAt == expiresIn (within second truncation) and ≤ hard-max.
-	require.Equal(t, res.ExpiresIn, int64(res.ExpiresAt.Sub(res.IssuedAt)/time.Second))
+	require.Equal(t, MaxTTL.String(), hydra.lastReq.AccessTokenLifespan,
+		"the lifetime is bounded on the issuer's client, which is the only place that can bound it")
 }
 
-func TestMintBootstrapToken_TTLZero_ServerDefault(t *testing.T) {
+func TestMintBootstrapToken_ReportedExpiryAgreesWithTimestamps(t *testing.T) {
 	uc := newUseCase(t, &fakeStore{}, &fakeHydra{},
 		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 86400}}, Config{})
-	res, err := uc.Execute(context.Background(), 0)
+
+	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, int64(DefaultTTL/time.Second), res.ExpiresIn, "ttl=0 → server default")
-	require.LessOrEqual(t, res.ExpiresIn, int64(MaxTTL/time.Second))
+	require.Positive(t, res.ExpiresIn)
+	require.Equal(t, res.ExpiresIn, int64(res.ExpiresAt.Sub(res.IssuedAt)/time.Second))
 }
 
 // ── IBT-11: only-bootstrap — no arbitrary principal ─────────────────────────────
@@ -176,7 +181,7 @@ func TestMintBootstrapToken_NoArbitraryPrincipal(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 300}}
 	uc := newUseCase(t, &fakeStore{}, &fakeHydra{}, ex, Config{})
 
-	res, err := uc.Execute(context.Background(), 0)
+	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 	// The minted principal is ALWAYS the deterministic bootstrap SA — there is no
 	// request field to name any other subject (skeleton-key rejected by construction).
@@ -194,7 +199,7 @@ func TestMintBootstrapToken_FirstCall_ProvisionsHydraClientOnce(t *testing.T) {
 	uc := newUseCase(t, store, hydra,
 		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 300}}, Config{})
 
-	res, err := uc.Execute(context.Background(), 0)
+	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 1, hydra.calls, "first call provisions the Hydra client exactly once")
 	require.NotNil(t, store.inserted, "mapping row inserted")
@@ -218,7 +223,7 @@ func TestMintBootstrapToken_Idempotent_ReusesExistingMapping(t *testing.T) {
 	uc := newUseCase(t, store, hydra,
 		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok2", ExpiresIn: 300}}, Config{})
 
-	res, err := uc.Execute(context.Background(), 0)
+	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 0, hydra.calls, "provisioned mapping is reused — no new Hydra client")
 	require.Nil(t, store.inserted, "no new mapping inserted")
@@ -233,7 +238,7 @@ func TestMintBootstrapToken_NoSigningKey_FailClosed(t *testing.T) {
 			GatewayAudience: "https://api.kacho.cloud",
 			// SigningKeyPEM deliberately empty.
 		})
-	_, err := uc.Execute(context.Background(), 0)
+	_, err := uc.Execute(context.Background())
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	require.Equal(t, "bootstrap token minting is not configured", status.Convert(err).Message())
 }

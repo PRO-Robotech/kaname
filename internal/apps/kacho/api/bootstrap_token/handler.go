@@ -29,7 +29,7 @@ func NewHandler(mint *MintUseCase) *Handler { return &Handler{mint: mint} }
 // MintBootstrapToken mints the bootstrap RS256 Bearer (synchronous — not an
 // Operation, D-2).
 func (h *Handler) MintBootstrapToken(ctx context.Context, req *iamv1.MintBootstrapTokenRequest) (*iamv1.MintBootstrapTokenResponse, error) {
-	res, err := h.mint.Execute(ctx, req.GetTtlSeconds())
+	res, err := h.mint.Execute(ctx)
 	if err != nil {
 		return nil, err
 	}
