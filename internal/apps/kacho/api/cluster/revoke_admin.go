@@ -11,16 +11,26 @@ package cluster
 // Flow (synchronous within Execute):
 //  1. Sync validation: subject_type (USER | SERVICE_ACCOUNT) + per-type
 //     subject_id format.
-//  2. Begin TX → Revoke (CAS with self-revoke / last-admin / already-revoked guards) →
-//     EmitDeleteTx (FGA outbox) → commit.
-//  3. Map sentinel errors (ErrSelfRevoke → FailedPrecondition,
+//  2. Persist Operation (done=false) so the returned id is always queryable.
+//  3. Begin TX → Revoke (CAS with self-revoke / last-admin / already-revoked guards) →
+//     EmitDeleteTx (FGA outbox) → commit. On failure → MarkError the op.
+//  4. Map sentinel errors (ErrSelfRevoke → FailedPrecondition,
 //     ErrLastAdmin → FailedPrecondition, ErrNotFound → NotFound).
-//  4. Create Operation record (done=true) and return to caller.
+//  5. Complete the Operation (done=true) with the full metadata (the revoked
+//     grant id) and the declared response (ClusterAdminGrant).
 //
 // Synchronous pattern: same as GrantAdmin. The mutation is a single CAS UPDATE
 // on one row and completes in milliseconds — no async worker needed. Tests
 // check status.Code(err) on the direct handler return value, which requires
 // synchronous execution.
+//
+// «Synchronous» is about latency, NOT about skipping the persisted transition:
+// the Operation row is created (done=false) and then flipped by a terminal
+// write, exactly as in GrantAdmin. It used to be built in memory with
+// done=true/response set and handed to Create — but Create writes `done` as the
+// literal false and writes no response columns at all, so the RPC answered
+// done:true over a row that said done=f, response_data=NULL, and a client
+// following the documented poll protocol never finished.
 
 import (
 	"context"
@@ -28,6 +38,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
@@ -47,7 +58,7 @@ type RevokeAdminUseCase struct {
 	writer    grantWriter
 	relations relationOutboxEmitter
 	txb       service.TxBeginner
-	opsRepo   operations.Repo
+	opsRepo   operationRepo
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate. nil →
 	// fail-closed (requireClusterSystemAdmin denies). See admin_authz.go.
 	adminCheck adminChecker
@@ -60,7 +71,7 @@ func NewRevokeAdminUseCase(
 	w grantWriter,
 	relations relationOutboxEmitter,
 	txb service.TxBeginner,
-	opsRepo operations.Repo,
+	opsRepo operationRepo,
 ) *RevokeAdminUseCase {
 	return &RevokeAdminUseCase{writer: w, relations: relations, txb: txb, opsRepo: opsRepo}
 }
@@ -107,44 +118,74 @@ func (uc *RevokeAdminUseCase) Execute(
 	// coercion (that silently accepted unauthenticated callers and is removed).
 	principal := authzguard.PrincipalUserID(ctx)
 
-	// Perform domain mutation synchronously.
-	grant, err := uc.doRevoke(ctx, styp, sid, principal)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build and persist Operation (done=true immediately — sync mutation).
-	meta, merr := anypb.New(&iamv1.RevokeClusterAdminMetadata{
-		ClusterAdminGrantId: string(grant.ID),
-		SubjectId:           subjectID,
-	})
-	if merr != nil {
-		return nil, fmt.Errorf("marshal revoke metadata: %w", merr)
-	}
-
+	// Persist the Operation (done=false) BEFORE the mutation — same reason as
+	// GrantAdmin: the id handed to the caller must ALWAYS be queryable, and
+	// persisting after the mutation left a committed revoke whose operation row
+	// never existed when Create failed. The revoked grant.ID is not knowable
+	// yet, so the initial metadata carries only subject_id; the terminal write
+	// below replaces it with the full one.
 	op, oerr := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Revoke cluster admin from %s %s", styp, subjectID),
-		&iamv1.RevokeClusterAdminMetadata{
-			ClusterAdminGrantId: string(grant.ID),
-			SubjectId:           subjectID,
-		},
+		&iamv1.RevokeClusterAdminMetadata{SubjectId: subjectID},
 	)
 	if oerr != nil {
 		return nil, oerr
 	}
-	op.Done = true
-	op.Response = meta
-
 	if err := uc.opsRepo.Create(ctx, op); err != nil {
-		// Non-fatal: mutation already committed; return op without persisting.
-		// Log so a later OperationService.Get(op.id) returning NotFound is
-		// traceable to this persistence failure (CWE-390: no silent swallow).
-		slog.ErrorContext(ctx, "cluster RevokeAdmin: operation persist failed",
-			"operation_id", op.ID, "err", err.Error())
+		return nil, fmt.Errorf("persist operation: %w", err)
 	}
 
+	// Perform domain mutation synchronously.
+	grant, err := uc.doRevoke(ctx, styp, sid, principal)
+	if err != nil {
+		// Record the terminal failure on the already-persisted op so a poll sees
+		// a real error rather than a row that never completes. MapRepoErr is
+		// idempotent on already-mapped sentinels and collapses any unmapped
+		// error (begin tx / emit / commit) to the fixed opaque INTERNAL text, so
+		// no pgx/SQL detail is persisted into op.error.
+		gerr := shared.MapRepoErr(err)
+		_ = uc.opsRepo.MarkError(ctx, op.ID, status.Convert(gerr).Proto())
+		return nil, gerr
+	}
+
+	// Complete the Operation: done=true, metadata replaced by the full one (the
+	// revoked grant id), response = the declared ClusterAdminGrant.
+	meta, resp, merr := revokeOperationPayload(subjectID, grant)
+	if merr != nil {
+		return nil, merr
+	}
+	if err := uc.opsRepo.MarkDoneWithMetadata(ctx, op.ID, meta, resp); err != nil {
+		// Non-fatal for the caller: the revoke committed and the row exists, so a
+		// poll answers (done=false) and never NotFound. It is NOT self-healing —
+		// the IAM orphan-resolver has no arm for cluster-admin metadata and skips
+		// such rows — so this is logged loudly, never swallowed (CWE-390).
+		slog.ErrorContext(ctx, "cluster RevokeAdmin: operation complete failed",
+			"operation_id", op.ID, "err", err.Error())
+	}
+	op.Done = true
+	op.Metadata = meta
+	op.Response = resp
+
 	return shared.OperationToProto(&op), nil
+}
+
+// revokeOperationPayload — the terminal (metadata, response) pair declared by
+// `InternalClusterService.RevokeAdmin` (metadata: RevokeClusterAdminMetadata,
+// response: ClusterAdminGrant — the soft-revoked row, granted_until set).
+func revokeOperationPayload(subjectID string, grant domain.ClusterAdminGrant) (meta, resp *anypb.Any, err error) {
+	meta, err = anypb.New(&iamv1.RevokeClusterAdminMetadata{
+		ClusterAdminGrantId: string(grant.ID),
+		SubjectId:           subjectID,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal revoke metadata: %w", err)
+	}
+	resp, err = anypb.New(clusterAdminGrantToProto(grant))
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal revoke response: %w", err)
+	}
+	return meta, resp, nil
 }
 
 // doRevoke — runs revoke (with D-5/D-6/D-12 guards) within a single TX.

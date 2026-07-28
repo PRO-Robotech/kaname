@@ -112,7 +112,11 @@ type services struct {
 // buildServices создает все repo'ы поверх pool и собирает бизнес-сервисы.
 // Composition root passes a fully-configured OpenFGA HTTP client — wiring
 // of every per-resource use-case is unconditional (no fallback stub).
-func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
+// opsRepo is the FULL corelib repo (operations.NewRepo), not the narrow
+// operations.Repo: the cluster-admin use-cases finalize their Operation
+// metadata on the terminal write (the grant id exists only after the mutation),
+// and that capability must be proven at compile time, not type-asserted here.
+func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	kachoRepo kachorepo.Repository,
 	relationStore *clients.OpenFGAHTTPClient,
 	metricsReg *metrics.Registry,

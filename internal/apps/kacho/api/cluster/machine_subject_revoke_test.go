@@ -135,13 +135,16 @@ func (r *recordingRelationEmitter) EmitDeleteTx(_ context.Context, _ service.Tx,
 }
 
 // noopOpsRepo — operations.Repo stub. The cluster use-cases touch Create /
-// MarkDone / MarkError; every one is stubbed explicitly (embedding the
-// interface and overriding only some methods leaves the rest as a nil-panic
-// waiting to happen).
+// MarkDone / MarkDoneWithMetadata / MarkError; every one is stubbed explicitly
+// (embedding the interface and overriding only some methods leaves the rest as
+// a nil-panic waiting to happen).
 type noopOpsRepo struct{ operations.Repo }
 
 func (noopOpsRepo) Create(context.Context, operations.Operation) error { return nil }
 func (noopOpsRepo) MarkDone(context.Context, string, *anypb.Any) error { return nil }
+func (noopOpsRepo) MarkDoneWithMetadata(context.Context, string, *anypb.Any, *anypb.Any) error {
+	return nil
+}
 func (noopOpsRepo) MarkError(context.Context, string, *statuspb.Status) error {
 	return nil
 }
