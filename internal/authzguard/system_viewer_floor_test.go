@@ -223,7 +223,6 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 
 	mustHave := []string{
 		"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
-		"/kacho.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
 		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
 		"/kacho.cloud.iam.v1.InternalUserService/Get",
 		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
@@ -239,6 +238,10 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 	mustNotHave := []string{
 		// PDP — never floor-gated (INV-FLOOR-5).
 		"/kacho.cloud.iam.v1.InternalIAMService/Check",
+		// Retired: iam serves no implementation for it. The floor is a list of
+		// RPCs this service answers; listing one it does not is dead policy that
+		// reads as coverage.
+		"/kacho.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
 		// secret-authed webhook (INV-FLOOR-6).
 		"/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
 		// hot-path chicken-and-egg (INV-FLOOR-6).

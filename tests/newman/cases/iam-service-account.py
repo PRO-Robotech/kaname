@@ -669,7 +669,10 @@ CASES.append(Case(
             name="update-immutable",
             method="PATCH",
             path="/iam/v1/serviceAccounts/{{crudSvaId}}",
-            body={"accountId": "{{accountAId}}", "updateMask": "account_id"},
+            # The mask alone carries the assertion: the immutable-switch is keyed on
+            # the mask path, and `accountId` is not a field of
+            # UpdateServiceAccountRequest — sending it would be a discarded key.
+            body={"updateMask": "account_id"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),

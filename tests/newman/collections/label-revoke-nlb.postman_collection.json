@@ -378,7 +378,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"loadBalancerId\": \"{{_t31nLb}}\", \"name\": \"t31n-lsn-{{runId}}\", \"protocol\": \"TCP\", \"port\": 80, \"targetPort\": 8080, \"ipVersion\": \"IPV4\", \"addressSpec\": {\"auto\": {}}, \"labels\": {\"lsn\": \"treska\"}}",
+              "raw": "{\"loadBalancerId\": \"{{_t31nLb}}\", \"name\": \"t31n-lsn-{{runId}}\", \"protocol\": \"TCP\", \"port\": 80, \"targetPort\": 8080, \"labels\": {\"lsn\": \"treska\"}}",
               "options": {
                 "raw": {
                   "language": "json"

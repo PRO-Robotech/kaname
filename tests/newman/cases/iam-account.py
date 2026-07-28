@@ -894,7 +894,10 @@ CASES.append(Case(
             name="update-immutable",
             method="PATCH",
             path="/iam/v1/accounts/{{accountAId}}",
-            body={"ownerUserId": "{{userAAAId}}", "updateMask": "owner_user_id"},
+            # The mask alone carries the assertion: the immutable-switch is keyed on
+            # the mask path, and `ownerUserId` is not a field of UpdateAccountRequest —
+            # sending it would be a key the edge discards.
+            body={"updateMask": "owner_user_id"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),

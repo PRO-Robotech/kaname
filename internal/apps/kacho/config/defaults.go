@@ -65,7 +65,6 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.hook-shared-secret-env", "KACHO_IAM_HOOK_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KACHO_IAM_JWKS_ENC_KEY")
-	v.SetDefault("authn.session-revocations-cache-ttl-seconds", 5)
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,

@@ -62,8 +62,8 @@ const gatewayServiceName = "api-gateway"
 // from any other module is a privilege-escalation attempt.
 //
 // NOT in this set (any verified module — floor only):
-//   - InternalIAMService/{Check,LookupSubject,PollSubjectChanges,
-//     GetJWKSStatus} — hot-path service→service RPCs.
+//   - InternalIAMService/{Check,LookupSubject,PollSubjectChanges} — hot-path
+//     service→service RPCs.
 //   - InternalSessionRevocationsService/IsRevoked — the gateway's own hot-path
 //     lookup, runs before per-user authz can possibly run (chicken-and-egg).
 //   - InternalUserService/Get — service→service lookup.

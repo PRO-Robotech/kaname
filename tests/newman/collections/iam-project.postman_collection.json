@@ -2245,7 +2245,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"updateMask\": \"account_id\"}",
+              "raw": "{\"updateMask\": \"account_id\"}",
               "options": {
                 "raw": {
                   "language": "json"

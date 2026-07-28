@@ -89,7 +89,6 @@ func ReadFloorRPCs() []string {
 	return []string{
 		// InternalIAMService — service→service read lookups.
 		"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
-		"/kacho.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
 		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
 		// InternalUserService — service→service user mirror read.
 		"/kacho.cloud.iam.v1.InternalUserService/Get",

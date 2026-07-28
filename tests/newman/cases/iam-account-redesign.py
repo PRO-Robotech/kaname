@@ -166,7 +166,9 @@ CASES.append(Case(
             method="PATCH",
             path="/iam/v1/accounts/{{accountAId}}",
             # FieldMask → comma-separated STRING in proto3 JSON, not an array.
-            body={"updateMask": "ownerUserId", "ownerUserId": "usr00000000000000bad"},
+            # `ownerUserId` is not a field of UpdateAccountRequest — the mask alone
+            # drives the immutable-switch; a body key here would be discarded.
+            body={"updateMask": "ownerUserId"},
             # The account OWNER does NOT materialize v_update on the account itself
             # (hierarchy-scope anti-over-grant, data-integrity.md) → an owner update
             # is authz-denied (403) BEFORE the handler's immutable-check. Use the
@@ -362,7 +364,9 @@ CASES.append(Case(
             method="PATCH",
             path="/iam/v1/projects/{{projectA1Id}}",
             # FieldMask → comma-separated STRING in proto3 JSON, not an array.
-            body={"updateMask": "accountId", "accountId": "{{accountBId}}"},
+            # `accountId` is not a field of UpdateProjectRequest — the mask alone
+            # drives the immutable-switch; a body key here would be discarded.
+            body={"updateMask": "accountId"},
             # editor does NOT materialize v_update on the project hierarchy-scope
             # (anti-over-grant) → owner/editor update is authz-denied (403) before the
             # handler's immutable-check. Use system_admin so the immutable validation

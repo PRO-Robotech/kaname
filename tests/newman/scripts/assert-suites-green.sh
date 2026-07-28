@@ -11,8 +11,7 @@
 # WHY this is shared (KAC — newman gate consolidation): the known-RED whitelist
 # used to be duplicated inline in each repo's newman-e2e.yml. They drifted —
 # get-malformed (api-gateway#73), delete-binding (iam#108), the user-per-account
-# invite fix (iam#113, migration 0011) and the SEC-C-A-* whitelist only ever
-# reached kacho-iam's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on
+# invite fix (iam#113, migration 0011) only ever reached kacho-iam's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on
 # the very same shared suites that kacho-iam reported GREEN. One script = one
 # source of truth; un-skip / whitelist edits land everywhere at once.
 set -e
@@ -140,10 +139,6 @@ for col in "${collections[@]}"; do
   #   Removing a token that matches nothing cannot change any verdict — it only
   #   takes away the trap where a future step reusing one of those names would be
   #   silently absorbed.
-  #   - SEC-C-A-* (parent.name) — FGA-proxy Register/UnregisterResource are
-  #     cluster-internal :9091-only RPCs with no google.api.http mapping (ban
-  #     #6) → un-runnable as black-box REST; covered by fgaproxy_test.go
-  #     (kacho-iam#111 tracks dropping/re-targeting the REST suite).
   #   - (#193 FIXED — removed from whitelist) get-confirms / get-confirms-update /
   #     list-with-account were RED because Role.Get/List filtered by the `v_list`
   #     verb relation, which has NO tier→v_* bridge in the FGA model, so a role's
@@ -390,7 +385,7 @@ for col in "${collections[@]}"; do
   # variable could be absorbed by an unrelated alternation entry and the suite would
   # go quiet again in exactly the way this whole mechanism exists to prevent.
   if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache|probe-check-after-revoke|poll-op-plaintext|re-get-op-redacted|poll-bind-project-anchor|te4-post-bind-project-viewer|teardown-user-gone|teardown-grp-gone|teardown-nonmem-gone|revoke-binding-gone|teardown-sa-gone|teardown-sa-iso-gone|teardown-usr-iso-gone|teardown-user-revoke|teardown-usr-iso-revoke|issue-sakey")) or (.parent.name? // "" | test("^SEC-C-A-|^T31-LBLREVOKE-NLB-|^IAM-CH-GRP-MEMBERSHIP-FLIP-OK|^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH |^SUBNET-LF-D-VISIBLE |^SUBNET-LF-D-NOLEAK |^SUBNET-LF-D-NONE ")))] | length' "$report")
+    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache|probe-check-after-revoke|poll-op-plaintext|re-get-op-redacted|poll-bind-project-anchor|te4-post-bind-project-viewer|teardown-user-gone|teardown-grp-gone|teardown-nonmem-gone|revoke-binding-gone|teardown-sa-gone|teardown-sa-iso-gone|teardown-usr-iso-gone|teardown-user-revoke|teardown-usr-iso-revoke|issue-sakey")) or (.parent.name? // "" | test("^T31-LBLREVOKE-NLB-|^IAM-CH-GRP-MEMBERSHIP-FLIP-OK|^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH |^SUBNET-LF-D-VISIBLE |^SUBNET-LF-D-NOLEAK |^SUBNET-LF-D-NONE ")))] | length' "$report")
     fails=$((fails - known_red))
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi

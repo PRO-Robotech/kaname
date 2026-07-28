@@ -429,9 +429,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.Repo,
 		WithRelationWriter(relationStore).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
-		// ForceLogout records a session revocation. (GetJWKSStatus needs no
-		// wiring: iam owns no signing keyset, so it reports an empty one —
-		// the oidc_jwks_keys store it used to read was dropped in 0065.)
+		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
 		// Defense-in-depth ReBAC gate for ForceLogout (security.md "AuthN+AuthZ
 		// ВЕЗДЕ"): require the authenticated principal hold system_admin@cluster.

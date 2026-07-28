@@ -3039,7 +3039,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": \"scopeId\", \"scopeId\": \"{{accountBId}}\"}",
+              "raw": "{\"updateMask\": \"scopeId\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3121,7 +3121,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": \"subjects\", \"subjects\": [{\"type\": \"USER\", \"id\": \"{{userAAAId}}\"}]}",
+              "raw": "{\"updateMask\": \"subjects\"}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 )
 
 // ResolveHookSharedSecret returns the current shared-secret for Hydra hooks.
@@ -173,17 +172,6 @@ func (c AuthNConfig) ResolveHydraJWKSURL() string {
 		return v
 	}
 	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/.well-known/jwks.json"
-}
-
-// SessionRevocationsCacheTTL returns the TTL for the memo-cache over
-// session_revocations. Default 5 seconds (SLA — ≤1s after force-logout;
-// cache TTL must be shorter).
-func (c AuthNConfig) SessionRevocationsCacheTTL() time.Duration {
-	s := c.SessionRevocationsTTLSec
-	if s <= 0 {
-		s = 5
-	}
-	return time.Duration(s) * time.Second
 }
 
 // HooksHTTPListenAddress — normalised listen-addr for the webhook HTTP
