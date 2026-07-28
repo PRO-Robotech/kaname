@@ -173,8 +173,6 @@ authn:
   hydra-issuer: ""                 # пусто → выводится из domain
   hook-shared-secret-env: KACHO_IAM_HOOK_TOKEN
   jwks-encryption-key-hex-env: KACHO_IAM_JWKS_ENC_KEY
-  jwks-rotation-days: 90
-  session-revocations-cache-ttl-seconds: 5
   hooks-http-endpoint: "tcp://0.0.0.0:9092"
 ```
 
@@ -277,10 +275,14 @@ KACHO_IAM_DB_PASSWORD=secret kacho-migrator up
 subcommand `kacho-iam jwks rotate` и падал в 100% запусков), а следом — репозиторий
 ключей, доменный тип и методы публикации/удаления ключа у Hydra-admin-клиента.
 
-RPC `InternalIAMService.GetJWKSStatus` **сохранён**: это опубликованный
-wire-контракт (его удаление роняет CI-гейт `buf breaking`). Теперь он всегда
-отдаёт **пустой** набор алгоритмов — ровно то же, что он отдавал, читая пустую
-таблицу, так что для вызывающих поведение не изменилось.
+RPC `InternalIAMService.GetJWKSStatus` **снят с обслуживания**. Он сообщал
+содержимое снятой таблицы, после её удаления безусловно отдавал пустой набор и
+не имел ни одного вызывающего — ни сервиса, ни шлюза, ни консоли, ни
+регрессионного кейса. Read-RPC, который ничего не решает и который никто не
+зовёт, снимается: iam реализации не держит, вызов доходит до сгенерированной
+заглушки и получает `UNIMPLEMENTED`. Объявление в proto (RPC + сообщения
+`JWKSStatusResponse`/`JWKSAlgStatus`) снимается отдельным шагом с резервированием
+номера И имени — это осознанное изменение контракта, а не уборка.
 
 `KACHO_IAM_JWKS_ENC_KEY` пока остаётся обязательным в production-режиме —
 его требует boot-guard `config.validateProductionAuthNSecrets`.

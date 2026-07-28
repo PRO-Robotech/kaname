@@ -130,7 +130,6 @@ type PostgresConfig struct {
 //	                        minted for was dropped in migration 0065), but the
 //	                        production boot guard still REQUIRES it — see
 //	                        validateProductionAuthNSecrets.
-//	SessionRevocationsTTLSec — session_revocations cache TTL (default 5s).
 //	HooksHTTPEndpoint     — HTTP listener for webhooks from Hydra/Kratos.
 //	                        Default `tcp://0.0.0.0:9092` (separate port from
 //	                        gRPC public 9090 / internal 9091).
@@ -160,24 +159,23 @@ type PostgresConfig struct {
 //	                        действует глобальный дефолт провайдера. Задаётся
 //	                        профилем деплоя; override KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
-	Mode                     Mode          `mapstructure:"mode"`
-	Domain                   string        `mapstructure:"domain"`
-	HydraIssuer              string        `mapstructure:"hydra-issuer"`
-	HydraAdminURL            string        `mapstructure:"hydra-admin-url"`
-	HydraTokenURL            string        `mapstructure:"hydra-token-url"`
-	HydraJWKSURL             string        `mapstructure:"hydra-jwks-url"`
-	HookSharedSecret         string        `mapstructure:"hook-shared-secret"`
-	HookSharedSecretEnv      string        `mapstructure:"hook-shared-secret-env"`
-	JWKSEncryptionKeyHex     string        `mapstructure:"jwks-encryption-key-hex"`
-	JWKSEncryptionKeyHexEnv  string        `mapstructure:"jwks-encryption-key-hex-env"`
-	SessionRevocationsTTLSec int           `mapstructure:"session-revocations-cache-ttl-seconds"`
-	HooksHTTPEndpoint        string        `mapstructure:"hooks-http-endpoint"`
-	SAKeyRedactGrace         time.Duration `mapstructure:"sakey-redact-grace"`
-	UserTokenRedactGrace     time.Duration `mapstructure:"usertoken-redact-grace"`
-	SAKeyDefaultTTL          time.Duration `mapstructure:"sakey-default-ttl"`
-	SAKeyMaxTTL              time.Duration `mapstructure:"sakey-max-ttl"`
-	SAKeyAccessTokenTTL      time.Duration `mapstructure:"sakey-access-token-ttl"`
-	SAKeyBindDPoP            bool          `mapstructure:"sakey-bind-dpop"`
+	Mode                    Mode          `mapstructure:"mode"`
+	Domain                  string        `mapstructure:"domain"`
+	HydraIssuer             string        `mapstructure:"hydra-issuer"`
+	HydraAdminURL           string        `mapstructure:"hydra-admin-url"`
+	HydraTokenURL           string        `mapstructure:"hydra-token-url"`
+	HydraJWKSURL            string        `mapstructure:"hydra-jwks-url"`
+	HookSharedSecret        string        `mapstructure:"hook-shared-secret"`
+	HookSharedSecretEnv     string        `mapstructure:"hook-shared-secret-env"`
+	JWKSEncryptionKeyHex    string        `mapstructure:"jwks-encryption-key-hex"`
+	JWKSEncryptionKeyHexEnv string        `mapstructure:"jwks-encryption-key-hex-env"`
+	HooksHTTPEndpoint       string        `mapstructure:"hooks-http-endpoint"`
+	SAKeyRedactGrace        time.Duration `mapstructure:"sakey-redact-grace"`
+	UserTokenRedactGrace    time.Duration `mapstructure:"usertoken-redact-grace"`
+	SAKeyDefaultTTL         time.Duration `mapstructure:"sakey-default-ttl"`
+	SAKeyMaxTTL             time.Duration `mapstructure:"sakey-max-ttl"`
+	SAKeyAccessTokenTTL     time.Duration `mapstructure:"sakey-access-token-ttl"`
+	SAKeyBindDPoP           bool          `mapstructure:"sakey-bind-dpop"`
 	// BootstrapMint — caller gate + key source for
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`

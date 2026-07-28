@@ -3,12 +3,11 @@
 
 package internal_iam
 
-// force_logout_test.go — unit-тесты InternalIAMService.ForceLogout +
-// GetJWKSStatus. До этого фикса оба метода были advertised (caller_policy +
-// permission_catalog), но Unimplemented. ForceLogout — admin force-logout,
-// который ДОЛЖЕН записывать session-revocation для целевого subject (тот же
-// writer, что и user-logout Revoke). GetJWKSStatus — теперь всегда пустой
-// keyset: iam не владеет ключами подписи (см. блок тестов ниже).
+// force_logout_test.go — unit-тесты InternalIAMService.ForceLogout. До этого
+// фикса метод был advertised (caller_policy + permission_catalog), но
+// Unimplemented. ForceLogout — admin force-logout, который ДОЛЖЕН записывать
+// session-revocation для целевого subject (тот же writer, что и user-logout
+// Revoke). Ретайр GetJWKSStatus — jwks_status_retired_test.go.
 
 import (
 	"context"
@@ -20,7 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -143,44 +141,4 @@ func TestForceLogout_NotWired_Unavailable(t *testing.T) {
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true}) // no session revoker wired
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_x"})
 	require.Equal(t, codes.Unavailable, status.Code(err))
-}
-
-// ── GetJWKSStatus — iam owns no signing keyset ────────────────────────────
-//
-// kacho-iam mints nothing: the only signature it produces is over an assertion
-// signed with the caller's OWN presented credential, and the token itself is
-// issued by Hydra. The `oidc_jwks_keys` store that once backed this RPC was
-// dropped (migration 0065) — its only writers (InsertBootstrap / Rotate) lost
-// their last caller when the nightly rotation was retired (713f7e1), and the
-// table carried zero rows on a fully working stand.
-//
-// The RPC itself is a PUBLISHED wire contract (`buf breaking` FILE-rules gate it
-// against main), so it is retained and answers truthfully: iam has no keyset,
-// therefore no algorithms. That is byte-identical to what it already returned
-// against the empty table — no observable behaviour change for any caller.
-
-// TestGetJWKSStatus_ReportsNoAlgorithms — the RPC succeeds and reports an empty
-// algorithm set, with NO store wired and nothing to wire. Previously a handler
-// without a JWKS reader failed closed with Unavailable; there is no longer a
-// reader to be absent.
-func TestGetJWKSStatus_ReportsNoAlgorithms(t *testing.T) {
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil)
-
-	resp, err := h.GetJWKSStatus(context.Background(), &emptypb.Empty{})
-	require.NoError(t, err, "iam owns no keyset — reporting that is not an error")
-	require.NotNil(t, resp)
-	assert.Empty(t, resp.GetAlgorithms(),
-		"iam mints nothing and stores no keys — it can only report an empty keyset")
-}
-
-// TestGetJWKSStatus_NeverUnavailable — regression lock on the observable code.
-// The old handler returned Unavailable ("jwks status reader not configured")
-// whenever the reader port was nil. With the store gone that branch must not
-// come back: a nil-everything handler still answers OK.
-func TestGetJWKSStatus_NeverUnavailable(t *testing.T) {
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil)
-
-	_, err := h.GetJWKSStatus(context.Background(), &emptypb.Empty{})
-	require.NoError(t, err)
-	assert.NotEqual(t, codes.Unavailable, status.Code(err))
 }

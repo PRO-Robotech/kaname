@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// force_logout.go — InternalIAMService.ForceLogout + GetJWKSStatus.
+// force_logout.go — InternalIAMService.ForceLogout.
 //
 // ForceLogout — admin force-logout: records a USER-LEVEL revoke-all cutoff
 // (user_token_revocations.revoke_before = now) for the target subject so the
@@ -10,11 +10,6 @@
 // user-logout / Revoke(revoke_all) paths. Async per the proto envelope (returns
 // Operation, done=true). The earlier per-jti synthetic-jti write was inert — a
 // synthetic jti can never match the target's real live-token jti.
-//
-// GetJWKSStatus — reports a permanently EMPTY keyset: iam owns no signing keys
-// (it mints nothing; Hydra is the issuer and signer). The `oidc_jwks_keys`
-// store it used to read was dropped in migration 0065. Kept because the RPC is
-// a published, buf-breaking-gated wire contract — see the method docstring.
 //
 // ForceLogout was advertised (caller_policy + permission_catalog) but
 // Unimplemented before this fix — an advertised-but-Unimplemented RPC is a
@@ -29,7 +24,6 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -175,28 +169,4 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	}
 	op.Done = true
 	return shared.OperationToProto(&op), nil
-}
-
-// GetJWKSStatus — reports iam's signing-key rotation status, which is
-// permanently EMPTY: iam owns no signing keyset.
-//
-// iam mints nothing. Its only signature is over an assertion signed with the
-// caller's OWN presented credential, and the access token itself is issued by
-// Hydra. The public keyset iam serves on :9097 is a byte-identical short-TTL
-// MIRROR of Hydra's — Hydra stays the issuer and the signer; iam proxies, it
-// does not mint. So there is no per-alg "current key" for iam to report and
-// nothing for it to rotate.
-//
-// The backing `oidc_jwks_keys` store was therefore dropped (migration 0065):
-// its only writers (InsertBootstrap / Rotate) lost their last caller when the
-// nightly rotation was retired (713f7e1), and it held zero rows on a fully
-// working stand — the whole platform authenticates with that store empty.
-//
-// This RPC is retained rather than deleted because it is a PUBLISHED wire
-// contract: `buf breaking` (FILE rules, vs main) rejects deleting the RPC and
-// its two messages, so retirement is a deliberate contract change, not a
-// cleanup. Returning an empty algorithm set is exactly what the RPC already
-// returned when it read the empty table — callers observe no change.
-func (h *Handler) GetJWKSStatus(_ context.Context, _ *emptypb.Empty) (*iamv1.JWKSStatusResponse, error) {
-	return &iamv1.JWKSStatusResponse{}, nil
 }

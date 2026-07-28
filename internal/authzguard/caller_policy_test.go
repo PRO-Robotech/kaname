@@ -269,7 +269,6 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		"/kacho.cloud.iam.v1.InternalIAMService/Check",
 		"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
 		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
-		"/kacho.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
 		"/kacho.cloud.iam.v1.InternalIAMService/RegisterResource",
 		"/kacho.cloud.iam.v1.InternalIAMService/UnregisterResource",
 		"/kacho.cloud.iam.v1.InternalIAMService/WriteCreatorTuple",
