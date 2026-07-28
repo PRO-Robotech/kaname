@@ -2346,7 +2346,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"ownerUserId\": \"{{userAAAId}}\", \"updateMask\": \"owner_user_id\"}",
+              "raw": "{\"updateMask\": \"owner_user_id\"}",
               "options": {
                 "raw": {
                   "language": "json"

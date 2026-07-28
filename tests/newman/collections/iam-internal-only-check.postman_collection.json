@@ -298,7 +298,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"usr00000000000000abc\", \"relation\": \"viewer\", \"objectId\": \"acc00000000000abc\"}",
+              "raw": "{\"subjectId\": \"user:usr00000000000000abc\", \"relation\": \"viewer\", \"object\": \"account:acc00000000000abc\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -360,20 +360,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/authorize:writeTuples",
+              "raw": "{{baseUrl}}/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "iam",
-                "v1",
-                "internal",
-                "authorize:writeTuples"
+                "kacho.cloud.iam.v1.InternalAuthorizeService",
+                "WriteTuples"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"tuples\": [{\"user\": \"user:test\", \"relation\": \"viewer\", \"object\": \"account:abc\"}]}",
+              "raw": "{\"writes\": [{\"subject\": \"user:usr00000000000000abc\", \"relation\": \"viewer\", \"object\": \"account:acc00000000000abc\"}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -391,7 +389,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/authorize:writeTuples';",
+                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples';",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -435,15 +433,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/sessionRevocations:revoke",
+              "raw": "{{baseUrl}}/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "iam",
-                "v1",
-                "internal",
-                "sessionRevocations:revoke"
+                "kacho.cloud.iam.v1.InternalSessionRevocationsService",
+                "Revoke"
               ]
             },
             "body": {
@@ -466,7 +462,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/sessionRevocations:revoke';",
+                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke';",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -510,15 +506,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/sessionRevocations:isRevoked",
+              "raw": "{{baseUrl}}/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "iam",
-                "v1",
-                "internal",
-                "sessionRevocations:isRevoked"
+                "kacho.cloud.iam.v1.InternalSessionRevocationsService",
+                "IsRevoked"
               ]
             },
             "body": {
@@ -541,7 +535,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/sessionRevocations:isRevoked';",
+                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked';",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -585,15 +579,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/internal/iam:forceLogout",
+              "raw": "{{baseUrl}}/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "iam",
-                "v1",
-                "internal",
-                "iam:forceLogout"
+                "kacho.cloud.iam.v1.InternalIAMService",
+                "ForceLogout"
               ]
             },
             "body": {
@@ -616,7 +608,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:forceLogout';",
+                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalIAMService/ForceLogout';",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must 404 on the advertised TLS endpoint', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1097,7 +1089,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"{{userAAAId}}\", \"relation\": \"viewer\", \"objectId\": \"{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{userAAAId}}\", \"relation\": \"viewer\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1140,13 +1132,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// 200 with allowed=true|false is the expected success response.",
-                  "// 403/404 from service (not mux) is also acceptable if FGA is not seeded.",
-                  "pm.test('INT-IAM-CHECK: status 200 or 4xx (internal service response)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403, 404]));",
+                  "// A well-formed triple always resolves: the PDP answers 200 with a boolean",
+                  "// verdict (allowed true or false). 4xx is NOT tolerated — tolerating 400 is",
+                  "// exactly what kept the discarded-key defect invisible.",
+                  "pm.test('INT-IAM-CHECK: status 200 (PDP answered)', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
                   "const j = pm.response.json();",
-                  "if (pm.response.code === 200) {",
-                  "  pm.test('INT-IAM-CHECK: allowed field present', () => pm.expect(j.allowed, 'allowed field').to.be.a('boolean'));",
-                  "}"
+                  "pm.test('INT-IAM-CHECK: allowed is a boolean verdict', () => pm.expect(j.allowed, JSON.stringify(j)).to.be.a('boolean'));"
                 ]
               }
             }

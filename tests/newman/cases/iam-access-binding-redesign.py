@@ -321,7 +321,9 @@ CASES.append(Case(
             method="PATCH",
             path="/iam/v1/accessBindings/{{rdAcbIm}}",
             # FieldMask → comma-separated STRING in proto3 JSON, not an array.
-            body={"updateMask": "scopeId", "scopeId": "{{accountBId}}"},
+            # `scopeId` is not a field of UpdateAccessBindingRequest — the mask alone
+            # drives the immutable-switch; a body key here would be discarded.
+            body={"updateMask": "scopeId"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
@@ -334,7 +336,9 @@ CASES.append(Case(
             method="PATCH",
             path="/iam/v1/accessBindings/{{rdAcbIm}}",
             # FieldMask → comma-separated STRING in proto3 JSON, not an array.
-            body={"updateMask": "subjects", "subjects": [{"type": "USER", "id": "{{userAAAId}}"}]},
+            # `subjects` is not a field of UpdateAccessBindingRequest — the mask alone
+            # drives the immutable-switch; a body key here would be discarded.
+            body={"updateMask": "subjects"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),

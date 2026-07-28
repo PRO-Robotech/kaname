@@ -609,7 +609,9 @@ for subj in SUBJECTS:
          "GET", f"/iam/v1/roles/{ROLE_VIEW}", None, subj)
     emit("ROLE-CR", "Create role (cluster admin)", "cluster-role-mutate",
          "POST", "/iam/v1/roles",
-         {"name": f"authz-role-{subj[0].lower()}", "isSystem": False,
+         # `isSystem` is derived output-only (from definitionTier) and is not a field
+         # of CreateRoleRequest — sending it would be a key the edge discards.
+         {"name": f"authz-role-{subj[0].lower()}",
           "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]}, subj)
     emit("ROLE-UP", "Update role (cluster admin)", "cluster-role-mutate",
          "PATCH", f"/iam/v1/roles/{GARBAGE_ROLE}", {"description":"x"}, subj)

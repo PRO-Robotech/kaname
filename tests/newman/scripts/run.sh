@@ -182,17 +182,6 @@ else
   # `iam-authz-grant-check-propagation(no-report)` as a phantom failure even
   # though all cases would pass. Run it here.
   run_one "iam-authz-grant-check-propagation"
-  # SEC-C FGA-proxy suite. gen.py emits collections/sec-c-fga-proxy.json from
-  # cases/sec-c-fga-proxy.py, and the CI `assert all suites green` step parses
-  # EVERY collections/*.json — so without running it here the gate reports
-  # `sec-c-fga-proxy(no-report)` as a phantom failure. Its cases hit the
-  # Internal FGA-proxy RPCs (RegisterResource/UnregisterResource) which are
-  # cluster-internal :9091-only with NO google.api.http mapping (ban #6) — they
-  # are NOT reachable as black-box REST through the api-gateway and are covered
-  # at the integration level (internal/.../fgaproxy_test.go). The cases stay
-  # whitelisted as known-RED in newman-e2e.yml; running the collection just
-  # produces the report the gate expects.
-  run_one "sec-c-fga-proxy"
   # iam-invite-grant-fga: invite→activate→grant(anchor role on project)→invitee
   # SEES the granted project+account AND has its own personal default account+project
   # (RC-1/RC-2/RC-5). gen.py emits collections/iam-invite-grant-fga.json from

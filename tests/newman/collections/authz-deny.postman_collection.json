@@ -12587,7 +12587,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"authz-role-anon\", \"isSystem\": false, \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
+              "raw": "{\"name\": \"authz-role-anon\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12884,7 +12884,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"authz-role-nob\", \"isSystem\": false, \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
+              "raw": "{\"name\": \"authz-role-nob\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13208,7 +13208,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"authz-role-pa1\", \"isSystem\": false, \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
+              "raw": "{\"name\": \"authz-role-pa1\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13532,7 +13532,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"authz-role-aaa\", \"isSystem\": false, \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
+              "raw": "{\"name\": \"authz-role-aaa\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13856,7 +13856,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"authz-role-aab\", \"isSystem\": false, \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
+              "raw": "{\"name\": \"authz-role-aab\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14180,7 +14180,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"authz-role-inv\", \"isSystem\": false, \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
+              "raw": "{\"name\": \"authz-role-inv\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"

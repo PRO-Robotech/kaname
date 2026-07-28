@@ -84,6 +84,27 @@ Test-first note (strict TDD):
 CASES = []
 
 # ---------------------------------------------------------------------------
+# Unbound REST paths for Internal* RPCs that carry NO `google.api.http` binding.
+#
+# Only two InternalIAMService RPCs are annotated (`:lookupSubject`, `:check`);
+# WriteTuples / SessionRevocations.Revoke / .IsRevoked / ForceLogout are not.
+# grpc-gateway is generated with `generate_unbound_methods=true`, so the route
+# these four actually answer on is the fully-qualified default form below — and
+# it is served ONLY by the cluster-internal sub-mux (ban #6).
+#
+# The earlier `/iam/v1/internal/authorize:writeTuples`-style paths were invented:
+# no binding of that shape exists on ANY listener, so "404 on external" held for
+# a path that 404s everywhere. The probe had the form of an isolation check and
+# none of its substance. Same shape as the storage suite's *-EXTERNAL-ABSENT
+# cases, which target this default form for exactly this reason.
+# ---------------------------------------------------------------------------
+
+_UNBOUND_WRITE_TUPLES = "/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples"
+_UNBOUND_SR_REVOKE = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke"
+_UNBOUND_SR_ISREVOKED = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
+_UNBOUND_FORCE_LOGOUT = "/kacho.cloud.iam.v1.InternalIAMService/ForceLogout"
+
+# ---------------------------------------------------------------------------
 # Helper: pre_script fragment that overrides the request URL to externalBaseUrl.
 # Used for all "on external" negative checks.
 # gen.py generates {{baseUrl}}<path>; this pre_script replaces it with
@@ -262,7 +283,10 @@ CASES.append(Case(
             name="iam-check-on-external",
             method="POST",
             path="/iam/v1/internal/iam:check",
-            body={"subjectId": "usr00000000000000abc", "relation": "viewer", "objectId": "acc00000000000abc"},
+            # CheckRequest names the object field `object` and takes a TYPED FGA
+            # string; there is no `objectId` (that belongs to ExpandAccessRequest).
+            body={"subjectId": "user:usr00000000000000abc", "relation": "viewer",
+                  "object": "account:acc00000000000abc"},
             pre_script=_external_url_override("/iam/v1/internal/iam:check"),
             test_script=[
                 "pm.test('EXT-IAM-CHECK: status 404 (path not on external mux)', () => {",
@@ -290,9 +314,10 @@ CASES.append(Case(
         Step(
             name="write-tuples-on-external",
             method="POST",
-            path="/iam/v1/internal/authorize:writeTuples",
-            body={"tuples": [{"user": "user:test", "relation": "viewer", "object": "account:abc"}]},
-            pre_script=_external_url_override("/iam/v1/internal/authorize:writeTuples"),
+            path=_UNBOUND_WRITE_TUPLES,
+            body={"writes": [{"subject": "user:usr00000000000000abc", "relation": "viewer",
+                              "object": "account:acc00000000000abc"}]},
+            pre_script=_external_url_override(_UNBOUND_WRITE_TUPLES),
             test_script=[
                 "pm.test('EXT-WRITETUPLES: status 404 (path not on external mux)', () => {",
                 "  const code = pm.response.code;",
@@ -320,9 +345,9 @@ CASES.append(Case(
         Step(
             name="sr-revoke-on-external",
             method="POST",
-            path="/iam/v1/internal/sessionRevocations:revoke",
+            path=_UNBOUND_SR_REVOKE,
             body={"userId": "usr00000000000000abc", "tokenJti": "leak-jti", "reason": "x"},
-            pre_script=_external_url_override("/iam/v1/internal/sessionRevocations:revoke"),
+            pre_script=_external_url_override(_UNBOUND_SR_REVOKE),
             test_script=[
                 "pm.test('EXT-SR-REVOKE: status 404 (path not on external mux)', () => {",
                 "  const code = pm.response.code;",
@@ -349,9 +374,9 @@ CASES.append(Case(
         Step(
             name="sr-isrevoked-on-external",
             method="POST",
-            path="/iam/v1/internal/sessionRevocations:isRevoked",
+            path=_UNBOUND_SR_ISREVOKED,
             body={"tokenJti": "leak-jti"},
-            pre_script=_external_url_override("/iam/v1/internal/sessionRevocations:isRevoked"),
+            pre_script=_external_url_override(_UNBOUND_SR_ISREVOKED),
             test_script=[
                 "pm.test('EXT-SR-ISREVOKED: status 404 (path not on external mux)', () => {",
                 "  const code = pm.response.code;",
@@ -379,9 +404,9 @@ CASES.append(Case(
         Step(
             name="iam-forcelogout-on-external",
             method="POST",
-            path="/iam/v1/internal/iam:forceLogout",
+            path=_UNBOUND_FORCE_LOGOUT,
             body={"userId": "usr00000000000000abc", "reason": "x"},
-            pre_script=_external_url_override("/iam/v1/internal/iam:forceLogout"),
+            pre_script=_external_url_override(_UNBOUND_FORCE_LOGOUT),
             test_script=[
                 "pm.test('EXT-FORCELOGOUT: status 404 (path not on external mux)', () => {",
                 "  const code = pm.response.code;",
@@ -610,23 +635,28 @@ CASES.append(Case(
             name="iam-check-on-internal",
             method="POST",
             path="/iam/v1/internal/iam:check",
+            # CheckRequest is an FGA triple: `subject_id` and `object` are TYPED
+            # strings ("user:<usr…>" / "account:<acc…>"), and the object field is
+            # named `object` — there is no `objectId`. The previous body sent
+            # `objectId`, which the edge discards, so `object` arrived empty and the
+            # required-check rejected the call: this "OK" probe never reached the PDP
+            # at all, it only ever measured a 400 that the tolerant assertion accepted.
             body={
-                "subjectId": "{{userAAAId}}",
+                "subjectId": "user:{{userAAAId}}",
                 "relation": "viewer",
-                "objectId": "{{accountAId}}",
+                "object": "account:{{accountAId}}",
             },
             # Internal* → internal-rest listener ({{internalBaseUrl}}, see UPSERT above).
             pre_script=_internal_url_override("/iam/v1/internal/iam:check"),
             # internal-rest listener enforces authN — send a valid JWT (see UPSERT above).
             auth="jwtAccountAdminA",
             test_script=[
-                "// 200 with allowed=true|false is the expected success response.",
-                "// 403/404 from service (not mux) is also acceptable if FGA is not seeded.",
-                "pm.test('INT-IAM-CHECK: status 200 or 4xx (internal service response)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403, 404]));",
+                "// A well-formed triple always resolves: the PDP answers 200 with a boolean",
+                "// verdict (allowed true or false). 4xx is NOT tolerated — tolerating 400 is",
+                "// exactly what kept the discarded-key defect invisible.",
+                "pm.test('INT-IAM-CHECK: status 200 (PDP answered)', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
                 "const j = pm.response.json();",
-                "if (pm.response.code === 200) {",
-                "  pm.test('INT-IAM-CHECK: allowed field present', () => pm.expect(j.allowed, 'allowed field').to.be.a('boolean'));",
-                "}",
+                "pm.test('INT-IAM-CHECK: allowed is a boolean verdict', () => pm.expect(j.allowed, JSON.stringify(j)).to.be.a('boolean'));",
             ],
         ),
     ],

@@ -242,8 +242,10 @@ CASES.append(Case(
         # listener with a matching label — EXTERNAL auto-allocate VIP.
         Step(name="create-listener", method="POST", path=LISTENERS,
              body={"loadBalancerId": "{{_t31nLb}}", "name": "t31n-lsn-{{runId}}",
-                   "protocol": "TCP", "port": 80, "targetPort": 8080, "ipVersion": "IPV4",
-                   "addressSpec": {"auto": {}}, "labels": {"lsn": "treska"}},
+                   # `ipVersion`/`addressSpec` are RESERVED in CreateListenerRequest — the
+                   # per-family VIP moved Listener->LoadBalancer, so the edge discards them.
+                   "protocol": "TCP", "port": 80, "targetPort": 8080,
+                   "labels": {"lsn": "treska"}},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),
                           *save_from_response("j.metadata && j.metadata.listenerId", "_t31nLsn"),

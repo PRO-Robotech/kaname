@@ -506,7 +506,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": \"ownerUserId\", \"ownerUserId\": \"usr00000000000000bad\"}",
+              "raw": "{\"updateMask\": \"ownerUserId\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1772,7 +1772,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"updateMask\": \"accountId\", \"accountId\": \"{{accountBId}}\"}",
+              "raw": "{\"updateMask\": \"accountId\"}",
               "options": {
                 "raw": {
                   "language": "json"
