@@ -287,7 +287,10 @@ func TestTokenHook_UserNotFound_EmitsMinimalClaims(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	claims := resp.Session.AccessToken["ext_claims"].(map[string]any)
 	assert.Equal(t, "unknown-sub", claims["kacho_external_id"])
-	assert.Equal(t, "service_account", claims["kacho_principal_type"])
+	assert.Equal(t, "user", claims["kacho_principal_type"],
+		"the reduced set is for a human whose mirror has not committed yet")
+	assert.Empty(t, claims["kacho_principal_id"],
+		"it names no kacho principal, which is what makes it authorize nothing")
 }
 
 func TestTokenHook_MethodNotAllowed(t *testing.T) {

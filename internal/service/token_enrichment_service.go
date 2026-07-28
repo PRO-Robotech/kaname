@@ -422,13 +422,24 @@ func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u d
 // here, so this set is no longer what an unknown or revoked OAuth client
 // receives.
 //
+// The principal type says `user` because that is what this population is, and
+// because the value is read as a decision, not as a label. Two platform
+// controls treat `service_account` as "there is no person here":
+// grpcsrv.EvaluateStepUp lifts the interactive-authentication floor for it, and
+// the gateway demands a sender-constrained token from it. Stamping it on a
+// human hands them an exemption built for machines and, on the day the binding
+// requirement is switched on, rejects the very flow this set exists to carry —
+// their tokens are ordinary bearers. `user` is also what the platform assumes
+// when no type is stated at all, so it adds no assurance the set did not have.
+//
 // It carries no principal id by construction, which is why it authorizes
-// nothing: the gateway resolves such a token to a diagnostic subject that the
-// permission model denies.
+// nothing: subject resolution at the gateway needs a kacho id and finds none
+// here, so such a token resolves to a diagnostic subject the permission model
+// has no object type for and always denies.
 func (s *TokenEnrichmentService) MinimalClaims(subject string) map[string]any {
 	return map[string]any{
 		"kacho_external_id":       subject,
-		"kacho_principal_type":    "service_account",
+		"kacho_principal_type":    "user",
 		"kacho_device_compliance": "unknown",
 		"kacho_issuer":            s.cfg.HydraIssuer,
 		"kacho_audience":          s.cfg.Domain,
