@@ -52,6 +52,13 @@ func newHandler(check bool) *Handler {
 	return h
 }
 
+// Every RPC below is invoked as a verified cluster-internal module PDP peer
+// (moduleCertCtx). A policy-decision query carries no tenant principal, and what
+// makes it legitimate is the verified module certificate on the internal
+// listener — not the absence of a principal. Naming that keeps these
+// transport-shaping tests on the production-posture path rather than the
+// insecure-stand opt-out.
+
 // newHandlerWithStub returns the handler plus the underlying stubFGA so tests
 // can inspect which relation reached the FGA Check.
 func newHandlerWithStub(check bool) (*Handler, *stubFGA) {
@@ -68,7 +75,7 @@ func newHandlerWithStub(check bool) (*Handler, *stubFGA) {
 
 func TestHandler_Check_AllowedHappyPath(t *testing.T) {
 	h := newHandler(true)
-	resp, err := h.Check(context.Background(), &iamv1.AuthorizeCheckRequest{
+	resp, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
 		Subject:  "user:usr_alice",
 		Resource: &iamv1.ResourceRef{Type: "vpc_network", Id: "vpcn_x"},
 		Action:   "vpc.networks.list",
@@ -94,7 +101,7 @@ func TestHandler_Check_AllowedHappyPath(t *testing.T) {
 
 func TestHandler_Check_InvalidArgumentSubject(t *testing.T) {
 	h := newHandler(true)
-	_, err := h.Check(context.Background(), &iamv1.AuthorizeCheckRequest{
+	_, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
 		Resource: &iamv1.ResourceRef{Type: "x", Id: "y"},
 		Action:   "x.x.x",
 	})
@@ -109,7 +116,7 @@ func TestHandler_Check_InvalidArgumentSubject(t *testing.T) {
 
 func TestHandler_BatchCheck_OrderPreserved(t *testing.T) {
 	h := newHandler(true)
-	resp, err := h.BatchCheck(context.Background(), &iamv1.BatchAuthorizeCheckRequest{
+	resp, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
 			{Subject: "user:a", Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Action: "x.x.list"},
 			{Subject: "user:b", Resource: &iamv1.ResourceRef{Type: "x", Id: "2"}, Action: "x.x.list"},
@@ -135,7 +142,7 @@ func TestHandler_BatchCheck_OrderPreserved(t *testing.T) {
 // forwarded (and not the auto-derived viewer, which would slip admin gating).
 func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 	h, stub := newHandlerWithStub(true)
-	_, err := h.BatchCheck(context.Background(), &iamv1.BatchAuthorizeCheckRequest{
+	_, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
 			{
 				Subject:          "user:a",
@@ -158,7 +165,7 @@ func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 
 func TestHandler_ListObjects_InvalidAction(t *testing.T) {
 	h := newHandler(true)
-	_, err := h.ListObjects(context.Background(), &iamv1.ListObjectsRequest{
+	_, err := h.ListObjects(moduleCertCtx(), &iamv1.ListObjectsRequest{
 		Subject: "user:x", ResourceType: "y", Action: "bogus",
 	})
 	st, _ := status.FromError(err)
@@ -169,7 +176,7 @@ func TestHandler_ListObjects_InvalidAction(t *testing.T) {
 
 func TestHandler_ListSubjects_Filter(t *testing.T) {
 	h := newHandler(true)
-	resp, err := h.ListSubjects(context.Background(), &iamv1.ListSubjectsRequest{
+	resp, err := h.ListSubjects(moduleCertCtx(), &iamv1.ListSubjectsRequest{
 		Resource: &iamv1.ResourceRef{Type: "x", Id: "1"},
 		Action:   "x.x.list",
 		// All subjects start with "user:" — explicit filter for "user" still returns both.
@@ -230,19 +237,19 @@ func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
 		call func() error
 	}{
 		{"ListObjects", func() error {
-			_, err := h.ListObjects(context.Background(), &iamv1.ListObjectsRequest{
+			_, err := h.ListObjects(moduleCertCtx(), &iamv1.ListObjectsRequest{
 				Subject: "user:x", ResourceType: "y", Action: "x.x.list",
 			})
 			return err
 		}},
 		{"ListSubjects", func() error {
-			_, err := h.ListSubjects(context.Background(), &iamv1.ListSubjectsRequest{
+			_, err := h.ListSubjects(moduleCertCtx(), &iamv1.ListSubjectsRequest{
 				Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Action: "x.x.list",
 			})
 			return err
 		}},
 		{"ExpandRelations", func() error {
-			_, err := h.ExpandRelations(context.Background(), &iamv1.ExpandRelationsRequest{
+			_, err := h.ExpandRelations(moduleCertCtx(), &iamv1.ExpandRelationsRequest{
 				Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Relation: "viewer",
 			})
 			return err
@@ -276,7 +283,7 @@ func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
 // permanent Internal/PermissionDenied.
 func TestHandler_BatchCheck_RedactsBackendUnavailable(t *testing.T) {
 	h := newHandlerWithAuthorizer(&errFGA{})
-	resp, err := h.BatchCheck(context.Background(), &iamv1.BatchAuthorizeCheckRequest{
+	resp, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
 			{Subject: "user:x", Resource: &iamv1.ResourceRef{Type: "y", Id: "1"}, Action: "x.x.list"},
 		},
@@ -298,7 +305,7 @@ func TestHandler_BatchCheck_RedactsBackendUnavailable(t *testing.T) {
 
 func TestHandler_Expand_ReturnsTree(t *testing.T) {
 	h := newHandler(true)
-	resp, err := h.ExpandRelations(context.Background(), &iamv1.ExpandRelationsRequest{
+	resp, err := h.ExpandRelations(moduleCertCtx(), &iamv1.ExpandRelationsRequest{
 		Resource: &iamv1.ResourceRef{Type: "vpc_network", Id: "vpcn_x"},
 		Relation: "viewer",
 	})

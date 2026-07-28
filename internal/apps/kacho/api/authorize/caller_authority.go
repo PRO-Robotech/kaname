@@ -1,16 +1,21 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// caller_authority.go — inner defense-in-depth authority gate for
+// caller_authority.go — the authority gate for
 // AuthorizeService.{Check,BatchCheck,ListObjects,ListSubjects,ExpandRelations}.
 //
-// The api-gateway is the OUTER gate: it enforces that a tenant caller may only
-// query authz decisions about itself or about subjects/resources it holds the
-// `iam.subjects.checkAuthorization` authority on. This file adds the INNER
-// gate the rest of the codebase already applies to read paths (read_authz.go /
-// account.List re-Check the FGA relation even though the gateway did), so a
-// gateway bug or a confused-deputy caller cannot enumerate the cluster
-// authorization graph for an arbitrary subject (CWE-863 / CWE-862).
+// It is NOT an inner second opinion behind a narrower outer one. The proto
+// comment on these RPCs says the gateway admits only callers holding
+// `iam.subjects.checkAuthorization` on the subject/resource; there is no such
+// permission in the catalog and no such relation in the model. What the catalog
+// actually asks for all four public RPCs is `viewer` on the cluster singleton —
+// and the cluster bootstrap deliberately grants that relation to `user:*`, so
+// the global reference catalog (regions, zones, disk types) is readable by
+// anyone authenticated. Every authenticated subject therefore answers the
+// gateway's question, and this file is the ONLY thing deciding who may ask the
+// service "may subject X do Y to object Z", enumerate the objects a subject can
+// reach, or enumerate the subjects that can reach an object. Without it these
+// RPCs are an authorization oracle over every tenant (CWE-863 / CWE-862).
 //
 // Scope of the gate — only TENANT-facing principals (user / service_account)
 // are gated. Anonymous / system principals are the cluster-internal
@@ -40,9 +45,16 @@ import (
 // callerAuthorityRelations — FGA relations on the queried resource that grant a
 // tenant caller the authority to ask authz questions about OTHER subjects on
 // that resource (delegated administration). `admin` is the canonical resource
-// authority; `checkAuthorization` mirrors the gateway's documented relation
-// (an unknown relation simply Check-errors and is skipped — never fail-open).
-var callerAuthorityRelations = []string{"admin", "checkAuthorization"}
+// authority and, today, the only one the model defines for this purpose.
+//
+// It used to also carry `checkAuthorization`, "mirroring the gateway's documented
+// relation". No such relation exists in the canonical model, so that arm could
+// only ever Check-error and be skipped: a branch documenting a contract the
+// system never produces, paid for with a second FGA round-trip on every denial.
+// If delegated "may ask about others" is wanted as its own grantable authority
+// (rather than riding on `admin`), it has to be declared in
+// proto/kacho/cloud/iam/v1/fga_model.fga first — then added here.
+var callerAuthorityRelations = []string{"admin"}
 
 // authorizeCaller is the inner defense-in-depth gate. It returns nil (allow) when:
 //
@@ -106,23 +118,24 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 //
 //   - a verified module SAN is present (genuine internal PDP peer — the internal
 //     listener's CallerPolicy verified-cert floor is the governing outer gate); OR
-//   - the process is in dev / insecure-listener mode (prodMode == false), where
-//     there is no mTLS at all so the public/internal listeners are
-//     indistinguishable — permissive back-compat, mirroring
+//   - the deployment explicitly opted into the insecure-listener posture
+//     (WithInsecureAnonymousPeer), where there is no mTLS at all so the
+//     public/internal listeners are indistinguishable — mirroring
 //     authzguard.CallerPolicy / RelationWriteGate.
 //
-// Otherwise (production, no verified module cert) the caller reached the PUBLIC
-// :9090 listener with no credentials and is DENIED — fail-closed, closing the
-// public-listener authorization-oracle bypass.
+// Otherwise the caller reached the PUBLIC :9090 listener with no credentials and
+// is DENIED — fail-closed, closing the public-listener authorization-oracle
+// bypass. Denial is the DEFAULT: an omitted setter lands here, because that is
+// what a wiring mistake must produce.
 func (h *Handler) authorizeAnonymousPeer(ctx context.Context) error {
 	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
 		if _, ok := authzguard.SANToServiceDomain(san); ok {
 			return nil
 		}
 	}
-	if !h.prodMode {
-		// Dev / insecure listener: no mTLS to distinguish listeners → allow
-		// (insecure back-compat). Production is strictly fail-closed above.
+	if h.insecureAnonymousPeer {
+		// Explicitly opted-in insecure listener: no mTLS to distinguish listeners
+		// → allow. Every other configuration is strictly fail-closed above.
 		return nil
 	}
 	return status.Error(codes.PermissionDenied, "permission denied")

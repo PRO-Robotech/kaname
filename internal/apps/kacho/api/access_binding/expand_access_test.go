@@ -55,6 +55,15 @@ func authedCtx() context.Context {
 	return operations.WithPrincipal(context.Background(), operations.Principal{ID: "usr_auditor", Type: "user"})
 }
 
+// authorizedUC builds the use-case with an authority that GRANTS the caller
+// admin on the queried object, so a test about the projection (dedupe,
+// truncation, error shaping) exercises the projection rather than the gate.
+// The gate itself is unconditional and is covered in
+// expand_access_gate_mandatory_test.go / expand_access_authz_test.go.
+func authorizedUC(l PrincipalLister) *ExpandAccessUseCase {
+	return NewExpandAccessUseCase(l).WithGrantAuthority(nil, newRecordingFGA(), nil)
+}
+
 func TestExpandAccess_E31_GroupExpandedToConcretePrincipals(t *testing.T) {
 	// ListUsers returns the concrete principals with the group userset ALREADY
 	// expanded (usr_u1, usr_u2 from the group + the direct user + the SA). The
@@ -70,7 +79,7 @@ func TestExpandAccess_E31_GroupExpandedToConcretePrincipals(t *testing.T) {
 			"group:grp_g#member", // defensive: not a concrete principal → dropped
 		},
 	}}
-	uc := NewExpandAccessUseCase(exp)
+	uc := authorizedUC(exp)
 
 	res, truncated, err := uc.Execute(authedCtx(), "compute_instance", "inst_x", "v_delete", 0)
 	require.NoError(t, err)
@@ -100,7 +109,7 @@ func TestExpandAccess_FailClosedOnListerError(t *testing.T) {
 	// A ListUsers transport / FGA error must fail closed: INTERNAL, no principals,
 	// no leak of the underlying error text.
 	exp := &fakeLister{err: errors.New("fga down: dial tcp refused")}
-	uc := NewExpandAccessUseCase(exp)
+	uc := authorizedUC(exp)
 	res, _, err := uc.Execute(authedCtx(), "account", "acc_x", "viewer", 0)
 	require.Error(t, err)
 	assert.Empty(t, res, "no principals on a fail-closed error")
@@ -108,7 +117,9 @@ func TestExpandAccess_FailClosedOnListerError(t *testing.T) {
 }
 
 func TestExpandAccess_AnonymousRejected(t *testing.T) {
-	uc := NewExpandAccessUseCase(&fakeLister{})
+	// Authority GRANTS — so the rejection proves the anonymous floor, not the
+	// per-object gate standing in for it.
+	uc := authorizedUC(&fakeLister{})
 	_, _, err := uc.Execute(context.Background(), "compute_instance", "inst_x", "v_delete", 0)
 	require.Error(t, err, "anonymous caller must be rejected (viewer-floor gate)")
 }
@@ -128,7 +139,7 @@ func TestExpandAccess_TruncatedWhenOverMax(t *testing.T) {
 	exp := &fakeLister{byNode: map[string][]string{
 		"compute_instance:inst_x#viewer": {"user:usr_a", "user:usr_b", "user:usr_c"},
 	}}
-	uc := NewExpandAccessUseCase(exp)
+	uc := authorizedUC(exp)
 	res, truncated, err := uc.Execute(authedCtx(), "compute_instance", "inst_x", "viewer", 2)
 	require.NoError(t, err)
 	assert.True(t, truncated, "result over max_results must set truncated")

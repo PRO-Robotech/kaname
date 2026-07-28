@@ -68,14 +68,15 @@ type Principal struct {
 
 type ExpandAccessUseCase struct {
 	lister PrincipalLister
-	// repo + relations back the per-object grant-authority gate. When wired,
-	// Execute requires the caller to hold
-	// grant-authority/admin on the target object's scope BEFORE the principals are
-	// resolved — the SAME requireGrantAuthority predicate ListByScope/ListByRole
-	// enforce (read==enforce: a caller may expand "who can do X" only on objects
-	// they are themselves authorized to administer). repo is nil-safe: for leaf FGA
-	// objects (compute.instance, …) authority resolves purely through the FGA admin
-	// path, so only relations is strictly required.
+	// repo + relations back the per-object grant-authority gate. Execute ALWAYS
+	// requires the caller to hold grant-authority/admin on the target object's
+	// scope BEFORE the principals are resolved — the SAME requireGrantAuthority
+	// predicate ListByScope/ListByRole enforce (read==enforce: a caller may expand
+	// "who can do X" only on objects they are themselves authorized to administer).
+	// repo is nil-safe: for leaf FGA objects (compute.instance, …) authority
+	// resolves purely through the FGA admin path, so only relations is strictly
+	// required. Both nil is not a bypass — it is an unresolvable authority, and the
+	// gate denies.
 	repo      Repo
 	relations clients.RelationStore
 	logger    *slog.Logger
@@ -126,12 +127,23 @@ func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID,
 	// can do <relation> on <object>" ONLY if they hold grant-authority/admin on the
 	// object's scope — the SAME predicate ListByScope/ListByRole enforce. This
 	// runs BEFORE the principal resolution, so an unauthorized caller never observes
-	// the effective principals (no authz-topology / membership leak). Not wired
-	// (degraded mode / older unit fixtures) ⇒ skip the gate; production always wires it.
-	if u.repo != nil || u.relations != nil {
-		if err := requireGrantAuthority(ctx, u.repo, u.relations, objectType, objectID); err != nil {
-			return nil, false, err
-		}
+	// the effective principals (no authz-topology / membership leak).
+	//
+	// UNCONDITIONAL. It used to run only `if u.repo != nil || u.relations != nil`,
+	// which made the single narrowing this RPC has depend on a composition-root
+	// setter: a build that forgot WithGrantAuthority answered "who can act on this
+	// object" — people and machine accounts, groups already expanded — to any
+	// authenticated caller, on any object, with nothing failing anywhere. The
+	// catalog entry cannot catch that either: it asks `viewer` on the cluster
+	// singleton, a relation the bootstrap grants to `user:*` so the global
+	// reference catalog stays readable, so every authenticated subject is already
+	// through the front door by the time execution reaches here.
+	//
+	// Unwired now means unresolvable authority, and unresolvable authority is a
+	// denial: requireGrantAuthority's own paths are fail-closed on nil ports, so
+	// calling it always yields PermissionDenied rather than an accidental pass.
+	if err := requireGrantAuthority(ctx, u.repo, u.relations, objectType, objectID); err != nil {
+		return nil, false, hideObjectExistence(err)
 	}
 	limit := maxResults
 	if limit <= 0 {
@@ -174,6 +186,25 @@ func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID,
 		out = append(out, p)
 	}
 	return out, truncated, nil
+}
+
+// hideObjectExistence collapses the authority gate's NOT_FOUND into the denial,
+// so a caller with no authority over an object cannot use this RPC to learn
+// whether the object is there.
+//
+// The gate resolves an account/project scope through the database, so an absent
+// id answered `NOT_FOUND "Account <id> not found"` while a real id belonging to
+// someone else answered `PERMISSION_DENIED` — two different answers to "is this
+// id real?", available to any authenticated subject, because the front door's
+// catalog question is one every authenticated subject passes.
+//
+// Only NOT_FOUND is collapsed. A backend failure keeps its own code: an outage
+// reported as a denial would send the caller to fix permissions that are fine.
+func hideObjectExistence(err error) error {
+	if status.Code(err) == codes.NotFound {
+		return authzguard.PermissionDenied()
+	}
+	return err
 }
 
 // parseFGAPrincipal parses an FGA user string into a concrete Principal. Returns

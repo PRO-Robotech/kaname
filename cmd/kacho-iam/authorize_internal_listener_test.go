@@ -81,7 +81,16 @@ func newAuthorizeServicesForRegistration() *services {
 	})
 	// whoAmI is required by the handler builder; its deps are nil here (WhoAmI is
 	// not exercised by this registration test — only the AuthorizeService RPCs).
-	h := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
+	//
+	// WithInsecureAnonymousPeer: this harness is a bufconn with no TLS at all, so a
+	// call carries neither a tenant principal nor a verified module certificate —
+	// the exact condition the opt-out describes. Without it the caller-authority
+	// gate (correctly) denies before the route is exercised, and the subject of
+	// this test is the ROUTE: that AuthorizeService is registered on the internal
+	// listener and reaches the use-case. Who may call it is covered in
+	// api/authorize/caller_authority*_test.go.
+	h := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).
+		WithInsecureAnonymousPeer(true)
 	return &services{authorizeHandler: h}
 }
 

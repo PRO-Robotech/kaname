@@ -690,16 +690,19 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 		ClusterAdminChecker: relationStore,
 	})
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kachoRepo, relationStore)
-	// WithCallerAuthority wires the inner defense-in-depth caller-authority gate
-	// (a tenant principal may only query authz decisions about itself, a resource
-	// it administers, or as a cluster-admin). The SAME OpenFGA client answers the
-	// authority Check; anonymous/system module PDP peer calls pass through.
-	// WithProductionMode makes the inner caller-authority gate fail-closed for an
-	// anonymous/system principal without a verified module cert (the public-listener
-	// authorization-oracle bypass); dev-mode stays permissive (no mTLS to gate on).
+	// WithCallerAuthority wires the caller-authority gate (a tenant principal may
+	// only query authz decisions about itself, a resource it administers, or as a
+	// cluster-admin). The SAME OpenFGA client answers the authority Check; a
+	// verified module PDP peer passes through. This gate is not a second opinion
+	// behind a narrower gateway check — the catalog entry these RPCs carry is
+	// answered by every authenticated subject, so it is the only one there is.
+	//
+	// WithInsecureAnonymousPeer is the EXCEPTION for a stand without mTLS, where
+	// the public and internal listeners cannot be told apart. Fail-closed is the
+	// default; only a non-production AuthN mode opts out.
 	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC).
 		WithCallerAuthority(relationStore).
-		WithProductionMode(prodMode)
+		WithInsecureAnonymousPeer(!prodMode)
 
 	// RelationProjector — used by InternalAuthorizeService.
 	tupleWriter := service.NewRelationProjector(relationStore)

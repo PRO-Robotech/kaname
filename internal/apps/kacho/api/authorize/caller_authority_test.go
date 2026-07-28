@@ -43,11 +43,19 @@ func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
 	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth)
 }
 
-// newHandlerWithAuthorityProd builds the handler in PRODUCTION mode, where the
-// inner caller-authority gate fails closed for an anonymous/system principal
-// that carries no verified module cert (the public-listener bypass).
+// newHandlerWithAuthorityProd builds the handler in the DEFAULT posture, which
+// fails closed for an anonymous/system principal carrying no verified module
+// cert (the public-listener bypass). It is spelled out explicitly here so the
+// production intent stays readable at the call sites, even though the same
+// posture is now what an unset handler already has.
 func newHandlerWithAuthorityProd(svcCheck bool, auth *authorityStub) *Handler {
-	return newHandlerWithAuthority(svcCheck, auth).WithProductionMode(true)
+	return newHandlerWithAuthority(svcCheck, auth).WithInsecureAnonymousPeer(false)
+}
+
+// newHandlerWithAuthorityInsecure builds the handler for a stand WITHOUT mTLS,
+// which must opt in explicitly.
+func newHandlerWithAuthorityInsecure(svcCheck bool, auth *authorityStub) *Handler {
+	return newHandlerWithAuthority(svcCheck, auth).WithInsecureAnonymousPeer(true)
 }
 
 // moduleCertCtx injects a verified mTLS module-cert SAN into ctx, simulating a
@@ -141,12 +149,14 @@ func TestCallerAuthority_Check_ResourceAdmin_Allowed(t *testing.T) {
 	}
 }
 
-// TestCallerAuthority_Anonymous_PassesThrough — a call with NO principal (the
-// cluster-internal verified-mTLS module PDP peer path) is NOT gated here; the
-// decision proceeds as before.
+// TestCallerAuthority_Anonymous_PassesThrough — on a stand that EXPLICITLY opted
+// out of mTLS there is no certificate to tell the two listeners apart, so a call
+// with no principal is not gated here and the decision proceeds. The opt-out is
+// what makes this legal; without it the same call is denied (see
+// caller_authority_default_posture_test.go).
 func TestCallerAuthority_Anonymous_PassesThrough(t *testing.T) {
 	auth := &authorityStub{allow: map[string]bool{}}
-	h := newHandlerWithAuthority(true, auth)
+	h := newHandlerWithAuthorityInsecure(true, auth)
 	resp, err := h.Check(context.Background(), &iamv1.AuthorizeCheckRequest{
 		Subject:  "user:usr_bob",
 		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},

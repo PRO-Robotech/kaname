@@ -4,11 +4,12 @@
 // Package authorize — AuthorizeService gRPC handler.
 // Thin transport-layer wrapper around the service.AuthorizeService use-case.
 //
-// Subject binding: handler accepts subject directly from the protobuf
-// request (api-gateway interceptor enforces that the caller can only query
-// authz decisions about itself or about subjects in folders where the
-// caller holds `iam.subjects.checkAuthorization` — that gating happens at
-// the gateway, NOT here).
+// Subject binding: the handler accepts `subject` directly from the protobuf
+// request, and decides HERE who may name a subject other than themselves — see
+// caller_authority.go. The proto comment claiming the gateway gates this on
+// `iam.subjects.checkAuthorization` describes a permission that exists in no
+// catalog and a relation that exists in no model; the catalog entry these RPCs
+// actually carry is answered by every authenticated subject.
 package authorize
 
 import (
@@ -53,13 +54,20 @@ type Handler struct {
 	// or resource-authority (fail-closed). Wired to the OpenFGA client in the
 	// composition root via WithCallerAuthority.
 	authority authzguard.RelationChecker
-	// prodMode — production AuthN mode (cfg.AuthN.Mode.IsProduction()). It governs
-	// the inner caller-authority gate's treatment of an anonymous/system principal
-	// that carries NO verified module cert: in production such a caller is on the
-	// PUBLIC listener (no module-cert floor) and is DENIED (fail-closed); in dev
-	// (insecure listener, no mTLS at all) it is allowed (back-compat, mirroring
-	// authzguard.CallerPolicy / RelationWriteGate). Set via WithProductionMode.
-	prodMode bool
+	// insecureAnonymousPeer — the EXCEPTION knob for the inner caller-authority
+	// gate's treatment of an anonymous/system principal that carries NO verified
+	// module cert. Default (false) is the RULE: such a caller reached the PUBLIC
+	// listener, which has no module-cert floor, and is DENIED. Setting it opts a
+	// stand without mTLS into the permissive posture, where the two listeners are
+	// indistinguishable (mirroring authzguard.CallerPolicy / RelationWriteGate).
+	//
+	// The polarity is load-bearing, not cosmetic. It used to be `prodMode`, whose
+	// zero value selected the permissive branch — so a composition that never
+	// called the setter answered authorization questions about arbitrary subjects
+	// to a caller presenting no credentials at all, and nothing failed to say so.
+	// A knob may carry the exception; it may not carry the rule. Set via
+	// WithInsecureAnonymousPeer.
+	insecureAnonymousPeer bool
 }
 
 // NewHandler — builder. Both svc and whoAmI are required (composition root
@@ -75,13 +83,14 @@ func (h *Handler) WithCallerAuthority(checker authzguard.RelationChecker) *Handl
 	return h
 }
 
-// WithProductionMode toggles fail-closed enforcement of the inner
-// caller-authority gate for anonymous/system principals without a verified
-// module cert (the public-listener bypass). Defaults to dev-mode (permissive
-// back-compat); the composition root enables it from cfg.AuthN.Mode.IsProduction().
+// WithInsecureAnonymousPeer opts a stand WITHOUT mTLS into the permissive
+// treatment of an anonymous/system principal that carries no verified module
+// cert. Passing false (or never calling this at all) keeps the fail-closed
+// default. The composition root derives it from the AuthN mode:
+// WithInsecureAnonymousPeer(!cfg.AuthN.Mode.IsProduction()).
 // Returns the receiver for chaining.
-func (h *Handler) WithProductionMode(prod bool) *Handler {
-	h.prodMode = prod
+func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
+	h.insecureAnonymousPeer = insecure
 	return h
 }
 
