@@ -84,6 +84,8 @@ func applyWithConflictRetry(ctx context.Context, apply func(context.Context) err
 		}
 		// Full jitter over the current window — decorrelates symmetric writers.
 		// math/rand is deliberate: this is backoff spread, not a security value.
+		// #nosec G404 -- the draw is consumed by time.After four lines below and
+		// nowhere else; it is not a secret, a one-time code or an identifier.
 		wait := time.Duration(rand.Int64N(int64(backoff)) + 1)
 		select {
 		case <-ctx.Done():

@@ -16,7 +16,7 @@
 package bootstrap_token
 
 import (
-	"crypto/md5" //nolint:gosec // md5 is used ONLY as a deterministic id-derivation function (NOT for security); it must match Postgres md5() in migration 0058.
+	"crypto/md5" // #nosec G501 -- deterministic id derivation (must match Postgres md5() in migration 0058), not a security primitive
 	"encoding/hex"
 )
 
@@ -36,8 +36,14 @@ const (
 // md5Suffix returns the first 17 hex chars of md5(s) — identical to Postgres
 // `substr(md5(s),1,17)`. All hex chars are valid Crockford-base32 (0-9a-f ⊂
 // [0-9a-hjkmnp-tv-z]), so the derived ids satisfy the soc_/cag_ id CHECKs.
+//
+// The only inputs are the package constants above, and the outputs are public
+// identifiers — nothing here is authentication material. The digest is fixed by
+// an already-applied migration: 0058 seeded its rows under
+// `substr(md5('kacho-bootstrap-admin'),1,17)`, so a different digest would not
+// be "stronger", it would simply stop addressing the rows that exist.
 func md5Suffix(s string) string {
-	sum := md5.Sum([]byte(s)) //nolint:gosec // deterministic id derivation, not security.
+	sum := md5.Sum([]byte(s)) // #nosec G401 -- deterministic id (must match Postgres md5()), not a security primitive
 	return hex.EncodeToString(sum[:])[:17]
 }
 

@@ -1327,6 +1327,10 @@ const (
 // at most the whole window (see the constants above for why the floor matters).
 func conflictWait(window time.Duration) time.Duration {
 	half := window / 2
+	// #nosec G404 -- retry-backoff spread, not a security value: the result is
+	// only ever handed to time.After (see the retry loop below), it is never a
+	// secret, a one-time code or an identifier. crypto/rand here would buy
+	// nothing and add a syscall to a hot retry path.
 	return half + time.Duration(rand.Int64N(int64(half)+1))
 }
 
