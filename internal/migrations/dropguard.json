@@ -1,0 +1,98 @@
+{
+  "service": "iam",
+  "drops": [
+    {
+      "version": 5,
+      "table": "kacho_iam._pre_rbac_v2_roles",
+      "kind": "recreate",
+      "expect_rows": 0
+    },
+    {
+      "version": 5,
+      "table": "kacho_iam._pre_rbac_v2_access_bindings",
+      "kind": "recreate",
+      "expect_rows": 0
+    },
+    {
+      "version": 6,
+      "table": "kacho_iam.scim_group_members",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 6,
+      "table": "kacho_iam.scim_groups",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 6,
+      "table": "kacho_iam.scim_user_mappings",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 6,
+      "table": "kacho_iam.saml_sessions",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 6,
+      "table": "kacho_iam.break_glass_post_incident_reviews",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 6,
+      "table": "kacho_iam.cluster_break_glass_grants",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 7,
+      "table": "kacho_iam.caep_event_delivery",
+      "kind": "absent",
+      "expect_rows": 0,
+      "note": "No migration in this chain creates this table, so on every database these migrations built the statement is a no-op and destroys nothing. It is aimed at databases that predate the chain, where the CAEP push pipeline had been created outside it; the measured run confirms the absence rather than taking the migration's word for it."
+    },
+    {
+      "version": 7,
+      "table": "kacho_iam.caep_outbox",
+      "kind": "absent",
+      "expect_rows": 0,
+      "note": "No migration in this chain creates this table, so on every database these migrations built the statement is a no-op and destroys nothing. It is aimed at databases that predate the chain, where the CAEP push pipeline had been created outside it; the measured run confirms the absence rather than taking the migration's word for it."
+    },
+    {
+      "version": 7,
+      "table": "kacho_iam.caep_subscribers",
+      "kind": "absent",
+      "expect_rows": 0,
+      "note": "No migration in this chain creates this table, so on every database these migrations built the statement is a no-op and destroys nothing. It is aimed at databases that predate the chain, where the CAEP push pipeline had been created outside it; the measured run confirms the absence rather than taking the migration's word for it."
+    },
+    {
+      "version": 8,
+      "table": "kacho_iam.organizations",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 30,
+      "table": "kacho_iam.access_binding_targets",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 30,
+      "table": "kacho_iam.access_binding_selector",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 65,
+      "table": "kacho_iam.oidc_jwks_keys",
+      "kind": "retire",
+      "expect_rows": 0
+    }
+  ]
+}
