@@ -104,6 +104,25 @@ type Authorizer interface {
 	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error)
 }
 
+// StructuralFactResolver — port over the structural facts iam can PROVE from its
+// own committed rows: the parent pointers the super-access cascade derives over,
+// and the account's owner. Implemented by internal/authzcascade.
+//
+// It exists because those tuples otherwise reach OpenFGA only through the
+// at-least-once outbox, which makes the cascade delivery-dependent — the one thing
+// the recorded decision chose a cascade in order NOT to be. See the package doc of
+// internal/authzcascade.
+type StructuralFactResolver interface {
+	// Derivable reports whether this object type can be spoken about at all,
+	// without touching the database — so a Check on an object iam does not own
+	// costs no read.
+	Derivable(objectType string) bool
+	// StructuralFacts returns the facts for one object. (nil, nil) means "nothing
+	// is claimed" (unknown type or absent row); a non-nil error means the row could
+	// not be read, which is an outage and NOT a denial.
+	StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.ConditionalTuple, error)
+}
+
 // AuthorizeService — use-case.
 type AuthorizeService struct {
 	relations Authorizer
@@ -114,6 +133,9 @@ type AuthorizeService struct {
 	// Optional / nil-safe: an unwired checker never short-circuits (the
 	// ordinary FGA path is the sole decision — backward-compatible).
 	clusterAdmin authzguard.RelationChecker
+	// structural — request-time source of the cascade's structural facts. Wired in
+	// production; nil in unit tests that do not exercise the cascade.
+	structural StructuralFactResolver
 }
 
 // AuthorizeServiceConfig — DI config.
@@ -123,6 +145,9 @@ type AuthorizeServiceConfig struct {
 	// ClusterAdminChecker — flat cluster-admin short-circuit port. nil → no
 	// short-circuit (ordinary FGA path only).
 	ClusterAdminChecker authzguard.RelationChecker
+	// StructuralFacts — request-time resolver for the cascade's structural facts.
+	// nil → the cascade resolves only over tuples the queue has already delivered.
+	StructuralFacts StructuralFactResolver
 }
 
 // NewAuthorizeService — builder.
@@ -131,6 +156,7 @@ func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
 		relations:    cfg.Relations,
 		modelID:      cfg.ModelID,
 		clusterAdmin: cfg.ClusterAdminChecker,
+		structural:   cfg.StructuralFacts,
 	}
 }
 
