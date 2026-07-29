@@ -81,7 +81,7 @@ var notDerivableHere = map[string]string{
 // would drift.
 func suppliedPairs() map[string]map[string]bool {
 	out := map[string]map[string]bool{}
-	add := func(facts []authztypes.ConditionalTuple) {
+	add := func(facts []authztypes.TupleKey) {
 		for _, f := range facts {
 			objType, _, ok := splitForTest(f.Object)
 			if !ok {

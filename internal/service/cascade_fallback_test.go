@@ -32,14 +32,14 @@ import (
 // cfResolver — a StructuralFactResolver fake that counts reads.
 type cfResolver struct {
 	derivable map[string]bool
-	facts     []authztypes.ConditionalTuple
+	facts     []authztypes.TupleKey
 	err       error
 	reads     int
 }
 
 func (r *cfResolver) Derivable(objectType string) bool { return r.derivable[objectType] }
 
-func (r *cfResolver) StructuralFacts(_ context.Context, _, _ string) ([]authztypes.ConditionalTuple, error) {
+func (r *cfResolver) StructuralFacts(_ context.Context, _, _ string) ([]authztypes.TupleKey, error) {
 	r.reads++
 	return r.facts, r.err
 }
@@ -49,12 +49,12 @@ func (r *cfResolver) StructuralFacts(_ context.Context, _, _ string) ([]authztyp
 type cfAuthorizer struct {
 	mockRelations
 	contextualAllow bool
-	gotContextual   []authztypes.ConditionalTuple
+	gotContextual   []authztypes.TupleKey
 	contextualCalls int
 }
 
 func (a *cfAuthorizer) CheckWithContextualTuples(
-	_ context.Context, _, _, _ string, _ map[string]any, contextual []authztypes.ConditionalTuple,
+	_ context.Context, _, _, _ string, _ map[string]any, contextual []authztypes.TupleKey,
 ) (bool, error) {
 	a.contextualCalls++
 	a.gotContextual = contextual
@@ -157,7 +157,7 @@ func TestStructuralFallback_UnreadableRowIsAnOutageNotADenial(t *testing.T) {
 }
 
 func TestStructuralFallback_SuppliesTheFactsAndAllows(t *testing.T) {
-	facts := []authztypes.ConditionalTuple{
+	facts := []authztypes.TupleKey{
 		{User: "account:acc_1", Relation: "account", Object: "iam_access_binding:abn_1"},
 	}
 	res := &cfResolver{derivable: map[string]bool{"iam_access_binding": true}, facts: facts}

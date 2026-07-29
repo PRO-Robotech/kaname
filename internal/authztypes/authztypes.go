@@ -73,3 +73,18 @@ type StoreInfo struct {
 	ModelBuildSHA        string
 	EngineVersion        string
 }
+
+// TupleKey — an UNCONDITIONAL relation triple.
+//
+// It exists so a caller that cannot honour a condition does not have to accept a type
+// that carries one. The contextual-tuple Check is the case: OpenFGA's
+// `contextual_tuples.tuple_keys` takes bare triples, so a ConditionalTuple parameter
+// there would promise a condition the transport drops — and the direction of that
+// failure is an ALLOW where the condition would have denied. Api-conventions forbids
+// accepting a field nothing reads; the narrower type removes the field instead of
+// documenting the omission.
+type TupleKey struct {
+	User     string
+	Relation string
+	Object   string
+}

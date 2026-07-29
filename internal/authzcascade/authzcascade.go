@@ -39,11 +39,19 @@
 // It is not a second source of truth. The projection here and the projection the
 // outbox emits are the same function of the same column, and on
 // iam_access_binding that column is immutable after Create (update.go
-// abImmutableFields: scopeType/scopeId), so the stored tuple and the contextual
-// one cannot disagree for the whole life of the row. When the queue does deliver,
-// the stored tuple is byte-identical and the contextual copy is redundant, not
-// contradictory. On revoke the row is gone, so the fact stops being derivable at
-// once — earlier than the stored tuple disappears, never later.
+// abImmutableFields: scopeType/scopeId), so the two projections cannot disagree about
+// WHAT the pointer is for the whole life of the row. When the queue delivers, the
+// stored tuple is byte-identical and the contextual copy is redundant.
+//
+// They DO diverge about WHETHER the pointer is present, in exactly one place, by
+// design: Revoke deletes the emitted set (the parent pointer among it) while KEEPING
+// the row (access_binding/revoke.go), so afterwards the store has no pointer and this
+// package still derives one. That is intended — a revoked binding is still a record
+// its account's administrator must be able to read and delete — and it cannot restore
+// the grant, because what the grantee held were tuples on the SCOPE object and nothing
+// here ever projects one. Delete removes the row, and then the fact stops being
+// derivable at once. Locked by
+// service/cascade_queue_independence_integration_test.go::TestRevokedBindingStaysManageableAndGrantsNothing.
 //
 // A synchronous write after commit would not give the same property. OpenFGA
 // cannot take part in the database transaction — that is why the outbox exists —
@@ -72,6 +80,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -87,16 +96,46 @@ type ConditionReader interface {
 	Get(ctx context.Context, id domain.ConditionID) (domain.Condition, error)
 }
 
+// PrimaryReaderSource opens a read-only transaction on the PRIMARY.
+//
+// It is deliberately NOT kachorepo.Repository, whose Reader() prefers a replica. The
+// row this package reads is, by construction, one that was just committed — precisely
+// what a replica lags on. Reading it from a replica would not remove the dependency on
+// a delivery pipeline, only change which pipeline it is, and the package would then be
+// claiming something it does not do. Satisfied by *repo/kacho/pg.Repository.
+type PrimaryReaderSource interface {
+	ReaderFromPrimary(ctx context.Context) (kachorepo.Reader, error)
+}
+
 // Resolver reads iam's committed rows and projects them into the structural
 // tuples the cascade derives over.
 type Resolver struct {
-	repo       kachorepo.Repository
+	repo       PrimaryReaderSource
 	conditions ConditionReader
+	// readTimeout bounds ONE structural read. The read sits on the request path of an
+	// authorization decision, so an unresponsive database must cost a bounded wait and
+	// a fail-closed answer rather than a held goroutine (architecture.md, per-call
+	// deadline on every external call).
+	readTimeout time.Duration
 }
 
-// New builds a Resolver over iam's own repository.
-func New(repo kachorepo.Repository) *Resolver {
-	return &Resolver{repo: repo}
+// defaultReadTimeout — the structural read is a handful of primary-key lookups; a
+// second is already far beyond healthy, and the deny it produces on expiry is
+// fail-closed.
+const defaultReadTimeout = time.Second
+
+// New builds a Resolver over iam's own primary.
+func New(repo PrimaryReaderSource) *Resolver {
+	return &Resolver{repo: repo, readTimeout: defaultReadTimeout}
+}
+
+// WithReadTimeout overrides the per-read deadline. Zero or negative leaves the
+// default.
+func (r *Resolver) WithReadTimeout(d time.Duration) *Resolver {
+	if d > 0 {
+		r.readTimeout = d
+	}
+	return r
 }
 
 // WithConditions wires the conditions reader, making iam_condition derivable.
@@ -163,7 +202,7 @@ const maxChainDepth = 4
 //   - the read failed → (nil, err). The caller must NOT read this as "no facts":
 //     the structural fact is part of the decision, so an unreadable row means the
 //     answer is unknown, and unknown is an outage, not a denial.
-func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.ConditionalTuple, error) {
+func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.TupleKey, error) {
 	if objectID == "" || !r.Derivable(objectType) {
 		return nil, nil
 	}
@@ -172,17 +211,22 @@ func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID str
 	// hierarchy (the binding's project from before a move, that project's account
 	// from after it), and the facts handed to OpenFGA would then describe a shape
 	// that never existed. One snapshot cannot.
+	if r.readTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.readTimeout)
+		defer cancel()
+	}
 	var rd kachorepo.Reader
 	if r.repo != nil {
 		var err error
-		rd, err = r.repo.Reader(ctx)
+		rd, err = r.repo.ReaderFromPrimary(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("authzcascade reader: %w", err)
 		}
 		defer func() { _ = rd.Rollback(ctx) }()
 	}
 	var (
-		out     []authztypes.ConditionalTuple
+		out     []authztypes.TupleKey
 		visited = map[string]bool{}
 		// worklist of objects still to project, breadth-first from the target.
 		queue = []objectRef{{Type: objectType, ID: objectID}}
@@ -241,7 +285,7 @@ func parseObjectRef(s string) (objectRef, bool) {
 // hop taken from it, and the project itself is then read on the snapshot.
 func (r *Resolver) factsFor(
 	ctx context.Context, rd kachorepo.Reader, objectType, objectID string,
-) ([]authztypes.ConditionalTuple, error) {
+) ([]authztypes.TupleKey, error) {
 	if objectType == "iam_condition" {
 		return r.conditionFacts(ctx, objectID)
 	}
@@ -284,8 +328,12 @@ func (r *Resolver) factsFor(
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		// A system role has no owning account (account_id IS NULL); nothing to
-		// derive, and the account tier must not reach it.
+		// account_id is NULL for TWO kinds of role, and neither yields a fact.
+		// A system role has no owning account at all, and the account tier must not
+		// reach it. A PROJECT-scoped custom role has a parent — its project — but
+		// `iam_role` declares no `project` relation, so that arm of the cascade is
+		// unreachable in the model rather than merely undelivered; see the note on
+		// iam_role in cascade_coverage_test.go.
 		return toConditionalOne(domain.AccountScopedStructuralFact(string(ro.AccountID), "iam_role", objectID)), nil
 	case "iam_service_account":
 		sa, gerr := rd.ServiceAccounts().Get(ctx, domain.ServiceAccountID(objectID))
@@ -297,7 +345,7 @@ func (r *Resolver) factsFor(
 	return nil, nil
 }
 
-func (r *Resolver) conditionFacts(ctx context.Context, objectID string) ([]authztypes.ConditionalTuple, error) {
+func (r *Resolver) conditionFacts(ctx context.Context, objectID string) ([]authztypes.TupleKey, error) {
 	c, err := r.conditions.Get(ctx, domain.ConditionID(objectID))
 	if err != nil {
 		return nil, absentIsNotAnError(err)
@@ -320,18 +368,18 @@ func absentIsNotAnError(err error) error {
 // ONLY place this package decides anything about tuple shape; what the triples ARE
 // is decided once, in domain/structural_tuple.go, and the outbox emitter reads the
 // same function. See that file for why.
-func toConditional(sts []domain.StructuralTuple) []authztypes.ConditionalTuple {
+func toConditional(sts []domain.StructuralTuple) []authztypes.TupleKey {
 	if len(sts) == 0 {
 		return nil
 	}
-	out := make([]authztypes.ConditionalTuple, 0, len(sts))
+	out := make([]authztypes.TupleKey, 0, len(sts))
 	for _, st := range sts {
-		out = append(out, authztypes.ConditionalTuple{User: st.User, Relation: st.Relation, Object: st.Object})
+		out = append(out, authztypes.TupleKey{User: st.User, Relation: st.Relation, Object: st.Object})
 	}
 	return out
 }
 
-func toConditionalOne(st domain.StructuralTuple, ok bool) []authztypes.ConditionalTuple {
+func toConditionalOne(st domain.StructuralTuple, ok bool) []authztypes.TupleKey {
 	if !ok {
 		return nil
 	}

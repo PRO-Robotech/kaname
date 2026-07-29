@@ -68,3 +68,21 @@ func (r *Repository) readPool() *pgxpool.Pool {
 
 // Compile-time guard.
 var _ kacho.Repository = (*Repository)(nil)
+
+// ReaderFromPrimary opens a read-only TX on the PRIMARY, never on a replica.
+//
+// Reader() prefers the replica, which is right for ordinary reads and wrong for one
+// specific job: reading a row in order to decide authorization about that same row.
+// Such a row is, by construction, one that was just committed — precisely what a
+// replica lags on. A decision that reads it from a replica has not stopped depending
+// on a delivery pipeline, it has changed which pipeline it depends on.
+//
+// The only caller is internal/authzcascade, which projects committed rows into the
+// structural facts the super-access cascade resolves over. See that package's doc.
+func (r *Repository) ReaderFromPrimary(ctx context.Context) (kacho.Reader, error) {
+	tx, err := r.master.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	return &readTx{tx: tx}, nil
+}

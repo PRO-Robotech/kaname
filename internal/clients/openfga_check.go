@@ -49,7 +49,7 @@ func (c *OpenFGAHTTPClient) CheckWithContext(ctx context.Context, subject, relat
 // request that carried it.
 func (c *OpenFGAHTTPClient) CheckWithContextualTuples(
 	ctx context.Context, subject, relation, object string,
-	condCtx map[string]any, contextual []authztypes.ConditionalTuple,
+	condCtx map[string]any, contextual []authztypes.TupleKey,
 ) (bool, error) {
 	return c.checkWithContext(ctx, subject, relation, object, condCtx, "", contextual)
 }
@@ -68,7 +68,7 @@ func (c *OpenFGAHTTPClient) CheckWithContextConsistent(ctx context.Context, subj
 // contextual carries request-scoped tuples (nil ⇒ the field is omitted entirely).
 func (c *OpenFGAHTTPClient) checkWithContext(
 	ctx context.Context, subject, relation, object string,
-	condCtx map[string]any, consistency string, contextual []authztypes.ConditionalTuple,
+	condCtx map[string]any, consistency string, contextual []authztypes.TupleKey,
 ) (bool, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return false, ErrNotConfigured

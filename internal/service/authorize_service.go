@@ -120,7 +120,7 @@ type StructuralFactResolver interface {
 	// StructuralFacts returns the facts for one object. (nil, nil) means "nothing
 	// is claimed" (unknown type or absent row); a non-nil error means the row could
 	// not be read, which is an outage and NOT a denial.
-	StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.ConditionalTuple, error)
+	StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.TupleKey, error)
 }
 
 // AuthorizeService — use-case.
@@ -433,7 +433,7 @@ type consistentAuthorizer interface {
 // production wiring that lost the capability must be a failure, not a silence).
 type contextualAuthorizer interface {
 	CheckWithContextualTuples(ctx context.Context, subject, relation, object string,
-		condCtx map[string]any, contextual []authztypes.ConditionalTuple) (bool, error)
+		condCtx map[string]any, contextual []authztypes.TupleKey) (bool, error)
 }
 
 // StructuralFallbackReachable reports whether the structural fallback can run at
