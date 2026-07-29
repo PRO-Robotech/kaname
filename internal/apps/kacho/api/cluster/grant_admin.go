@@ -52,8 +52,8 @@ type GrantAdminUseCase struct {
 	relations relationOutboxEmitter
 	txb       service.TxBeginner
 	opsRepo   operationRepo
-	// subjectState — состояние субъекта выдачи; nil = skip (тесты без сида
-	// таблиц users/service_accounts).
+	// subjectState — состояние субъекта выдачи. nil → fail-closed
+	// (assertSubjectMayHoldGrant отказывает), как и nil adminCheck.
 	subjectState subjectStateReader
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate. nil →
 	// fail-closed (requireClusterSystemAdmin denies). See admin_authz.go.
@@ -127,10 +127,8 @@ func (uc *GrantAdminUseCase) Execute(
 	// в идентификаторе).
 	//
 	// Чтение — по типу, т.к. subject_id полиморфен и FK его не покрывает.
-	if uc.subjectState != nil {
-		if err := uc.assertSubjectMayHoldGrant(ctx, styp, subjectID); err != nil {
-			return nil, err
-		}
+	if err := uc.assertSubjectMayHoldGrant(ctx, styp, subjectID); err != nil {
+		return nil, err
 	}
 
 	// Principal for granted_by field. The authZ gate above already proved a
@@ -208,6 +206,15 @@ func (uc *GrantAdminUseCase) Execute(
 func (uc *GrantAdminUseCase) assertSubjectMayHoldGrant(
 	ctx context.Context, styp domain.GrantSubjectType, subjectID string,
 ) error {
+	// Непровязанная проверка — это отказ, а не разрешение (так же устроен
+	// соседний гейт ReBAC этого же RPC). Иначе композиция, забывшая её
+	// подключить, поднимает сервис, выдающий права уровня кластера кому угодно,
+	// и заметить это нечем. Текст называет основание — его читает оператор,
+	// поднимающий стенд.
+	if uc.subjectState == nil {
+		return shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"subject state is not verifiable"))
+	}
 	switch styp {
 	case domain.GrantSubjectTypeServiceAccount:
 		// `enabled` — и есть предикат domain.ServiceAccount.MayAuthenticate;

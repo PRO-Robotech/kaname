@@ -211,8 +211,11 @@ func TestGrantAdmin_ServiceAccountSubject_EmitsMachineTuple(t *testing.T) {
 	w := &recordingGrantWriter{}
 	rel := &recordingRelationEmitter{}
 
+	// Состояние субъекта названо явно: проверка состояния — не «необязательная»,
+	// непровязанная она отказывает, поэтому фикстура обязана его нести.
 	uc := clusterapp.NewGrantAdminUseCase(w, nil, rel, &fakeTxBeginner{}, noopOpsRepo{}).
-		WithAdminChecker(chk)
+		WithAdminChecker(chk).
+		WithSubjectStateReader(&fakeSubjectState{saEnabled: true})
 
 	_, err := uc.Execute(ctxUser(validUserA),
 		iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT, validServiceAccount)
