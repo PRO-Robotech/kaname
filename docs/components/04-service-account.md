@@ -19,8 +19,10 @@ kacho-iam держит только запись с id, именем, account_id
 - `account_id` immutable.
 - Имя уникально per-Account.
 - SA-ключи (`sa_keys`) — отдельный sub-resource (см. [`05-sa-keys.md`](05-sa-keys.md)).
-- `enabled=false` блокирует выпуск новых ключей и инвалидирует существующие
-  (Hydra refuses token-issue).
+- `enabled=false` закрывает КАЖДЫЙ путь выдачи нового токена или ключа
+  (token-hook `client_credentials`, федеративная ассерция, `SAKeyService.Issue`,
+  docker-token). Уже выданные access-токены НЕ инвалидируются — они доживают
+  свой срок; останавливается чеканка новых.
 
 ## Доменная модель
 
@@ -31,7 +33,7 @@ kacho-iam держит только запись с id, именем, account_id
 | `project_id`  | `ProjectID`               | нет          | через Move| FK → `projects(id) ON DELETE RESTRICT`.           |
 | `name`        | `SvcAccountName`          | да           | нет       | `^[a-z][-a-z0-9]{2,62}$`.                         |
 | `description` | `Description`             | нет          | нет       | len ≤256.                                          |
-| `enabled`     | `bool`                    | да           | нет       | default `true`. Disabled SA не выпускает токены.  |
+| `enabled`     | `bool`                    | да           | нет       | default `true`. Меняется ТОЛЬКО действиями `Disable`/`Enable`, НЕ через `Update`. |
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                              |
 
 **ID prefix:** `sva`.
@@ -94,8 +96,16 @@ sequenceDiagram
 | `Create`  | async      | Создает SA в Account (опционально в Project).   |
 | `Get`     | sync       | Получает SA по id.                              |
 | `List`    | sync       | Список (filter by `account_id`, `project_id`).  |
-| `Update`  | async      | UpdateMask: `name`, `description`, `enabled`.   |
+| `Update`  | async      | UpdateMask: `name`, `description`, `labels`.    |
+| `Disable` | async      | Учётка больше не аутентифицируется. Идемпотентно; порог повышенной аутентификации. |
+| `Enable`  | async      | Учётка аутентифицируется снова. Идемпотентно; тот же порог. |
 | `Delete`  | async      | RESTRICT-FK если есть active bindings/ключи.    |
+
+**Почему `enabled` НЕ поле маски.** У `Update` пустая маска по конвенции платформы
+означает полную замену объекта, а `bool` в proto3 неотличим от неприсланного —
+клиент, не заполнивший поле, отключил бы учётку молча. Плюс отключение — событие
+(«учётку вывели из эксплуатации»), а не правка атрибута, и в журнале оно обязано
+читаться событием: `iam.service_account.disabled` / `.enabled`.
 
 SA-ключи — отдельный service (см. [`05-sa-keys.md`](05-sa-keys.md)).
 
@@ -107,6 +117,8 @@ SA-ключи — отдельный service (см. [`05-sa-keys.md`](05-sa-keys
 | GET     | `/iam/v1/serviceAccounts/{saId}`              | `ServiceAccountService.Get`        |
 | GET     | `/iam/v1/serviceAccounts`                     | `ServiceAccountService.List`       |
 | PATCH   | `/iam/v1/serviceAccounts/{saId}`              | `ServiceAccountService.Update`     |
+| POST    | `/iam/v1/serviceAccounts/{saId}:disable`      | `ServiceAccountService.Disable`    |
+| POST    | `/iam/v1/serviceAccounts/{saId}:enable`       | `ServiceAccountService.Enable`     |
 | DELETE  | `/iam/v1/serviceAccounts/{saId}`              | `ServiceAccountService.Delete`     |
 
 ## Конфигурация
@@ -132,10 +144,16 @@ SA_ID=...
 # Get.
 curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID -H "Authorization: Bearer $TOKEN"
 
-# Disable (revoke токены).
-curl -X PATCH http://localhost:18080/iam/v1/serviceAccounts/$SA_ID \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"enabled":false,"update_mask":"enabled"}'
+# Disable — учётка перестаёт получать новые токены и ключи.
+# Действие, а не поле маски: маску можно забыть, действие — нет.
+# Требует сессии с повышенной аутентификацией (acr=2).
+curl -X POST http://localhost:18080/iam/v1/serviceAccounts/$SA_ID:disable \
+  -H "Authorization: Bearer $STEPUP_TOKEN" -d '{}'
+
+# Enable — обратно. Оба действия идемпотентны: запрос состояния, в котором
+# учётка уже находится, успешен.
+curl -X POST http://localhost:18080/iam/v1/serviceAccounts/$SA_ID:enable \
+  -H "Authorization: Bearer $STEPUP_TOKEN" -d '{}'
 ```
 
 ### gRPC
@@ -179,7 +197,7 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s -run TestServic
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/service_account/{create,get,list,update,delete}.go`.
+- **Use-cases:** `internal/apps/kacho/api/service_account/{create,get,list,update,delete,set_enabled}.go`.
 - **Handler:** `internal/apps/kacho/api/service_account/handler.go`.
 - **Repo:** `internal/repo/kacho/pg/service_account_repo.go`.
 - **Hydra integration:** SA сам по себе не делает запросы в Hydra — только
