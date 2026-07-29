@@ -54,17 +54,16 @@ def assert_iam_operation_envelope():
 
 
 def _revoke_teardown(name, acb_var):
-    """Best-effort revoke so re-runs do not trip strict-create (active-grant
-    UNIQUE). Accepts 200/404/403."""
-    return Step(
-        name=name,
-        method="DELETE",
-        path="/iam/v1/accessBindings/{{" + acb_var + "}}",
-        auth="jwtAccountAdminA",
-        test_script=[
-            "pm.test('teardown: status acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
-        ],
-    )
+    """RELIABLE revoke — общий помощник gen.py.
+
+    Прежняя редакция принимала 403 («отказано в правах») как успешную уборку и
+    ехала дальше. Отзыв при этом НЕ происходил: грант оставался ACTIVE в ОБЩЕМ
+    аккаунте после конца прогона, и следующий прогон видел субъекта, у которого
+    «нет ни одной выдачи», но которому тем не менее разрешено. Реализация была
+    исправлена в соседнем файле (iam-rbac-subjects), а здесь класс остался жив —
+    ровно потому, что помощник скопирован, а не общий. Теперь он один.
+    """
+    return reliable_delete(name, "/iam/v1/accessBindings/{{" + acb_var + "}}")
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +83,7 @@ CASES.append(Case(
             path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userNOBId}}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                 "pm.environment.unset('vbcDupAcbId');",
                 "if (pm.response.code === 200) {",
                 "  const arr = (pm.response.json() || {}).accessBindings || [];",
@@ -95,13 +94,15 @@ CASES.append(Case(
                 "if (!pm.environment.get('vbcDupAcbId')) { pm.execution.setNextRequest('create-derive'); }",
             ],
         ),
-        Step(
+        poll_request_until_status(
+            retry_on=(403,),
+            
             name="del-dup",
             method="DELETE",
             path="/iam/v1/accessBindings/{{vbcDupAcbId}}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+                "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                 # AccessBinding.Delete is ASYNC (returns Operation). Save its id so the
                 # next step AWAITS the revoke (revoked_at set) BEFORE create-derive — else
                 # the strict-create races the still-active grant → AlreadyExists (the
@@ -196,7 +197,7 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        _revoke_teardown("teardown-vbc16", "vbcAcbId"),
+        *_revoke_teardown("teardown-vbc16", "vbcAcbId"),
     ],
 ))
 

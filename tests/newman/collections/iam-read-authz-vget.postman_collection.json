@@ -73,7 +73,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                   "pm.environment.unset('rdAuthzDupAcbId');",
                   "if (pm.response.code === 200) {",
                   "  const arr = (pm.response.json() || {}).accessBindings || [];",
@@ -125,6 +125,12 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_del_dup') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_del_dup', '0');",
+                  "  pm.environment.set('_poll200_started_del_dup', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -134,7 +140,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+                  "const _p200c = parseInt(pm.environment.get('_poll200_del_dup') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_del_dup', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_del_dup');",
+                  "pm.environment.unset('_poll200_started_del_dup');",
+                  "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('rdAuthzDelOpId');",
                   "if (pm.response.code === 200) {",
                   "  const dj = pm.response.json() || {};",
@@ -534,6 +552,12 @@
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_grant') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_grant', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_grant', pm.info.requestName);",
                   "}"
                 ]
               }
@@ -543,7 +567,84 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('teardown: revoke acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_grant') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_grant', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_grant');",
+                  "pm.environment.unset('_poll200_started_teardown_grant');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardowngrantRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardowngrantRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RDAUTHZ-ACC-GT-GRANTED-NONOWNER-OK :: teardown-grant-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardowngrantRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardowngrantRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "if (pm.environment.get('__teardowngrantRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardowngrantRevOpCount', '0'); pm.environment.set('__teardowngrantRevOpStarted', pm.info.requestName); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardowngrantRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardowngrantRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardowngrantRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardowngrantRevOpCount'); pm.environment.unset('__teardowngrantRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }
             }

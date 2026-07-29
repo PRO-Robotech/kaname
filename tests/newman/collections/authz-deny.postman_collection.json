@@ -11157,7 +11157,14 @@
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "pm.environment.set('_abTeardownDelId', pm.environment.get('_abTeardownId_AUTHZ_AB_CR_A_AAA') || 'acbnonexistent000001');"
+                  "if (!pm.environment.get('_abTeardownId_AUTHZ_AB_CR_A_AAA')) { pm.execution.skipRequest(); }",
+                  "pm.environment.set('_abTeardownDelId', pm.environment.get('_abTeardownId_AUTHZ_AB_CR_A_AAA'));",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_delete_ab_teardown') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_delete_ab_teardown', '0');",
+                  "  pm.environment.set('_poll200_started_delete_ab_teardown', pm.info.requestName);",
+                  "}"
                 ]
               }
             },
@@ -11166,8 +11173,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_delete_ab_teardown') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_delete_ab_teardown', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_delete_ab_teardown');",
+                  "pm.environment.unset('_poll200_started_delete_ab_teardown');",
                   "try { const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('_abDelOpId_AUTHZ_AB_CR_A_AAA', _dop.id); } catch(e) {}",
-                  "pm.test('[teardown] delete-ab: 200 or 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES into the next run', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));"
                 ]
               }
             }
@@ -11680,7 +11699,14 @@
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "pm.environment.set('_abTeardownDelId', pm.environment.get('_abTeardownId_AUTHZ_AB_CR_B_AAB') || 'acbnonexistent000001');"
+                  "if (!pm.environment.get('_abTeardownId_AUTHZ_AB_CR_B_AAB')) { pm.execution.skipRequest(); }",
+                  "pm.environment.set('_abTeardownDelId', pm.environment.get('_abTeardownId_AUTHZ_AB_CR_B_AAB'));",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_delete_ab_teardown') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_delete_ab_teardown', '0');",
+                  "  pm.environment.set('_poll200_started_delete_ab_teardown', pm.info.requestName);",
+                  "}"
                 ]
               }
             },
@@ -11689,8 +11715,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_delete_ab_teardown') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_delete_ab_teardown', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_delete_ab_teardown');",
+                  "pm.environment.unset('_poll200_started_delete_ab_teardown');",
                   "try { const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('_abDelOpId_AUTHZ_AB_CR_B_AAB', _dop.id); } catch(e) {}",
-                  "pm.test('[teardown] delete-ab: 200 or 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES into the next run', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));"
                 ]
               }
             }
@@ -12133,7 +12171,14 @@
                   "  });",
                   "  pm.request.headers.remove('Authorization');",
                   "}",
-                  "pm.environment.set('_abTeardownDelId', pm.environment.get('_abTeardownId_AUTHZ_AB_CR_B_INV') || 'acbnonexistent000001');"
+                  "if (!pm.environment.get('_abTeardownId_AUTHZ_AB_CR_B_INV')) { pm.execution.skipRequest(); }",
+                  "pm.environment.set('_abTeardownDelId', pm.environment.get('_abTeardownId_AUTHZ_AB_CR_B_INV'));",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_delete_ab_teardown') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_delete_ab_teardown', '0');",
+                  "  pm.environment.set('_poll200_started_delete_ab_teardown', pm.info.requestName);",
+                  "}"
                 ]
               }
             },
@@ -12142,8 +12187,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_delete_ab_teardown') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_delete_ab_teardown', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_delete_ab_teardown');",
+                  "pm.environment.unset('_poll200_started_delete_ab_teardown');",
                   "try { const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('_abDelOpId_AUTHZ_AB_CR_B_INV', _dop.id); } catch(e) {}",
-                  "pm.test('[teardown] delete-ab: 200 or 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"
+                  "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES into the next run', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));"
                 ]
               }
             }

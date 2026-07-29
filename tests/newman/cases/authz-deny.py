@@ -459,12 +459,6 @@ _AB_CR_ALLOW_AUTH = {
     "AUTHZ-AB-CR-B-INV": "jwtInvitee",
 }
 
-# GARBAGE_AB — a well-formed-but-nonexistent acb id used as the teardown DELETE
-# fallback so an UNRESOLVED teardown id never reaches the gateway as a literal
-# `{{...}}` template (a 400 InvalidArgument masquerading as a teardown failure).
-# A DELETE on this id is a clean 404/403 — the expected "nothing to clean up".
-_AB_TEARDOWN_FALLBACK = GARBAGE_AB
-
 for _case in CASES:
     if _case.id not in _AB_CR_ALLOW_AUTH:
         continue
@@ -545,29 +539,44 @@ for _case in CASES:
             "} catch(e) {}",
         ],
     ))
-    # Step 3: DELETE the binding (teardown). Best-effort cleanup so re-runs don't
-    # trip the strict-create active-grant UNIQUE. If THIS case's teardown id is
-    # unresolved, target a well-formed garbage acb (clean 404) — never a literal
-    # `{{...}}` template (which 400s). 200 (op returned) / 404 (gone) / 403 (no FGA
-    # path on the garbage fallback) are all acceptable teardown outcomes.
-    _case.steps.append(Step(
+    # Step 3: DELETE the binding (teardown), so re-runs don't trip the strict-create
+    # active-grant UNIQUE.
+    #
+    # A PERMISSION DENIAL IS NOT A CLEANUP RESULT. The previous version accepted
+    # `oneOf([200, 404, 403])`, and 403 was defensible only for one of the two targets
+    # this step could aim at: when THIS case's binding id was unresolved it deliberately
+    # aimed at a well-formed garbage id, which legitimately 403s at the scope extractor.
+    # But the SAME assertion covered the real target, where 403 means the admin's
+    # `v_delete` on the fresh binding had not yet materialised — the revoke did NOT
+    # happen and the grant stays ACTIVE in the SHARED account for whoever runs next.
+    # One assertion could not tell the two apart, so it accepted the harmful one to
+    # tolerate the harmless one.
+    #
+    # The ambiguity is removed at the source instead of being tolerated: when there is
+    # no binding of ours to delete, no DELETE is issued at all (an explicit
+    # `skipRequest()` guard, which is the sanctioned form for exec-coverage). The step
+    # therefore only ever runs against a REAL target, where 403 is not terminal — it is
+    # retried past the materialization window, and a persistent denial fails honestly.
+    _case.steps.append(poll_request_until_status(
         name=_delName,
         method="DELETE",
         path="/iam/v1/accessBindings/{{_abTeardownDelId}}",
         auth=_auth,
-        pre_script=[
-            # Resolve the target: this case's id if present, else the garbage fallback
-            # (a well-formed id that 404s — keeps the URL valid, no literal template).
-            f"pm.environment.set('_abTeardownDelId', pm.environment.get('{_idvar}') || '{_AB_TEARDOWN_FALLBACK}');",
-        ],
+        retry_on=(403,),
         test_script=[
-            # Save delete Operation id for the follow-up poll (only on the real path).
+            # Save delete Operation id for the follow-up poll.
             f"try {{ const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('{_delopvar}', _dop.id); }} catch(e) {{}}",
-            # Teardown step: accept 200 (op returned), 404 (already gone / garbage
-            # fallback), or 403 (no FGA path on the garbage fallback).
-            "pm.test('[teardown] delete-ab: 200 or 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+            "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 "
+            "means the grant SURVIVES into the next run', "
+            "() => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
         ],
     ))
+    # No binding of ours ⇒ no DELETE. Aiming at a garbage id purely to have something to
+    # send is what made the outcome unreadable in the first place.
+    _case.steps[-1].pre_script = [
+        f"if (!pm.environment.get('{_idvar}')) {{ pm.execution.skipRequest(); }}",
+        f"pm.environment.set('_abTeardownDelId', pm.environment.get('{_idvar}'));",
+    ] + list(_case.steps[-1].pre_script or [])
     # Step 4: poll THIS case's Delete Operation until done (best-effort cleanup).
     _case.steps.append(Step(
         name=_delPollName,

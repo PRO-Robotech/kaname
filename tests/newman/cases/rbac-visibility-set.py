@@ -172,7 +172,7 @@ def preclean_account_loop(tag, next_step):
                 f"if (pm.environment.get('_{tag}Started') !== pm.info.requestName) {{ pm.environment.set('_{tag}Count', '0'); pm.environment.set('_{tag}Started', pm.info.requestName); }}",
             ],
             test_script=[
-                "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                 f"const c = parseInt(pm.environment.get('_{tag}Count') || '0', 10);",
                 "let arr = [];",
                 "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
@@ -188,13 +188,15 @@ def preclean_account_loop(tag, next_step):
                 f"pm.execution.setNextRequest('{next_step}');",
             ],
         ),
-        Step(
+        poll_request_until_status(
+            retry_on=(403,),
+            
             name=del_step,
             method="DELETE",
             path="/iam/v1/accessBindings/{{" + dup + "}}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('pre-clean delete acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+                "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                 f"pm.environment.unset('{delop}');",
                 "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('" + delop + "', dj.id); }",
                 # 200 → fall through to await_step; non-200 (already gone / undeletable) → re-list
@@ -337,13 +339,12 @@ def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, ac
 
 
 def teardown(name, path):
-    return Step(
-        name=name,
-        method="DELETE",
-        path=path,
-        auth="jwtAccountAdminA",
-        test_script=["pm.test('teardown acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"],
-    )
+    """RELIABLE teardown — общий помощник gen.py (403 не терминален).
+
+    Ресурс здесь не выдача, а роль/проект, но класс тот же: принятый отказ в правах
+    оставляет ресурс в ОБЩЕМ аккаунте, и следующий прогон стартует с чужим мусором.
+    """
+    return reliable_delete(name, path)
 
 
 def robust_revoke_binding(name, acb_var):
@@ -446,18 +447,22 @@ CASES.append(Case(
         # while its projects are still async-deleting — tolerated (a leaked per-run rbacvis-<runId>
         # account is harmless: unique name, not pool-constrained, never asserted).
         robust_revoke_binding("teardown-binding", "visSetAcb"),
-        teardown("teardown-role", "/iam/v1/roles/{{visSetRole}}"),
-        teardown("teardown-pp1", "/iam/v1/projects/{{visPP1}}"),
-        teardown("teardown-pp2", "/iam/v1/projects/{{visPP2}}"),
-        teardown("teardown-pp3", "/iam/v1/projects/{{visPP3}}"),
-        teardown("teardown-pm1", "/iam/v1/projects/{{visPM1}}"),
-        teardown("teardown-pm2", "/iam/v1/projects/{{visPM2}}"),
-        teardown("teardown-pm3", "/iam/v1/projects/{{visPM3}}"),
-        teardown("teardown-bq1", "/iam/v1/projects/{{visBQ1}}"),
-        teardown("teardown-bq2", "/iam/v1/projects/{{visBQ2}}"),
-        Step(name="teardown-suite-account", method="DELETE", path="/iam/v1/accounts/{{visSetAcct}}",
-             auth="jwtAccountAdminA",
-             test_script=["pm.test('suite-account teardown best-effort', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403, 404, 409]));"]),
+        *teardown("teardown-role", "/iam/v1/roles/{{visSetRole}}"),
+        *teardown("teardown-pp1", "/iam/v1/projects/{{visPP1}}"),
+        *teardown("teardown-pp2", "/iam/v1/projects/{{visPP2}}"),
+        *teardown("teardown-pp3", "/iam/v1/projects/{{visPP3}}"),
+        *teardown("teardown-pm1", "/iam/v1/projects/{{visPM1}}"),
+        *teardown("teardown-pm2", "/iam/v1/projects/{{visPM2}}"),
+        *teardown("teardown-pm3", "/iam/v1/projects/{{visPM3}}"),
+        *teardown("teardown-bq1", "/iam/v1/projects/{{visBQ1}}"),
+        *teardown("teardown-bq2", "/iam/v1/projects/{{visBQ2}}"),
+        # Снос аккаунта суиты: 403 НЕ принимается — он значит, что аккаунт остаётся, а
+        # вместе с ним всё, что суита в нём насоздавала. Отказ retry'ится через окно
+        # материализации; терминально допустимы снятие (200), «его уже нет» (404) и
+        # «ещё не пуст» (400/409 — дочерние ресурсы сносятся шагами выше, и если один из
+        # них не доехал, это видно ИМЕННО здесь, а не растворяется в общем «best-effort»).
+        *reliable_delete("teardown-suite-account", "/iam/v1/accounts/{{visSetAcct}}",
+                         terminal_codes=(200, 400, 404, 409)),
     ],
 ))
 
@@ -508,8 +513,8 @@ CASES.append(Case(
             ],
         ),
         robust_revoke_binding("teardown-binding", "visVlAcb"),
-        teardown("teardown-role", "/iam/v1/roles/{{visVlRole}}"),
-        teardown("teardown-proj", "/iam/v1/projects/{{visVlProj}}"),
+        *teardown("teardown-role", "/iam/v1/roles/{{visVlRole}}"),
+        *teardown("teardown-proj", "/iam/v1/projects/{{visVlProj}}"),
     ],
 ))
 
@@ -654,9 +659,9 @@ def exact_set_case_steps(kind, pfx, role_name):
         ],
     )
     teardowns = [robust_revoke_binding("teardown-binding", pfx + "Acb"),
-                 teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "Role}}")]
+                 *teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "Role}}")]
     for v in pp + mm + bq:
-        teardowns.append(teardown("teardown-" + v, spec["path"] + "/{{" + v + "}}"))
+        teardowns.extend(teardown("teardown-" + v, spec["path"] + "/{{" + v + "}}"))
     return [
         *objs,
         *preclean_account_loop(pfx + "Set", "create-role"),
@@ -697,8 +702,8 @@ def vlist_only_case_steps(kind, pfx, role_name):
                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));",
              ]),
         robust_revoke_binding("teardown-binding", pfx + "VlAcb"),
-        teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "VlRole}}"),
-        teardown("teardown-obj", spec["path"] + "/{{" + obj + "}}"),
+        *teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "VlRole}}"),
+        *teardown("teardown-obj", spec["path"] + "/{{" + obj + "}}"),
     ]
 
 

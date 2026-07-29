@@ -1334,6 +1334,75 @@ def build_collection(resource: str, cases: List[Case]) -> Dict:
     }
 
 
+
+def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
+                    op_key: Optional[str] = None,
+                    terminal_codes=(200, 404)) -> List[Step]:
+    """RELIABLE teardown DELETE: retry PAST the 403 window, then AWAIT the operation.
+
+    ONE implementation, shared — because six copies of this teardown existed and five of
+    them carried the defect the sixth had already fixed. Duplication was the mechanism:
+    the fix landed in the copy where the leak was observed, and the neighbours kept
+    accepting a denial as cleanup.
+
+    WHY 403 IS NOT AN ACCEPTABLE CLEANUP RESULT. The binding is created by the account
+    admin, but the admin's `v_delete` on that fresh iam_access_binding OBJECT materialises
+    a beat after Create→done. Under load the DELETE lands inside that window and answers
+    403 — and an assertion phrased `oneOf([200, 404, 403])` DECLARES THAT A SUCCESS. The
+    revoke never happened, so the binding stays ACTIVE in the SHARED account past the end
+    of the run, and the next run's leak-guards see a subject that "has no access binding"
+    yet is nonetheless allowed. testing.md names this exact failure mode for
+    preclean-revoke: retry the DELETE on 403 until it succeeds, never fire-and-forget.
+
+    Terminal states are 200 (revoked) and 404 (already gone). 403 is NOT terminal: if it
+    persists past the retry budget the assertion fails HONESTLY — a cleanup that cannot
+    run is a finding, not something to swallow. The revoke is async, so the second step
+    awaits the Operation; without it the case can end while the revoke is still in flight
+    and the binding is still ACTIVE for whoever runs next.
+    """
+    op_var = "_" + (op_key or re.sub(r"[^A-Za-z0-9]", "", name)) + "RevOp"
+    return [
+        poll_request_until_status(
+            name=name,
+            method="DELETE",
+            path=path,
+            auth=auth,
+            expect_code=200,
+            retry_on=(403,),
+            test_script=[
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"pm.environment.unset('{op_var}');",
+                "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', "
+                f"() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([{', '.join(str(c) for c in terminal_codes)}]));",
+                f"if (pm.response.code === 200 && j && j.id) pm.environment.set('{op_var}', j.id);",
+            ],
+        ),
+        Step(
+            name=f"{name}-await",
+            method="GET",
+            path="/operations/{{" + op_var + "}}",
+            auth=auth,
+            pre_script=[
+                f"if (pm.environment.get('_{op_var}Started') !== pm.info.requestName) {{ pm.environment.set('_{op_var}Count', '0'); pm.environment.set('_{op_var}Started', pm.info.requestName); }}",
+            ],
+            test_script=[
+                # Nothing to await when the DELETE reported 404 (already revoked).
+                f"if (!pm.environment.get('{op_var}')) {{ return; }}",
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                f"const c = parseInt(pm.environment.get('_{op_var}Count') || '0', 10);",
+                f"if (j && !j.done && c < {POLL_CAP}) {{",
+                f"  pm.environment.set('_{op_var}Count', String(c + 1));",
+                "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                f"pm.environment.unset('_{op_var}Count'); pm.environment.unset('_{op_var}Started');",
+                "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+            ],
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Discovery + main
 # ---------------------------------------------------------------------------
@@ -1359,6 +1428,7 @@ def load_cases_module(path: Path):
     mod.retry_until_absent = retry_until_absent
     mod.get_until_gone = get_until_gone
     mod.poll_request_until_status = poll_request_until_status
+    mod.reliable_delete = reliable_delete
     mod.POLL_CAP = POLL_CAP
     mod.assert_op_error = assert_op_error
     mod.assert_op_success = assert_op_success
