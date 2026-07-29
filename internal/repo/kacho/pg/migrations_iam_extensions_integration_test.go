@@ -148,7 +148,8 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		{"access_bindings", "granted_by_user_id"},
 		{"access_bindings", "revoked_at"},
 		{"access_bindings", "revoked_by_user_id"},
-		{"service_accounts", "project_id"},
+		// `service_accounts.project_id` из этого списка снят: колонку никто не
+		// заполнял, и она ушла вместе с полем контракта (миграция 0071).
 		{"service_accounts", "enabled"},
 	} {
 		var exists bool
