@@ -214,8 +214,9 @@ func (s *SessionRevocationsAdapter) GetByJTI(ctx context.Context, jti string) (d
 }
 
 // ListByUser делегирует (admin/audit enumeration via the gRPC service).
-func (s *SessionRevocationsAdapter) ListByUser(ctx context.Context, userID string, limit int32) ([]domain.SessionRevocation, error) {
-	return s.repo.ListByUser(ctx, userID, limit)
+// Cursor-paged: returns the page plus its continuation token.
+func (s *SessionRevocationsAdapter) ListByUser(ctx context.Context, userID string, pageSize int32, pageToken string) ([]domain.SessionRevocation, string, error) {
+	return s.repo.ListByUser(ctx, userID, pageSize, pageToken)
 }
 
 // emitAuditTx — INSERT one audit_outbox row on the supplied tx.

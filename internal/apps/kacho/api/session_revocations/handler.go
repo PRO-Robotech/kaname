@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
@@ -52,7 +53,11 @@ type revoker interface {
 type reader interface {
 	IsRevoked(ctx context.Context, jti string) (bool, error)
 	GetByJTI(ctx context.Context, jti string) (domain.SessionRevocation, error)
-	ListByUser(ctx context.Context, userID string, limit int32) ([]domain.SessionRevocation, error)
+	// ListByUser returns ONE page of the user's revocations plus the token that
+	// continues the walk (empty ⇒ the history is exhausted). The cursor is part
+	// of the port because an audit enumeration that cannot be continued reports
+	// a prefix of the history as the whole of it.
+	ListByUser(ctx context.Context, userID string, pageSize int32, pageToken string) ([]domain.SessionRevocation, string, error)
 }
 
 // Handler — gRPC server for InternalSessionRevocationsService.
@@ -124,24 +129,42 @@ func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*
 	return resp, nil
 }
 
-// ListByUser — sync admin/audit enumeration of active revocations for a user.
+// ListByUser — sync admin/audit enumeration of active revocations for a user,
+// cursor-paged.
+//
+// Page format is validated FIRST, before anything can short-circuit: a page_size
+// outside [0..1000] and a page_token that does not decode are the caller's
+// errors and are REJECTED (INVALID_ARGUMENT), never clamped or ignored. Both
+// silent forms tell the same lie — a short page that reads as a complete audit —
+// and an ignored cursor additionally re-serves page one under a token the caller
+// believes advances. The repo re-checks both as the authoritative backstop; this
+// gate makes the answer deterministic regardless of wiring.
 func (h *Handler) ListByUser(ctx context.Context, req *iamv1.ListByUserRequest) (*iamv1.ListByUserResponse, error) {
 	userID := strings.TrimSpace(req.GetUserId())
 	if userID == "" {
 		return nil, shared.InvalidArg("user_id", "required")
 	}
+	if _, err := corevalidate.PageSize("page_size", req.GetPageSize()); err != nil {
+		return nil, err
+	}
+	if err := shared.ValidatePageToken("page_token", req.GetPageToken()); err != nil {
+		return nil, err
+	}
 	if h.read == nil {
 		return nil, status.Error(codes.Unavailable, "session revocation reader not configured")
 	}
-	limit := safeconv.ClampNonNegInt32(req.GetPageSize())
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	rows, err := h.read.ListByUser(ctx, userID, limit)
+	// 0 is forwarded as 0 so the store applies its own documented default (100).
+	rows, next, err := h.read.ListByUser(ctx, userID,
+		safeconv.ClampNonNegInt32(req.GetPageSize()), req.GetPageToken())
 	if err != nil {
+		// A page the store rejected keeps its classification; anything else is a
+		// store failure and gets the fixed text (no pgx/SQL leak).
+		if mapped := shared.MapRepoErr(err); status.Code(mapped) == codes.InvalidArgument {
+			return nil, mapped
+		}
 		return nil, status.Error(codes.Internal, "session revocation list failed")
 	}
-	resp := &iamv1.ListByUserResponse{}
+	resp := &iamv1.ListByUserResponse{NextPageToken: next}
 	for _, r := range rows {
 		resp.Revocations = append(resp.Revocations, toProto(r))
 	}

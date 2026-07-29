@@ -118,12 +118,12 @@ func (r *abReader) GetForUpdate(ctx context.Context, id domain.AccessBindingID) 
 // identical re-grant produces a SECOND row, i.e. one grant shown twice. Parity with
 // ListByAccount / ListByRole, whose default already hides them.
 func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
-	pageSize := int64(f.PageSize)
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
+	// answers 200 OK with a page shorter than asked for, and nothing in the
+	// response tells that apart from a complete answer.
+	pageSize, err := effectivePageSize(f.PageSize)
+	if err != nil {
+		return nil, "", err
 	}
 
 	conditions := []string{}
@@ -227,12 +227,12 @@ func (r *abReader) ListBySubject(ctx context.Context, subjectType domain.Subject
 // Within-service refs (ban #10): the subquery uses
 // the FK-validated projects table — no cross-DB call required, no TOCTOU.
 func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID, f access_binding.AccountPageFilter) ([]domain.AccessBinding, string, error) {
-	pageSize := int64(f.PageSize)
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
+	// answers 200 OK with a page shorter than asked for, and nothing in the
+	// response tells that apart from a complete answer.
+	pageSize, err := effectivePageSize(f.PageSize)
+	if err != nil {
+		return nil, "", err
 	}
 
 	// $1 = accountID — referenced twice (direct + project scope).
@@ -322,12 +322,12 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 // Within-service refs (запрет #10): the JOIN reads the FK-validated `roles`
 // table — no cross-DB call, no TOCTOU. Read-only — no CAS/race path.
 func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, f access_binding.PageFilter) ([]domain.SubjectPrivilege, string, error) {
-	pageSize := int64(f.PageSize)
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
+	// answers 200 OK with a page shorter than asked for, and nothing in the
+	// response tells that apart from a complete answer.
+	pageSize, err := effectivePageSize(f.PageSize)
+	if err != nil {
+		return nil, "", err
 	}
 
 	// Subject-match: DIRECT (the binding names the subject) OR GROUP-derived (the
@@ -475,12 +475,12 @@ func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 // Два смежных капкана той же строки: шаблон без `%d` молча вставит в SQL
 // `%!(EXTRA int=…)`, а шаблон с `%s` съест номер плейсхолдера как текст.
 func (r *abReader) listWithConds(ctx context.Context, f access_binding.PageFilter, condTmpls []string, condArgs []any) ([]domain.AccessBinding, string, error) {
-	pageSize := int64(f.PageSize)
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
+	// answers 200 OK with a page shorter than asked for, and nothing in the
+	// response tells that apart from a complete answer.
+	pageSize, err := effectivePageSize(f.PageSize)
+	if err != nil {
+		return nil, "", err
 	}
 
 	conditions := []string{}
@@ -1362,12 +1362,12 @@ func (r *abReader) CountActiveByRole(ctx context.Context, roleID domain.RoleID) 
 // static predicate with no bind-arg, so this query is built inline rather than
 // via listWithConds, which assumes one bind-arg per condition).
 func (r *abReader) ListByRole(ctx context.Context, roleID domain.RoleID, f access_binding.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
-	pageSize := int64(f.PageSize)
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
+	// answers 200 OK with a page shorter than asked for, and nothing in the
+	// response tells that apart from a complete answer.
+	pageSize, err := effectivePageSize(f.PageSize)
+	if err != nil {
+		return nil, "", err
 	}
 
 	conditions := []string{"role_id = $1"}

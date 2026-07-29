@@ -73,12 +73,16 @@ func (r *ConditionsRepo) Get(ctx context.Context, id domain.ConditionID) (domain
 
 // List — page over conditions in a project, excluding DELETING tombstones.
 func (r *ConditionsRepo) List(ctx context.Context, f condition.ListFilter) ([]domain.Condition, string, error) {
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
+	// answers 200 OK with a page shorter than asked for, and nothing in the
+	// response tells that apart from a complete answer.
 	pageSize := int64(f.PageSize)
-	if pageSize <= 0 {
-		pageSize = 100
+	if pageSize < 0 || pageSize > maxListPageSize {
+		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
 	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	if pageSize == 0 {
+		pageSize = 100
 	}
 	conditions := []string{"status != 'DELETING'"}
 	args := []any{}

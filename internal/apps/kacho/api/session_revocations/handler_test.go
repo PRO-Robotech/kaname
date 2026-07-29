@@ -102,9 +102,9 @@ func (f *fakeReader) GetByJTI(_ context.Context, jti string) (domain.SessionRevo
 	return domain.SessionRevocation{TokenJTI: jti, RevokedAt: f.revAt, Reason: f.reason}, nil
 }
 
-func (f *fakeReader) ListByUser(_ context.Context, userID string, _ int32) ([]domain.SessionRevocation, error) {
+func (f *fakeReader) ListByUser(_ context.Context, userID string, _ int32, _ string) ([]domain.SessionRevocation, string, error) {
 	f.gotUserID = userID
-	return f.listRows, f.listErr
+	return f.listRows, "", f.listErr
 }
 
 // recordingOpsRepo — operations repo stub that records the call sequence, so a

@@ -89,22 +89,58 @@ func (r *SessionRevocationRepo) ListRecent(ctx context.Context, window time.Dura
 	return out, rows.Err()
 }
 
-// ListByUser — active (not-yet-expired) revocations for a user, newest first.
-// Used by InternalSessionRevocationsService.ListByUser (admin/audit). A
-// non-positive limit defaults to 100 (caller clamps the upper bound).
-func (r *SessionRevocationRepo) ListByUser(ctx context.Context, userID string, limit int32) ([]domain.SessionRevocation, error) {
-	if limit <= 0 {
-		limit = 100
+// sessionRevocationDefaultPageSize — the documented default of
+// InternalSessionRevocationsService.ListByUser (proto: "default 100, max 1000").
+// The upper bound is the platform-wide maxListPageSize.
+const sessionRevocationDefaultPageSize int32 = 100
+
+// ListByUser — one CURSOR-PAGED page of the user's active (not-yet-expired)
+// revocations, newest first.
+//
+// This is an audit enumeration, so a page that was cut must SAY it was cut: the
+// returned token continues the walk and an empty token means the history is
+// exhausted. It used to take a bare limit, apply it and return nothing else — so
+// a user with more revocations than the limit had the rest of the history
+// dropped while the response looked whole.
+//
+// Ordering is (revoked_at, token_jti) DESC — the jti breaks ties so the cursor
+// is total; ordering on the timestamp alone lets two revocations of the same
+// instant swap places between pages, which either repeats or skips a row.
+//
+// page_size outside [0..maxListPageSize] is REJECTED (ErrInvalidArg →
+// INVALID_ARGUMENT), never clamped: a clamp answers 200 OK with a short page
+// the caller cannot tell apart from a complete one. 0 means the default. A
+// page_token that does not decode is rejected the same way — an ignored cursor
+// re-serves page one under a token the caller believes advances.
+func (r *SessionRevocationRepo) ListByUser(ctx context.Context, userID string, pageSize int32, pageToken string) ([]domain.SessionRevocation, string, error) {
+	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
+		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
 	}
-	const q = `
+	if pageSize == 0 {
+		pageSize = sessionRevocationDefaultPageSize
+	}
+
+	args := []any{userID, int64(pageSize) + 1} // +1 row probes for a next page
+	cursor := ""
+	if pageToken != "" {
+		ts, jti, err := decodePageToken(pageToken)
+		if err != nil {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "invalid page_token")
+		}
+		cursor = " AND (revoked_at, token_jti) < ($3, $4)"
+		args = append(args, ts, jti)
+	}
+
+	q := `
 		SELECT token_jti, revoked_at, reason, user_id, ttl_expires_at
 		  FROM session_revocations
-		 WHERE user_id = $1 AND ttl_expires_at > now()
-		 ORDER BY revoked_at DESC
+		 WHERE user_id = $1 AND ttl_expires_at > now()` + cursor + `
+		 ORDER BY revoked_at DESC, token_jti DESC
 		 LIMIT $2`
-	rows, err := r.pool.Query(ctx, q, userID, limit)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
-		return nil, mapErr(err, "ListByUser", "")
+		return nil, "", mapErr(err, "ListByUser", "")
 	}
 	defer rows.Close()
 	var out []domain.SessionRevocation
@@ -112,12 +148,22 @@ func (r *SessionRevocationRepo) ListByUser(ctx context.Context, userID string, l
 		var sr domain.SessionRevocation
 		var uid string
 		if err := rows.Scan(&sr.TokenJTI, &sr.RevokedAt, &sr.Reason, &uid, &sr.TTLExpiresAt); err != nil {
-			return nil, mapErr(err, "ListByUser.scan", "")
+			return nil, "", mapErr(err, "ListByUser.scan", "")
 		}
 		sr.UserID = domain.UserID(uid)
 		out = append(out, sr)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", mapErr(err, "ListByUser.rows", "")
+	}
+
+	next := ""
+	if int64(len(out)) > int64(pageSize) {
+		last := out[pageSize-1]
+		next = encodePageToken(last.RevokedAt, last.TokenJTI)
+		out = out[:pageSize]
+	}
+	return out, next, nil
 }
 
 // GetByJTI — single-row lookup. Возвращает ErrNotFound если row нет или ttl

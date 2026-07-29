@@ -263,7 +263,13 @@ func unmarshalTrustedSubjects(body []byte) ([]domain.TrustedSubject, error) {
 
 // List returns OAuth clients owned by the given SA, paged by id ASC.
 func (r *SAOAuthClientRepo) List(ctx context.Context, svaID domain.ServiceAccountID, pageToken string, pageSize int32) ([]domain.ServiceAccountOAuthClient, string, error) {
-	if pageSize <= 0 || pageSize > 1000 {
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped (a clamp
+	// returns a short page indistinguishable from a complete one). 0 → default.
+	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
+		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
+	}
+	if pageSize == 0 {
 		pageSize = 100
 	}
 	q := `SELECT ` + socCols + `

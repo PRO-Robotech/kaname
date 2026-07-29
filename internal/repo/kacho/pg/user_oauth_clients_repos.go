@@ -129,7 +129,13 @@ func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.User
 
 // List возвращает токены владельца-User, страница по id ASC (cursor-based).
 func (r *UserOAuthClientRepo) List(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.UserOAuthClient, string, error) {
-	if pageSize <= 0 || pageSize > 1000 {
+	// page_size outside [0..maxListPageSize] is REJECTED, never clamped (a clamp
+	// returns a short page indistinguishable from a complete one). 0 → default.
+	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
+		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
+	}
+	if pageSize == 0 {
 		pageSize = 100
 	}
 	q := `SELECT ` + uocCols + `
