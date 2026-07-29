@@ -41,6 +41,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
@@ -200,19 +201,24 @@ func TestAccountAdminRevokesForeignGrantWhileQueueHasNotDelivered(t *testing.T) 
 }
 
 // TestRevokedBindingStaysManageableAndGrantsNothing — the direction a reader is
-// most likely to "fix" wrongly.
+// most likely to "fix" wrongly, asserted so that it can actually fail.
 //
-// A revoked binding keeps its row (status REVOKED), and the projection is
+// A revoked binding keeps its row (only Delete removes it), and the projection is
 // deliberately status-independent, so the account administrator still reaches the
 // binding OBJECT: a revoked grant is a record that has to remain readable and
 // deletable, and filtering it out here would take that away exactly when the queue is
 // behind — the same lockout this branch exists to remove, in the other direction.
 //
-// What must NOT come back is the grant itself. The grantee's access lived in tuples on
-// the SCOPE object, and this package never supplies those: it projects parent pointers
-// and the account owner, and nothing else. So revocation stays revoked.
+// What must NOT come back is the grant. To make that a real assertion rather than a
+// tautology, this test first PUTS the grant in the store — the scope-object verb tuples
+// the reconciler materializes, plus the delivered parent pointer — proves the grantee
+// has access, then does what revoke does (delete the emitted set, keep the row) and
+// proves the access is gone. Without the fixture being live first, "denied afterwards"
+// would hold even if the resolver re-armed everything, because there would have been
+// nothing to re-arm.
 func TestRevokedBindingStaysManageableAndGrantsNothing(t *testing.T) {
 	w := newCIWorld(t)
+	ctx := context.Background()
 
 	const (
 		acc      = "acc-ciqueue6"
@@ -227,20 +233,47 @@ func TestRevokedBindingStaysManageableAndGrantsNothing(t *testing.T) {
 	w.seedUser(t, grantee, acc)
 	w.seedRole(t, role, acc)
 	w.seedBinding(t, binding, grantee, role, "account", acc)
-	w.exec(t, `UPDATE kacho_iam.access_bindings
-	              SET status = 'REVOKED', revoked_at = now(), revoked_by_user_id = $2
-	            WHERE id = $1`, binding, accAdmin)
 
 	w.harness.Write(t, "user:"+accAdmin, "admin", "account:"+acc)
 
-	require.True(t, w.allowed(t, "user:"+accAdmin, "v_delete", "iam_access_binding:"+binding),
-		"a revoked binding must stay manageable by the account administrator — it is still a "+
-			"record, and a status filter here would lock him out of cleaning it up")
+	// The queue has delivered everything this ACTIVE binding emits: the grantee's
+	// per-object verbs on the scope, and the binding's parent pointer.
+	emitted := make([]clients.RelationTuple, 0, len(ciVerbs)+1)
+	for _, verb := range ciVerbs {
+		w.harness.Write(t, "user:"+grantee, verb, "account:"+acc)
+		emitted = append(emitted, clients.RelationTuple{
+			User: "user:" + grantee, Relation: verb, Object: "account:" + acc})
+	}
+	w.harness.Write(t, "account:"+acc, "account", "iam_access_binding:"+binding)
+	emitted = append(emitted, clients.RelationTuple{
+		User: "account:" + acc, Relation: "account", Object: "iam_access_binding:" + binding})
+
+	// Premise: the grant is live. If this fails the rest proves nothing.
+	for _, verb := range ciVerbs {
+		require.True(t, w.allowed(t, "user:"+grantee, verb, "account:"+acc),
+			"premise: the ACTIVE binding's %s must be in force before revoking it", verb)
+	}
+
+	// Revoke, exactly as doRevoke does it: the row survives with status REVOKED and the
+	// emitted set is removed from the store.
+	w.exec(t, `UPDATE kacho_iam.access_bindings
+	              SET status = 'REVOKED', revoked_at = now(), revoked_by_user_id = $2
+	            WHERE id = $1`, binding, accAdmin)
+	require.NoError(t, w.harness.Client.DeleteTuples(ctx, emitted))
+
+	// The grant is gone and nothing supplied at request time may bring it back: what
+	// the grantee held were tuples on the SCOPE object, and the resolver projects
+	// parent pointers and the account owner, never a grant on a scope.
 	for _, verb := range ciVerbs {
 		require.False(t, w.allowed(t, "user:"+grantee, verb, "account:"+acc),
-			"revocation must stay revoked: the grantee holds no %s on the scope, and nothing "+
-				"supplied here may restore it", verb)
+			"revocation must stay revoked: the grantee must hold no %s on the scope after "+
+				"the emitted set is removed, even though the binding row survives", verb)
 	}
+
+	// The record itself stays manageable, over a pointer the store no longer has.
+	require.True(t, w.allowed(t, "user:"+accAdmin, "v_delete", "iam_access_binding:"+binding),
+		"a revoked binding must stay manageable by the account administrator — its parent "+
+			"pointer was deleted with the emitted set, so this can only resolve from the row")
 }
 
 // TestForeignAccountAdminIsNotAdminHere — the injected structural fact is the

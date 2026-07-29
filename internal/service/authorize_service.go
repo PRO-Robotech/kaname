@@ -472,13 +472,20 @@ func splitFGAObject(object string) (objectType, objectID string, ok bool) {
 // was already allowed cannot have their answer changed by it. A contextual tuple
 // can only ADD a path, so this can turn a deny into an allow and never the reverse
 // — which is why supplying only TRUE facts about the row is the whole safety
-// argument, and why cascade_injection_scope_test.go pins that the model reads those
-// relations in exactly one place (`super_admin`).
+// argument, and why authzcascade/cascade_coverage_test.go pins which relations the
+// model reads those facts through.
 //
 // Returns (allowed, err). A non-nil err means the structural fact could not be
 // read; the caller must surface that as an outage rather than as a denial, because
 // the fact is part of the decision and an unread fact is an unknown answer, not a
 // negative one.
+//
+// A caller asking for HIGHER_CONSISTENCY does NOT get it here: this Check uses the
+// default read. The only effect is a possible false DENY (the store's own replica has
+// not caught up with a tuple written moments ago), which is the safe direction and is
+// what the fallback exists to make rare in the first place. The structural fact itself
+// is read from the primary, so the part this package is responsible for is not subject
+// to that lag.
 func (s *AuthorizeService) structuralFallback(
 	ctx context.Context, subject, relation, object string, condCtx map[string]any,
 ) (bool, error) {

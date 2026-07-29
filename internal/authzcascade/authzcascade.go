@@ -69,10 +69,18 @@
 // measured and named by cascade_coverage_test.go, which fails when a type is
 // excluded that has become derivable.
 //
-// Levels 1-2 (cloud administrator / bootstrap identity) were already independent
-// before this package existed: authorize_service resolves them with a flat
-// super-gate Check on the cluster singleton, which reads a GRANT and no pointer.
-// This package is what makes level 3 and the account owner behave the same way.
+// Levels 1-2 (cloud administrator / bootstrap identity) were already independent of
+// THIS delivery before the package existed: authorize_service resolves them with a flat
+// super-gate Check on the cluster singleton, which reads a GRANT and no structural
+// pointer, so no row's pointer has to have arrived. This package is what makes level 3
+// and the account owner behave the same way.
+//
+// Worth stating precisely rather than overclaiming: that grant tuple is itself written
+// by the bootstrap seed through the same store. It is safe in practice because it is
+// OLD — written once at bootstrap, long before any incident — not because it is
+// pipeline-free. In the harder disaster the recorded decision gestures at (the relation
+// store itself rebuilt or wiped) the cloud administrator is locked out too, and nothing
+// here changes that; recovering it is a bootstrap-reseed problem, not a cascade one.
 package authzcascade
 
 import (

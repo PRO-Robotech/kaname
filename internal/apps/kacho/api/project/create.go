@@ -155,10 +155,11 @@ func (u *CreateProjectUseCase) doCreate(ctx context.Context, p domain.Project, a
 			// admin/v_* on project:<id> itself is MATERIALIZED by the reconciler (owner
 			// `*.*` ARM_ANCHOR over iam.project, see the reconcile-event emit below),
 			// not derived from a leaf `from account` cascade.
-			if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{
-				{User: "account:" + string(inserted.AccountID), Relation: "account", Object: "project:" + string(inserted.ID)},
-				{User: "cluster:cluster_kacho_root", Relation: "cluster", Object: "project:" + string(inserted.ID)},
-			}); ferr != nil {
+			// Shape from domain.Project.StructuralFacts — the SAME projection
+			// internal/authzcascade supplies as a request-scoped fact, so the tiers
+			// above resolve before this intent is delivered. One projection, so the
+			// delivered and the request-time answers cannot drift apart.
+			if ferr := w.EmitFGARelationWrite(ctx, projectStructuralTuples(inserted)); ferr != nil {
 				return domain.Project{}, ferr
 			}
 			// rbac-contract-a-fix (forward-mat, C-01b): co-commit a reconcile event
@@ -211,4 +212,16 @@ func (u *CreateProjectUseCase) reconcileObject(ctx context.Context, objectType, 
 		u.logger.Error("project create: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}
+}
+
+// projectStructuralTuples adapts domain.Project.StructuralFacts to the outbox intent
+// type. The projection itself lives in domain (structural_tuple.go) because
+// internal/authzcascade reads it too — see the note there.
+func projectStructuralTuples(p domain.Project) []service.RelationTuple {
+	facts := p.StructuralFacts()
+	out := make([]service.RelationTuple, 0, len(facts))
+	for _, st := range facts {
+		out = append(out, service.RelationTuple{User: st.User, Relation: st.Relation, Object: st.Object})
+	}
+	return out
 }

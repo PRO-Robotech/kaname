@@ -38,6 +38,30 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
+// NOTE — iam_role, and why it stays derivable rather than excluded.
+//
+// roles.account_id is NULL for two kinds of role. A SYSTEM role has no owning account
+// at all, and the account tier must not reach it, so producing no fact is the right
+// answer. A PROJECT-scoped custom role does have a parent — its project — but the model
+// declares no `project` relation on `iam_role`, so that arm of the cascade is
+// unreachable in the model, not merely undelivered. The type is kept in DerivableTypes
+// because account-scoped roles (the common case) are genuinely derivable; the
+// project-scoped gap is a model question, and pretending otherwise by excluding the
+// whole type would hide it.
+//
+// NOTE — which emitters share the projection, and which agree only by inspection.
+//
+// domain/structural_tuple.go is the single projection, and three emitters read it:
+// access_binding/tuples.go::hierarchyParentTuple, account/create.go::ownerTuples,
+// project/create.go::projectStructuralTuples. The account pointer for the remaining
+// five types is still built as a literal at its own site (user/internal_upsert.go,
+// group/create.go, role/create.go, service_account/create.go,
+// conditions_crud_service.go). For those the delivered tuple and the request-time fact
+// agree by inspection rather than by construction. That is a real, named remainder: the
+// safe direction of a drift there is a denial (the two facts differ, so the cascade
+// resolves over one of them and not the other), never an over-grant, because both are
+// still true readings of the same column.
+
 // notDerivableHere — types whose structural pointer this package cannot prove,
 // with the reason. Keep it factual: the reason is what the next reader checks
 // against reality.
@@ -263,26 +287,57 @@ func TestSuppliedRelationsAreReadOnlyBySuperAdmin(t *testing.T) {
 					"delivery-dependent", typeName, ptr)
 				continue
 			}
-			for _, rel := range mt.order {
+			// TRANSITIVE closure, not one hop. Pinning only the direct readers of
+			// the supplied relation would be a gate one level deep: `account.admin`
+			// already reads `owner`, and everything deriving from `admin` therefore
+			// reads it too. A gate that stopped at the first hop would stay green if,
+			// say, `iam_group.member` started deriving from `super_admin` — which would
+			// make the account owner a MEMBER of every group in the account, i.e. a
+			// subject userset usable platform-wide.
+			for _, rel := range readersOfClosure(mt, ptr) {
 				def := mt.relations[rel]
-				if !readsRelation(def, ptr) {
-					continue
-				}
 				checked++
 				switch {
 				case rel == "super_admin":
 					// The cascade itself — the whole point.
-				case typeName == "account" && ptr == "owner" &&
-					(rel == "admin" || strings.HasPrefix(rel, "v_")):
-					// The recorded owner refinement: `account`'s five verbs and its
-					// admin tier read `owner` directly, on purpose, so that tearing an
-					// account down is as reliable as creating it.
+				case isCRUDVerbOrTier(rel):
+					// The verbs and the viewer/editor/admin tiers ARE what the cascade
+					// is for: the recorded decision grants the top tiers full CRUD.
+					// `account`'s verbs additionally read `owner` directly by the owner
+					// refinement, which lands here for the same reason.
+				case typeName == "account" && rel == "billing_admin":
+					// account.billing_admin derives from admin, which both the owner
+					// (by the refinement) and the cloud tier (through the cluster
+					// pointer) are. Billing authority over an account one owns or
+					// administers cluster-wide.
+				case typeName == "iam_service_account" && (rel == "user" || rel == "token_creator"):
+					// NAMED because it is the strongest thing reachable this way, and it
+					// is worth stating rather than discovering.
+					//
+					// `iam_service_account.user` derives from editor and `token_creator`
+					// from admin, both by their PRE-EXISTING definitions — the model's
+					// own header lists `use`/`token_creator`/`ssh`/`console` as relations
+					// that "follow the tier, by their pre-existing definition — not by
+					// anything added here". So an account administrator could already
+					// mint credentials for every service account in his account; what
+					// this package changes is only WHEN that holds — immediately on
+					// creation instead of after the queue delivers the account pointer.
+					//
+					// It is not an escalation (the fact supplied is a true reading of
+					// service_accounts.account_id, and the authority was already the
+					// administrator's), but it is credential-issuing power reached
+					// through a tier, so a reader who wants it narrowed should narrow it
+					// IN THE MODEL — the account tier should stop implying
+					// `token_creator` — rather than by withholding a true fact here,
+					// which would only restore the delivery window.
 				default:
-					t.Errorf("%s.%s reads the structural relation %q (%q). This package supplies "+
-						"%q about %s as a request-scoped fact on the strength of it being read "+
-						"ONLY by super_admin there; that is no longer true, so either stop "+
-						"supplying it or justify this reader here.",
-						typeName, rel, ptr, def, ptr, typeName)
+					t.Errorf("%s.%s resolves over the structural relation %q (%q), and it is "+
+						"neither the cascade relation nor a CRUD verb/tier. This package supplies "+
+						"%q about %s as a request-scoped fact, so that relation now holds for the "+
+						"tiers the cascade grants — which for a non-CRUD relation (membership, a "+
+						"data-plane capability, a credential-issuing power) is not what the "+
+						"decision says. Either stop supplying %q or justify this reader here.",
+						typeName, rel, ptr, def, ptr, typeName, ptr)
 				}
 			}
 		}
@@ -293,6 +348,54 @@ func TestSuppliedRelationsAreReadOnlyBySuperAdmin(t *testing.T) {
 	}
 	t.Logf("%d supplied (type, relation) pairs; %d readers of them in the model; all accounted for",
 		pairs, checked)
+}
+
+// readersOfClosure returns every relation of this type that resolves over `name`,
+// directly or through other relations of the same type — the transitive closure. A
+// one-hop answer is not the safety argument: what matters is everything a supplied fact
+// ends up satisfying, not only what mentions it.
+func readersOfClosure(mt *modelType, name string) []string {
+	reached := map[string]bool{}
+	// Seed: direct readers of the supplied relation.
+	for _, rel := range mt.order {
+		if readsRelation(mt.relations[rel], name) {
+			reached[rel] = true
+		}
+	}
+	// Close: anything reading something already reached.
+	for changed := true; changed; {
+		changed = false
+		for _, rel := range mt.order {
+			if reached[rel] {
+				continue
+			}
+			for r := range reached {
+				if readsRelation(mt.relations[rel], r) {
+					reached[rel] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(reached))
+	for _, rel := range mt.order { // deterministic order
+		if reached[rel] {
+			out = append(out, rel)
+		}
+	}
+	return out
+}
+
+// isCRUDVerbOrTier reports whether a relation is one of the CRUD verbs or the
+// viewer/editor/admin tiers — i.e. exactly the authority the recorded decision grants
+// the top tiers. Anything else reached from a supplied fact is a finding.
+func isCRUDVerbOrTier(rel string) bool {
+	switch rel {
+	case "viewer", "editor", "admin":
+		return true
+	}
+	return strings.HasPrefix(rel, "v_")
 }
 
 // readsRelation reports whether a relation definition RESOLVES over `name` —

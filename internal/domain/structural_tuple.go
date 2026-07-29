@@ -12,9 +12,10 @@ import "strings"
 // There are two consumers, and the reason this lives in domain is that they must
 // never disagree:
 //
-//   - the emitter — access_binding/tuples.go, account/create.go, project/create.go
-//     — enqueues the triple into kacho_iam.fga_outbox inside the writer transaction,
-//     to be applied to OpenFGA by the drainer;
+//   - the emitter — access_binding/tuples.go::hierarchyParentTuple,
+//     account/create.go::ownerTuples, project/create.go::projectStructuralTuples —
+//     enqueues the triple into kacho_iam.fga_outbox inside the writer transaction, to
+//     be applied to OpenFGA by the drainer;
 //   - the resolver — internal/authzcascade — supplies the SAME triple as a
 //     request-scoped contextual tuple, so the cascade resolves from committed state
 //     instead of waiting for that delivery.
