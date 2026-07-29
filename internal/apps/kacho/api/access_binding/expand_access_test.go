@@ -40,15 +40,16 @@ type fakeLister struct {
 	calls    int
 }
 
-func (f *fakeLister) ListUsers(_ context.Context, objectType, objectID, relation string, userTypes []string) ([]string, error) {
+func (f *fakeLister) ListUsers(_ context.Context, objectType, objectID, relation string, userTypes []string) ([]string, bool, error) {
 	if f.calls == 0 {
 		f.gotType, f.gotID, f.gotRel, f.gotTypes = objectType, objectID, relation, userTypes
 	}
 	f.calls++
 	if f.err != nil {
-		return nil, f.err
+		return nil, false, f.err
 	}
-	return f.byNode[objectType+":"+objectID+"#"+relation], nil
+	// storeTruncated=false: these fixtures model a store that answered in full.
+	return f.byNode[objectType+":"+objectID+"#"+relation], false, nil
 }
 
 func authedCtx() context.Context {

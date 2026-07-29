@@ -159,32 +159,63 @@ type fgaWireListUsersResponse struct {
 	} `json:"users"`
 }
 
+// ListUsersServerCap — OpenFGA's OWN server-side ceiling on a list-users
+// response (`OPENFGA_LIST_USERS_MAX_RESULTS`; default 1000, and unset — hence
+// default — on the deployed stand). Sibling of fgaListObjectsServerCap, and the
+// same reasoning: the ceiling is applied by the SERVER, the reply is a bare
+// `users[]` with NO continuation token, so a response of exactly this size is
+// indistinguishable from "there were more" and must be reported as truncated.
+//
+// It has to be stated here because the answer carries no other trace: comparing
+// the length against anything WE chose (a client-side trim, a caller's
+// max_results) cannot see the cut — our own number is at least as large as
+// whatever the server hands back, so the comparison is false by construction and
+// the caller is told the answer is complete.
+//
+// Do NOT "fix" a truncated answer by raising this. It is an external, finite
+// bound. That the deployment leaves it at the default is asserted, not assumed —
+// see TestListUsersServerCap_DeploymentDoesNotOverrideIt.
+const ListUsersServerCap = 1000
+
 // ListUsers resolves the CONCRETE principals (FGA-prefixed: "user:<id>" /
 // "service_account:<id>") that hold `relation` on `objectType:objectID`,
 // traversing the full authorization graph. userTypes is the closed set of
 // concrete principal types to resolve (e.g. {"user","service_account"}); a
 // userset/wildcard entry in the response is skipped (not a concrete principal).
+//
+// The second result is the STORE's own truncation signal: at least one per-type
+// answer came back at ListUsersServerCap, so the grantee set is a prefix and
+// there is no way to ask for the rest. Callers must surface it rather than claim
+// a complete set (ExpandAccess → `truncated`).
+//
 // fail-closed: any transport / non-200 / decode error is returned to the caller
 // (ExpandAccess maps it to INTERNAL and returns no principals).
-func (c *OpenFGAHTTPClient) ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) ([]string, error) {
+func (c *OpenFGAHTTPClient) ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) ([]string, bool, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
-		return nil, ErrNotConfigured
+		return nil, false, ErrNotConfigured
 	}
 	out := make([]string, 0)
+	truncated := false
 	for _, ut := range userTypes {
-		users, err := c.listUsersOfType(ctx, objectType, objectID, relation, ut)
+		users, cut, err := c.listUsersOfType(ctx, objectType, objectID, relation, ut)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		truncated = truncated || cut
 		out = append(out, users...)
 	}
-	return out, nil
+	return out, truncated, nil
 }
 
 // listUsersOfType issues a single ListUsers request for ONE concrete principal
 // type (OpenFGA v1.8.x rejects multi-type user_filters), returning the
-// FGA-prefixed concrete principals ("<type>:<id>").
-func (c *OpenFGAHTTPClient) listUsersOfType(ctx context.Context, objectType, objectID, relation, userType string) ([]string, error) {
+// FGA-prefixed concrete principals ("<type>:<id>") and whether the SERVER cut
+// this answer at its ceiling.
+//
+// The cut is measured on the RAW `users[]` length, BEFORE usersets/wildcards are
+// dropped: the ceiling is applied by the server to what it emitted, so filtering
+// first would make a cut answer look short and complete.
+func (c *OpenFGAHTTPClient) listUsersOfType(ctx context.Context, objectType, objectID, relation, userType string) ([]string, bool, error) {
 	body, _ := json.Marshal(fgaWireListUsersRequest{
 		AuthorizationModelID: c.AuthorizationModel,
 		Object:               fgaWireListUsersObject{Type: objectType, ID: objectID},
@@ -196,19 +227,20 @@ func (c *OpenFGAHTTPClient) listUsersOfType(ctx context.Context, objectType, obj
 	resp, err := c.do(cctx, "POST",
 		fmt.Sprintf("http://%s/stores/%s/list-users", c.Endpoint, c.StoreID), body)
 	if err != nil {
-		return nil, fmt.Errorf("openfga listUsers: %w", err)
+		return nil, false, fmt.Errorf("openfga listUsers: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		// Drain (capped) for connection reuse; never surface the body to callers
 		// (ExpandAccess maps any error to a fixed INTERNAL — no FGA-internal leak).
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("openfga listUsers: status %d", resp.StatusCode)
+		return nil, false, fmt.Errorf("openfga listUsers: status %d", resp.StatusCode)
 	}
 	var r fgaWireListUsersResponse
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, fmt.Errorf("openfga listUsers decode: %w", err)
+		return nil, false, fmt.Errorf("openfga listUsers decode: %w", err)
 	}
+	truncated := len(r.Users) >= ListUsersServerCap
 	out := make([]string, 0, len(r.Users))
 	for _, u := range r.Users {
 		// Only concrete objects are principals; usersets/wildcards are not the
@@ -218,7 +250,7 @@ func (c *OpenFGAHTTPClient) listUsersOfType(ctx context.Context, objectType, obj
 		}
 		out = append(out, u.Object.Type+":"+u.Object.ID)
 	}
-	return out, nil
+	return out, truncated, nil
 }
 
 // ListSubjects — OpenFGA does not expose a 1:1 ListSubjects in stable

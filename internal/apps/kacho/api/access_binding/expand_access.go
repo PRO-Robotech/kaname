@@ -37,8 +37,14 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-// maxExpandResults — default + hard cap on the concrete-principal fan-out.
-// A query exceeding it returns truncated=true.
+// defaultExpandResults / maxExpandResults — the CLIENT-side trim of the
+// principal fan-out (proto: max_results, default 1000, ceiling 10000).
+//
+// It only ever narrows: the grant store bounds its own enumeration at
+// clients.ListUsersServerCap and offers no continuation, so asking for more than
+// that cannot widen the answer. Whether the answer was cut is therefore NOT
+// decidable from these numbers — it is reported by the store and carried through
+// PrincipalLister.
 const (
 	defaultExpandResults = 1000
 	maxExpandResults     = 10000
@@ -55,8 +61,14 @@ var expandUserTypes = []string{"user", "service_account"}
 // "user:…" / "service_account:…") that hold object+relation, traversing the full
 // authorization graph (computed usersets + scope_grant indirection + group
 // memberships). Implemented by the OpenFGA client's ListUsers.
+//
+// The second result is the STORE's truncation signal — the grant store bounds
+// its own answer and offers no continuation, so whether the set is a prefix is a
+// fact only the store's reply carries. It belongs to the port because the
+// use-case has no other way to learn it: measuring the returned length against
+// anything the use-case itself chose cannot detect a cut made upstream.
 type PrincipalLister interface {
-	ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) ([]string, error)
+	ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) (principals []string, storeTruncated bool, err error)
 }
 
 // Principal — a concrete grantee resolved by ExpandAccess (USER or
@@ -98,8 +110,12 @@ func (u *ExpandAccessUseCase) WithGrantAuthority(repo Repo, relations clients.Re
 }
 
 // Execute resolves <relation> on <objectType>:<objectID> into concrete
-// principals. maxResults<=0 → default (1000); capped at 10000. Returns
-// truncated=true when the resolved set exceeded maxResults.
+// principals. maxResults<=0 → default (1000); capped at 10000.
+//
+// truncated=true means the answer is a LOWER BOUND, for either reason: the grant
+// store cut its own enumeration at its server-side ceiling (no continuation
+// token exists, so the rest is unreachable — narrow the query), or the resolved
+// set exceeded maxResults and was trimmed here.
 func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID, relation string, maxResults int) ([]Principal, bool, error) {
 	// Anti-anonymous floor — a precondition for, not a substitute for, the
 	// per-object authority gate below.
@@ -154,9 +170,15 @@ func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID,
 	}
 
 	// Resolve concrete principals via the graph-traversing ListUsers (groups,
-	// computed usersets and scope_grant indirection all expanded server-side). One
-	// ask for limit+1 lets us detect truncation without a second round-trip.
-	principals, err := u.lister.ListUsers(ctx, objectType, objectID, relation, expandUserTypes)
+	// computed usersets and scope_grant indirection all expanded server-side).
+	//
+	// storeTruncated is the store's OWN report that it cut the answer at its
+	// server-side ceiling (clients.ListUsersServerCap). There is no continuation
+	// token to follow, so a cut set can only be DECLARED incomplete, never
+	// continued. It has to come from the store: the enumeration is bounded
+	// upstream, and no comparison against our own trim can observe a cut made
+	// before the answer reached us.
+	principals, storeTruncated, err := u.lister.ListUsers(ctx, objectType, objectID, relation, expandUserTypes)
 	if err != nil {
 		if u.logger != nil {
 			u.logger.WarnContext(ctx, "ExpandAccess ListUsers failed",
@@ -169,7 +191,11 @@ func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID,
 
 	seen := make(map[Principal]struct{}, len(principals))
 	out := make([]Principal, 0, len(principals))
-	truncated := false
+	// Two independent reasons the answer is a lower bound, and BOTH must set the
+	// flag: the store cut its own enumeration, or we trimmed to the caller's
+	// max_results below. Reporting only the second is what made the flag always
+	// false — our trim is never smaller than what the store returns.
+	truncated := storeTruncated
 	for _, s := range principals {
 		p, ok := parseFGAPrincipal(s)
 		if !ok {
