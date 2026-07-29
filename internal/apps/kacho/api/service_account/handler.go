@@ -29,14 +29,14 @@ type Handler struct {
 	delete  *DeleteServiceAccountUseCase
 	get     *GetServiceAccountUseCase
 	list    *ListServiceAccountsUseCase
-	disable *SetEnabledServiceAccountUseCase
-	enable  *SetEnabledServiceAccountUseCase
+	disable *DisableServiceAccountUseCase
+	enable  *EnableServiceAccountUseCase
 	listOp  *shared.ListOperationsUseCase
 }
 
 func NewHandler(c *CreateServiceAccountUseCase, u *UpdateServiceAccountUseCase, d *DeleteServiceAccountUseCase,
 	g *GetServiceAccountUseCase, l *ListServiceAccountsUseCase,
-	disable, enable *SetEnabledServiceAccountUseCase) *Handler {
+	disable *DisableServiceAccountUseCase, enable *EnableServiceAccountUseCase) *Handler {
 	return &Handler{create: c, update: u, delete: d, get: g, list: l, disable: disable, enable: enable}
 }
 

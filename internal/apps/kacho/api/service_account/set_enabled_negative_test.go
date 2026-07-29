@@ -33,7 +33,9 @@ import (
 )
 
 // setEnabledExec — the pair under test, addressed uniformly so every case runs
-// against both directions without being written twice.
+// against both directions without being written twice. The two are DISTINCT
+// types (a swap at the composition root must not compile); this map exists to
+// share the cases, not to make them interchangeable.
 func setEnabledExec(t *testing.T, repo Repo) map[string]func(context.Context, domain.ServiceAccountID) (*operations.Operation, error) {
 	t.Helper()
 	return map[string]func(context.Context, domain.ServiceAccountID) (*operations.Operation, error){

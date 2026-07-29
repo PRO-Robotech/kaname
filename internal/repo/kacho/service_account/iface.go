@@ -23,11 +23,12 @@ type WriterIface interface {
 	// SetEnabled writes `service_accounts.enabled` — whether this service
 	// account may authenticate at all.
 	//
-	// Separate from Update on purpose, and it is not a shortcut. Update carries
-	// a field mask, and an EMPTY mask means full replacement by convention; a
-	// proto3 bool cannot say "not sent", so a client that omitted the field
-	// would disable the account. The state that decides whether a machine
-	// identity still works must not be reachable by forgetting something.
+	// Separate from Update on purpose. Update carries a field mask, an EMPTY mask
+	// means full replacement by convention, and a proto3 bool cannot say "not
+	// sent" — so had `enabled` been made a maskable field, omitting it would have
+	// disabled the account. That design was declined rather than repaired; the
+	// state deciding whether a machine identity still works must not be reachable
+	// by forgetting something.
 	//
 	// The argument is the STATE, not a transition: setting the state an account
 	// is already in succeeds and reports it. A retry of a disable is a disable.

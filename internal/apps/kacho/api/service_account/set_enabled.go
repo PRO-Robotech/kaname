@@ -9,10 +9,11 @@ package service_account
 // WHY NOT A FIELD ON Update. Three reasons, each on its own sufficient:
 //
 //  1. An empty `update_mask` means full-object replacement by platform
-//     convention, and a proto3 `bool` is indistinguishable from unset. A client
-//     that simply did not fill the field in would disable the account —
-//     silently, and for every account it touched. An action has no mask, so
-//     there is nothing to forget.
+//     convention, and a proto3 `bool` is indistinguishable from unset. Had
+//     `enabled` been added as a maskable field — the obvious design — a client
+//     that simply did not fill it in would have disabled the account, silently
+//     and for every account it touched. The field was therefore never added;
+//     an action has no mask, so there is nothing to forget.
 //  2. "This account was taken out of service" is an EVENT, not the editing of an
 //     attribute, and the audit trail has to be able to say so. A year from now
 //     "who disabled the CI bot" must not be a question you answer by reading
@@ -24,6 +25,17 @@ package service_account
 // IDEMPOTENT. The input is the STATE, not a transition: disabling an already
 // disabled account succeeds and reports it disabled. The direction that makes a
 // system safer must never be the one that fails on retry.
+//
+// ORDER IS NOT GUARANTEED BETWEEN TWO IN-FLIGHT REQUESTS, and the reason is the
+// Operation, not the database. The write is handed to a background worker, so
+// request order does not decide commit order: an Enable requested BEFORE a
+// Disable can commit AFTER it. In an incident that means an in-flight Enable can
+// land on top of a Disable an operator just performed. The operator-visible
+// remedy is the same as everywhere else in this platform — read the state back
+// (`Get` reports `enabled`) rather than assume the last request sent is the last
+// one applied. Making these two synchronous would remove the window; it would
+// also make them the only mutations in this service that answer inline, which is
+// a contract decision, not a fix to smuggle in here.
 //
 // WHAT IT DOES NOT DO. Access tokens already minted are not invalidated here;
 // they run out on their own schedule. What stops at once is every path that
@@ -49,27 +61,44 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// SetEnabledServiceAccountUseCase carries both directions. They differ in
-// exactly two values — the state written and the event recorded — so they share
-// one implementation rather than two that can drift apart. The constructors
-// below are the public surface; nothing outside this file chooses the bool.
-type SetEnabledServiceAccountUseCase struct {
+// setEnabledServiceAccountUseCase carries both directions. They differ in exactly
+// two values — the state written and the event recorded — so they share one
+// implementation rather than two that can drift apart.
+//
+// It is UNEXPORTED, and the two directions are distinct exported types below.
+// That is not ceremony: a single exported type would make the two use-cases
+// interchangeable to the compiler, and the composition root passes them
+// adjacently into the handler. Swapped there, everything still builds, every
+// test in this package still passes (they construct the use-cases directly), and
+// `:disable` quietly becomes `:enable` — the one mistake that turns the control
+// into its own opposite. Distinct types make that a compile error.
+type setEnabledServiceAccountUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
 	enabled bool
 }
 
+// DisableServiceAccountUseCase — the account may no longer authenticate.
+type DisableServiceAccountUseCase struct {
+	setEnabledServiceAccountUseCase
+}
+
+// EnableServiceAccountUseCase — the account may authenticate again.
+type EnableServiceAccountUseCase struct {
+	setEnabledServiceAccountUseCase
+}
+
 // NewDisableServiceAccountUseCase — the account may no longer authenticate.
-func NewDisableServiceAccountUseCase(r Repo, opsRepo operations.Repo) *SetEnabledServiceAccountUseCase {
-	return &SetEnabledServiceAccountUseCase{repo: r, opsRepo: opsRepo, enabled: false}
+func NewDisableServiceAccountUseCase(r Repo, opsRepo operations.Repo) *DisableServiceAccountUseCase {
+	return &DisableServiceAccountUseCase{setEnabledServiceAccountUseCase{repo: r, opsRepo: opsRepo, enabled: false}}
 }
 
 // NewEnableServiceAccountUseCase — the account may authenticate again.
-func NewEnableServiceAccountUseCase(r Repo, opsRepo operations.Repo) *SetEnabledServiceAccountUseCase {
-	return &SetEnabledServiceAccountUseCase{repo: r, opsRepo: opsRepo, enabled: true}
+func NewEnableServiceAccountUseCase(r Repo, opsRepo operations.Repo) *EnableServiceAccountUseCase {
+	return &EnableServiceAccountUseCase{setEnabledServiceAccountUseCase{repo: r, opsRepo: opsRepo, enabled: true}}
 }
 
-func (u *SetEnabledServiceAccountUseCase) Execute(ctx context.Context, id domain.ServiceAccountID) (*operations.Operation, error) {
+func (u *setEnabledServiceAccountUseCase) Execute(ctx context.Context, id domain.ServiceAccountID) (*operations.Operation, error) {
 	// Anti-anonymous floor only. WHO may take this service account out of
 	// service is decided by the MODEL: the api-gateway Checks
 	// `v_update@iam_service_account:<service_account_id>` (plus the step-up
@@ -126,7 +155,7 @@ func (u *SetEnabledServiceAccountUseCase) Execute(ctx context.Context, id domain
 // metadata picks the per-direction Operation metadata message. Two messages
 // rather than one with a flag: the operations feed is read by people, and
 // «Disable» and «Enable» are different things to find in it.
-func (u *SetEnabledServiceAccountUseCase) metadata(id domain.ServiceAccountID, accountID domain.AccountID) proto.Message {
+func (u *setEnabledServiceAccountUseCase) metadata(id domain.ServiceAccountID, accountID domain.AccountID) proto.Message {
 	if u.enabled {
 		return &iamv1.EnableServiceAccountMetadata{
 			ServiceAccountId: string(id), AccountId: string(accountID),
@@ -147,7 +176,7 @@ func (u *SetEnabledServiceAccountUseCase) metadata(id domain.ServiceAccountID, a
 // account already in the requested state. Someone with the authority to do this
 // asked for it, and «who tried, and when» is precisely what the trail is for —
 // a repeat that leaves no trace is a repeat nobody can see.
-func (u *SetEnabledServiceAccountUseCase) doSetEnabled(ctx context.Context, id domain.ServiceAccountID, actor, eventType string) (*anypb.Any, error) {
+func (u *setEnabledServiceAccountUseCase) doSetEnabled(ctx context.Context, id domain.ServiceAccountID, actor, eventType string) (*anypb.Any, error) {
 	updated, err := shared.DoWithWriteTx(ctx, u.repo,
 		func(ctx context.Context, w Writer) (domain.ServiceAccount, error) {
 			sa, serr := w.ServiceAccountsW().SetEnabled(ctx, id, u.enabled)
