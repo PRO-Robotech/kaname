@@ -87,7 +87,7 @@ func TestBlockedState_HasNoProductWriterWithoutALiftPath(t *testing.T) {
 			if !isGo && !isSQL {
 				return nil
 			}
-			body, rerr := os.ReadFile(path) //nolint:gosec // фиксированное дерево репозитория
+			body, rerr := os.ReadFile(path)
 			if rerr != nil {
 				return rerr
 			}
@@ -143,7 +143,7 @@ func TestBlockedState_ReadersExistWhichIsWhyTheWriterMatters(t *testing.T) {
 				strings.HasSuffix(info.Name(), "_test.go") {
 				return nil
 			}
-			body, rerr := os.ReadFile(path) //nolint:gosec // фиксированное дерево репозитория
+			body, rerr := os.ReadFile(path)
 			if rerr != nil {
 				return rerr
 			}
