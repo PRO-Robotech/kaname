@@ -27,7 +27,13 @@ type fakeUserLookup struct {
 	err   error
 }
 
-func (f *fakeUserLookup) FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
+// FindByExternalID returns every row for the identity, whatever its state —
+// the shape the wired repository returns, so a blocked row reaches the handler
+// exactly as it does in production. The fake used to expose only an
+// ACTIVE-named method that did NOT filter on the state, which handed the
+// handler rows the real query would never return and kept a test green over a
+// branch production could not reach.
+func (f *fakeUserLookup) FindByExternalID(_ context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

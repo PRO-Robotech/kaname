@@ -56,7 +56,7 @@ func (s stubSAPort) FindByExternalSubject(_ context.Context, _, _ string) (domai
 // bootstrap SA subject (the SA branch resolves first).
 type bootstrapUserPort struct{ t *testing.T }
 
-func (p bootstrapUserPort) FindActiveByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
+func (p bootstrapUserPort) FindByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
 	p.t.Fatalf("interactive-user path must not be reached for the bootstrap SA client_credentials subject")
 	return nil, nil
 }
@@ -110,6 +110,6 @@ func TestEnrichClaims_UnknownClient_NotBootstrapSA(t *testing.T) {
 
 type fallthroughUserPort struct{}
 
-func (fallthroughUserPort) FindActiveByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
+func (fallthroughUserPort) FindByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
 	return nil, nil
 }

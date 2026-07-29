@@ -9,8 +9,12 @@
 // каждый раз при refresh-token-rotation. Handler:
 //
 //  1. Проверяет shared-secret.
-//  2. Lookup user; если admin force-blocked (user.invite_status == BLOCKED) —
-//     возвращает 403 user_disabled → Hydra пропагирует как invalid_grant.
+//  2. Читает строки субъекта КАК ЕСТЬ и выносит вердикт по состоянию
+//     (domain.InviteStatus.MayAuthenticate): ни одной строки → 403
+//     user_disabled с причиной user_not_found; строки есть, но ни одна не
+//     вправе аутентифицироваться → 403 user_disabled с причиной user_blocked.
+//     Hydra пропагирует оба как invalid_grant. Тот же вердикт применяет
+//     token-hook, поэтому разойтись они больше не могут.
 //  3. Требует jti; пустой jti → 403 invalid_grant (revocation-gate не skippable).
 //  4. Проверяет session_revocations cache — если jti revoked → reject.
 //  5. Re-injects ext_claims (same as token_hook).
@@ -125,8 +129,15 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// 1. Lookup user; reject if blocked.
-	users, err := h.users.FindActiveByExternalID(ctx, domain.ExternalSubject(payload.Subject))
+	// 1. Look the subject up AS IT IS, then judge its state.
+	//
+	// This used to resolve through the ACTIVE-only query, which meant a blocked
+	// user arrived here as an EMPTY result and was refused as "not found". The
+	// refusal was right; the recorded reason was not — it named a state the row
+	// does not have — and the blocked branch below was unreachable code that
+	// only a fake could enter. The issuance hook read the very same emptiness as
+	// "the mirror has not committed yet" and issued. One state, one verdict.
+	users, err := h.users.FindByExternalID(ctx, domain.ExternalSubject(payload.Subject))
 	if err != nil {
 		h.logger.Error("refresh_hook: user lookup failed", "subject", payload.Subject, "err", err)
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -137,8 +148,18 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"user_disabled"}`, http.StatusForbidden)
 		return
 	}
-	primary := users[0]
-	if primary.InviteStatus == domain.InviteStatusBlocked {
+	// A membership set may mix states across accounts; the first row that may
+	// authenticate is the default active account. None means the subject exists
+	// and is refused — a different verdict from absent, and audited as such.
+	var primary domain.User
+	var found bool
+	for _, u := range users {
+		if u.InviteStatus.MayAuthenticate() {
+			primary, found = u, true
+			break
+		}
+	}
+	if !found {
 		h.denyAndAudit(ctx, payload, "user_blocked")
 		http.Error(w, `{"error":"user_disabled"}`, http.StatusForbidden)
 		return

@@ -34,7 +34,7 @@ import (
 // paths under test; it fails the test if it is.
 type stubUserPort struct{ t *testing.T }
 
-func (s stubUserPort) FindActiveByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
+func (s stubUserPort) FindByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
 	if s.t != nil {
 		s.t.Fatalf("interactive-user path must not be reached on a user-token subject")
 	}
@@ -72,8 +72,11 @@ func newUserTokenEnricher(users TokenEnrichmentUserPort, ut TokenEnrichmentUserT
 func TestEnrichClaims_UserToken_HappyPath(t *testing.T) {
 	fixed := time.Unix(1_700_000_000, 0).UTC()
 	ut := stubUserTokenPort{
-		uoc:  domain.UserOAuthClient{ID: domain.UserOAuthClientID("uoc-123"), UserID: domain.UserID("usr-abc")},
-		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz")},
+		uoc: domain.UserOAuthClient{ID: domain.UserOAuthClientID("uoc-123"), UserID: domain.UserID("usr-abc")},
+		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz"),
+			// A personal token is its owner's authority: the owner's state is
+			// load-bearing, so the fixture states it rather than leaving it unset.
+			InviteStatus: domain.InviteStatusActive},
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, fixed)
 

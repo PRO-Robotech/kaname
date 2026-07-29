@@ -255,6 +255,19 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"invalid_client"}`, http.StatusForbidden)
 			return
 		}
+		// The subject is a kacho user whose state forbids authentication.
+		//
+		// Checked BEFORE the not-found branch, and for a sharper reason than the
+		// expiry above: this refusal used to BE that branch. The user resolution
+		// filtered on ACTIVE, so a blocked user came back empty, was taken for an
+		// identity whose mirror had not committed yet, and was issued the reduced
+		// claim set — a 200. Same diagnostic as the refresh hook returns for the
+		// same state: one subject state, one answer, whichever hook is asked.
+		if errors.Is(err, service.ErrSubjectNotActive) {
+			h.denyNotActive(ctx, subject, payload)
+			http.Error(w, `{"error":"user_disabled"}`, http.StatusForbidden)
+			return
+		}
 		if errors.Is(err, iamerr.ErrNotFound) {
 			// Nothing in kacho answers to this subject. What that means — and
 			// therefore what we owe the caller — depends entirely on whether a
@@ -327,6 +340,15 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.logger.Warn("token_hook: encode response failed", "err", err)
 	}
+}
+
+// denyNotActive records the refusal of a subject whose state forbids
+// authentication. Mirrors the refresh hook's own deny trail so the two hooks
+// leave one recognisable account of the same verdict.
+func (h *TokenHookHandler) denyNotActive(ctx context.Context, subject string, payload hydraTokenHookRequest) {
+	h.logger.WarnContext(ctx, "token_hook: subject not active — token request denied",
+		"subject", subject, "client_id", payload.Request.ClientID)
+	h.auditDenied(ctx, subject, payload, "user_blocked")
 }
 
 // denyExpired records the refusal of a credential past its stated expiry.

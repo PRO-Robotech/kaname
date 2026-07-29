@@ -16,12 +16,19 @@ import (
 
 // UserLookupPort — read-side dependency для token/refresh hooks.
 //
-// FindActiveByExternalID — возвращает все ACTIVE-row для identity (Kratos sub)
-// через все Account-ы. Для случая multi-Account membership используется
-// первый row (default active account); явный выбор активного аккаунта через
-// `account_id` hint в request — будущее расширение.
+// FindByExternalID возвращает ВСЕ row для identity (Kratos sub) через все
+// Account-ы, в любом состоянии. Для multi-Account membership берётся первый
+// row, который вправе аутентифицироваться (default active account); явный
+// выбор аккаунта через `account_id` hint — будущее расширение.
+//
+// ACTIVE-фильтрующего варианта здесь СОЗНАТЕЛЬНО нет. Он отвечает «дай
+// пригодные строки», тогда как хук спрашивает «в каком состоянии субъект»:
+// заблокированный пользователь возвращался пустым результатом, и два хука
+// читали эту пустоту противоположно — один отказывал, второй принимал за
+// «зеркало ещё не доехало» и выдавал урезанный набор claims. Вердикт выносит
+// domain.InviteStatus.MayAuthenticate по прочитанной строке.
 type UserLookupPort interface {
-	FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
+	FindByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
 	GetByID(ctx context.Context, id domain.UserID) (domain.User, error)
 }
 

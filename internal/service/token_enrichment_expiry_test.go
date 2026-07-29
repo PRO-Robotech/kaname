@@ -211,7 +211,10 @@ func TestEnrichClaims_UserToken_Expired_Denied(t *testing.T) {
 			UserID:    domain.UserID("usr-abc"),
 			ExpiresAt: &expired,
 		},
-		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz")},
+		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz"),
+			// A personal token is its owner's authority: the owner's state is
+			// load-bearing, so the fixture states it rather than leaving it unset.
+			InviteStatus: domain.InviteStatusActive},
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, now)
 
@@ -227,8 +230,11 @@ func TestEnrichClaims_UserToken_Expired_Denied(t *testing.T) {
 func TestEnrichClaims_UserToken_NoExpiry_Mints(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	ut := stubUserTokenPort{
-		uoc:  domain.UserOAuthClient{ID: domain.UserOAuthClientID("uoc-123"), UserID: domain.UserID("usr-abc")},
-		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz")},
+		uoc: domain.UserOAuthClient{ID: domain.UserOAuthClientID("uoc-123"), UserID: domain.UserID("usr-abc")},
+		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz"),
+			// A personal token is its owner's authority: the owner's state is
+			// load-bearing, so the fixture states it rather than leaving it unset.
+			InviteStatus: domain.InviteStatusActive},
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, now)
 

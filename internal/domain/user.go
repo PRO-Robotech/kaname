@@ -26,6 +26,23 @@ const (
 	InviteStatusBlocked InviteStatus = "BLOCKED"
 )
 
+// MayAuthenticate reports whether a user in this state may be issued a token.
+//
+// This is the VERDICT both token hooks ask for, and the reason it exists as a
+// predicate rather than as a WHERE clause: the hooks used to resolve the
+// identity through an ACTIVE-only query, which turns "blocked" into "absent" —
+// and then read absence in opposite directions. One refused; the other took it
+// for "the mirror has not committed yet" and issued the reduced claim set to a
+// blocked user. A filter cannot be asked "why"; a verdict can.
+//
+// Only ACTIVE authenticates. PENDING is an invitee who has not confirmed an
+// identity yet (the DB CHECK users_invite_status_consistency keeps such a row
+// from carrying an external id at all, so it is a floor rather than a live
+// path), and an unset state is not an authorisation.
+func (s InviteStatus) MayAuthenticate() bool {
+	return s == InviteStatusActive
+}
+
 func (s InviteStatus) Validate() error {
 	switch s {
 	case InviteStatusPending, InviteStatusActive, InviteStatusBlocked:

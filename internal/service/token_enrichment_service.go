@@ -33,12 +33,32 @@ import (
 // branch, and the gate would be defeated for exactly the requests it exists for.
 var ErrCredentialExpired = stderrors.New("credential expired")
 
+// ErrSubjectNotActive — the subject behind this token request IS a kacho user,
+// and its state forbids authentication. Both hooks translate it into a 403.
+//
+// Like ErrCredentialExpired it is deliberately NOT an iamerr sentinel, and for
+// the same reason, sharpened by what actually happened: "blocked" and "not
+// found" are different verdicts and the hook owes them different answers.
+// Not-found still mints the reduced claim set for an interactive identity whose
+// mirror has not committed yet — that is first login. A blocked user collapsing
+// into not-found therefore reached that surviving branch and was ISSUED a token,
+// which is precisely the defect this sentinel exists to make impossible.
+var ErrSubjectNotActive = stderrors.New("subject not active")
+
 // TokenEnrichmentUserPort — read-side dependency: resolve a User mirror by its
 // external identity subject (Kratos `sub`).
 type TokenEnrichmentUserPort interface {
-	// FindActiveByExternalID returns all ACTIVE User rows for an identity
-	// across every Account. The first row is the default active account.
-	FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
+	// FindByExternalID returns EVERY User row for an identity across every
+	// Account, whatever its state. The first row that may authenticate is the
+	// default active account.
+	//
+	// An ACTIVE-filtering variant is deliberately absent. That filter answers
+	// "give me the usable rows", which is the wrong question here: a blocked
+	// user comes back as an empty result, indistinguishable from an identity
+	// that has no mirror yet — and the reduced claim set that exists for the
+	// latter was therefore minted for the former. Reading the rows as they are
+	// lets the state be judged instead of inferred from an absence.
+	FindByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
 }
 
 // TokenEnrichmentSAPort — read-side dependency: resolve a ServiceAccount and
@@ -238,6 +258,15 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 			if uErr != nil && !stderrors.Is(uErr, iamerr.ErrNotFound) {
 				return nil, fmt.Errorf("get user %s: %w", uoc.UserID, uErr)
 			}
+			// A personal token is its owner's authority, so it cannot outlive
+			// the owner's ability to authenticate. This path resolves the owner
+			// BY ID, which applies no state filter at all — so before this check
+			// a blocked user's personal token minted the FULL claim set,
+			// principal id and account included: strictly more than the
+			// interactive path handed the same user.
+			if uErr == nil && !u.InviteStatus.MayAuthenticate() {
+				return nil, fmt.Errorf("user-token %s owner %s: %w", uoc.ID, uoc.UserID, ErrSubjectNotActive)
+			}
 			return s.userTokenClaims(uoc, u, subject, hookCtx), nil
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
@@ -246,12 +275,25 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	}
 
 	// 3. User path (interactive sessions).
-	users, err := s.users.FindActiveByExternalID(ctx, domain.ExternalSubject(subject))
+	//
+	// Read the rows AS THEY ARE, then judge. Resolving through the ACTIVE-only
+	// query instead would answer an empty set for a blocked user, and the caller
+	// below cannot tell that apart from an identity with no mirror yet — so the
+	// reduced claim set meant for first login was minted for a blocked user.
+	users, err := s.users.FindByExternalID(ctx, domain.ExternalSubject(subject))
 	if err != nil {
 		return nil, fmt.Errorf("find users by external_id: %w", err)
 	}
+	for _, u := range users {
+		if u.InviteStatus.MayAuthenticate() {
+			// A membership set may mix states across accounts; the first row that
+			// may authenticate is the default active account.
+			return s.userClaims(u, subject, hookCtx), nil
+		}
+	}
 	if len(users) > 0 {
-		return s.userClaims(users[0], subject, hookCtx), nil
+		// The subject is present and refused, not missing.
+		return nil, fmt.Errorf("subject %s: %w", subject, ErrSubjectNotActive)
 	}
 
 	return nil, iamerr.Wrapf(iamerr.ErrNotFound, "subject %s not found (neither user nor service-account oauth client)", subject)
@@ -411,16 +453,22 @@ func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u d
 	return claims
 }
 
-// MinimalClaims returns the reduced ext_claims set for a subject without an
-// active User or SA mapping.
+// MinimalClaims returns the reduced ext_claims set for a subject with NO User
+// or SA mapping at all.
 //
-// Its ONE remaining population is the interactive identity whose kacho mirror
-// has not committed yet: provisioning is asynchronous (the provision hook
-// returns once the Operation is accepted), so a freshly registered human can
-// request their first token before the User row exists. The caller — the token
-// hook — refuses an unresolved MACHINE credential outright instead of coming
-// here, so this set is no longer what an unknown or revoked OAuth client
-// receives.
+// Its ONE population is the interactive identity whose kacho mirror has not
+// committed yet: provisioning is asynchronous (the provision hook returns once
+// the Operation is accepted), so a freshly registered human can request their
+// first token before the User row exists. The caller — the token hook — refuses
+// an unresolved MACHINE credential outright instead of coming here, so this set
+// is not what an unknown or revoked OAuth client receives.
+//
+// It is also not what a BLOCKED user receives, and that sentence used to be
+// false. The user lookup filtered on ACTIVE, so a blocked row came back as an
+// empty result and landed here — this docstring claimed the population was one
+// thing while the query fed it another. The lookup now returns rows as they are
+// and the state is judged (ErrSubjectNotActive), so absence again means only
+// absence.
 //
 // The principal type says `user` because that is what this population is, and
 // because the value is read as a decision, not as a label. Two platform
