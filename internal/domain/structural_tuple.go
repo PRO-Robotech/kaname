@@ -60,6 +60,14 @@ func isBindableScope(scope string) bool {
 // admin from account or any_admin from cluster` resolves over — the sole enabler of
 // the cascade on a binding. ok=false when the scope is not a hierarchy parent or the
 // binding has no id.
+//
+// It is deliberately INDEPENDENT of status. A revoked binding keeps its row, and it
+// is still a record that has to be readable and deletable by the administrator of its
+// account; a status filter here would take that away precisely when the queue is
+// behind. It cannot bring the grant back: what the grantee held were tuples on the
+// SCOPE object, and this is a pointer at the binding, not a grant on the scope. Locked
+// by service/cascade_queue_independence_integration_test.go
+// (TestRevokedBindingStaysManageableAndGrantsNothing).
 func (b AccessBinding) StructuralParent() (StructuralTuple, bool) {
 	scope := strings.ToLower(string(b.ResourceType))
 	if !isBindableScope(scope) || b.ID == "" || b.ResourceID == "" {

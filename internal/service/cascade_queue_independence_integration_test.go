@@ -199,6 +199,50 @@ func TestAccountAdminRevokesForeignGrantWhileQueueHasNotDelivered(t *testing.T) 
 		"the binding's own SUBJECT is not thereby its administrator")
 }
 
+// TestRevokedBindingStaysManageableAndGrantsNothing — the direction a reader is
+// most likely to "fix" wrongly.
+//
+// A revoked binding keeps its row (status REVOKED), and the projection is
+// deliberately status-independent, so the account administrator still reaches the
+// binding OBJECT: a revoked grant is a record that has to remain readable and
+// deletable, and filtering it out here would take that away exactly when the queue is
+// behind — the same lockout this branch exists to remove, in the other direction.
+//
+// What must NOT come back is the grant itself. The grantee's access lived in tuples on
+// the SCOPE object, and this package never supplies those: it projects parent pointers
+// and the account owner, and nothing else. So revocation stays revoked.
+func TestRevokedBindingStaysManageableAndGrantsNothing(t *testing.T) {
+	w := newCIWorld(t)
+
+	const (
+		acc      = "acc-ciqueue6"
+		owner    = "usr-ciqueueown6"
+		accAdmin = "usr-ciqueueadm6"
+		grantee  = "usr-ciqueuegrantee6"
+		role     = "rol-ciqueue6"
+		binding  = "abn-ciqueue6"
+	)
+	w.seedAccountWithOwner(t, acc, owner)
+	w.seedUser(t, accAdmin, acc)
+	w.seedUser(t, grantee, acc)
+	w.seedRole(t, role, acc)
+	w.seedBinding(t, binding, grantee, role, "account", acc)
+	w.exec(t, `UPDATE kacho_iam.access_bindings
+	              SET status = 'REVOKED', revoked_at = now(), revoked_by_user_id = $2
+	            WHERE id = $1`, binding, accAdmin)
+
+	w.harness.Write(t, "user:"+accAdmin, "admin", "account:"+acc)
+
+	require.True(t, w.allowed(t, "user:"+accAdmin, "v_delete", "iam_access_binding:"+binding),
+		"a revoked binding must stay manageable by the account administrator — it is still a "+
+			"record, and a status filter here would lock him out of cleaning it up")
+	for _, verb := range ciVerbs {
+		require.False(t, w.allowed(t, "user:"+grantee, verb, "account:"+acc),
+			"revocation must stay revoked: the grantee holds no %s on the scope, and nothing "+
+				"supplied here may restore it", verb)
+	}
+}
+
 // TestForeignAccountAdminIsNotAdminHere — the injected structural fact is the
 // account the row actually names, so an administrator of a DIFFERENT account
 // gains nothing from it.
