@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
 type fgaWireCheckRequest struct {
@@ -32,7 +34,24 @@ type fgaWireCheckResponse struct {
 
 // CheckWithContext — see RelationQueries. Default (MINIMIZE_LATENCY) consistency.
 func (c *OpenFGAHTTPClient) CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
-	return c.checkWithContext(ctx, subject, relation, object, condCtx, "")
+	return c.checkWithContext(ctx, subject, relation, object, condCtx, "", nil)
+}
+
+// CheckWithContextualTuples — CheckWithContext plus tuples that hold for THIS
+// request only. OpenFGA merges them into the tuple set for the duration of the
+// Check, so they take part in graph resolution exactly as stored tuples do.
+//
+// Its one caller is the structural fallback in AuthorizeService: the tuples the
+// super-access cascade derives over are projections of columns in rows iam has
+// already committed, and supplying them here is what makes that cascade resolve
+// from committed state instead of waiting for the outbox to deliver the same
+// triples. Nothing is written — a contextual tuple has no effect outside the
+// request that carried it.
+func (c *OpenFGAHTTPClient) CheckWithContextualTuples(
+	ctx context.Context, subject, relation, object string,
+	condCtx map[string]any, contextual []authztypes.TupleKey,
+) (bool, error) {
+	return c.checkWithContext(ctx, subject, relation, object, condCtx, "", contextual)
 }
 
 // CheckWithContextConsistent — CheckWithContext forcing HIGHER_CONSISTENCY (strong
@@ -41,21 +60,35 @@ func (c *OpenFGAHTTPClient) CheckWithContext(ctx context.Context, subject, relat
 // HIGHER_CONSISTENCY, so the probe never reads a stale-replica negative for a tuple
 // just written to the same store.
 func (c *OpenFGAHTTPClient) CheckWithContextConsistent(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
-	return c.checkWithContext(ctx, subject, relation, object, condCtx, consistencyHigherConsistency)
+	return c.checkWithContext(ctx, subject, relation, object, condCtx, consistencyHigherConsistency, nil)
 }
 
 // checkWithContext is the shared CheckWithContext transport; consistency is the
 // OpenFGA `consistency` wire value ("" ⇒ omitted ⇒ default MINIMIZE_LATENCY).
-func (c *OpenFGAHTTPClient) checkWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any, consistency string) (bool, error) {
+// contextual carries request-scoped tuples (nil ⇒ the field is omitted entirely).
+func (c *OpenFGAHTTPClient) checkWithContext(
+	ctx context.Context, subject, relation, object string,
+	condCtx map[string]any, consistency string, contextual []authztypes.TupleKey,
+) (bool, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return false, ErrNotConfigured
 	}
-	body, _ := json.Marshal(fgaWireCheckRequest{
+	req := fgaWireCheckRequest{
 		AuthorizationModelID: c.AuthorizationModel,
 		TupleKey:             fgaWireTupleKey{User: subject, Relation: relation, Object: object},
 		Context:              condCtx,
 		Consistency:          consistency,
-	})
+	}
+	if len(contextual) > 0 {
+		keys := make([]fgaWireTupleKey, 0, len(contextual))
+		for _, t := range contextual {
+			keys = append(keys, fgaWireTupleKey{User: t.User, Relation: t.Relation, Object: t.Object})
+		}
+		req.ContextualTuples = &struct {
+			TupleKeys []fgaWireTupleKey `json:"tuple_keys"`
+		}{TupleKeys: keys}
+	}
+	body, _ := json.Marshal(req)
 	cctx, cancel := context.WithTimeout(ctx, c.checkTimeout())
 	defer cancel()
 	resp, err := c.do(cctx, "POST",

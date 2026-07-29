@@ -38,6 +38,7 @@ import (
 	usertokensapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user_tokens"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/bootstraptokenwire"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -731,11 +732,38 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// answers the single super-gate Check (cluster:…#system_admin) — when the
 	// caller is a cluster-admin, Check/CheckRelation ALLOW before the per-object
 	// resolve.
+	// StructuralFacts wires the request-time source of the super-access cascade's
+	// parent pointers (internal/authzcascade). Without it the cascade resolves only
+	// over pointers the fga_outbox drainer has already delivered, which makes the
+	// three tiers exactly as delivery-dependent as the flat index they were chosen
+	// over — the ConditionsRepo is attached so iam_condition is covered too.
+	//
+	// Built on a PRIMARY-ONLY repository (no replica), deliberately: the rows it reads
+	// are ones that were just committed, which is exactly what a replica lags on, so a
+	// replica read would swap one delivery pipeline for another. It shares the master
+	// pool with the ordinary repository; only the read routing differs.
+	structuralFacts := authzcascade.New(kachopg.New(pool, nil)).
+		WithConditions(kachopg.NewConditionsRepo(pool))
 	authSvc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           relationStore,
 		ModelID:             modelID,
 		ClusterAdminChecker: relationStore,
+		StructuralFacts:     structuralFacts,
 	})
+	// Refuse to run a cascade that has silently gone back to waiting for a queue.
+	// The fallback needs BOTH a resolver and an Authorizer that can carry contextual
+	// tuples; losing either in a refactor would leave every tier below the cloud
+	// administrator dependent on delivery again, and nothing else would say so.
+	//
+	// NOT conditioned on the authentication mode. Every deployed stand runs production
+	// posture, and a stand that takes a different authorization path than production is
+	// the divergence that rule forbids — the guard would then be absent from the only
+	// stands where anyone would notice it firing.
+	if !authSvc.StructuralFallbackReachable() {
+		logger.Error("refusing to start: the super-access cascade would depend on outbox delivery " +
+			"(structural-fact resolver or contextual-tuple Check not wired)")
+		os.Exit(1)
+	}
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kachoRepo, relationStore)
 	// WithCallerAuthority wires the caller-authority gate (a tenant principal may
 	// only query authz decisions about itself, a resource it administers, or as a

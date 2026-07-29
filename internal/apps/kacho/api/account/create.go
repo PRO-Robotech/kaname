@@ -53,13 +53,19 @@ type OwnerBindingReconciler interface {
 // ownerTuples builds the owner self-grant + SEC-L cluster parent-pointer
 // owner-tuple intents for a freshly-created Account. Co-committed in the writer-tx
 // (SEC-D); see doCreate.
+//
+// The SHAPE comes from domain.Account.StructuralFacts, which is also what
+// internal/authzcascade supplies as a request-scoped fact so the account's owner and
+// the cloud tier resolve before this intent has been delivered. Two copies of the
+// projection would let those two answers drift apart; delegating leaves nothing to
+// drift. (Both facts are structural — the owner self-grant is read by `account`'s
+// verbs directly, see the model's owner refinement.)
 func ownerTuples(a domain.Account) []service.RelationTuple {
-	return []service.RelationTuple{
-		// user:<owner>#owner@account:<id> — owner self-grant.
-		{User: "user:" + string(a.OwnerUserID), Relation: "owner", Object: "account:" + string(a.ID)},
-		// cluster:cluster_kacho_root#cluster@account:<id> — SEC-L cluster pointer.
-		{User: "cluster:cluster_kacho_root", Relation: "cluster", Object: "account:" + string(a.ID)},
+	out := make([]service.RelationTuple, 0, 2)
+	for _, st := range a.StructuralFacts() {
+		out = append(out, service.RelationTuple{User: st.User, Relation: st.Relation, Object: st.Object})
 	}
+	return out
 }
 
 // ownerBindingHierarchyTuples builds the binding-OBJECT hierarchy parent-pointer
@@ -262,10 +268,8 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	if perr != nil {
 		return nil, shared.MapRepoErr(perr)
 	}
-	if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{
-		{User: "account:" + string(insertedProj.AccountID), Relation: "account", Object: "project:" + string(insertedProj.ID)},
-		{User: "cluster:cluster_kacho_root", Relation: "cluster", Object: "project:" + string(insertedProj.ID)},
-	}); ferr != nil {
+	// Same single projection as ProjectService.Create — see ownerTuples above.
+	if ferr := w.EmitFGARelationWrite(ctx, projectStructuralTuples(insertedProj)); ferr != nil {
 		return nil, shared.MapRepoErr(ferr)
 	}
 	if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.project", string(insertedProj.ID)); rerr != nil {
@@ -394,4 +398,16 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	}
 
 	return marshalAccount(inserted)
+}
+
+// projectStructuralTuples adapts domain.Project.StructuralFacts to the outbox intent
+// type for the default project created alongside an Account. Mirrors the identically
+// named helper in the project package; both read the one projection in domain.
+func projectStructuralTuples(p domain.Project) []service.RelationTuple {
+	facts := p.StructuralFacts()
+	out := make([]service.RelationTuple, 0, len(facts))
+	for _, st := range facts {
+		out = append(out, service.RelationTuple{User: st.User, Relation: st.Relation, Object: st.Object})
+	}
+	return out
 }

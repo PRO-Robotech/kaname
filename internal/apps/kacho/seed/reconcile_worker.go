@@ -16,9 +16,11 @@ package seed
 //	  LISTEN/NOTIFY (NotifyWatcher, паритет с fga_outbox drainer): событие в очереди
 //	  шлет pg_notify, worker просыпается и дренажит в пределах одного прохода. Poll
 //	  по DrainInterval остается fallback'ом на случай пропущенного NOTIFY.
-//	SLOW (periodic sweep, D12 + D9) — every interval: (a) re-reconcile every
-//	  selector binding (defense-in-depth against a lost event / restart before
-//	  drain) and (b) expire TTL-elapsed bindings (eager-revoke, γ-16).
+//	SLOW (periodic sweep, D12) — every interval, re-reconcile every selector
+//	  binding (defense-in-depth against a lost event / restart before drain).
+//	TERM (own goroutine, own ticker, D9) — end the terms of TTL-elapsed bindings.
+//	  Separate on purpose: it is the ONLY thing that ends a grant, so it must not
+//	  queue behind either of the two paths above. See runExpiry.
 //
 // Clean Architecture: the loop owns no SQL — it depends on the reconcile
 // use-case (ReconcileObject/ReconcileBinding/ExpireBinding) + the narrow drain
@@ -29,6 +31,7 @@ package seed
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -62,8 +65,9 @@ type NotifyWatcher interface {
 
 // ReconcileWorkerConfig — tunables.
 type ReconcileWorkerConfig struct {
-	// SweepInterval between periodic sweeps (selector re-reconcile + expiry).
-	// Defaults to 30s when zero.
+	// SweepInterval between periodic selector re-reconciles, AND the period of the
+	// independent term-expiry loop (runExpiry) — one knob, two schedules that do not
+	// wait on each other. Defaults to 30s when zero.
 	SweepInterval time.Duration
 	// DrainInterval between event-queue drain polls. With a Notify watcher set this
 	// is the missed-NOTIFY poll-fallback (the NOTIFY carries the materialization
@@ -114,7 +118,18 @@ func NewReconcileWorker(engine ReconcileEngine, queue ReconcileQueue, cfg Reconc
 }
 
 // Run drives the worker until ctx is cancelled. Returns nil on clean shutdown.
+//
+// Term enforcement runs on its OWN goroutine (runExpiry), not in this loop. See
+// runExpiry for why that is a correctness property and not a scheduling nicety.
 func (w *ReconcileWorker) Run(ctx context.Context) error {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w.runExpiry(ctx)
+	}()
+	defer wg.Wait()
+
 	drainTick := time.NewTicker(w.drainIvl)
 	sweepTick := time.NewTicker(w.sweepIvl)
 	defer drainTick.Stop()
@@ -170,8 +185,11 @@ func (w *ReconcileWorker) drain(ctx context.Context) {
 	}
 }
 
-// sweep re-reconciles every selector binding (D12 defense-in-depth) and expires
-// TTL-elapsed bindings (D9 eager-revoke, γ-16).
+// sweep re-reconciles every selector binding (D12 defense-in-depth).
+//
+// Term expiry is NOT here any more — it is its own loop (runExpiry). It used to be
+// the last step of this pass, which meant the end of a grant waited on a
+// re-reconcile of every selector binding in the cluster.
 func (w *ReconcileWorker) sweep(ctx context.Context) {
 	selectorIDs, err := w.queue.ListSelectorBindingIDs(ctx)
 	if err != nil {
@@ -183,14 +201,61 @@ func (w *ReconcileWorker) sweep(ctx context.Context) {
 				slog.String("binding_id", string(id)), slog.Any("err", err))
 		}
 	}
+}
 
+// runExpiry ends the terms of TTL-elapsed bindings, on its own goroutine and its own
+// ticker, until ctx is cancelled.
+//
+// This is separate work because of what it enforces. A binding's term is enforced in
+// exactly ONE way — deleting the binding's tuples — because the tuples carry no
+// expiry condition and the store therefore has no idea a term exists. Until that
+// deletion lands, an expired grant is indistinguishable from a live one and answers
+// "allowed".
+//
+// While it was the tail of the periodic sweep, that deletion queued behind a
+// re-reconcile of every selector binding in the cluster (each taking a per-binding
+// exclusive advisory lock, and by the reconciler's own measurement reading tens of
+// thousands of rows) AND shared its goroutine with the event drain. So the delay
+// between the end of a term and the end of the access was not the interval; it was
+// the interval plus a full pass over the installation plus whatever the drain was
+// doing, and it grew as the installation grew. On its own schedule the delay is
+// bounded by the interval.
+//
+// Concurrency is safe by construction rather than by convention: ExpireBinding takes
+// the same per-binding EXCLUSIVE advisory lock the reconcile passes take, so a
+// concurrent pass over the same binding serialises in the database in either order.
+//
+// This bounds the window; it does not remove it. Removing it means putting the term
+// ON the tuple, as a condition OpenFGA evaluates per request — the model already
+// declares `condition non_expired(current_time, valid_until)` and no relation
+// references it, so that is a model change (a new authorization-model id and a
+// rollout) and is deliberately not made here.
+func (w *ReconcileWorker) runExpiry(ctx context.Context) {
+	tick := time.NewTicker(w.sweepIvl)
+	defer tick.Stop()
+	// Immediate pass on boot: a term that elapsed while the process was down must
+	// not wait a full interval to be enforced.
+	w.expireElapsed(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			w.expireElapsed(ctx)
+		}
+	}
+}
+
+// expireElapsed runs one pass of term enforcement (D9 eager-revoke, γ-16).
+func (w *ReconcileWorker) expireElapsed(ctx context.Context) {
 	expiredIDs, err := w.queue.ListExpiredBindingIDs(ctx)
 	if err != nil {
-		w.logger.WarnContext(ctx, "reconcile sweep: list expired bindings failed", slog.Any("err", err))
+		w.logger.WarnContext(ctx, "reconcile expiry: list expired bindings failed", slog.Any("err", err))
+		return
 	}
 	for _, id := range expiredIDs {
 		if err := w.engine.ExpireBinding(ctx, id); err != nil {
-			w.logger.WarnContext(ctx, "reconcile sweep: expire binding failed",
+			w.logger.WarnContext(ctx, "reconcile expiry: expire binding failed",
 				slog.String("binding_id", string(id)), slog.Any("err", err))
 		}
 	}

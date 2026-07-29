@@ -104,6 +104,25 @@ type Authorizer interface {
 	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error)
 }
 
+// StructuralFactResolver — port over the structural facts iam can PROVE from its
+// own committed rows: the parent pointers the super-access cascade derives over,
+// and the account's owner. Implemented by internal/authzcascade.
+//
+// It exists because those tuples otherwise reach OpenFGA only through the
+// at-least-once outbox, which makes the cascade delivery-dependent — the one thing
+// the recorded decision chose a cascade in order NOT to be. See the package doc of
+// internal/authzcascade.
+type StructuralFactResolver interface {
+	// Derivable reports whether this object type can be spoken about at all,
+	// without touching the database — so a Check on an object iam does not own
+	// costs no read.
+	Derivable(objectType string) bool
+	// StructuralFacts returns the facts for one object. (nil, nil) means "nothing
+	// is claimed" (unknown type or absent row); a non-nil error means the row could
+	// not be read, which is an outage and NOT a denial.
+	StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.TupleKey, error)
+}
+
 // AuthorizeService — use-case.
 type AuthorizeService struct {
 	relations Authorizer
@@ -114,6 +133,9 @@ type AuthorizeService struct {
 	// Optional / nil-safe: an unwired checker never short-circuits (the
 	// ordinary FGA path is the sole decision — backward-compatible).
 	clusterAdmin authzguard.RelationChecker
+	// structural — request-time source of the cascade's structural facts. Wired in
+	// production; nil in unit tests that do not exercise the cascade.
+	structural StructuralFactResolver
 }
 
 // AuthorizeServiceConfig — DI config.
@@ -123,6 +145,9 @@ type AuthorizeServiceConfig struct {
 	// ClusterAdminChecker — flat cluster-admin short-circuit port. nil → no
 	// short-circuit (ordinary FGA path only).
 	ClusterAdminChecker authzguard.RelationChecker
+	// StructuralFacts — request-time resolver for the cascade's structural facts.
+	// nil → the cascade resolves only over tuples the queue has already delivered.
+	StructuralFacts StructuralFactResolver
 }
 
 // NewAuthorizeService — builder.
@@ -131,6 +156,7 @@ func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
 		relations:    cfg.Relations,
 		modelID:      cfg.ModelID,
 		clusterAdmin: cfg.ClusterAdminChecker,
+		structural:   cfg.StructuralFacts,
 	}
 }
 
@@ -284,11 +310,23 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		return result, nil
 	}
 	// Per-object resolve DENIED. Cluster-admin fallback: the flat super-gate
-	// (cluster:…#system_admin) is the SOLE second-chance — a cluster-admin holds
+	// (cluster:…#system_admin) is the first second-chance — a cluster-admin holds
 	// authority on everything even without a per-object tuple. The common
 	// allow case above already returned, so only a denied request pays this extra
 	// round-trip; fail-closed preserved (a non-cluster-admin stays denied).
 	if s.isClusterAdmin(ctx, caMemo, req.Subject) {
+		result.Allowed = true
+		return result, nil
+	}
+	// Structural fallback: the cascade's parent pointers read from iam's committed
+	// rows instead of from whatever the outbox has delivered. This is what makes the
+	// account administrator and the account owner resolve at request time, as the
+	// cloud administrator already did above.
+	structuralAllowed, serr := s.structuralFallback(ctx, req.Subject, relation, object, condCtx)
+	if serr != nil {
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
+	}
+	if structuralAllowed {
 		result.Allowed = true
 		return result, nil
 	}
@@ -388,6 +426,90 @@ type consistentAuthorizer interface {
 	CheckWithContextConsistent(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error)
 }
 
+// contextualAuthorizer — OPTIONAL capability of the Authorizer: a Check that also
+// carries request-scoped tuples. Implemented by *clients.OpenFGAHTTPClient; a test
+// stub that implements only CheckWithContext keeps working and simply never gets a
+// structural fallback (which is why StructuralFallbackReachable exists — a
+// production wiring that lost the capability must be a failure, not a silence).
+type contextualAuthorizer interface {
+	CheckWithContextualTuples(ctx context.Context, subject, relation, object string,
+		condCtx map[string]any, contextual []authztypes.TupleKey) (bool, error)
+}
+
+// StructuralFallbackReachable reports whether the structural fallback can run at
+// all: a resolver is wired AND the Authorizer can carry contextual tuples. The
+// boot guard reads it, so "the cascade silently went back to being queue-dependent"
+// cannot be a runtime surprise. Exported because the composition root is where a
+// missing wiring must become a refusal to start.
+func (s *AuthorizeService) StructuralFallbackReachable() bool {
+	if s.structural == nil || s.relations == nil {
+		return false
+	}
+	_, ok := s.relations.(contextualAuthorizer)
+	return ok
+}
+
+// splitFGAObject splits "<type>:<id>" on the FIRST colon. Object ids may
+// themselves contain colons (registry_repository:<reg>/<repo>:<tag>), so the
+// remainder is the id verbatim.
+func splitFGAObject(object string) (objectType, objectID string, ok bool) {
+	i := strings.Index(object, ":")
+	if i <= 0 || i == len(object)-1 {
+		return "", "", false
+	}
+	return object[:i], object[i+1:], true
+}
+
+// structuralFallback re-resolves a DENIED check with the structural facts iam can
+// prove from its OWN committed rows, supplied as request-scoped contextual tuples.
+//
+// It is the reason the super-access cascade holds while the outbox has delivered
+// nothing: the pointers the cascade derives over are projections of committed
+// columns, so they are knowable at request time and need not be waited for.
+//
+// Placement is the deny path, after the cluster-admin super-gate, for the same
+// reason that gate sits there: the common ALLOW never pays for it, and a caller who
+// was already allowed cannot have their answer changed by it. A contextual tuple
+// can only ADD a path, so this can turn a deny into an allow and never the reverse
+// — which is why supplying only TRUE facts about the row is the whole safety
+// argument, and why authzcascade/cascade_coverage_test.go pins which relations the
+// model reads those facts through.
+//
+// Returns (allowed, err). A non-nil err means the structural fact could not be
+// read; the caller must surface that as an outage rather than as a denial, because
+// the fact is part of the decision and an unread fact is an unknown answer, not a
+// negative one.
+//
+// A caller asking for HIGHER_CONSISTENCY does NOT get it here: this Check uses the
+// default read. The only effect is a possible false DENY (the store's own replica has
+// not caught up with a tuple written moments ago), which is the safe direction and is
+// what the fallback exists to make rare in the first place. The structural fact itself
+// is read from the primary, so the part this package is responsible for is not subject
+// to that lag.
+func (s *AuthorizeService) structuralFallback(
+	ctx context.Context, subject, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	if s.structural == nil {
+		return false, nil
+	}
+	objectType, objectID, ok := splitFGAObject(object)
+	if !ok || !s.structural.Derivable(objectType) {
+		return false, nil // no read for an object iam does not own
+	}
+	ca, ok := s.relations.(contextualAuthorizer)
+	if !ok {
+		return false, nil
+	}
+	facts, err := s.structural.StructuralFacts(ctx, objectType, objectID)
+	if err != nil {
+		return false, err
+	}
+	if len(facts) == 0 {
+		return false, nil
+	}
+	return ca.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
+}
+
 // CheckRelation — relation-native authorization check (FGA Check + OPA
 // overlay). Used by the cluster-internal per-RPC authz gate
 // (`InternalIAMService.Check`). Reuses the same FGA + OPA pipeline as
@@ -430,6 +552,18 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	// after the cascade is contracted. Checked AFTER the per-object resolve so the
 	// common allow case costs a single round-trip; nil-safe.
 	if authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, req.Subject) {
+		result.Allowed = true
+		return result, nil
+	}
+	// Structural fallback — same reason and same ordering as in check(): the
+	// cascade's parent pointers come from iam's committed rows, so levels below the
+	// cloud administrator stop depending on the outbox having delivered them. This
+	// is the path the api-gateway per-RPC gate takes.
+	structuralAllowed, serr := s.structuralFallback(ctx, req.Subject, req.Relation, req.Object, condCtx)
+	if serr != nil {
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
+	}
+	if structuralAllowed {
 		result.Allowed = true
 		return result, nil
 	}
