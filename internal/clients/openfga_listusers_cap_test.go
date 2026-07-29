@@ -114,7 +114,7 @@ func TestListUsersServerCap_DeploymentDoesNotOverrideIt(t *testing.T) {
 		if err != nil || info.IsDir() {
 			return err //nolint:wrapcheck // walk-control error, surfaced verbatim below
 		}
-		b, rerr := os.ReadFile(path) //nolint:gosec // test-only walk of the repo's own deploy tree
+		b, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr //nolint:wrapcheck // walk-control error, surfaced verbatim below
 		}
