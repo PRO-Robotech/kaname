@@ -80,6 +80,8 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
 			AccountID: "acc_01abcdefghjkmnpqr",
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

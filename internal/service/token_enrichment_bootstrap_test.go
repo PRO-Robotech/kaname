@@ -72,6 +72,8 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(bootstrapSvaID),
 			AccountID: domain.AccountID(systemAccountID),
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}
 	svc := NewTokenEnrichmentService(

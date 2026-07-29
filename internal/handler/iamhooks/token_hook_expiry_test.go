@@ -67,6 +67,8 @@ func newExpiryTokenHook(t *testing.T, expiresAt *time.Time, audit *fakeAudit) *i
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
 			AccountID: "acc_01abcdefghjkmnpqr",
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}
 	enricher := service.NewTokenEnrichmentService(

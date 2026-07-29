@@ -127,6 +127,8 @@ func TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
 			AccountID: "acc_01abcdefghjkmnpqr",
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}, &fakeAudit{})
 
@@ -191,6 +193,8 @@ func TestTokenHook_ProviderBody_JwtBearer_StatedOnlyAuthoritatively_ResolvesFede
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
 			AccountID: "acc_01abcdefghjkmnpqr",
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}
 	h := newTokenHookWithSAPort(t, &fakeUserLookup{}, saPort, &fakeAudit{})

@@ -77,6 +77,8 @@ func newExpirySAEnricher(t *testing.T, expiresAt *time.Time, now time.Time) *Tok
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(expirySvaID),
 			AccountID: domain.AccountID(expiryAccID),
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}
 	svc := NewTokenEnrichmentService(
@@ -180,6 +182,8 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(expirySvaID),
 			AccountID: domain.AccountID(expiryAccID),
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}
 	svc := NewTokenEnrichmentService(

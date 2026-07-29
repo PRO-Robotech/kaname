@@ -276,6 +276,8 @@ func TestTokenHook_ClientCredentials_MappedSAKey_StillMints(t *testing.T) {
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
 			AccountID: "acc_01abcdefghjkmnpqr",
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}, audit)
 

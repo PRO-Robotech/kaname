@@ -106,6 +106,43 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 	return out, nil
 }
 
+// GetServiceAccount — pool-scoped read of the ServiceAccount behind a mapping
+// row. The token hook needs it while a token is being minted, outside any
+// transaction of its own; the aggregate reader in `service_account_repo.go` is
+// tx-scoped, so the read lives here rather than as a second copy of the query
+// somewhere in the composition root — which is where it used to live, and where
+// nothing could reach it to check what it selected.
+//
+// It selects `enabled` because the caller decides on it. A read that stops at
+// identity fields answers false for every account alive, so a check written
+// against the field would refuse all of them while looking like a working gate.
+// The state has to arrive before anything can judge it.
+//
+// Missing SA → ErrNotFound (well-formed id, no such SA).
+func (r *SAOAuthClientRepo) GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
+	var (
+		sa                domain.ServiceAccount
+		name, description string
+		projectID         sql.NullString
+	)
+	err := r.pool.QueryRow(ctx,
+		`SELECT id, account_id, name, description, created_at, enabled, project_id
+		   FROM service_accounts WHERE id = $1`, string(id)).Scan(
+		(*string)(&sa.ID), (*string)(&sa.AccountID),
+		&name, &description, &sa.CreatedAt, &sa.Enabled, &projectID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
+	}
+	if err != nil {
+		return domain.ServiceAccount{}, mapErr(err, "SAOAuthClient.GetServiceAccount", string(id))
+	}
+	sa.Name = domain.SvcAccountName(name)
+	sa.Description = domain.Description(description)
+	sa.ProjectID = domain.ProjectID(projectID.String)
+	return sa, nil
+}
+
 // AccountForServiceAccount — resolves the owning account of a ServiceAccount by
 // its id. Used to stamp `account_id` on Issue/Revoke SA-key Operation metadata so
 // the account-scoped /iam/operations feed includes token operations. Missing SA →
