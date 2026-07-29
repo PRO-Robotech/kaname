@@ -99,20 +99,32 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 	return out, nil
 }
 
-// AccountForUser — резолвит account владельца-User по его id. Используется для
-// стемпинга `account_id` на Issue/Revoke user-token Operation-метаданных, чтобы
-// account-scoped /iam/operations включал token-операции. Нет User → ErrNotFound.
-func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error) {
-	var accountID string
+// AccountForUser — резолвит account владельца-User по его id и состояние,
+// разрешающее ему аутентифицироваться. Используется для стемпинга `account_id`
+// на Issue/Revoke user-token Operation-метаданных (иначе account-scoped
+// /iam/operations исключает token-операции) и для отказа в выдаче нового токена
+// тому, кому аутентификация запрещена.
+//
+// Строка читается КАК ЕСТЬ, без фильтра по состоянию: фильтр отвечает «нет
+// такого пользователя» на пользователя, который есть, — и вызывающий, увидев
+// пустой результат, не отличит его от несуществующего. Состояние возвращается,
+// чтобы его судили, а не выводили из отсутствия.
+//
+// Нет User → ErrNotFound.
+func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
+	var (
+		accountID    string
+		inviteStatus string
+	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT account_id FROM users WHERE id = $1`, string(id)).Scan(&accountID)
+		`SELECT account_id, invite_status FROM users WHERE id = $1`, string(id)).Scan(&accountID, &inviteStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+		return "", false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
 	}
 	if err != nil {
-		return "", mapErr(err, "UserOAuthClient.AccountForUser", string(id))
+		return "", false, mapErr(err, "UserOAuthClient.AccountForUser", string(id))
 	}
-	return domain.AccountID(accountID), nil
+	return domain.AccountID(accountID), domain.InviteStatus(inviteStatus).MayAuthenticate(), nil
 }
 
 // List возвращает токены владельца-User, страница по id ASC (cursor-based).

@@ -144,20 +144,30 @@ func (r *SAOAuthClientRepo) GetServiceAccount(ctx context.Context, id domain.Ser
 }
 
 // AccountForServiceAccount — resolves the owning account of a ServiceAccount by
-// its id. Used to stamp `account_id` on Issue/Revoke SA-key Operation metadata so
-// the account-scoped /iam/operations feed includes token operations. Missing SA →
-// ErrNotFound (well-formed id, no such SA).
-func (r *SAOAuthClientRepo) AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, error) {
-	var accountID string
+// its id, and whether that account may authenticate. Used to stamp `account_id`
+// on Issue/Revoke SA-key Operation metadata (the account-scoped /iam/operations
+// feed otherwise excludes token operations), and by Issue to refuse minting a
+// credential for an account that may not use one.
+//
+// The state comes back with the account rather than through a second call so a
+// caller cannot end up deciding on a field this query forgot to select — the
+// exact shape of the defect this signature exists to rule out.
+//
+// Missing SA → ErrNotFound (well-formed id, no such SA).
+func (r *SAOAuthClientRepo) AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, bool, error) {
+	var (
+		accountID string
+		enabled   bool
+	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT account_id FROM service_accounts WHERE id = $1`, string(id)).Scan(&accountID)
+		`SELECT account_id, enabled FROM service_accounts WHERE id = $1`, string(id)).Scan(&accountID, &enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
+		return "", false, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
 	}
 	if err != nil {
-		return "", mapErr(err, "SAOAuthClient.AccountForServiceAccount", string(id))
+		return "", false, mapErr(err, "SAOAuthClient.AccountForServiceAccount", string(id))
 	}
-	return domain.AccountID(accountID), nil
+	return domain.AccountID(accountID), enabled, nil
 }
 
 // OwnerUserForServiceAccount resolves the account owner (a users(id)) of a

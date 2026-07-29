@@ -18,11 +18,14 @@ import (
 
 // AccountForServiceAccount — резолвер account'а SA (порт SAClientRepo). Дефолт —
 // фиксированный account; тесты account_id-стемпинга подставляют свой.
-func (s *stubSAClientRepo) AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, error) {
+// The bool states whether the account may authenticate. Enabled unless a test
+// says otherwise: that is the database default, and it is the case every test
+// that is not ABOUT the state is exercising.
+func (s *stubSAClientRepo) AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, bool, error) {
 	if s.accountID != "" {
-		return s.accountID, nil
+		return s.accountID, !s.disabled, nil
 	}
-	return "acc00000000000000001", nil
+	return "acc00000000000000001", !s.disabled, nil
 }
 
 // OwnerUserForServiceAccount — резолвер владельца account'а SA (порт SAClientRepo,

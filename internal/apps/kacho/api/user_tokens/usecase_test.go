@@ -36,15 +36,24 @@ type stubUserClientRepo struct {
 	listRows  []domain.UserOAuthClient
 	deleted   bool
 	accountID domain.AccountID
+	// blocked — the user may not authenticate. blockedIDs narrows that to
+	// specific ids so a test can block the token's OWNER without blocking the
+	// caller who asked.
+	blocked    bool
+	blockedIDs map[domain.UserID]bool
 }
 
 // AccountForUser — резолвер account'а User (порт UserClientRepo). Дефолт —
 // фиксированный account; тесты account_id-стемпинга подставляют свой.
-func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error) {
-	if s.accountID != "" {
-		return s.accountID, nil
+func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
+	may := !s.blocked
+	if s.blockedIDs != nil {
+		may = !s.blockedIDs[id]
 	}
-	return "acc00000000000000001", nil
+	if s.accountID != "" {
+		return s.accountID, may, nil
+	}
+	return "acc00000000000000001", may, nil
 }
 
 func (s *stubUserClientRepo) Get(ctx context.Context, id domain.UserOAuthClientID) (domain.UserOAuthClient, error) {
@@ -100,12 +109,21 @@ func (a *stubAudit) EmitTx(ctx context.Context, tx service.Tx, ev service.AuditE
 type stubOpsRepo struct {
 	mu       sync.Mutex
 	done     bool
+	created  bool
 	lastResp *anypb.Any
 	lastErr  *rpcstatus.Status
 }
 
-func (s *stubOpsRepo) Create(ctx context.Context, op operations.Operation) error { return nil }
+func (s *stubOpsRepo) Create(ctx context.Context, op operations.Operation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.created = true
+	return nil
+}
 func (s *stubOpsRepo) CreateWithPrincipal(ctx context.Context, op operations.Operation, p operations.Principal) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.created = true
 	return nil
 }
 func (s *stubOpsRepo) Get(ctx context.Context, id string) (*operations.Operation, error) {

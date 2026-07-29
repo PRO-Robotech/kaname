@@ -16,12 +16,23 @@ import (
 
 // fakeSAByID — a scripted reverse lookup by Hydra client_id.
 type fakeSAByID struct {
-	row domain.ServiceAccountOAuthClient
-	err error
+	row        domain.ServiceAccountOAuthClient
+	err        error
+	saDisabled bool
+	saErr      error
 }
 
 func (f fakeSAByID) GetByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	return f.row, f.err
+}
+
+// The owning account, whose state the docker path decides on. Enabled unless a
+// test says otherwise — the database default.
+func (f fakeSAByID) GetServiceAccount(_ context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
+	if f.saErr != nil {
+		return domain.ServiceAccount{}, f.saErr
+	}
+	return domain.ServiceAccount{ID: id, Enabled: !f.saDisabled}, nil
 }
 
 // TestSAClientLookup_MapsRegisteredKey — the adapter maps the SA row to the shim's
@@ -48,6 +59,9 @@ func TestSAClientLookup_MapsRegisteredKey(t *testing.T) {
 		PublicKeyPEM: "PEM-A",
 		KeyAlgorithm: "ES256",
 		ExpiresAt:    &exp,
+		// The owner's state travels with the key: the docker path decides on it,
+		// and a lookup that did not answer for it would refuse every login.
+		SubjectEnabled: true,
 	}
 	if got != want {
 		t.Fatalf("RegisteredKey = %+v; want %+v", got, want)

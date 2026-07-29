@@ -28,6 +28,12 @@ type RegisteredKey struct {
 	PublicKeyPEM string
 	KeyAlgorithm string
 	ExpiresAt    *time.Time // nil → no expiry.
+	// SubjectEnabled — whether the owning ServiceAccount may authenticate at
+	// all. Carried on the key rather than looked up by the validator so the
+	// lookup that resolves the credential is the one obliged to answer for the
+	// owner's state; a validator fetching it separately could be handed a key
+	// by any lookup that never asked.
+	SubjectEnabled bool
 }
 
 // SAClientLookup — reverse lookup of the SA-key registered for a Hydra client_id.
@@ -85,6 +91,14 @@ func (v *SAKeyValidator) Validate(ctx context.Context, clientID, privateKeyPEM s
 		return Credential{}, ErrInvalidCredentials
 	}
 	if key.ExpiresAt != nil && !key.ExpiresAt.After(v.now()) {
+		return Credential{}, ErrInvalidCredentials
+	}
+	if !key.SubjectEnabled {
+		// The owning service account may not authenticate. Refused here for the
+		// same reason expiry is: this path and the provider path must not
+		// disagree about the same account at the same instant. Collapsed into
+		// the one sentinel — which half of the credential failed is not
+		// something an unauthenticated caller gets to learn.
 		return Credential{}, ErrInvalidCredentials
 	}
 	registered, err := publicDERFromPublicPEM(key.PublicKeyPEM)
