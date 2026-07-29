@@ -6,7 +6,9 @@
 // Flow:
 //  1. Read env `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL` (caller passes the value).
 //  2. If empty — skip (no-op, log DEBUG).
-//  3. Lookup user by email. Not found → log INFO + idempotent retry on next boot.
+//  3. Resolve the canonical row of that email — the oldest ACTIVE one (see the
+//     query below). No such row → skip, distinguishing "not registered yet"
+//     from "exists but may not authenticate", and retry on the next boot.
 //  4. Found → atomic TX:
 //     INSERT cluster_admin_grant (subject=user, granted_by='bootstrap')
 //     INSERT fga_outbox (event_type='fga.tuple.write', payload={tuple})
@@ -22,6 +24,7 @@ package seed
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -46,8 +49,11 @@ type BootstrapAdminInput struct {
 
 // BootstrapAdminResult — bootstrap-run result (observability / tests).
 type BootstrapAdminResult struct {
-	Skipped       bool   // true if email empty or user not found
-	SkipReason    string // 'email empty' | 'user not registered' | 'concurrent race (23505)'
+	Skipped bool // true if the run granted nothing
+	// SkipReason — 'email empty' | 'user not registered' | 'user not active' |
+	// 'concurrent race (23505)'. "not registered" and "not active" are kept
+	// apart on purpose: they send an operator to different places.
+	SkipReason    string
 	GrantID       string // id of the cluster_admin_grant created (when Skipped=false)
 	FGAOutboxID   string // id of the enqueued fga_outbox row
 	AuditOutboxID string // id of the enqueued audit_outbox row
@@ -77,18 +83,54 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 		return BootstrapAdminResult{Skipped: true, SkipReason: "email empty"}, nil
 	}
 
-	// Step 1: Lookup user by email.
-	var userID string
-	err := pool.QueryRow(ctx,
-		`SELECT id FROM users WHERE email = $1 LIMIT 1`, email).Scan(&userID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	// Step 1: какой строке принадлежит этот адрес почты.
+	//
+	// Один человек = N строк с одним адресом (по одной на аккаунт): глобальная
+	// уникальность почты снята намеренно (миграция 0011), уникальность живёт
+	// внутри аккаунта и по lower(email). Поэтому запрос обязан сказать ровно
+	// две вещи, и обе — одним обращением:
+	//
+	//   active_id — каноническая строка личности: старейшая ДЕЙСТВУЮЩАЯ, тот же
+	//     выбор, что делают остальные пути резолва по адресу
+	//     (FindActiveByEmail / GetByExternalID). Без ORDER BY выбор оставался за
+	//     физическим порядком строк: тот же стенд, тот же адрес — а права
+	//     уровня кластера получала то одна строка, то другая. `id` вторым
+	//     ключом закрывает совпадение отметок времени.
+	//   any_row  — существует ли вообще строка с этим адресом. Нужна, чтобы
+	//     отличить «администратор ещё не зарегистрировался» от «строка есть, но
+	//     не действует»: иначе оператор ищет опечатку в адресе, которой нет.
+	//
+	// Состояние решает, а не фильтрует: заблокированная строка и
+	// неподтверждённое приглашение существуют обе, и права уровня кластера не
+	// сеются ни на ту, ни на другую. Приглашение вдобавок не несёт external_id
+	// — подтвердит его тот, кто первым войдёт по этому адресу.
+	var (
+		activeID sql.NullString
+		anyRow   bool
+	)
+	err := pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT id FROM users
+		     WHERE lower(email) = lower($1) AND invite_status = 'ACTIVE'
+		     ORDER BY created_at ASC, id ASC
+		     LIMIT 1)                                                  AS active_id,
+		  EXISTS(SELECT 1 FROM users WHERE lower(email) = lower($1))   AS any_row`,
+		email).Scan(&activeID, &anyRow)
+	if err != nil {
+		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: lookup user by email: %w", err)
+	}
+	if !activeID.Valid {
+		if anyRow {
+			logger.WarnContext(ctx,
+				"bootstrap admin row exists but may not authenticate, skipping cluster admin grant",
+				slog.String("email", email))
+			return BootstrapAdminResult{Skipped: true, SkipReason: "user not active"}, nil
+		}
 		logger.InfoContext(ctx, "bootstrap admin user not registered yet, skipping cluster admin grant",
 			slog.String("email", email))
 		return BootstrapAdminResult{Skipped: true, SkipReason: "user not registered"}, nil
 	}
-	if err != nil {
-		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: lookup user by email: %w", err)
-	}
+	userID := activeID.String
 
 	// Step 2: Atomic TX — cluster_admin_grant + fga_outbox + audit_outbox.
 	now := in.NowFn()
