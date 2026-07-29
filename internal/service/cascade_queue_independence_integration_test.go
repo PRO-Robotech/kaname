@@ -28,6 +28,24 @@
 // delivered NOTHING for them. A cascade that is genuinely request-time resolves
 // anyway. A cascade that is secretly materialized denies.
 //
+// WHAT THESE TESTS DO AND DO NOT ESTABLISH
+//
+// They exercise AuthorizeService, which is the gate the api-gateway per-RPC middleware
+// asks (InternalIAMService.Check → CheckRelation). So a property proven here holds for
+// every RPC reached through the gateway.
+//
+// It does NOT yet hold for iam's OWN in-service gates, which put the same question to
+// the store directly and therefore still wait for delivery:
+// authzguard.AllowsVerb (behind account/project/user/group/service_account Get),
+// access_binding/helpers.go::fgaHoldsScopeAdmin (Path 2 of requireGrantAuthority, run
+// by binding Create/Delete/Revoke/ListByScope), and authzfilter.Visible/VisibleSet
+// (every List page filter). Two consequences are worth naming because they are visible:
+// the owner of a brand-new account can DELETE it and still be told it does not exist
+// when he reads it, and the delegated account administrator is admitted by the gateway
+// on a project-scoped binding and then refused in-service. Closing that means routing
+// those call sites through the same structural facts — one decorator over the relation
+// client would reach all three — and is deliberately not smuggled in here.
+//
 // Real OpenFGA (canonical fga_model.fga) + real Postgres. Skipped under -short.
 
 package service_test
