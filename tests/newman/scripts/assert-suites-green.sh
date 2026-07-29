@@ -15,15 +15,26 @@
 # the very same shared suites that kacho-iam reported GREEN. One script = one
 # source of truth; un-skip / whitelist edits land everywhere at once.
 #
-# THREE OUTCOMES, THREE NAMES. A request ends one of three ways, and this gate
+# FOUR OUTCOMES, FOUR NAMES. A request ends one of four ways, and this gate
 # reports each separately because folding any of them into another is how a suite
 # goes quiet:
-#   answered + assertion passed — the check ran and said yes;
-#   answered + assertion failed — the check ran and said no       (`failed`);
-#   NOT ANSWERED                — the check did not run           (`UNANSWERED`).
+#   answered + assertion passed  — the check ran and said yes;
+#   answered + assertion failed  — the check ran and said no      (`failed`);
+#   answered + SCRIPT CRASHED    — the check never got to run     (`SCRIPT FAILED`);
+#   NOT ANSWERED                 — nothing came back              (`UNANSWERED`).
 # Plus the degenerate case of a report containing no assertions at all, which is
 # printed as NOTHING RAN rather than being allowed to read as "nothing failed".
-# UNANSWERED is never subtracted, whitelisted or explained away.
+# None of the three non-passing outcomes is ever subtracted, whitelisted or
+# explained away.
+#
+# The third one was missing until 2026-07-29, and it was invisible by construction:
+# newman books a test-script exception under `scripts`/`testScripts`, NOT under
+# `assertions.failed` (an assertion that never ran cannot fail) and NOT under
+# `requests.failed` (a response did arrive). A case whose script threw on its first
+# line therefore reached this gate reading exactly like a clean one — `0 failed,
+# 0 UNANSWERED` — with none of its checks performed. Measured on newman 6.2.2: a body
+# the script cannot parse yields `assertions.failed=0, requests.failed=0,
+# testScripts.failed=1`.
 set -e
 shopt -s nullglob
 
@@ -45,6 +56,7 @@ tot_reported=0
 tot_requests=0
 tot_asserts=0
 tot_fails=0
+tot_scripts=0
 tot_unanswered=0
 tot_empty=0
 
@@ -116,6 +128,21 @@ for col in "${collections[@]}"; do
   # "nothing failed". Zero of both is the shape every silent failure took.
   asserts=$(jq -r '.run.stats.assertions.total // 0' "$report")
   reqs=$(jq -r '.run.stats.requests.total // 0' "$report")
+  # SCRIPT FAILED — the response arrived and the case's own script threw BEFORE
+  # reaching its assertions. A fourth end for a request, and it had no home here: it
+  # is not `assertions.failed` (nothing was asserted) and not `requests.failed`
+  # (something was answered), so a case that checked NOTHING was indistinguishable
+  # from a case that checked everything and agreed.
+  #
+  # Pre-request scripts count too, for a sharper reason than symmetry: in these suites
+  # the pre-request script is what upserts the Authorization header naming the SUBJECT
+  # the case is about (gen.py::_auth_pre_script). A crash there does not skip the
+  # request — it sends it with whatever header was already on it, i.e. as a DIFFERENT
+  # principal, and the expected 401/403 then still holds for the wrong reason.
+  #
+  # NEVER subtracted and never whitelisted: an exception is not a known-RED product
+  # gap, it is a case that did not run.
+  scripts_failed=$(jq -r '((.run.stats.testScripts.failed // 0) + (.run.stats.prerequestScripts.failed // 0))' "$report")
 
   # Known-RED whitelist (RED-by-design, each tracked). Subtraction clamps to 0,
   # so when a case is genuinely fixed the gate still passes; a NEW failure
@@ -430,15 +457,30 @@ for col in "${collections[@]}"; do
   tot_requests=$((tot_requests + reqs))
   tot_asserts=$((tot_asserts + asserts))
   tot_fails=$((tot_fails + fails))
+  tot_scripts=$((tot_scripts + scripts_failed))
   tot_unanswered=$((tot_unanswered + unanswered))
 
-  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed (after known-RED skip), $unanswered UNANSWERED"
+  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed (after known-RED skip), $scripts_failed SCRIPT FAILED, $unanswered UNANSWERED"
 
   # Name what did not answer. A count alone cannot be acted on, and the whole
   # point of separating this category is that somebody reads it.
+  # Request-level errors are the ones carrying a transport errno (`error.code`:
+  # ECONNREFUSED, ENOTFOUND, ETIMEDOUT…); a script exception carries none, which is
+  # what keeps these two listings from describing each other's entries.
   if [ "$unanswered" -gt 0 ]; then
     jq -r '[.run.failures[]? | select((.error.name? // "") != "AssertionError")
+            | select((.error.code? // "") != "")
             | "    NOT EXECUTED: \(.source.name? // "?") <- \(.error.message? // "no response")"]
+           | unique | .[]' "$report" 2>/dev/null || true
+  fi
+
+  # Name what crashed. The message is the whole diagnosis here — "Unexpected token
+  # '<'" says the body was not JSON, "X is not defined" says the script was edited
+  # without being run — so it is printed rather than counted.
+  if [ "$scripts_failed" -gt 0 ]; then
+    jq -r '[.run.failures[]? | select((.error.name? // "") != "AssertionError")
+            | select((.error.code? // "") == "")
+            | "    SCRIPT FAILED (its assertions never ran): \(.source.name? // "?") <- \(.error.name? // "?"): \(.error.message? // "")"]
            | unique | .[]' "$report" 2>/dev/null || true
   fi
 
@@ -453,14 +495,14 @@ for col in "${collections[@]}"; do
     tot_empty=$((tot_empty + 1))
   fi
 
-  if [ "$fails" -gt 0 ] || [ "$unanswered" -gt 0 ] || [ "$empty" -gt 0 ]; then
+  if [ "$fails" -gt 0 ] || [ "$scripts_failed" -gt 0 ] || [ "$unanswered" -gt 0 ] || [ "$empty" -gt 0 ]; then
     failed_suites+=("$name")
   fi
 done
 
 # The verdict in numbers, on one line. Read the FIRST pair first: a run that
 # stopped early leaves every other counter looking healthy.
-echo "TOTAL: ${tot_reported}/${#collections[@]} collection(s) reported, ${tot_requests} request(s), ${tot_asserts} assertion(s), ${tot_fails} failed, ${tot_unanswered} UNANSWERED, ${tot_empty} report(s) with no assertions"
+echo "TOTAL: ${tot_reported}/${#collections[@]} collection(s) reported, ${tot_requests} request(s), ${tot_asserts} assertion(s), ${tot_fails} failed, ${tot_scripts} SCRIPT FAILED, ${tot_unanswered} UNANSWERED, ${tot_empty} report(s) with no assertions"
 
 # The same numbers into the job summary when running in CI. Each gate step is
 # short, so these blocks land in the interface one after another AS THE STEPS
@@ -478,9 +520,9 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   fi
   {
     printf '### гейт `%s` — %s\n\n' "$_label" "$_verdict"
-    printf 'коллекций с отчётом **%s из %s** · запросов %s · утверждений %s · **упало %s** · без ответа %s · пустых отчётов %s\n\n' \
+    printf 'коллекций с отчётом **%s из %s** · запросов %s · утверждений %s · **упало %s** · скрипт упал %s · без ответа %s · пустых отчётов %s\n\n' \
       "$tot_reported" "${#collections[@]}" "$tot_requests" "$tot_asserts" \
-      "$tot_fails" "$tot_unanswered" "$tot_empty"
+      "$tot_fails" "$tot_scripts" "$tot_unanswered" "$tot_empty"
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 
