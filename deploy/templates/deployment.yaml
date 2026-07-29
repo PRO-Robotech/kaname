@@ -16,6 +16,20 @@ spec:
       labels:
         app: {{ .Values.name }}
       annotations:
+        # ПРИВЯЗКА ПОДА К СОДЕРЖИМОМУ ОБРАЗА.
+        #
+        # Тег локального образа (`kacho-*:dev`) неизменен, поэтому пересборка под
+        # тем же тегом НЕ меняет шаблон пода: Kubernetes не видит разницы и под не
+        # перекатывается — процесс продолжает работать СТАРЫМ бинарником под новым
+        # тегом. Ровно тот же разрыв между намерением и исходом, что и у настроек,
+        # приезжающих массовым импортом (инцидент 2026-07-25), и лечится он так же —
+        # аннотацией, привязанной к содержимому.
+        #
+        # Значение — идентификатор содержимого образа; его пишет `make build-services`
+        # в helm/umbrella/values.image-ids.yaml сразу после сборки. Профиль, который
+        # этот файл не накладывает (offline-рендер, чужой реестр), получает "unset" —
+        # и тогда привязки нет, что честно: привязывать не к чему.
+        kacho.cloud/image-id: {{ dig "kachoImageIds" "iam" "unset" (.Values.global | default dict) | quote }}
         # ConfigMap-content hash → pod rolling-restart при изменении config.yaml.
         kacho.cloud/config-checksum: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         # Prometheus scrape — /metrics on the dedicated internal port (never the
