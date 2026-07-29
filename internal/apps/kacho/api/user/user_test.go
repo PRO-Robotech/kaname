@@ -408,8 +408,23 @@ func (fakeUserUR) GetByEmail(context.Context, domain.Email) (domain.User, error)
 func (fakeUserUR) GetByAccountEmail(context.Context, domain.AccountID, domain.Email) (domain.User, error) {
 	return domain.User{}, stderrors.New("not stubbed")
 }
-func (fakeUserUR) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
-	return nil, nil
+
+// FindPendingByEmail models the real query: PENDING rows matched by email. A
+// pending invitee carries no external id (the DB CHECK forbids one), so email is
+// the only way it can be found — which is exactly why this branch has to be
+// reachable in tests that seed one.
+func (r fakeUserUR) FindPendingByEmail(_ context.Context, email domain.Email) ([]domain.User, error) {
+	if r.parent == nil {
+		return nil, nil
+	}
+	var out []domain.User
+	for _, u := range r.parent.existingActive {
+		if u.InviteStatus == domain.InviteStatusPending &&
+			strings.EqualFold(string(u.Email), string(email)) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }
 
 // FindActiveByExternalID models the real query, whose WHERE clause is

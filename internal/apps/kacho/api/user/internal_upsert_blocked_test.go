@@ -85,6 +85,35 @@ func TestUpsertFromIdentity_UnknownIdentity_StillProvisioned(t *testing.T) {
 	require.NotNil(t, op)
 }
 
+// Blocking lives on the MEMBERSHIP row, so it belongs to one account. An
+// invitation to a different account is a membership that account issued itself,
+// and it must still be acceptable — otherwise one account blocking a person
+// locks them out everywhere, including places that never heard of them.
+func TestUpsertFromIdentity_BlockedElsewhereWithPendingInvite_StillProvisioned(t *testing.T) {
+	pending := domain.User{
+		ID:        "usr0000000000pendng1",
+		AccountID: "acc0000000000invitr1",
+		// A pending invitee carries no external id — the DB CHECK forbids it —
+		// which is why it is found by email and not by the identity above.
+		ExternalID:   "",
+		Email:        "blocked@example.com",
+		InviteStatus: domain.InviteStatusPending,
+	}
+	repo := newFakeUserRepo()
+	repo.existingActive = []domain.User{blockedIdentityRow(), pending}
+	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser())
+
+	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
+		ExternalID:  blockedExternalID,
+		Email:       "blocked@example.com",
+		DisplayName: "Blocked",
+	})
+
+	require.NoError(t, err, "a pending invitation from another account must still be "+
+		"acceptable; a block belongs to the account that issued it")
+	require.NotNil(t, op)
+}
+
 // An identity that is blocked in one account and active in another may still
 // sign in: the active membership is a real one, and refusing it would let a
 // single blocked membership lock a person out of accounts that never blocked

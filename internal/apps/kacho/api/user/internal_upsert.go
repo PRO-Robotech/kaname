@@ -220,14 +220,14 @@ func (uc *UpsertFromIdentityUseCase) resolveUserID(ctx context.Context, in Upser
 			return string(u.ID), false, nil
 		}
 	}
-	if len(existing) > 0 {
-		// Личность есть, и ей запрещено. Это не «нет такой» — и ответ обязан
-		// отличаться, иначе он снова уедет в ветку, которая её заведёт заново.
-		return "", false, status.Errorf(codes.FailedPrecondition,
-			"identity %s is blocked and cannot be provisioned", in.ExternalID)
-	}
-
 	// Есть PENDING-invite(ы) по email → Activate сохранит существующий row-id.
+	//
+	// Проверяется ДО отказа ниже, и это не порядок ради порядка: блокировка
+	// живёт на строке МЕМБЕРШИПА, то есть внутри конкретного аккаунта.
+	// Приглашение в другой аккаунт — отдельное членство, которое тот аккаунт
+	// выдал сам; отказать здесь значило бы позволить одному аккаунту запереть
+	// человека везде, где его блокировать никто не собирался. PENDING-строка ещё
+	// не несёт external_id (DB-CHECK), поэтому по нему она и не нашлась выше.
 	if in.Email != "" {
 		pendings, err := rd.Users().FindPendingByEmail(ctx, in.Email)
 		if err != nil {
@@ -238,7 +238,16 @@ func (uc *UpsertFromIdentityUseCase) resolveUserID(ctx context.Context, in Upser
 		}
 	}
 
-	// Ни ACTIVE, ни PENDING — bootstrap нового identity, новый id.
+	if len(existing) > 0 {
+		// Личность есть, ни одному её членству аутентификация не разрешена, и
+		// приглашения, которое завело бы новое, тоже нет. Это не «нет такой» — и
+		// ответ обязан отличаться, иначе он снова уедет в ветку, которая заведёт
+		// её заново.
+		return "", false, status.Errorf(codes.FailedPrecondition,
+			"identity %s is blocked and cannot be provisioned", in.ExternalID)
+	}
+
+	// Ни ACTIVE, ни BLOCKED, ни PENDING — bootstrap нового identity, новый id.
 	return ids.NewID(domain.PrefixUser), true, nil
 }
 
