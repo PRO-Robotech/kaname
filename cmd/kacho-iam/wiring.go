@@ -225,7 +225,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	saDelete := serviceaccountapp.NewDeleteServiceAccountUseCase(kachoRepo, opsRepo)
 	saGet := serviceaccountapp.NewGetServiceAccountUseCase(kachoRepo).WithRelationStore(relationStore)
 	saList := serviceaccountapp.NewListServiceAccountsUseCase(kachoRepo).WithRelationStore(relationStore)
-	saHandler := serviceaccountapp.NewHandler(saCreate, saUpdate, saDelete, saGet, saList).
+	// Disable / Enable — the writers for the state that decides whether a service
+	// account may authenticate. The state was read by the token hook, by key
+	// issuance and by the docker-token validator long before anything could set
+	// it; until these were wired, the only way to move it was a statement against
+	// the database by hand.
+	saDisable := serviceaccountapp.NewDisableServiceAccountUseCase(kachoRepo, opsRepo)
+	saEnable := serviceaccountapp.NewEnableServiceAccountUseCase(kachoRepo, opsRepo)
+	saHandler := serviceaccountapp.NewHandler(saCreate, saUpdate, saDelete, saGet, saList, saDisable, saEnable).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
 	// GroupService.
