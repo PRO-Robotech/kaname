@@ -167,6 +167,20 @@ func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID str
 	if objectID == "" || !r.Derivable(objectType) {
 		return nil, nil
 	}
+	// ONE reader transaction for the whole walk. Two reasons, and the second is
+	// correctness: a chain read across separate transactions can see a TORN
+	// hierarchy (the binding's project from before a move, that project's account
+	// from after it), and the facts handed to OpenFGA would then describe a shape
+	// that never existed. One snapshot cannot.
+	var rd kachorepo.Reader
+	if r.repo != nil {
+		var err error
+		rd, err = r.repo.Reader(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("authzcascade reader: %w", err)
+		}
+		defer func() { _ = rd.Rollback(ctx) }()
+	}
 	var (
 		out     []authztypes.ConditionalTuple
 		visited = map[string]bool{}
@@ -181,7 +195,7 @@ func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID str
 				continue
 			}
 			visited[key] = true
-			facts, err := r.factsFor(ctx, ref.Type, ref.ID)
+			facts, err := r.factsFor(ctx, rd, ref.Type, ref.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -205,10 +219,11 @@ type objectRef struct {
 	ID   string
 }
 
-// parseObjectRef reads "<type>:<id>" produced by this package's own projections.
-// A userset reference ("group:g#member") or a subject ("user:u") is not an object
-// the walk continues over: only `account:` and `project:` have parents of their own,
-// and Derivable filters the rest.
+// parseObjectRef reads "<type>:<id>" produced by this package's own projections. A
+// userset reference ("group:g#member") is refused outright; anything else is filtered
+// by Derivable, which is what actually keeps the walk to objects iam owns — a
+// subject ("user:<owner>") and the cluster singleton both fall out there, since
+// neither is a derivable type.
 func parseObjectRef(s string) (objectRef, bool) {
 	i := strings.Index(s, ":")
 	if i <= 0 || i == len(s)-1 || strings.Contains(s, "#") {
@@ -217,20 +232,22 @@ func parseObjectRef(s string) (objectRef, bool) {
 	return objectRef{Type: s[:i], ID: s[i+1:]}, true
 }
 
-// factsFor projects ONE row. StructuralFacts is the transitive closure over it.
-func (r *Resolver) factsFor(ctx context.Context, objectType, objectID string) ([]authztypes.ConditionalTuple, error) {
+// factsFor projects ONE row, on the walk's shared snapshot. StructuralFacts is the
+// transitive closure over it.
+//
+// The conditions reader is pool-direct (it is the one iam resource whose reader is
+// not on kachorepo.Reader), so an iam_condition read is outside the snapshot. That is
+// harmless here: a condition is a leaf of the chain — its project pointer is the last
+// hop taken from it, and the project itself is then read on the snapshot.
+func (r *Resolver) factsFor(
+	ctx context.Context, rd kachorepo.Reader, objectType, objectID string,
+) ([]authztypes.ConditionalTuple, error) {
 	if objectType == "iam_condition" {
 		return r.conditionFacts(ctx, objectID)
 	}
-	if r.repo == nil {
+	if rd == nil {
 		return nil, nil
 	}
-	rd, err := r.repo.Reader(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("authzcascade reader: %w", err)
-	}
-	defer func() { _ = rd.Rollback(ctx) }()
-
 	switch objectType {
 	case "iam_access_binding":
 		b, gerr := rd.AccessBindings().Get(ctx, domain.AccessBindingID(objectID))
