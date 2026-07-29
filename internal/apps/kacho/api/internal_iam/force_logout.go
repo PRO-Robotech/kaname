@@ -211,10 +211,20 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	}
 
 	// Complete the Operation: done=true, metadata + the declared response.
+	//
 	// revoked_count counts the revocation records this call committed — one
 	// user-level cutoff, which denies every live token of the subject. It is
 	// deliberately not 0: an inert 0-with-success is how the earlier
-	// synthetic-jti implementation reported doing nothing.
+	// synthetic-jti implementation reported doing nothing, and the sibling
+	// Revoke(revoke_all) path counts its cutoff the same way for the same reason.
+	//
+	// KNOWN, NOT FIXED HERE: the field's proto comment still describes the
+	// per-jti model it was written for ("session_revocations rows newly
+	// inserted"). Under the cutoff model no such row is inserted and the number
+	// of tokens denied is not knowable at all — it is "every live one". Making
+	// the comment say that is a proto edit with stub regeneration and a catalog
+	// re-check behind it, which is its own change; leaving the response unwritten
+	// to dodge the question would recreate the defect this fixes.
 	meta, resp, merr := forceLogoutOperationPayload(userID)
 	if merr != nil {
 		return nil, merr
