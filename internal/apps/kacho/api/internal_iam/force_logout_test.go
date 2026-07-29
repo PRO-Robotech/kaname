@@ -17,8 +17,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -66,12 +68,59 @@ func (f *fakeForceLogoutRecorder) RevokeAllUserTokensTx(_ context.Context, userI
 	return f.allErr
 }
 
+// recordingForceLogoutOps — operations repo stub recording the transitions
+// ForceLogout drives. Every method the handler touches is stubbed explicitly
+// (embedding the interface and overriding only some leaves the rest as a
+// nil-panic waiting to happen).
+type recordingForceLogoutOps struct {
+	operations.Repo
+
+	calls     []string
+	created   operations.Operation
+	doneMeta  *anypb.Any
+	doneResp  *anypb.Any
+	errStatus *statuspb.Status
+}
+
+func (f *recordingForceLogoutOps) Create(_ context.Context, op operations.Operation) error {
+	f.calls = append(f.calls, "create")
+	f.created = op
+	return nil
+}
+
+func (f *recordingForceLogoutOps) MarkDone(context.Context, string, *anypb.Any) error {
+	f.calls = append(f.calls, "markdone")
+	return nil
+}
+
+func (f *recordingForceLogoutOps) MarkDoneWithMetadata(_ context.Context, _ string, meta, resp *anypb.Any) error {
+	f.calls = append(f.calls, "markdone-with-metadata")
+	f.doneMeta, f.doneResp = meta, resp
+	return nil
+}
+
+func (f *recordingForceLogoutOps) MarkError(_ context.Context, _ string, st *statuspb.Status) error {
+	f.calls = append(f.calls, "markerror")
+	f.errStatus = st
+	return nil
+}
+
 func forceLogoutHandler(rec sessionRevoker) *Handler {
+	h, _ := forceLogoutHandlerWithOps(rec)
+	return h
+}
+
+// forceLogoutHandlerWithOps is forceLogoutHandler plus a handle on the recorded
+// operation transitions.
+func forceLogoutHandlerWithOps(rec sessionRevoker) (*Handler, *recordingForceLogoutOps) {
 	// An allowing ReBAC checker — these tests exercise the revocation behaviour,
 	// not the authZ gate (gate-specific cases live in force_logout_authz_test.go).
-	return NewHandler(NewLookupSubjectUseCase(nil), nil).
+	ops := &recordingForceLogoutOps{}
+	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
-		WithAdminChecker(&fakeForceLogoutChecker{allow: true})
+		WithAdminChecker(&fakeForceLogoutChecker{allow: true}).
+		WithOperations(ops)
+	return h, ops
 }
 
 func TestForceLogout_RecordsUserLevelRevocationForSubject(t *testing.T) {
@@ -141,4 +190,64 @@ func TestForceLogout_NotWired_Unavailable(t *testing.T) {
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true}) // no session revoker wired
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_x"})
 	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+// ── Operation persistence (unit level) ───────────────────────────────────────
+
+// ForceLogout returns an Operation, so the row that id names must exist. It
+// used to be built in memory, stamped done=true and returned — the admin got an
+// id that answered NotFound forever.
+func TestForceLogout_PersistsOperationAndCompletesIt(t *testing.T) {
+	rec := &fakeForceLogoutRecorder{}
+	h, ops := forceLogoutHandlerWithOps(rec)
+
+	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.NoError(t, err)
+	require.NotEmpty(t, op.GetId())
+
+	require.Contains(t, ops.calls, "create", "the operation row must be persisted")
+	require.Contains(t, ops.calls, "markdone-with-metadata",
+		"the terminal transition must write the declared metadata and response")
+	require.Equal(t, op.GetId(), ops.created.ID,
+		"the id handed to the admin must be the id of the persisted row")
+
+	meta := &iamv1.ForceLogoutMetadata{}
+	require.NotNil(t, ops.doneMeta)
+	require.NoError(t, ops.doneMeta.UnmarshalTo(meta))
+	assert.Equal(t, "usr_victim", meta.GetUserId())
+
+	resp := &iamv1.ForceLogoutResult{}
+	require.NotNil(t, ops.doneResp, "ForceLogout declares response: ForceLogoutResult")
+	require.NoError(t, ops.doneResp.UnmarshalTo(resp))
+	assert.Equal(t, int32(1), resp.GetRevokedCount(),
+		"one revocation record was committed — not the inert 0-with-success")
+}
+
+// A failing cutoff write must mark the already-persisted operation terminally
+// with the error a poller will read.
+func TestForceLogout_WriteFailure_MarksOperationError(t *testing.T) {
+	rec := &fakeForceLogoutRecorder{allErr: errForceLogoutDown}
+	h, ops := forceLogoutHandlerWithOps(rec)
+
+	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.Error(t, err)
+	require.Contains(t, ops.calls, "create")
+	require.Contains(t, ops.calls, "markerror",
+		"a failed cutoff must leave a terminal error the poller can read")
+	require.NotContains(t, ops.calls, "markdone-with-metadata")
+	require.NotNil(t, ops.errStatus)
+	assert.NotZero(t, ops.errStatus.GetCode())
+}
+
+// Without a place to persist the operation the RPC must refuse rather than hand
+// back an id that names no row.
+func TestForceLogout_NoOperationRepo_Unavailable(t *testing.T) {
+	rec := &fakeForceLogoutRecorder{}
+	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
+		WithSessionRevoker(rec).
+		WithAdminChecker(&fakeForceLogoutChecker{allow: true})
+
+	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	assert.Zero(t, rec.allCnt, "the refusal must precede the mutation")
 }

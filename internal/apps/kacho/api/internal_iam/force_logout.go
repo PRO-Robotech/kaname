@@ -19,11 +19,13 @@ package internal_iam
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -53,6 +55,16 @@ type sessionRevoker interface {
 	RevokeAllUserTokensTx(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID, eventType string) error
 }
 
+// forceLogoutOperationRepo — Operation-порт ForceLogout. Шире operations.Repo
+// ровно на MetadataFinalizer: op-строку обязано создавать ДО мутации (иначе
+// сбой Create оставляет закоммиченный cutoff без pollable операции), а
+// объявленный контрактом ответ `ForceLogoutResult` известен только после
+// записи. `MarkDone` третьим параметром берёт RESPONSE и metadata не трогает.
+type forceLogoutOperationRepo interface {
+	operations.Repo
+	operations.MetadataFinalizer
+}
+
 // eventSessionForceLogout — audit_outbox taxonomy value for ForceLogout.
 // Defined locally to keep the use-case free of a repo/pg import; must match the
 // pg-side session taxonomy + audit_outbox_event_type CHECK.
@@ -62,6 +74,16 @@ const eventSessionForceLogout = "iam.session.force_logout"
 // ForceLogout. Composition-root only (cmd/kacho-iam/wiring.go).
 func (h *Handler) WithSessionRevoker(r sessionRevoker) *Handler {
 	h.sessionRevoker = r
+	return h
+}
+
+// WithOperations — attaches the Operation repository ForceLogout persists its
+// operation row in. Composition-root only. A nil repo stays fail-closed
+// (ForceLogout returns Unavailable): handing back an operation id that names no
+// row is the very defect this wiring exists to prevent, so a wiring omission
+// must refuse rather than answer with an unqueryable id.
+func (h *Handler) WithOperations(r forceLogoutOperationRepo) *Handler {
+	h.operations = r
 	return h
 }
 
@@ -127,6 +149,9 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	if h.sessionRevoker == nil {
 		return nil, status.Error(codes.Unavailable, "session revocation writer not configured")
 	}
+	if h.operations == nil {
+		return nil, status.Error(codes.Unavailable, "operation repository not configured")
+	}
 
 	reason := strings.TrimSpace(req.GetReason())
 	if reason == "" {
@@ -155,10 +180,13 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 			"actor_id must match the authenticated principal")
 	}
 	revokedBy := domain.UserID(actor)
-	if err := h.sessionRevoker.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy, eventSessionForceLogout); err != nil {
-		return nil, shared.MapRepoErr(err)
-	}
 
+	// Persist the Operation (done=false) BEFORE the mutation — mirroring every
+	// other mutation in this service, so the operation id the admin receives is
+	// ALWAYS durably queryable. It used to be built in memory, stamped
+	// done=true and returned without ever reaching the operations table: the
+	// force-logout was invisible to OperationService.Get, to every operation
+	// list and to every audit that reads operations.
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Force logout user %s", userID),
@@ -167,6 +195,55 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	if err != nil {
 		return nil, fmt.Errorf("build force-logout operation: %w", err)
 	}
+	if err := h.operations.Create(ctx, op); err != nil {
+		return nil, fmt.Errorf("persist operation: %w", err)
+	}
+
+	if err := h.sessionRevoker.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy, eventSessionForceLogout); err != nil {
+		// Record the terminal failure on the already-persisted op so a poll sees
+		// a real error, not NotFound; still surface the gRPC error to the caller.
+		gerr := shared.MapRepoErr(err)
+		if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
+			slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
+				"operation_id", op.ID, "err", merr.Error())
+		}
+		return nil, gerr
+	}
+
+	// Complete the Operation: done=true, metadata + the declared response.
+	// revoked_count counts the revocation records this call committed — one
+	// user-level cutoff, which denies every live token of the subject. It is
+	// deliberately not 0: an inert 0-with-success is how the earlier
+	// synthetic-jti implementation reported doing nothing.
+	meta, resp, merr := forceLogoutOperationPayload(userID)
+	if merr != nil {
+		return nil, merr
+	}
+	if err := h.operations.MarkDoneWithMetadata(ctx, op.ID, meta, resp); err != nil {
+		// Non-fatal for the caller: the cutoff committed and the row exists, so
+		// a poll answers (done=false) and never NotFound. Nothing finishes it
+		// afterwards, so it is logged loudly, never swallowed (CWE-390).
+		slog.ErrorContext(ctx, "ForceLogout: operation complete failed",
+			"operation_id", op.ID, "err", err.Error())
+	}
 	op.Done = true
+	op.Metadata = meta
+	op.Response = resp
+
 	return shared.OperationToProto(&op), nil
+}
+
+// forceLogoutOperationPayload — the terminal (metadata, response) pair declared
+// by `InternalIAMService.ForceLogout` (metadata: ForceLogoutMetadata,
+// response: ForceLogoutResult).
+func forceLogoutOperationPayload(userID string) (meta, resp *anypb.Any, err error) {
+	meta, err = anypb.New(&iamv1.ForceLogoutMetadata{UserId: userID})
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal force-logout metadata: %w", err)
+	}
+	resp, err = anypb.New(&iamv1.ForceLogoutResult{RevokedCount: 1})
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal force-logout response: %w", err)
+	}
+	return meta, resp, nil
 }

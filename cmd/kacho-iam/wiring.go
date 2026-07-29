@@ -435,6 +435,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
+		// ForceLogout returns an Operation — the row it names is persisted here,
+		// before the cutoff is written and terminally after it, so the id the
+		// admin gets back is queryable and the force-logout shows up in the
+		// operation list like every other mutation.
+		WithOperations(opsRepo).
 		// Defense-in-depth ReBAC gate for ForceLogout (security.md "AuthN+AuthZ
 		// ВЕЗДЕ"): require the authenticated principal hold system_admin@cluster.
 		// relationStore satisfies authzguard.RelationChecker; nil-safe fail-closed.
@@ -448,7 +453,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ListByUser (admin audit). Shares the session_revocations table with the
 	// refresh-hook reader. Internal-only (запрет #6).
 	sessionRevocationsHandler := sessionrevapp.NewHandler(
-		sessionrevapp.NewRevokeUseCase(sessionRevAdapter),
+		sessionrevapp.NewRevokeUseCase(sessionRevAdapter, opsRepo),
 		sessionRevAdapter,
 	)
 

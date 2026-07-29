@@ -110,6 +110,11 @@ type Handler struct {
 	// privileged admin RPCs (ForceLogout). nil → fail-closed (the gate denies).
 	// See force_logout.go requireSystemAdmin.
 	adminCheck authzguard.RelationChecker
+
+	// operations — Operation repository ForceLogout persists its operation row
+	// in, before the mutation and terminally after it. nil → the RPC fails
+	// closed Unavailable rather than returning an id that names no row.
+	operations forceLogoutOperationRepo
 }
 
 // NewHandler — builder. `authz` may be nil when the FGA stack is not

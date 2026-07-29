@@ -26,9 +26,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
@@ -103,14 +107,60 @@ func (f *fakeReader) ListByUser(_ context.Context, userID string, _ int32) ([]do
 	return f.listRows, f.listErr
 }
 
+// recordingOpsRepo — operations repo stub that records the call sequence, so a
+// test can pin that the operation row is created BEFORE the mutation and
+// completed after it. Every method the use-case touches is stubbed explicitly
+// (embedding the interface and overriding only some leaves the rest as a
+// nil-panic waiting to happen).
+type recordingOpsRepo struct {
+	operations.Repo
+
+	calls     []string
+	created   operations.Operation
+	doneMeta  *anypb.Any
+	doneResp  *anypb.Any
+	errStatus *statuspb.Status
+	createErr error
+}
+
+func (f *recordingOpsRepo) Create(_ context.Context, op operations.Operation) error {
+	f.calls = append(f.calls, "create")
+	f.created = op
+	return f.createErr
+}
+
+func (f *recordingOpsRepo) MarkDone(context.Context, string, *anypb.Any) error {
+	f.calls = append(f.calls, "markdone")
+	return nil
+}
+
+func (f *recordingOpsRepo) MarkDoneWithMetadata(_ context.Context, _ string, meta, resp *anypb.Any) error {
+	f.calls = append(f.calls, "markdone-with-metadata")
+	f.doneMeta, f.doneResp = meta, resp
+	return nil
+}
+
+func (f *recordingOpsRepo) MarkError(_ context.Context, _ string, st *statuspb.Status) error {
+	f.calls = append(f.calls, "markerror")
+	f.errStatus = st
+	return nil
+}
+
 // newHandler builds the production handler around a RevokeUseCase over the
 // fake writer + a fake reader. A nil writer exercises the fail-closed path.
 func newHandler(w sessionRevocationWriter, r reader) *Handler {
+	h, _ := newHandlerWithOps(w, r)
+	return h
+}
+
+// newHandlerWithOps is newHandler plus a handle on the recorded operation calls.
+func newHandlerWithOps(w sessionRevocationWriter, r reader) (*Handler, *recordingOpsRepo) {
+	ops := &recordingOpsRepo{}
 	var uc revoker
 	if w != nil {
-		uc = NewRevokeUseCase(w)
+		uc = NewRevokeUseCase(w, ops)
 	}
-	return NewHandler(uc, r)
+	return NewHandler(uc, r), ops
 }
 
 func TestRevoke_RecordsAndReturnsOperation(t *testing.T) {
@@ -266,4 +316,80 @@ func TestListByUser_MissingUserID_InvalidArgument(t *testing.T) {
 	h := newHandler(&fakeRevoker{}, &fakeReader{})
 	_, err := h.ListByUser(context.Background(), &iamv1.ListByUserRequest{})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// ── Operation persistence (unit level) ───────────────────────────────────────
+
+// The declared metadata field revoked_count is knowable only after the writes,
+// so it must arrive on the TERMINAL transition, not on Create. MarkDone would
+// not do: its third parameter is the response and it never touches metadata,
+// which is how a contract field stays empty forever while everything looks
+// green.
+func TestRevoke_TerminalTransitionCarriesMetadataAndResponse(t *testing.T) {
+	w := &fakeRevoker{}
+	h, ops := newHandlerWithOps(w, &fakeReader{})
+
+	_, err := h.Revoke(context.Background(), &iamv1.RevokeRequest{
+		TokenJti: "jti-123",
+		UserId:   "usr_alice",
+		Reason:   "user-logout",
+	})
+	require.NoError(t, err)
+
+	require.Contains(t, ops.calls, "create", "the operation row must be persisted")
+	require.Contains(t, ops.calls, "markdone-with-metadata",
+		"the terminal transition must replace metadata, not only write a response")
+	require.NotContains(t, ops.calls, "markdone",
+		"MarkDone leaves metadata as Create wrote it — revoked_count would stay 0 forever")
+
+	// What Create wrote cannot yet know the count; what the terminal transition
+	// wrote must.
+	createdMeta := &iamv1.RevokeMetadata{}
+	require.NoError(t, ops.created.Metadata.UnmarshalTo(createdMeta))
+	assert.Equal(t, int32(0), createdMeta.GetRevokedCount())
+
+	doneMeta := &iamv1.RevokeMetadata{}
+	require.NotNil(t, ops.doneMeta)
+	require.NoError(t, ops.doneMeta.UnmarshalTo(doneMeta))
+	assert.Equal(t, int32(1), doneMeta.GetRevokedCount())
+	assert.Equal(t, "usr_alice", doneMeta.GetUserId())
+
+	doneResp := &iamv1.SessionRevocation{}
+	require.NotNil(t, ops.doneResp, "Revoke declares response: SessionRevocation")
+	require.NoError(t, ops.doneResp.UnmarshalTo(doneResp))
+	assert.Equal(t, "jti-123", doneResp.GetTokenJti())
+	assert.Equal(t, "usr_alice", doneResp.GetUserId())
+}
+
+// A failing write must mark the already-persisted operation terminally with the
+// error a poller will read.
+func TestRevoke_WriteFailure_MarksOperationError(t *testing.T) {
+	w := &fakeRevoker{err: iamerr.ErrNotFound}
+	h, ops := newHandlerWithOps(w, &fakeReader{})
+
+	_, err := h.Revoke(context.Background(), &iamv1.RevokeRequest{
+		TokenJti: "jti-123",
+		UserId:   "usr_alice",
+	})
+	require.Error(t, err)
+	require.Contains(t, ops.calls, "create")
+	require.Contains(t, ops.calls, "markerror",
+		"a failed write must leave a terminal error the poller can read, not an unfinished row")
+	require.NotNil(t, ops.errStatus)
+	assert.NotZero(t, ops.errStatus.GetCode())
+}
+
+// Without a place to persist the operation the RPC must refuse: an id that
+// names no row is exactly the defect, and a wiring omission must not
+// reintroduce it silently.
+func TestRevoke_NilOperationRepo_FailsClosed(t *testing.T) {
+	w := &fakeRevoker{}
+	h := NewHandler(NewRevokeUseCase(w, nil), &fakeReader{})
+
+	_, err := h.Revoke(context.Background(), &iamv1.RevokeRequest{
+		TokenJti: "jti-123",
+		UserId:   "usr_alice",
+	})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	assert.Zero(t, w.callCnt, "the refusal must precede the mutation")
 }

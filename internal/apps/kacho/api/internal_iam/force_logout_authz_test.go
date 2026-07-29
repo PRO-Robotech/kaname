@@ -50,7 +50,8 @@ func (f *fakeForceLogoutChecker) Check(_ context.Context, subject, relation, obj
 func forceLogoutHandlerWithGate(rec sessionRevoker, chk *fakeForceLogoutChecker) *Handler {
 	return NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
-		WithAdminChecker(chk)
+		WithAdminChecker(chk).
+		WithOperations(&recordingForceLogoutOps{})
 }
 
 func ctxAdmin(id string) context.Context {
