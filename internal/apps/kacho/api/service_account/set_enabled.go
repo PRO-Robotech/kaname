@@ -18,9 +18,12 @@ package service_account
 //     attribute, and the audit trail has to be able to say so. A year from now
 //     "who disabled the CI bot" must not be a question you answer by reading
 //     diffs.
-//  3. It is a change of security posture, which is the band where step-up
-//     authentication applies. Routine lifecycle is not in that band, and the two
-//     cannot share one RPC.
+//  3. It is a change of security posture, and the permission catalog classifies
+//     it as such. Routine lifecycle is not in that band, and the two cannot
+//     share one RPC. (The step-up floor that classification carries is
+//     INTERACTIVE-only — a machine principal is exempt from it by platform rule.
+//     It sets what a PERSON must do, not who may do it: that stays `v_update`,
+//     decided by the model.)
 //
 // IDEMPOTENT. The input is the STATE, not a transition: disabling an already
 // disabled account succeeds and reports it disabled. The direction that makes a

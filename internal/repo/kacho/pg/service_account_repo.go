@@ -197,11 +197,16 @@ func (w *saWriter) Update(ctx context.Context, sa domain.ServiceAccount, updateM
 //
 // One statement, and the argument is the state rather than a transition: the
 // row ends up holding what was asked for whether or not it already did. There
-// is nothing to serialise, because two callers asking for the same state agree,
-// and two asking for opposite states are answered in whatever order the row
-// lock grants — both outcomes are ones an operator asked for. A compare-and-set
-// here would buy no invariant and would turn the retry of a disable into a
-// failure, which is the direction that must never be hard to reach.
+// is nothing to serialise here — two callers asking for the same state agree,
+// and a compare-and-set would buy no invariant while turning the retry of a
+// disable into a failure, which is the direction that must never be hard to
+// reach.
+//
+// What this does NOT settle, and must not be read as settling: the ORDER of two
+// opposite requests. That is not decided at this statement — the use-case hands
+// the write to a background worker, so request order does not determine commit
+// order at all (see set_enabled.go). Nothing available at this layer could fix
+// that, and a row lock is not what would.
 //
 // The whole row comes back so the caller can name the account in an audit
 // record without a second read.
