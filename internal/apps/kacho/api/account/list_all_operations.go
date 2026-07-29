@@ -25,9 +25,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
@@ -79,10 +76,9 @@ func (u *ListAllOperationsUseCase) Execute(ctx context.Context, accountID string
 		PageToken: pageToken,
 	})
 	if err != nil {
-		if pageToken != "" {
-			return nil, "", status.Error(codes.InvalidArgument, "invalid page_token")
-		}
-		return nil, "", status.Error(codes.Internal, "list operations failed")
+		// Classified by what the STORE answered, never by whether a cursor was
+		// supplied — see shared.MapOperationsListErr.
+		return nil, "", shared.MapOperationsListErr(err)
 	}
 	return ops, next, nil
 }

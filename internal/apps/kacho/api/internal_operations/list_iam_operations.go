@@ -16,11 +16,9 @@ package internal_operations
 import (
 	"context"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
@@ -48,7 +46,12 @@ func (u *ListIamOperationsUseCase) WithAdminChecker(checker authzguard.RelationC
 
 // Execute enforces the admin-tier gate, then returns the cluster-wide (or
 // account-filtered) operation page. accountID == "" → no account filter
-// (full cluster scope). Garbage page_token → InvalidArgument.
+// (full cluster scope). A listing failure is classified by what the STORE said
+// (shared.MapOperationsListErr): a page format the store rejected stays
+// InvalidArgument with its field named, and anything else — an unreachable
+// database above all — is reported as a store failure. This feed is what a
+// cluster administrator reads during an incident, so mislabelling an outage as
+// a bad cursor sends the one person who can fix it to the wrong place.
 func (u *ListIamOperationsUseCase) Execute(ctx context.Context, accountID string, pageSize int64, pageToken string) ([]operations.Operation, string, error) {
 	if err := u.requireClusterSystemAdmin(ctx); err != nil {
 		return nil, "", err
@@ -59,10 +62,7 @@ func (u *ListIamOperationsUseCase) Execute(ctx context.Context, accountID string
 		PageToken: pageToken,
 	})
 	if err != nil {
-		if pageToken != "" {
-			return nil, "", status.Error(codes.InvalidArgument, "invalid page_token")
-		}
-		return nil, "", status.Error(codes.Internal, "list operations failed")
+		return nil, "", shared.MapOperationsListErr(err)
 	}
 	return ops, next, nil
 }

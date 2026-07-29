@@ -86,8 +86,13 @@ func TestListOperationsUseCase_HappyPath_PassesResourceFilter(t *testing.T) {
 	}
 }
 
+// The fixture must be what the REPO actually returns for a cursor it could not
+// decode — a gRPC InvalidArgument naming page_token. An opaque `errors.New`
+// whose text merely mentions the words is answered InvalidArgument by any
+// classifier that keys on the caller's input rather than on the store's answer,
+// so it could not tell a correct classifier from the broken one.
 func TestListOperationsUseCase_BadPageToken_InvalidArgument(t *testing.T) {
-	repo := &recordingOpsRepo{listErr: errors.New("repo.List: invalid page_token: illegal base64")}
+	repo := &recordingOpsRepo{listErr: storePageTokenErr()}
 	uc := shared.NewListOperationsUseCase(repo)
 
 	_, _, err := uc.Execute(context.Background(), "rol00000000000000001", 25, "garbage-token")
