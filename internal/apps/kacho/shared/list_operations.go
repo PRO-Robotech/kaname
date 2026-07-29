@@ -37,7 +37,7 @@ func NewListOperationsUseCase(opsRepo operations.Repo) *ListOperationsUseCase {
 // Execute returns the resource's operations (cursor-paginated) and the
 // next_page_token. Failures are classified by MapOperationsListErr.
 func (u *ListOperationsUseCase) Execute(ctx context.Context, resourceID string, pageSize int64, pageToken string) ([]operations.Operation, string, error) {
-	ops, next, err := u.opsRepo.List(ctx, operations.ListFilter{
+	ops, next, err := operations.ListForCaller(ctx, u.opsRepo, operations.ListFilter{
 		ResourceID: resourceID,
 		PageSize:   pageSize,
 		PageToken:  pageToken,

@@ -54,12 +54,12 @@ func (r *fakeOpsList) Cancel(context.Context, string) error                    {
 
 func TestUser_ListOperations_ReturnsRecordedOps(t *testing.T) {
 	repo := &fakeOpsList{ops: []operations.Operation{
-		{ID: "iop00000000000000001", Description: "Delete user x", CreatedAt: time.Unix(1, 0)},
+		{ID: "iop00000000000000001", Description: "Delete user x", CreatedAt: time.Unix(1, 0), Principal: opsCaller},
 	}, next: "tok"}
 	h := userapp.NewHandler(nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(repo))
 
-	resp, err := h.ListOperations(context.Background(),
+	resp, err := h.ListOperations(opsCallerCtx(),
 		&iamv1.ListUserOperationsRequest{UserId: "usr00000000000000001", PageSize: 50})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -101,7 +101,7 @@ func TestUser_ListOperations_WellFormedMissing_EmptyList(t *testing.T) {
 	h := userapp.NewHandler(nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(repo))
 
-	resp, err := h.ListOperations(context.Background(),
+	resp, err := h.ListOperations(opsCallerCtx(),
 		&iamv1.ListUserOperationsRequest{UserId: "usr0000000000000miss"})
 	if err != nil {
 		t.Fatalf("well-formed-but-missing must be OK empty, got err %v", err)
@@ -110,3 +110,37 @@ func TestUser_ListOperations_WellFormedMissing_EmptyList(t *testing.T) {
 		t.Fatalf("expected empty list, got %d ops / token %q", len(resp.GetOperations()), resp.GetNextPageToken())
 	}
 }
+
+// ---- operations.OwnedOperationRepo ----
+//
+// Список операций теперь ownership-scoped: фейк обязан нести и суженный путь,
+// иначе use-case честно откажет (несуженного отката нет). ListOwned фильтрует
+// по владельцу — ровно то, что делает предикат в SQL WHERE.
+
+var opsCaller = operations.Principal{Type: "user", ID: "usr-caller", DisplayName: "caller@kacho.local"}
+
+func opsCallerCtx() context.Context {
+	return operations.WithPrincipal(context.Background(), opsCaller)
+}
+
+func (r *fakeOpsList) GetOwned(context.Context, string, operations.Owner) (*operations.Operation, error) {
+	return nil, operations.ErrNotFound
+}
+
+func (r *fakeOpsList) CancelOwned(context.Context, string, operations.Owner) (*operations.Operation, error) {
+	return nil, operations.ErrNotFound
+}
+
+func (r *fakeOpsList) ListOwned(_ context.Context, f operations.ListFilter, owner operations.Owner) ([]operations.Operation, string, error) {
+	r.listCalled = true
+	r.gotFilter = f
+	var out []operations.Operation
+	for _, op := range r.ops {
+		if op.Principal.Type == owner.PrincipalType && op.Principal.ID == owner.PrincipalID {
+			out = append(out, op)
+		}
+	}
+	return out, r.next, nil
+}
+
+var _ operations.OwnedOperationRepo = (*fakeOpsList)(nil)

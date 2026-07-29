@@ -61,14 +61,14 @@ func (r *recordingOpsRepo) Cancel(context.Context, string) error                
 func TestListOperationsUseCase_HappyPath_PassesResourceFilter(t *testing.T) {
 	repo := &recordingOpsRepo{
 		ops: []operations.Operation{
-			{ID: "iop00000000000000001", CreatedAt: time.Unix(1, 0)},
-			{ID: "iop00000000000000002", CreatedAt: time.Unix(2, 0)},
+			{ID: "iop00000000000000001", CreatedAt: time.Unix(1, 0), Principal: sharedCaller},
+			{ID: "iop00000000000000002", CreatedAt: time.Unix(2, 0), Principal: sharedCaller},
 		},
 		next: "nexttoken",
 	}
 	uc := shared.NewListOperationsUseCase(repo)
 
-	ops, next, err := uc.Execute(context.Background(), "rol00000000000000001", 25, "")
+	ops, next, err := uc.Execute(operations.WithPrincipal(context.Background(), sharedCaller), "rol00000000000000001", 25, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,11 +108,90 @@ func TestListOperationsUseCase_ServerErrorEmptyToken_Internal(t *testing.T) {
 	repo := &recordingOpsRepo{listErr: errors.New("repo.List: dial tcp: connection refused")}
 	uc := shared.NewListOperationsUseCase(repo)
 
-	_, _, err := uc.Execute(context.Background(), "rol00000000000000001", 25, "")
+	// Вызывающий назван: без ключа владения выдача схлопывается в пустую и до
+	// репозитория не доходит — тогда утверждение об отображении его сбоя было бы
+	// вакуумным.
+	ctx := operations.WithPrincipal(context.Background(), sharedCaller)
+	_, _, err := uc.Execute(ctx, "rol00000000000000001", 25, "")
 	if err == nil {
 		t.Fatal("want error for server failure, got nil")
 	}
 	if got := grpcstatus.Code(err); got != codes.Internal {
 		t.Fatalf("server error with empty token must map to Internal, got %s", got)
+	}
+}
+
+// ---- operations.OwnedOperationRepo ----
+//
+// Список операций ownership-scoped: фейк несёт оба пути. ListOwned фильтрует по
+// владельцу — ровно то, что делает предикат в SQL WHERE.
+
+func (r *recordingOpsRepo) GetOwned(context.Context, string, operations.Owner) (*operations.Operation, error) {
+	return nil, operations.ErrNotFound
+}
+
+func (r *recordingOpsRepo) CancelOwned(context.Context, string, operations.Owner) (*operations.Operation, error) {
+	return nil, operations.ErrNotFound
+}
+
+func (r *recordingOpsRepo) ListOwned(_ context.Context, f operations.ListFilter, owner operations.Owner) ([]operations.Operation, string, error) {
+	r.gotFilter = f
+	if r.listErr != nil {
+		return nil, "", r.listErr
+	}
+	var out []operations.Operation
+	for _, op := range r.ops {
+		if op.Principal.Type == owner.PrincipalType && op.Principal.ID == owner.PrincipalID {
+			out = append(out, op)
+		}
+	}
+	return out, r.next, nil
+}
+
+var _ operations.OwnedOperationRepo = (*recordingOpsRepo)(nil)
+
+var (
+	sharedCaller = operations.Principal{Type: "user", ID: "usr-caller", DisplayName: "caller@kacho.local"}
+	sharedOther  = operations.Principal{Type: "user", ID: "usr-other", DisplayName: "other@kacho.local"}
+)
+
+// Этот use-case обслуживает семь RPC iam разом, поэтому утверждение о выдаче
+// делается здесь один раз и на наблюдаемом: строки, которые он вернул.
+func TestListOperationsUseCase_ReturnsOnlyCallerOwnRows(t *testing.T) {
+	repo := &recordingOpsRepo{ops: []operations.Operation{
+		{ID: "iop00000000000000001", CreatedAt: time.Unix(1, 0), Principal: sharedCaller},
+		{ID: "iop00000000000000002", CreatedAt: time.Unix(2, 0), Principal: sharedOther},
+	}}
+	uc := shared.NewListOperationsUseCase(repo)
+
+	ctx := operations.WithPrincipal(context.Background(), sharedCaller)
+	ops, _, err := uc.Execute(ctx, "rol00000000000000001", 25, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ops) != 1 || ops[0].ID != "iop00000000000000001" {
+		t.Fatalf("выдача обязана нести только свою операцию, получено %+v", ops)
+	}
+	for _, op := range ops {
+		if op.Principal.ID == sharedOther.ID {
+			t.Fatalf("чужая операция попала в список: её Response несёт ресурс целиком, "+
+				"а Principal — email инициатора (%s)", op.Principal.DisplayName)
+		}
+	}
+}
+
+// Без ключа владения выдача пуста: несуженный откат запрещён.
+func TestListOperationsUseCase_UnidentifiedCallerGetsNoRows(t *testing.T) {
+	repo := &recordingOpsRepo{ops: []operations.Operation{
+		{ID: "iop00000000000000002", CreatedAt: time.Unix(2, 0), Principal: sharedOther},
+	}}
+	uc := shared.NewListOperationsUseCase(repo)
+
+	ops, _, err := uc.Execute(context.Background(), "rol00000000000000001", 25, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ops) != 0 {
+		t.Fatalf("без ключа владения выдача обязана быть пустой, получено %+v", ops)
 	}
 }
