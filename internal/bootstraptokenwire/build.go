@@ -26,9 +26,10 @@ type BuildConfig struct {
 	// supplied from a k8s Secret (KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM). Empty →
 	// mint disabled (fail-closed).
 	SigningKeyPEM string
-	// HydraAdminURL / HydraAdminToken — Hydra Admin API for CreateOAuthClient.
-	HydraAdminURL   string
-	HydraAdminToken string
+	// HydraAdmin — the provider-admin client used for CreateOAuthClient, built by
+	// the composition root so the trust anchor of the hop is resolved (and an
+	// unusable one refused) in ONE place rather than per consumer.
+	HydraAdmin *clients.HydraAdminClient
 	// HydraTokenURL — the Hydra public token endpoint for the client_credentials
 	// exchange.
 	HydraTokenURL string
@@ -68,7 +69,7 @@ func (a hydraExchange) Exchange(ctx context.Context, in bootstraptoken.ExchangeI
 func Build(pool *pgxpool.Pool, cfg BuildConfig) *bootstraptoken.Handler {
 	store := kachopg.NewBootstrapStore(pool)
 	txb := kachopg.NewPoolTxBeginner(pool)
-	hydraAdmin := clients.NewHydraAdminClient(cfg.HydraAdminURL, cfg.HydraAdminToken)
+	hydraAdmin := cfg.HydraAdmin
 	exchanger := hydraExchange{client: clients.NewHydraTokenClient(cfg.HydraTokenURL)}
 
 	uc := bootstraptoken.NewMintUseCase(store, txb, hydraAdmin, exchanger, bootstraptoken.Config{

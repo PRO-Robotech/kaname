@@ -159,10 +159,15 @@ type PostgresConfig struct {
 //	                        действует глобальный дефолт провайдера. Задаётся
 //	                        профилем деплоя; override KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
-	Mode                    Mode          `mapstructure:"mode"`
-	Domain                  string        `mapstructure:"domain"`
-	HydraIssuer             string        `mapstructure:"hydra-issuer"`
-	HydraAdminURL           string        `mapstructure:"hydra-admin-url"`
+	Mode          Mode   `mapstructure:"mode"`
+	Domain        string `mapstructure:"domain"`
+	HydraIssuer   string `mapstructure:"hydra-issuer"`
+	HydraAdminURL string `mapstructure:"hydra-admin-url"`
+	// HydraAdminCAFile — PEM bundle the provider-admin hop is verified against
+	// when it is served over TLS. Empty ⇒ the default transport (system roots),
+	// which an internal-CA certificate never chains to. Set ⇒ the bundle becomes
+	// the ONLY anchor, and one that cannot be read refuses the start.
+	HydraAdminCAFile        string        `mapstructure:"hydra-admin-ca-file"`
 	HydraTokenURL           string        `mapstructure:"hydra-token-url"`
 	HydraJWKSURL            string        `mapstructure:"hydra-jwks-url"`
 	HookSharedSecret        string        `mapstructure:"hook-shared-secret"`

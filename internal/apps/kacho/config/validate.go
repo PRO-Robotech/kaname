@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"go.uber.org/multierr"
@@ -67,6 +68,7 @@ func (c Config) Validate() error {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
 		errs = multierr.Append(errs, c.validateProductionTrustedForwarders())
+		errs = multierr.Append(errs, c.validateProductionProviderAdminHop())
 
 		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
 		// IAM data (user/SA records, session-revocation + token rows, the
@@ -162,6 +164,76 @@ func (c Config) validateProductionTrustedForwarders() error {
 			"KACHO_IAM_AUTHN__TRUSTED_FORWARDER_SANS) — an empty list lets ANY certificate-verified peer " +
 			"forward an end-user identity, so a neighbouring service can act as any tenant; " +
 			"pin the api-gateway SAN plus the peers that legitimately speak for a user")
+}
+
+// validateProductionProviderAdminHop refuses to start a production binary whose
+// route to the identity provider's ADMIN API is GUESSED, or carries the
+// administrative bearer in the clear.
+//
+// iam is the platform's sole facade to the provider: registering the OAuth2
+// client behind a personal token or a service-account key, recording a trust
+// grant, tearing down a login session — all of it goes over this hop, with the
+// administrative bearer attached. The provider's admin API authenticates nobody;
+// being able to reach it IS the authorization. So both properties below are
+// load-bearing, and they fail for different reasons.
+//
+// DECLARED, NOT DERIVED. The address falls back to a derivation from the issuer
+// ("hydra.X" → "hydra-admin.X", else "https://hydra-admin.<domain>"). A derived
+// address is never empty, so the facade reads as configured on a profile that
+// never declared it — and the derivation yields the PUBLIC ingress hostname,
+// which does not resolve inside the cluster. Every call then fails, or worse,
+// eventually resolves to whatever answers on that public name and receives the
+// administrative bearer. Requiring the declaration is the platform rule that a
+// security-relevant dependency address is never worked out from a neighbour's.
+//
+// NOT IN THE CLEAR. Same reason the edge gateway's hop is held to it: the bearer
+// is readable by anything on the path, and it opens an API that asks for nothing
+// else.
+//
+// Only the explicit sources count as declared — the YAML setting and its ENV
+// override — because those are the two an operator actually writes. dev keeps the
+// derivation and tolerates plaintext: an in-process fixture has no provider, and
+// a developer stand may run one without a certificate.
+func (c Config) validateProductionProviderAdminHop() error {
+	declared := c.AuthN.DeclaredHydraAdminURL()
+	if declared == "" {
+		return fmt.Errorf(
+			"production mode: authn.hydra-admin-url is not declared (env override " +
+				"KACHO_IAM_HYDRA_ADMIN_URL) — it then falls back to a name DERIVED from the " +
+				"issuer, which is the public ingress host and does not resolve inside the " +
+				"cluster; the derivation is never empty, so the facade reads as configured " +
+				"while addressing a host nobody chose. Name the cluster-internal admin " +
+				"Service explicitly")
+	}
+	u, err := url.Parse(declared)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf(
+			"production mode: authn.hydra-admin-url is not an absolute http(s) URL (got %q)",
+			declared)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf(
+			"production mode: authn.hydra-admin-url is plaintext (%q) — every OAuth2 client "+
+				"registration, trust grant and session teardown carries the administrative "+
+				"bearer over this hop, and the admin API it opens authenticates nobody, so "+
+				"anything on the path can read the credential and use it; address the admin "+
+				"listener over https",
+			declared)
+	}
+	// TLS without an anchor is not a partial improvement here. The provider's
+	// in-cluster certificate is issued by the internal CA and this process trusts
+	// the system roots, so every call would fail on an unknown authority — after
+	// the address already reads as hardened.
+	if c.AuthN.ResolveHydraAdminCAFile() == "" {
+		return fmt.Errorf(
+			"production mode: authn.hydra-admin-url is https (%q) but authn.hydra-admin-ca-file "+
+				"is empty (env KACHO_IAM_HYDRA_ADMIN_CA_FILE) — the provider's in-cluster "+
+				"certificate is issued by the internal CA and this process trusts the system "+
+				"roots, so every call on the hop fails with an unknown authority; pin the "+
+				"bundle together with the address",
+			declared)
+	}
+	return nil
 }
 
 // validateMode ensures Mode is a known ENUM value.
