@@ -35,6 +35,19 @@ fi
 
 failed_suites=()
 
+# Totals across the suite. Printed as ONE line at the end so a reader gets the
+# whole verdict in numbers without adding up per-collection lines: how many
+# collections produced a report OUT OF how many exist, plus requests, assertions,
+# failed assertions and UNANSWERED requests. "Collections reported out of
+# generated" is the number that makes a silently truncated run visible — every
+# other counter looks healthy when a collection simply never ran.
+tot_reported=0
+tot_requests=0
+tot_asserts=0
+tot_fails=0
+tot_unanswered=0
+tot_empty=0
+
 # ─── Execution-coverage gate ─────────────────────────────────────────────────
 # The assertion-based verdict below can only see requests that RAN. A request
 # that never executed produces no assertions and therefore no failures — so a
@@ -114,14 +127,21 @@ for col in "${collections[@]}"; do
   #   queue that may not be needed, or keeps a real regression invisible. Re-checking
   #   costs one suite run; leaving it costs somebody a day.
   #
-  #   - any-authz-gated-rpc-during-openfga-outage — needs external `kubectl
-  #     scale openfga --replicas=0` orchestration (authz-deny).
-  #     CHECKED 2026-07-28 (kind-kacho, `newman run collections/authz-deny…json`):
-  #     STILL TRUE — with the authorization store up, the whole 739-assertion suite
-  #     passes except this case's 2 assertions, which cannot pass without the scale-
-  #     down. Note the case's own comment points at `scripts/run-failclosed.sh` as
-  #     the wrapper that would orchestrate it; no such file exists anywhere in the
-  #     tree, so the entry is permanent until somebody writes it.
+  #   REMOVED 2026-07-29 — any-authz-gated-rpc-during-openfga-outage. The entry
+  #   said the case "needs external `kubectl scale openfga --replicas=0`
+  #   orchestration" and would stay "permanent until somebody writes it", pointing
+  #   at a `scripts/run-failclosed.sh` that existed nowhere in the tree. So for as
+  #   long as the entry lived, the invariant it names — no answer about permissions
+  #   must never be counted as "allowed" — was not checked at all, and the suite
+  #   read green. A case that needs an unavailable dependency does not get a
+  #   waiver, it gets a wave that CREATES the condition (testing.md).
+  #   That wave now exists: the case moved to its own collection
+  #   (cases/authz-failclosed.py), the wrapper it always named was written
+  #   (scripts/run-failclosed.sh — scales the store to zero, waits out the
+  #   gateway's decision cache, runs the one collection, restores and waits for
+  #   ready), and deploy/scripts/newman-parallel.sh drives it as WAVE 3 after every
+  #   other suite has reported. No exclusion replaces it: if the wave does not run,
+  #   there is no report and this gate says `authz-failclosed(no-report)`.
   #   - inv-get-account-allow-warm-cache — FGA grant→Check warm-cache window.
   #     CHECKED 2026-07-28 (same run): PASSED, converging on the third poll. Kept
   #     because a timing mask is not refuted by one unloaded run — this one exists
@@ -401,10 +421,16 @@ for col in "${collections[@]}"; do
   # variable could be absorbed by an unrelated alternation entry and the suite would
   # go quiet again in exactly the way this whole mechanism exists to prevent.
   if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("any-authz-gated-rpc-during-openfga-outage|inv-get-account-allow-warm-cache")) or (.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")))] | length' "$report")
+    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("inv-get-account-allow-warm-cache")) or (.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")))] | length' "$report")
     fails=$((fails - known_red))
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi
+
+  tot_reported=$((tot_reported + 1))
+  tot_requests=$((tot_requests + reqs))
+  tot_asserts=$((tot_asserts + asserts))
+  tot_fails=$((tot_fails + fails))
+  tot_unanswered=$((tot_unanswered + unanswered))
 
   echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed (after known-RED skip), $unanswered UNANSWERED"
 
@@ -424,12 +450,39 @@ for col in "${collections[@]}"; do
   if [ "$asserts" -eq 0 ]; then
     echo "    NOTHING RAN: $name produced 0 assertions — a suite that asserts nothing cannot pass"
     empty=1
+    tot_empty=$((tot_empty + 1))
   fi
 
   if [ "$fails" -gt 0 ] || [ "$unanswered" -gt 0 ] || [ "$empty" -gt 0 ]; then
     failed_suites+=("$name")
   fi
 done
+
+# The verdict in numbers, on one line. Read the FIRST pair first: a run that
+# stopped early leaves every other counter looking healthy.
+echo "TOTAL: ${tot_reported}/${#collections[@]} collection(s) reported, ${tot_requests} request(s), ${tot_asserts} assertion(s), ${tot_fails} failed, ${tot_unanswered} UNANSWERED, ${tot_empty} report(s) with no assertions"
+
+# The same numbers into the job summary when running in CI. Each gate step is
+# short, so these blocks land in the interface one after another AS THE STEPS
+# FINISH — which is what makes the summary readable during a run, unlike a single
+# write at the very end. Each block is self-contained (no shared table header
+# somebody else has to have written first).
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  _label="${SUITE_LABEL:-$PWD}"
+  # `if`, not `a && b`: under `set -e` a false test at statement level aborts the
+  # script — and the abort would happen right where the numbers are printed.
+  if [ "${#failed_suites[@]}" -gt 0 ]; then
+    _verdict="RED — ${failed_suites[*]}"
+  else
+    _verdict="GREEN"
+  fi
+  {
+    printf '### гейт `%s` — %s\n\n' "$_label" "$_verdict"
+    printf 'коллекций с отчётом **%s из %s** · запросов %s · утверждений %s · **упало %s** · без ответа %s · пустых отчётов %s\n\n' \
+      "$tot_reported" "${#collections[@]}" "$tot_requests" "$tot_asserts" \
+      "$tot_fails" "$tot_unanswered" "$tot_empty"
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
 
 if [ "${#failed_suites[@]}" -gt 0 ]; then
   echo "FAIL: suites with failures: ${failed_suites[*]}"

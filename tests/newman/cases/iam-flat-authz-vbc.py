@@ -6,13 +6,19 @@
 
 Covered scenarios (iam-native subset):
 
-  AccessBinding.Create with a LOWERCASE subject type (`"type":"user"`).
-    protojson DiscardUnknown drops the lowercase JSON value to the zero enum
-    (SUBJECT_TYPE_UNSPECIFIED), so subjectsFromProto derives the subject type from
-    the id PREFIX (usr→user, sva→service_account, grp→group). The UI sends this
-    shape; before the derive fix it failed validation. Happy: usr-prefixed id →
-    Operation(iop). Negative: an unrecognized prefix with no type → sync 400
-    INVALID_ARGUMENT (validation NOT weakened).
+  AccessBinding.Create with NO subject type (SUBJECT_TYPE_UNSPECIFIED).
+    subjectsFromProto derives the subject type from the id PREFIX (usr→user,
+    sva→service_account, grp→group). Happy: usr-prefixed id → Operation(iop).
+    Negative: an unrecognized prefix with no type → sync 400 INVALID_ARGUMENT
+    (validation NOT weakened).
+
+    This case used to send `"type":"user"` and lean on the edge dropping the
+    lowercase name to the zero enum, on the stated grounds that "the UI sends this
+    shape". Both halves stopped being true: the console maps its internal lowercase
+    type through SUBJECT_TYPE_ENUM to the wire name (`SUBJECT_TYPE_USER`), and the
+    edge now REFUSES an enum value outside the dictionary instead of swallowing it.
+    Sending garbage also made the case assert the wrong thing — the swallow rather
+    than the derive; it would have stayed green with the derive deleted.
 
   Foreign-account iam.user GET → 403 is already covered by
     iam-user.py::IAM-USR-GT-AUTHZ-FOREIGN-DENY (no implicit cross-account access);
@@ -62,11 +68,11 @@ def _revoke_teardown(name, acb_var):
 
 
 # ---------------------------------------------------------------------------
-# IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE — happy: lowercase type → derive from prefix
+# IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE — happy: no type → derive from id prefix
 # ---------------------------------------------------------------------------
 CASES.append(Case(
-    id="IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE",
-    title="AccessBinding.Create with lowercase subject type (`user`) + usr-prefixed id → derive → Operation(iop) done",
+    id="IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE",
+    title="AccessBinding.Create with no subject type + usr-prefixed id → derive → Operation(iop) done",
     classes=["VAL", "CRUD"],
     priority="P1",
     steps=[
@@ -139,10 +145,19 @@ CASES.append(Case(
             name="create-derive",
             method="POST",
             path="/iam/v1/accessBindings",
-            # Lowercase "user" — protojson DiscardUnknown → SUBJECT_TYPE_UNSPECIFIED;
-            # subjectsFromProto derives `user` from the `usr` id-prefix.
+            # `type` OMITTED — that is what SUBJECT_TYPE_UNSPECIFIED looks like on
+            # the wire, and it is the actual precondition of the derive:
+            # subjectsFromProto reads `user` off the `usr` id-prefix.
+            #
+            # It used to say `"type":"user"` and lean on the edge dropping the
+            # lowercase name to the zero enum. That prop is gone: an enum value
+            # outside the dictionary is now refused (INVALID_ARGUMENT), because
+            # accepting it meant answering 200 for a setting the server never made.
+            # Leaning on it also made this case test the WRONG thing — it asserted
+            # the edge's swallow, not the service's derive, and it would have stayed
+            # green if the derive were deleted.
             body={
-                "subjects": [{"type": "user", "id": "{{userNOBId}}"}],
+                "subjects": [{"id": "{{userNOBId}}"}],
                 "roleId": ROLE_VIEW,
                 "scopeType": "iam.account",
                 "scopeId": "{{accountAId}}",
@@ -151,7 +166,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             test_script=[
                 "const j = pm.response.json();",
-                "pm.test('lowercase subject derive accepted (200)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                "pm.test('subject type derived from id prefix (200)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "opId"),
                 *save_from_response("j.metadata && j.metadata.accessBindingId", "vbcAcbId"),

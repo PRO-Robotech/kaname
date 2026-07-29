@@ -277,12 +277,36 @@ fi
 # Набор вердикта = сгенерированные коллекции ∪ stem'ы, для которых run_one оставил
 # .rc. Дублировать здесь список прогона не нужно (и нечему разъезжаться): коллекция,
 # которую этот скрипт забыл прогнать, не имеет отчёта → MISSING → красный.
+#
+# DELEGATED — коллекции, которым нужно условие, несовместимое с этим прогоном.
+# Их гоняет ОТДЕЛЬНАЯ ВОЛНА (см. ниже), поэтому здесь они из набора вычитаются —
+# но только из ЭТОГО набора. Авторитетный гейт (scripts/assert-suites-green.sh)
+# по-прежнему требует отчёт для КАЖДОЙ collections/*.json и докладывает
+# `<stem>(no-report)`, если волна не отработала. То есть вычитание здесь ничего
+# спрятать не может: оно снимает ложный MISSING у прогонщика, а не проверку.
+#
+#   authz-failclosed — нужен ВЫКЛЮЧЕННЫЙ store прав; scripts/run-failclosed.sh
+#     сворачивает его в ноль, гоняет коллекцию и поднимает обратно. Волну
+#     запускает deploy/scripts/newman-parallel.sh (WAVE 3, после всех суит) либо
+#     отдельный шаг CI — соседям выключенный store прав сломал бы всё.
+DELEGATED=(authz-failclosed)
+_is_delegated() {
+  local s
+  for s in "${DELEGATED[@]}"; do [[ "$1" == "$s" ]] && return 0; done
+  return 1
+}
+
 stems=()
 if [[ -n "$SERVICE" ]]; then
   stems=("$SERVICE")
 else
   while IFS= read -r s; do
-    [[ -n "$s" ]] && stems+=("$s")
+    [[ -n "$s" ]] || continue
+    if _is_delegated "$s"; then
+      echo "[delegated] ${s} — гоняется отдельной волной (scripts/run-failclosed.sh); вердикт по нему выносит assert-suites-green.sh"
+      continue
+    fi
+    stems+=("$s")
   done < <(
     {
       for f in collections/*.postman_collection.json; do
