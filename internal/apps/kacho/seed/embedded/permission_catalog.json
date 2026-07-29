@@ -92,7 +92,7 @@
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/List",
     "permission": "compute.instanceses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
@@ -2133,7 +2133,7 @@
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/List",
     "permission": "vpc.addresseses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
@@ -2203,7 +2203,7 @@
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/List",
     "permission": "vpc.gatewayses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
@@ -2514,7 +2514,7 @@
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/List",
     "permission": "vpc.network_interfaceses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
@@ -2693,7 +2693,7 @@
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/List",
     "permission": "vpc.route_tableses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
@@ -2773,7 +2773,7 @@
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/List",
     "permission": "vpc.security_groupses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
@@ -2863,7 +2863,7 @@
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/List",
     "permission": "vpc.subnetses.list",
-    "required_relation": "v_list",
+    "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
