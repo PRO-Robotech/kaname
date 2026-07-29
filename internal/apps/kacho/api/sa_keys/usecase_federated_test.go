@@ -39,6 +39,8 @@ type stubSAClientRepo struct {
 	ownerUserID domain.UserID
 	getRow      domain.ServiceAccountOAuthClient
 	getErr      error
+	// disabled — the owning account may not authenticate.
+	disabled bool
 }
 
 func (s *stubSAClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {

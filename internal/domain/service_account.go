@@ -26,6 +26,18 @@ type ServiceAccount struct {
 	Labels Labels
 }
 
+// MayAuthenticate reports whether this service account is allowed to obtain a
+// token or a fresh credential. It is the single predicate every issuance path
+// asks, the machine counterpart of InviteStatus.MayAuthenticate for users — so
+// that no path can re-derive its own answer and quietly disagree with the rest.
+//
+// It reads a field, which means it is only as truthful as the query that
+// populated the struct: `enabled` is a bool, false in every zero value, so a
+// read that does not select the column makes this method answer "no" for every
+// account in existence. Callers therefore judge a row they actually read, and
+// the reads that feed them are pinned by their own tests.
+func (s ServiceAccount) MayAuthenticate() bool { return s.Enabled }
+
 func (s ServiceAccount) Validate() error {
 	var errs error
 	errs = multierr.Append(errs, s.Name.Validate())

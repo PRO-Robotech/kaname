@@ -235,6 +235,8 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
 			AccountID: "acc_01abcdefghjkmnpqr",
+			// This account may authenticate; the refusal under test is a different one.
+			Enabled: true,
 		},
 	}, &fakeAudit{})
 

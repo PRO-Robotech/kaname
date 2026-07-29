@@ -64,7 +64,10 @@ type SAClientRepo interface {
 	// AccountForServiceAccount resolves the owning account of a ServiceAccount so
 	// Issue/Revoke can stamp `account_id` on the Operation metadata (account-scoped
 	// /iam/operations feed). Missing SA → ErrNotFound.
-	AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, error)
+	// The second return states whether that account may authenticate. It is
+	// part of this signature rather than a separate lookup so no caller can
+	// decide on a field the query was never asked to load.
+	AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, bool, error)
 	// OwnerUserForServiceAccount resolves the account owner (a users(id)) of a
 	// ServiceAccount. Used to stamp a VALID `created_by` when the caller is a
 	// machine (service-account) principal that is not itself a users row — the
@@ -311,9 +314,19 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 
 	// Resolve the owning account so the Operation metadata carries account_id —
 	// the account-scoped /iam/operations feed otherwise excludes token operations.
-	accountID, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
+	accountID, mayAuthenticate, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
 	if err != nil {
 		return nil, mapPGErr(err)
+	}
+	// An account that may not authenticate does not get a new credential either.
+	// Refusing only the token would leave the key itself issued, handed over and
+	// waiting: it starts working the moment the account is re-enabled, granted
+	// at a time when nobody was permitted to grant it. Synchronous, because the
+	// request is well-formed and the answer is known now — an Operation that
+	// fails later says the same thing hours downstream and in a worse place.
+	if !mayAuthenticate {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"ServiceAccount %s is disabled and cannot be issued a key", in.ServiceAccountID)
 	}
 
 	// #60 analog (SA-key non-interactive seed path): a service-account principal
@@ -932,7 +945,11 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 	}
 	// Resolve the owning account so the Operation metadata carries account_id —
 	// the account-scoped /iam/operations feed otherwise excludes token operations.
-	accountID, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
+	// The account's state is deliberately not consulted here. It says the account
+	// may not AUTHENTICATE; taking away the ability to revoke its keys as well
+	// would make disabling an account something an operator cannot finish, and
+	// would strand live credentials exactly where they most need removing.
+	accountID, _, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
 	if err != nil {
 		return nil, mapPGErr(err)
 	}

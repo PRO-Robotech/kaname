@@ -40,6 +40,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
@@ -197,16 +199,35 @@ func (uc *UpsertFromIdentityUseCase) resolveUserID(ctx context.Context, in Upser
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// Уже есть ACTIVE-row по identity → переиспользуем его id.
-	existing, err := rd.Users().FindActiveByExternalID(ctx, in.ExternalID)
+	// Читаем строки КАК ЕСТЬ и судим по состоянию — не спрашиваем «дай активные».
+	//
+	// Фильтр `invite_status='ACTIVE'` отвечает пустым множеством на
+	// ЗАБЛОКИРОВАННУЮ личность, а пустое множество здесь означает «личности не
+	// существует» и ведёт в ветку bootstrap'а: заблокированному выдавалась
+	// свежая ACTIVE-строка, а вместе с ней аккаунт, проект и админские права на
+	// них. Хук срабатывает и на ВХОДЕ, не только на регистрации, — то есть
+	// блокировку снимал сам заблокированный, просто войдя ещё раз. Индекс
+	// уникальности этому не мешает: он покрывает только ACTIVE-строки.
+	existing, err := rd.Users().FindByExternalIDInStatuses(ctx, in.ExternalID,
+		[]domain.InviteStatus{domain.InviteStatusActive, domain.InviteStatusBlocked})
 	if err != nil {
 		return "", false, shared.MapRepoErr(err)
 	}
-	if len(existing) > 0 {
-		return string(existing[0].ID), false, nil
+	for _, u := range existing {
+		// Членство может быть разным по аккаунтам: первая строка, которой
+		// аутентификация разрешена, и есть действующая личность.
+		if u.InviteStatus.MayAuthenticate() {
+			return string(u.ID), false, nil
+		}
 	}
-
 	// Есть PENDING-invite(ы) по email → Activate сохранит существующий row-id.
+	//
+	// Проверяется ДО отказа ниже, и это не порядок ради порядка: блокировка
+	// живёт на строке МЕМБЕРШИПА, то есть внутри конкретного аккаунта.
+	// Приглашение в другой аккаунт — отдельное членство, которое тот аккаунт
+	// выдал сам; отказать здесь значило бы позволить одному аккаунту запереть
+	// человека везде, где его блокировать никто не собирался. PENDING-строка ещё
+	// не несёт external_id (DB-CHECK), поэтому по нему она и не нашлась выше.
 	if in.Email != "" {
 		pendings, err := rd.Users().FindPendingByEmail(ctx, in.Email)
 		if err != nil {
@@ -217,7 +238,16 @@ func (uc *UpsertFromIdentityUseCase) resolveUserID(ctx context.Context, in Upser
 		}
 	}
 
-	// Ни ACTIVE, ни PENDING — bootstrap нового identity, новый id.
+	if len(existing) > 0 {
+		// Личность есть, ни одному её членству аутентификация не разрешена, и
+		// приглашения, которое завело бы новое, тоже нет. Это не «нет такой» — и
+		// ответ обязан отличаться, иначе он снова уедет в ветку, которая заведёт
+		// её заново.
+		return "", false, status.Errorf(codes.FailedPrecondition,
+			"identity %s is blocked and cannot be provisioned", in.ExternalID)
+	}
+
+	// Ни ACTIVE, ни BLOCKED, ни PENDING — bootstrap нового identity, новый id.
 	return ids.NewID(domain.PrefixUser), true, nil
 }
 
@@ -311,10 +341,25 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	existing, err := rd.Users().FindActiveByExternalID(ctx, in.ExternalID)
+	allRows, err := rd.Users().FindByExternalIDInStatuses(ctx, in.ExternalID,
+		[]domain.InviteStatus{domain.InviteStatusActive, domain.InviteStatusBlocked})
 	_ = rd.Rollback(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
+	}
+	// Тот же вердикт, что и в синхронном гейте выше, повторён здесь намеренно:
+	// между резолвом и этим шагом строку могли заблокировать, и без проверки
+	// worker снова прочитал бы пустое множество ACTIVE как «личности нет» и
+	// завёл бы её заново — ровно тем путём, который гейт закрывает.
+	var existing []domain.User
+	for _, u := range allRows {
+		if u.InviteStatus.MayAuthenticate() {
+			existing = append(existing, u)
+		}
+	}
+	if len(existing) == 0 && len(allRows) > 0 && firstActivated == nil {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"identity %s is blocked and cannot be provisioned", in.ExternalID)
 	}
 
 	// RC-5 (owner-mandated, переворачивает прежний by-design D-7): bootstrap

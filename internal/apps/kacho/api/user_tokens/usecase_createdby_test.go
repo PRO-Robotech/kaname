@@ -27,11 +27,12 @@ type createdByStubRepo struct {
 	missing map[string]bool
 }
 
-func (s *createdByStubRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error) {
+func (s *createdByStubRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
 	if s.missing[string(id)] {
-		return "", iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+		return "", false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
 	}
-	return "acc00000000000000001", nil
+	// Present and able to authenticate: these tests are about created_by.
+	return "acc00000000000000001", true, nil
 }
 
 // TestIssue_SACallerRejectedSync (UTM-12): an SA created_by (`sva…`) →

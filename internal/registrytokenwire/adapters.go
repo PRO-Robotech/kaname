@@ -24,10 +24,14 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-// saClientByIDReader — reverse lookup of an SA-OAuth-client by Hydra client_id
-// (satisfied by the SA repo's GetByOAuthClientID).
+// saClientByIDReader — reverse lookup of an SA-OAuth-client by Hydra client_id,
+// plus the ServiceAccount it belongs to (satisfied by the SA repo). The account
+// read is part of this port because the docker path decides on the account's
+// state, and a port that could not answer for it would leave that decision
+// resting on a field nobody loaded.
 type saClientByIDReader interface {
 	GetByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error)
+	GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error)
 }
 
 // ── SA-key lookup by client_id ──────────────────────────────────────────────
@@ -44,19 +48,30 @@ func NewSAClientLookup(repo saClientByIDReader) *SAClientLookupAdapter {
 
 var _ registrytokenuc.SAClientLookup = (*SAClientLookupAdapter)(nil)
 
-// KeyByClientID returns the registered key material for a Hydra client_id.
+// KeyByClientID returns the registered key material for a Hydra client_id,
+// together with whether the owning ServiceAccount may authenticate.
+//
+// The owner's state is resolved here, on the lookup, because the validator
+// decides on it: a lookup that returned only key material would hand back a
+// zero value for the state, and every docker login in the platform would be
+// refused by a check that never saw a row.
 func (a *SAClientLookupAdapter) KeyByClientID(ctx context.Context, clientID string) (registrytokenuc.RegisteredKey, error) {
 	row, err := a.repo.GetByOAuthClientID(ctx, domain.OAuthClientID(clientID))
 	if err != nil {
 		return registrytokenuc.RegisteredKey{}, fmt.Errorf("registrytokenwire: lookup client %s: %w", clientID, err)
 	}
+	sa, err := a.repo.GetServiceAccount(ctx, row.SvaID)
+	if err != nil {
+		return registrytokenuc.RegisteredKey{}, fmt.Errorf("registrytokenwire: lookup service account %s: %w", row.SvaID, err)
+	}
 	return registrytokenuc.RegisteredKey{
-		ClientID:     string(row.OAuthClientID),
-		KeyID:        string(row.ID),
-		Subject:      string(row.SvaID),
-		PublicKeyPEM: row.PublicKeyPEM,
-		KeyAlgorithm: row.KeyAlgorithm,
-		ExpiresAt:    row.ExpiresAt,
+		ClientID:       string(row.OAuthClientID),
+		KeyID:          string(row.ID),
+		Subject:        string(row.SvaID),
+		PublicKeyPEM:   row.PublicKeyPEM,
+		KeyAlgorithm:   row.KeyAlgorithm,
+		ExpiresAt:      row.ExpiresAt,
+		SubjectEnabled: sa.MayAuthenticate(),
 	}, nil
 }
 

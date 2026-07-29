@@ -60,7 +60,9 @@ func (f fakeClientLookup) KeyByClientID(_ context.Context, clientID string) (Reg
 func TestSAKeyValidator_ValidPrivateKey_ResolvesCredential(t *testing.T) {
 	priv, pub := ecKeyPEMs(t)
 	v := NewSAKeyValidator(fakeClientLookup{byClient: map[string]RegisteredKey{
-		"cid-ci": {ClientID: "cid-ci", KeyID: "soc_key1", Subject: "sva0000000000000aa", PublicKeyPEM: pub, KeyAlgorithm: "ES256"},
+		// SubjectEnabled: the owning account may authenticate. Stated because the
+		// validator decides on it, and a zero value here would mean "disabled".
+		"cid-ci": {ClientID: "cid-ci", KeyID: "soc_key1", Subject: "sva0000000000000aa", PublicKeyPEM: pub, KeyAlgorithm: "ES256", SubjectEnabled: true},
 	}})
 
 	cred, err := v.Validate(context.Background(), "cid-ci", priv)
@@ -83,9 +85,9 @@ func TestSAKeyValidator_Rejections(t *testing.T) {
 	past := time.Now().Add(-time.Hour)
 
 	base := map[string]RegisteredKey{
-		"cid-ok":        {ClientID: "cid-ok", KeyID: "soc_1", PublicKeyPEM: pub, KeyAlgorithm: "ES256"},
-		"cid-expired":   {ClientID: "cid-expired", KeyID: "soc_2", PublicKeyPEM: pub, KeyAlgorithm: "ES256", ExpiresAt: &past},
-		"cid-federated": {ClientID: "cid-federated", KeyID: "soc_3", PublicKeyPEM: "" /* federated: no key */},
+		"cid-ok":        {ClientID: "cid-ok", KeyID: "soc_1", PublicKeyPEM: pub, KeyAlgorithm: "ES256", SubjectEnabled: true},
+		"cid-expired":   {ClientID: "cid-expired", KeyID: "soc_2", PublicKeyPEM: pub, KeyAlgorithm: "ES256", ExpiresAt: &past, SubjectEnabled: true},
+		"cid-federated": {ClientID: "cid-federated", KeyID: "soc_3", PublicKeyPEM: "" /* federated: no key */, SubjectEnabled: true},
 	}
 	v := NewSAKeyValidator(fakeClientLookup{byClient: base})
 

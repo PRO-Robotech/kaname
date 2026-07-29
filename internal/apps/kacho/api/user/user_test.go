@@ -408,28 +408,53 @@ func (fakeUserUR) GetByEmail(context.Context, domain.Email) (domain.User, error)
 func (fakeUserUR) GetByAccountEmail(context.Context, domain.AccountID, domain.Email) (domain.User, error) {
 	return domain.User{}, stderrors.New("not stubbed")
 }
-func (fakeUserUR) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
-	return nil, nil
+
+// FindPendingByEmail models the real query: PENDING rows matched by email. A
+// pending invitee carries no external id (the DB CHECK forbids one), so email is
+// the only way it can be found — which is exactly why this branch has to be
+// reachable in tests that seed one.
+func (r fakeUserUR) FindPendingByEmail(_ context.Context, email domain.Email) ([]domain.User, error) {
+	if r.parent == nil {
+		return nil, nil
+	}
+	var out []domain.User
+	for _, u := range r.parent.existingActive {
+		if u.InviteStatus == domain.InviteStatusPending &&
+			strings.EqualFold(string(u.Email), string(email)) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }
+
+// FindActiveByExternalID models the real query, whose WHERE clause is
+// `invite_status = 'ACTIVE'`. The status filter is applied HERE on purpose: a
+// double that returns rows of any state cannot fail on a caller who mistakes
+// "filtered out" for "does not exist", which is exactly the defect this reader
+// has to be able to express.
 func (r fakeUserUR) FindActiveByExternalID(_ context.Context, ext domain.ExternalSubject) ([]domain.User, error) {
 	if r.parent == nil {
 		return nil, nil
 	}
 	var out []domain.User
 	for _, u := range r.parent.existingActive {
-		if u.ExternalID == ext {
+		if u.ExternalID == ext && u.InviteStatus == domain.InviteStatusActive {
 			out = append(out, u)
 		}
 	}
 	return out, nil
 }
-func (r fakeUserUR) FindByExternalIDInStatuses(_ context.Context, ext domain.ExternalSubject, _ []domain.InviteStatus) ([]domain.User, error) {
+func (r fakeUserUR) FindByExternalIDInStatuses(_ context.Context, ext domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error) {
 	if r.parent == nil {
 		return nil, nil
 	}
+	want := map[domain.InviteStatus]bool{}
+	for _, st := range statuses {
+		want[st] = true
+	}
 	var out []domain.User
 	for _, u := range r.parent.existingActive {
-		if u.ExternalID == ext {
+		if u.ExternalID == ext && (len(want) == 0 || want[u.InviteStatus]) {
 			out = append(out, u)
 		}
 	}

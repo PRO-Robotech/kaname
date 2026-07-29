@@ -45,6 +45,24 @@ var ErrCredentialExpired = stderrors.New("credential expired")
 // which is precisely the defect this sentinel exists to make impossible.
 var ErrSubjectNotActive = stderrors.New("subject not active")
 
+// ErrServiceAccountDisabled — the subject behind this token request IS a kacho
+// service account, and `service_accounts.enabled` forbids it from
+// authenticating. The token hook translates it into a 403.
+//
+// Separate from ErrSubjectNotActive above, which carries the same fact about a
+// USER, because the hook owes the two different answers: what fails for a
+// machine credential is client authentication (RFC 6749 §5.2 `invalid_client`),
+// and the operator reading the trail needs to know which table to look in.
+// Nothing distinguishes them further down — a personal access token is a
+// machine request whose subject is a person — so the distinction has to be made
+// here, where the kind of subject is known.
+//
+// Also separate from iamerr.ErrNotFound: a mapping that resolves to no account
+// is refused through its own branch, and reporting an account that exists as
+// missing would send whoever is debugging it looking for a row that is right
+// there.
+var ErrServiceAccountDisabled = stderrors.New("service account disabled")
+
 // TokenEnrichmentUserPort — read-side dependency: resolve a User mirror by its
 // external identity subject (Kratos `sub`).
 type TokenEnrichmentUserPort interface {
@@ -205,6 +223,13 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 			if saErr != nil && !stderrors.Is(saErr, iamerr.ErrNotFound) {
 				return nil, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
 			}
+			// Federation-in reaches the same account by another door, so it owes
+			// the same answer: a state that stops one branch and not the other is
+			// not a state, it is a suggestion.
+			if saErr == nil && !sa.MayAuthenticate() {
+				return nil, fmt.Errorf("federated sa-key %s: service account %s: %w",
+					soc.ID, soc.SvaID, ErrServiceAccountDisabled)
+			}
 			return s.federatedClaims(soc, sa, subject, hookCtx), nil
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
@@ -231,6 +256,16 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 			sa, saErr := s.sas.GetServiceAccount(ctx, soc.SvaID)
 			if saErr != nil && !stderrors.Is(saErr, iamerr.ErrNotFound) {
 				return nil, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
+			}
+			// The account states whether it may authenticate at all, and this is
+			// where a token stops being issued to one that may not. The check is
+			// on the row that was READ: `Enabled` is false in a zero value too,
+			// so judging an unresolved account by the same field would refuse
+			// every mapping whose account read missed — a different verdict
+			// wearing this one's clothes.
+			if saErr == nil && !sa.MayAuthenticate() {
+				return nil, fmt.Errorf("sa-key %s: service account %s: %w",
+					soc.ID, soc.SvaID, ErrServiceAccountDisabled)
 			}
 			// sa may be zero-value when the mapping outlives the SA (SA
 			// deleted, OAuth client cleanup pending); still emit

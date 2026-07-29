@@ -8,11 +8,9 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
@@ -22,7 +20,6 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	handlerinternal "github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
@@ -56,7 +53,7 @@ func buildHooksMux(
 	auditAdapter := &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit}
 
 	saClientRepo := kachopg.NewSAOAuthClientRepo(pool)
-	saPort := &tokenEnrichSAAdapter{pool: pool, saClients: saClientRepo}
+	saPort := &tokenEnrichSAAdapter{saClients: saClientRepo}
 
 	// User-token principal mapping: минтованный из UserOAuthClient токен резолвится
 	// в принципал `user:<id>` (net-new относительно SA-key → serviceAccount:<id>).
@@ -149,12 +146,15 @@ func (a *userProvisionAdapter) Provision(ctx context.Context, in handlerinternal
 }
 
 // tokenEnrichSAAdapter — pool-scoped read adapter for
-// service.TokenEnrichmentSAPort. The SAOAuthClient pool repo already serves
-// the hydra_client_id reverse lookup; the ServiceAccount reader in
-// `service_account_repo.go` is tx-scoped, so we issue a single short-lived
-// read tx per lookup (no row locks; auto-rollback on return).
+// service.TokenEnrichmentSAPort. Every read it forwards belongs to the
+// SAOAuthClient pool repo, which serves both the hydra_client_id reverse lookup
+// and the ServiceAccount row behind it.
+//
+// The ServiceAccount read used to be a query written out here instead. Living
+// in the composition root, it was reachable by no test, and it selected only
+// the identity fields — so `enabled` arrived false for every account and the
+// mint path could not have judged the state even if it had tried to.
 type tokenEnrichSAAdapter struct {
-	pool      *pgxpool.Pool
 	saClients *kachopg.SAOAuthClientRepo
 }
 
@@ -169,23 +169,7 @@ func (a *tokenEnrichSAAdapter) FindByExternalSubject(ctx context.Context, issuer
 }
 
 func (a *tokenEnrichSAAdapter) GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
-	var sa domain.ServiceAccount
-	row := a.pool.QueryRow(ctx,
-		`SELECT id, account_id, name, description, created_at
-		   FROM service_accounts WHERE id = $1`, string(id))
-	var name, description string
-	if err := row.Scan(
-		(*string)(&sa.ID), (*string)(&sa.AccountID),
-		&name, &description, &sa.CreatedAt,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
-		}
-		return domain.ServiceAccount{}, fmt.Errorf("scan service_account %s: %w", id, err)
-	}
-	sa.Name = domain.SvcAccountName(name)
-	sa.Description = domain.Description(description)
-	return sa, nil
+	return a.saClients.GetServiceAccount(ctx, id)
 }
 
 // tokenEnrichUserTokenAdapter — pool-scoped read adapter for

@@ -268,6 +268,22 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"user_disabled"}`, http.StatusForbidden)
 			return
 		}
+		// The subject is a kacho SERVICE ACCOUNT whose state forbids
+		// authentication. Same refusal, different words on purpose: what failed
+		// is client authentication (`invalid_client`, RFC 6749 §5.2, as for an
+		// expired key on this same path), and the subject is not a person — so
+		// the human's diagnostic would send an operator searching the wrong
+		// table for a subject that is not in it.
+		//
+		// Also checked BEFORE the not-found branch, for the reason that branch
+		// documents: it still mints for an interactive identity whose mirror has
+		// not committed, and a refusal that reached it would be answered with a
+		// token.
+		if errors.Is(err, service.ErrServiceAccountDisabled) {
+			h.denyServiceAccountDisabled(ctx, subject, payload)
+			http.Error(w, `{"error":"invalid_client"}`, http.StatusForbidden)
+			return
+		}
 		if errors.Is(err, iamerr.ErrNotFound) {
 			// Nothing in kacho answers to this subject. What that means — and
 			// therefore what we owe the caller — depends entirely on whether a
@@ -349,6 +365,16 @@ func (h *TokenHookHandler) denyNotActive(ctx context.Context, subject string, pa
 	h.logger.WarnContext(ctx, "token_hook: subject not active — token request denied",
 		"subject", subject, "client_id", payload.Request.ClientID)
 	h.auditDenied(ctx, subject, payload, "user_blocked")
+}
+
+// denyServiceAccountDisabled records the refusal of a service account whose
+// state forbids authentication. The reason is its own, not the user one: an
+// operator responds to a disabled service account by looking at that account,
+// and calling it a blocked user would send them to a table it is not in.
+func (h *TokenHookHandler) denyServiceAccountDisabled(ctx context.Context, subject string, payload hydraTokenHookRequest) {
+	h.logger.WarnContext(ctx, "token_hook: service account disabled — token request denied",
+		"subject", subject, "client_id", payload.Request.ClientID)
+	h.auditDenied(ctx, subject, payload, "service_account_disabled")
 }
 
 // denyExpired records the refusal of a credential past its stated expiry.

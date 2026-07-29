@@ -30,7 +30,14 @@ type saReader struct {
 	tx pgx.Tx
 }
 
-const saCols = "id, account_id, name, description, labels, created_at"
+// saCols — every column a caller of this aggregate is entitled to see.
+//
+// `enabled` is part of it because it decides whether the account may
+// authenticate, and a projection that leaves it out hands every caller the same
+// zero value: false for an enabled account and false for a disabled one, with
+// nothing able to tell them apart. That is not a missing convenience, it is a
+// state nobody downstream can read — including the operator who set it.
+const saCols = "id, account_id, name, description, labels, created_at, enabled"
 
 func (r *saReader) Get(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
 	row := r.tx.QueryRow(ctx,
@@ -248,6 +255,7 @@ func scanSA(row scanner) (domain.ServiceAccount, error) {
 		(*string)(&sa.Description),
 		&labelsJSON,
 		&sa.CreatedAt,
+		&sa.Enabled,
 	)
 	if err != nil {
 		return domain.ServiceAccount{}, err

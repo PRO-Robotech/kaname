@@ -63,9 +63,15 @@ type UserClientRepo interface {
 	DeleteByID(ctx context.Context, tx service.Tx, id domain.UserOAuthClientID) error
 	List(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.UserOAuthClient, string, error)
 	// AccountForUser резолвит account владельца-User, чтобы Issue/Revoke стемпили
-	// `account_id` на Operation-метаданных (account-scoped /iam/operations feed).
+	// `account_id` на Operation-метаданных (account-scoped /iam/operations feed),
+	// и состояние, разрешающее ему аутентифицироваться.
+	//
+	// Состояние возвращается ВМЕСТЕ с account'ом, а не отдельным вызовом: иначе
+	// решение принимается по полю, которое запрос мог не загрузить — ровно тот
+	// дефект, ради которого эта сигнатура так выглядит.
+	//
 	// Нет User → ErrNotFound.
-	AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, error)
+	AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error)
 }
 
 // OAuthClientAdmin абстрагирует hydra-admin операции, нужные Issue/Revoke.
@@ -196,9 +202,19 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 
 	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
 	// иначе account-scoped /iam/operations исключает token-операции.
-	accountID, err := u.repo.AccountForUser(ctx, in.UserID)
+	accountID, mayAuthenticate, err := u.repo.AccountForUser(ctx, in.UserID)
 	if err != nil {
 		return nil, mapPGErr(err)
+	}
+	// The hooks already refuse to mint a token for a user in this state. Issuing
+	// them a NEW personal token is a separate act: the secret is handed over and
+	// kept, and it starts working the day the account is unblocked — granted
+	// while nobody was permitted to grant it. The state that decides is the
+	// TOKEN OWNER's, not the caller's; otherwise the refusal has a documented
+	// detour through anyone still able to ask.
+	if !mayAuthenticate {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"User %s is not active and cannot be issued a token", in.UserID)
 	}
 
 	// DEFECT (b) / UTM-12: created_by existence — the own-DB created_by FK
@@ -206,7 +222,7 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	// FAILED_PRECONDITION here, never as an async code-9. Skipped when created_by
 	// == the target user (already resolved just above — the common self-issue path).
 	if in.CreatedByUserID != string(in.UserID) {
-		if _, cerr := u.repo.AccountForUser(ctx, domain.UserID(in.CreatedByUserID)); cerr != nil {
+		if _, _, cerr := u.repo.AccountForUser(ctx, domain.UserID(in.CreatedByUserID)); cerr != nil {
 			if errors.Is(cerr, iamerr.ErrNotFound) {
 				return nil, status.Errorf(codes.FailedPrecondition,
 					"created_by_user_id %s is not a known user", in.CreatedByUserID)
@@ -503,7 +519,10 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 	}
 	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
 	// иначе account-scoped /iam/operations исключает token-операции.
-	accountID, err := u.repo.AccountForUser(ctx, in.UserID)
+	// Состояние владельца здесь намеренно не читается: оно запрещает
+	// АУТЕНТИФИКАЦИЮ, а не уборку за собой. Иначе заблокировать пользователя и
+	// отозвать его живые токены стало бы взаимоисключающим.
+	accountID, _, err := u.repo.AccountForUser(ctx, in.UserID)
 	if err != nil {
 		return nil, mapPGErr(err)
 	}

@@ -28,6 +28,11 @@ func (saObj) toPb(sa domain.ServiceAccount) (*iamv1.ServiceAccount, error) {
 		Description: string(sa.Description),
 		CreatedAt:   createdAt,
 		Labels:      labelsToStringMap(sa.Labels),
+		// Whether the account may authenticate. Reported because the issuance
+		// paths now decide on it: a state that changes what the platform does
+		// but that no reader can observe leaves an operator guessing why a
+		// machine flow stopped working.
+		Enabled: sa.Enabled,
 	}, nil
 }
 
