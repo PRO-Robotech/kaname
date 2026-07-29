@@ -5,7 +5,7 @@
 // facts the three-tier super-access cascade reads — so that cascade resolves at
 // request time and does not depend on a queue having delivered anything.
 //
-// WHY THIS EXISTS
+// # WHY THIS EXISTS
 //
 // The recorded decision (.claude/rules/security.md, "Три уровня супер-доступа")
 // chose a cascade over per-object materialization on one argument: with a lagging
@@ -28,7 +28,7 @@
 // delivery of its pointer, the derivation has nothing to resolve over and every
 // tier above the grantee is denied.
 //
-// WHAT THIS DOES INSTEAD
+// # WHAT THIS DOES INSTEAD
 //
 // The pointer is not new information. It is a projection of a column in a row iam
 // has already committed — `access_bindings.resource_type/resource_id`,
@@ -51,7 +51,7 @@
 // failure the window is back. What the decision asks for is INDEPENDENCE from
 // delivery, not a shorter delay.
 //
-// BOUNDARY
+// # BOUNDARY
 //
 // Only facts iam can prove from its own rows are derivable here. Object types
 // owned by other services (vpc_*, compute_*, nlb_*, storage_*, registry_*) have
@@ -135,15 +135,31 @@ func (r *Resolver) Derivable(objectType string) bool {
 	return ok
 }
 
-// StructuralFacts returns the structural tuples about `<objectType>:<objectID>`
-// that iam can prove from its own committed rows.
+// maxChainDepth bounds the walk below. The structural chain is
+// leaf → project → account → cluster, and `cluster` derives nothing further, so
+// three hops is the whole of it. The bound is here so a future pointer that
+// accidentally closes a loop costs a stopped walk rather than a hung request.
+const maxChainDepth = 4
+
+// StructuralFacts returns the structural tuples the cascade needs in order to
+// resolve `<objectType>:<objectID>` from committed state — the object's own parent
+// pointer AND, TRANSITIVELY, the pointers of the objects that pointer names.
+//
+// The transitive part is not an optimisation, it is the requirement. A
+// project-scoped access binding is reached by
+// `super_admin from project` → `project.super_admin: admin from account`, so the
+// account administrator's path runs over TWO pointers — binding→project and
+// project→account — and both are outbox-delivered. Supplying only the first leaves
+// the second hop with nothing to resolve over, and the cascade still denies. The
+// walk therefore follows each derived pointer to its own row until it reaches the
+// cluster, which points at nothing.
 //
 // Contract, and the three outcomes must stay distinguishable:
 //
 //   - the type is not derivable, or the row does not exist → (nil, nil). Nothing
 //     is claimed; the caller's deny stands. A missing row is NOT an error: iam
 //     legitimately gets asked about ids that were never its own.
-//   - the row exists → its facts, in a deterministic order.
+//   - the row exists → its facts and its ancestors', in a deterministic order.
 //   - the read failed → (nil, err). The caller must NOT read this as "no facts":
 //     the structural fact is part of the decision, so an unreadable row means the
 //     answer is unknown, and unknown is an outage, not a denial.
@@ -151,6 +167,58 @@ func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID str
 	if objectID == "" || !r.Derivable(objectType) {
 		return nil, nil
 	}
+	var (
+		out     []authztypes.ConditionalTuple
+		visited = map[string]bool{}
+		// worklist of objects still to project, breadth-first from the target.
+		queue = []objectRef{{Type: objectType, ID: objectID}}
+	)
+	for depth := 0; depth < maxChainDepth && len(queue) > 0; depth++ {
+		next := make([]objectRef, 0, len(queue))
+		for _, ref := range queue {
+			key := ref.Type + ":" + ref.ID
+			if visited[key] || !r.Derivable(ref.Type) {
+				continue
+			}
+			visited[key] = true
+			facts, err := r.factsFor(ctx, ref.Type, ref.ID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, facts...)
+			// Each derived pointer names a PARENT object; that parent's own pointer
+			// is the next hop of the same chain.
+			for _, f := range facts {
+				if p, ok := parseObjectRef(f.User); ok && !visited[p.Type+":"+p.ID] {
+					next = append(next, p)
+				}
+			}
+		}
+		queue = next
+	}
+	return out, nil
+}
+
+// objectRef — a typed FGA object the walk still has to project.
+type objectRef struct {
+	Type string
+	ID   string
+}
+
+// parseObjectRef reads "<type>:<id>" produced by this package's own projections.
+// A userset reference ("group:g#member") or a subject ("user:u") is not an object
+// the walk continues over: only `account:` and `project:` have parents of their own,
+// and Derivable filters the rest.
+func parseObjectRef(s string) (objectRef, bool) {
+	i := strings.Index(s, ":")
+	if i <= 0 || i == len(s)-1 || strings.Contains(s, "#") {
+		return objectRef{}, false
+	}
+	return objectRef{Type: s[:i], ID: s[i+1:]}, true
+}
+
+// factsFor projects ONE row. StructuralFacts is the transitive closure over it.
+func (r *Resolver) factsFor(ctx context.Context, objectType, objectID string) ([]authztypes.ConditionalTuple, error) {
 	if objectType == "iam_condition" {
 		return r.conditionFacts(ctx, objectID)
 	}
@@ -169,31 +237,31 @@ func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID str
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		return bindingScopeFacts(b), nil
+		return toConditionalOne(b.StructuralParent()), nil
 	case "account":
 		a, gerr := rd.Accounts().Get(ctx, domain.AccountID(objectID))
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		return accountFacts(a), nil
+		return toConditional(a.StructuralFacts()), nil
 	case "project":
 		p, gerr := rd.Projects().Get(ctx, domain.ProjectID(objectID))
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		return projectFacts(p), nil
+		return toConditional(p.StructuralFacts()), nil
 	case "iam_user":
 		u, gerr := rd.Users().Get(ctx, domain.UserID(objectID))
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		return accountPointer(string(u.AccountID), "iam_user", objectID), nil
+		return toConditionalOne(domain.AccountScopedStructuralFact(string(u.AccountID), "iam_user", objectID)), nil
 	case "iam_group":
 		g, gerr := rd.Groups().Get(ctx, domain.GroupID(objectID))
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		return accountPointer(string(g.AccountID), "iam_group", objectID), nil
+		return toConditionalOne(domain.AccountScopedStructuralFact(string(g.AccountID), "iam_group", objectID)), nil
 	case "iam_role":
 		ro, gerr := rd.Roles().Get(ctx, domain.RoleID(objectID))
 		if gerr != nil {
@@ -201,13 +269,13 @@ func (r *Resolver) StructuralFacts(ctx context.Context, objectType, objectID str
 		}
 		// A system role has no owning account (account_id IS NULL); nothing to
 		// derive, and the account tier must not reach it.
-		return accountPointer(string(ro.AccountID), "iam_role", objectID), nil
+		return toConditionalOne(domain.AccountScopedStructuralFact(string(ro.AccountID), "iam_role", objectID)), nil
 	case "iam_service_account":
 		sa, gerr := rd.ServiceAccounts().Get(ctx, domain.ServiceAccountID(objectID))
 		if gerr != nil {
 			return nil, absentIsNotAnError(gerr)
 		}
-		return accountPointer(string(sa.AccountID), "iam_service_account", objectID), nil
+		return toConditionalOne(domain.AccountScopedStructuralFact(string(sa.AccountID), "iam_service_account", objectID)), nil
 	}
 	return nil, nil
 }
@@ -217,14 +285,7 @@ func (r *Resolver) conditionFacts(ctx context.Context, objectID string) ([]authz
 	if err != nil {
 		return nil, absentIsNotAnError(err)
 	}
-	if c.ProjectID == "" {
-		return nil, nil
-	}
-	return []authztypes.ConditionalTuple{{
-		User:     "project:" + c.ProjectID,
-		Relation: "project",
-		Object:   "iam_condition:" + objectID,
-	}}, nil
+	return toConditionalOne(domain.ProjectScopedStructuralFact(c.ProjectID, "iam_condition", objectID)), nil
 }
 
 // absentIsNotAnError collapses "no such row" to (nil, nil) and passes every other
@@ -238,83 +299,24 @@ func absentIsNotAnError(err error) error {
 	return err
 }
 
-// bindingScopeFacts projects an AccessBinding row into its scope parent-pointer.
-//
-// This MUST stay byte-identical to what the outbox emits for the same row —
-// access_binding/tuples.go::hierarchyParentTuple. tuples_parity_test.go asserts
-// that against the emitter itself rather than against a copy of its shape, so the
-// two cannot drift apart silently.
-func bindingScopeFacts(b domain.AccessBinding) []authztypes.ConditionalTuple {
-	scope := strings.ToLower(string(b.ResourceType))
-	switch scope {
-	case "project", "account", "cluster":
-	default:
+// toConditional maps the domain projection onto the OpenFGA wire shape. It is the
+// ONLY place this package decides anything about tuple shape; what the triples ARE
+// is decided once, in domain/structural_tuple.go, and the outbox emitter reads the
+// same function. See that file for why.
+func toConditional(sts []domain.StructuralTuple) []authztypes.ConditionalTuple {
+	if len(sts) == 0 {
 		return nil
 	}
-	if b.ResourceID == "" {
-		return nil
-	}
-	return []authztypes.ConditionalTuple{{
-		User:     scope + ":" + b.ResourceID,
-		Relation: scope,
-		Object:   "iam_access_binding:" + string(b.ID),
-	}}
-}
-
-// accountFacts projects an account row into the two structural facts the model
-// reads on `account`: its cluster pointer (levels 1-2 reach the account over it)
-// and its OWNER.
-//
-// The owner is here because the model says it is structural — "holds the instant
-// the account exists and never waits for the reconciler" — while the `owner`
-// tuple was itself outbox-delivered, so an account could not be torn down by the
-// person who had just created it until the queue caught up. That is the exact
-// asymmetry the owner refinement was written to remove.
-func accountFacts(a domain.Account) []authztypes.ConditionalTuple {
-	out := []authztypes.ConditionalTuple{{
-		User:     "cluster:" + domain.ClusterSingletonID,
-		Relation: "cluster",
-		Object:   "account:" + string(a.ID),
-	}}
-	if a.OwnerUserID != "" {
-		out = append(out, authztypes.ConditionalTuple{
-			User:     "user:" + string(a.OwnerUserID),
-			Relation: "owner",
-			Object:   "account:" + string(a.ID),
-		})
+	out := make([]authztypes.ConditionalTuple, 0, len(sts))
+	for _, st := range sts {
+		out = append(out, authztypes.ConditionalTuple{User: st.User, Relation: st.Relation, Object: st.Object})
 	}
 	return out
 }
 
-// projectFacts projects a project row into its account and cluster pointers —
-// both of which `project.super_admin` derives over.
-func projectFacts(p domain.Project) []authztypes.ConditionalTuple {
-	out := []authztypes.ConditionalTuple{{
-		User:     "cluster:" + domain.ClusterSingletonID,
-		Relation: "cluster",
-		Object:   "project:" + string(p.ID),
-	}}
-	if p.AccountID != "" {
-		out = append(out, authztypes.ConditionalTuple{
-			User:     "account:" + string(p.AccountID),
-			Relation: "account",
-			Object:   "project:" + string(p.ID),
-		})
-	}
-	return out
-}
-
-// accountPointer is the one-line projection shared by the account-scoped iam
-// types (`<type>.super_admin: admin from account`). An empty accountID yields
-// nothing — a row with no owning account must not become reachable from any
-// account's administrator.
-func accountPointer(accountID, objectType, objectID string) []authztypes.ConditionalTuple {
-	if accountID == "" {
+func toConditionalOne(st domain.StructuralTuple, ok bool) []authztypes.ConditionalTuple {
+	if !ok {
 		return nil
 	}
-	return []authztypes.ConditionalTuple{{
-		User:     "account:" + accountID,
-		Relation: "account",
-		Object:   objectType + ":" + objectID,
-	}}
+	return toConditional([]domain.StructuralTuple{st})
 }

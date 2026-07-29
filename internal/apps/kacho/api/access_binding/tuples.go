@@ -236,21 +236,19 @@ func tuplesForBinding(b domain.AccessBinding, relations []authzmap.Relation) []a
 // resources[] arm previously emitted only per-object tuples and skipped this).
 //
 // ok=false when the scope is not a hierarchy parent or the binding has no id.
+//
+// The SHAPE is not decided here. domain.AccessBinding.StructuralParent is the single
+// projection of the row into this triple, and internal/authzcascade supplies the very
+// same triple as a request-scoped contextual tuple so the cascade resolves before the
+// drainer has delivered this one. Two independent copies would let the cascade mean
+// different things depending on whether the queue had caught up; delegating leaves
+// nothing to drift.
 func hierarchyParentTuple(b domain.AccessBinding) (abrepo.RelationTuple, bool) {
-	resType := strings.ToLower(string(b.ResourceType))
-	switch resType {
-	case "project", "account", "cluster":
-		if b.ID == "" {
-			return abrepo.RelationTuple{}, false
-		}
-		return abrepo.RelationTuple{
-			User:     fmt.Sprintf("%s:%s", resType, b.ResourceID),
-			Relation: resType,
-			Object:   fmt.Sprintf("iam_access_binding:%s", b.ID),
-		}, true
-	default:
+	st, ok := b.StructuralParent()
+	if !ok {
 		return abrepo.RelationTuple{}, false
 	}
+	return abrepo.RelationTuple{User: st.User, Relation: st.Relation, Object: st.Object}, true
 }
 
 // mapClusterRelations rewrites tier-derived relations to the canonical

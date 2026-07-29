@@ -310,11 +310,23 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		return result, nil
 	}
 	// Per-object resolve DENIED. Cluster-admin fallback: the flat super-gate
-	// (cluster:…#system_admin) is the SOLE second-chance — a cluster-admin holds
+	// (cluster:…#system_admin) is the first second-chance — a cluster-admin holds
 	// authority on everything even without a per-object tuple. The common
 	// allow case above already returned, so only a denied request pays this extra
 	// round-trip; fail-closed preserved (a non-cluster-admin stays denied).
 	if s.isClusterAdmin(ctx, caMemo, req.Subject) {
+		result.Allowed = true
+		return result, nil
+	}
+	// Structural fallback: the cascade's parent pointers read from iam's committed
+	// rows instead of from whatever the outbox has delivered. This is what makes the
+	// account administrator and the account owner resolve at request time, as the
+	// cloud administrator already did above.
+	structuralAllowed, serr := s.structuralFallback(ctx, req.Subject, relation, object, condCtx)
+	if serr != nil {
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
+	}
+	if structuralAllowed {
 		result.Allowed = true
 		return result, nil
 	}
@@ -414,6 +426,83 @@ type consistentAuthorizer interface {
 	CheckWithContextConsistent(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error)
 }
 
+// contextualAuthorizer — OPTIONAL capability of the Authorizer: a Check that also
+// carries request-scoped tuples. Implemented by *clients.OpenFGAHTTPClient; a test
+// stub that implements only CheckWithContext keeps working and simply never gets a
+// structural fallback (which is why StructuralFallbackReachable exists — a
+// production wiring that lost the capability must be a failure, not a silence).
+type contextualAuthorizer interface {
+	CheckWithContextualTuples(ctx context.Context, subject, relation, object string,
+		condCtx map[string]any, contextual []authztypes.ConditionalTuple) (bool, error)
+}
+
+// StructuralFallbackReachable reports whether the structural fallback can run at
+// all: a resolver is wired AND the Authorizer can carry contextual tuples. The
+// boot guard reads it, so "the cascade silently went back to being queue-dependent"
+// cannot be a runtime surprise. Exported because the composition root is where a
+// missing wiring must become a refusal to start.
+func (s *AuthorizeService) StructuralFallbackReachable() bool {
+	if s.structural == nil || s.relations == nil {
+		return false
+	}
+	_, ok := s.relations.(contextualAuthorizer)
+	return ok
+}
+
+// splitFGAObject splits "<type>:<id>" on the FIRST colon. Object ids may
+// themselves contain colons (registry_repository:<reg>/<repo>:<tag>), so the
+// remainder is the id verbatim.
+func splitFGAObject(object string) (objectType, objectID string, ok bool) {
+	i := strings.Index(object, ":")
+	if i <= 0 || i == len(object)-1 {
+		return "", "", false
+	}
+	return object[:i], object[i+1:], true
+}
+
+// structuralFallback re-resolves a DENIED check with the structural facts iam can
+// prove from its OWN committed rows, supplied as request-scoped contextual tuples.
+//
+// It is the reason the super-access cascade holds while the outbox has delivered
+// nothing: the pointers the cascade derives over are projections of committed
+// columns, so they are knowable at request time and need not be waited for.
+//
+// Placement is the deny path, after the cluster-admin super-gate, for the same
+// reason that gate sits there: the common ALLOW never pays for it, and a caller who
+// was already allowed cannot have their answer changed by it. A contextual tuple
+// can only ADD a path, so this can turn a deny into an allow and never the reverse
+// — which is why supplying only TRUE facts about the row is the whole safety
+// argument, and why cascade_injection_scope_test.go pins that the model reads those
+// relations in exactly one place (`super_admin`).
+//
+// Returns (allowed, err). A non-nil err means the structural fact could not be
+// read; the caller must surface that as an outage rather than as a denial, because
+// the fact is part of the decision and an unread fact is an unknown answer, not a
+// negative one.
+func (s *AuthorizeService) structuralFallback(
+	ctx context.Context, subject, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	if s.structural == nil {
+		return false, nil
+	}
+	objectType, objectID, ok := splitFGAObject(object)
+	if !ok || !s.structural.Derivable(objectType) {
+		return false, nil // no read for an object iam does not own
+	}
+	ca, ok := s.relations.(contextualAuthorizer)
+	if !ok {
+		return false, nil
+	}
+	facts, err := s.structural.StructuralFacts(ctx, objectType, objectID)
+	if err != nil {
+		return false, err
+	}
+	if len(facts) == 0 {
+		return false, nil
+	}
+	return ca.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
+}
+
 // CheckRelation — relation-native authorization check (FGA Check + OPA
 // overlay). Used by the cluster-internal per-RPC authz gate
 // (`InternalIAMService.Check`). Reuses the same FGA + OPA pipeline as
@@ -456,6 +545,18 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	// after the cascade is contracted. Checked AFTER the per-object resolve so the
 	// common allow case costs a single round-trip; nil-safe.
 	if authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, req.Subject) {
+		result.Allowed = true
+		return result, nil
+	}
+	// Structural fallback — same reason and same ordering as in check(): the
+	// cascade's parent pointers come from iam's committed rows, so levels below the
+	// cloud administrator stop depending on the outbox having delivered them. This
+	// is the path the api-gateway per-RPC gate takes.
+	structuralAllowed, serr := s.structuralFallback(ctx, req.Subject, req.Relation, req.Object, condCtx)
+	if serr != nil {
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
+	}
+	if structuralAllowed {
 		result.Allowed = true
 		return result, nil
 	}
