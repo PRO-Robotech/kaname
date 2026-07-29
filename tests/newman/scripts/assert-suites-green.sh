@@ -160,11 +160,16 @@ for col in "${collections[@]}"; do
   #   teardown-usr-iso-gone, teardown-user-revoke, teardown-usr-iso-revoke,
   #   issue-sakey, ^IAM-CH-GRP-MEMBERSHIP-FLIP-OK.
   #   PRO-Robotech/kacho#9, kacho-iam#212 and kacho-iam#217 should be closed as
-  #   fixed. The one remaining red in iam-authz-grant-check-propagation is NOT
+  #   fixed. The one remaining red in iam-authz-grant-check-propagation was NOT
   #   masked and must not be: AUTHZGCP-BIND-LIST-BY-SUBJECT-FOREIGN-DENY ::
-  #   inv-lists-aaa-subject denies correctly (403) but the response carries no
-  #   ErrorInfo detail, so the case cannot tell a scoped deny from a catalog miss.
-  #   That is a contract observation about error details, worth its own fix.
+  #   inv-lists-aaa-subject denied correctly (403) but the response carried no
+  #   ErrorInfo detail, so the case could not tell a scoped deny from a catalog
+  #   miss. The contract fix landed in the service (iam now attaches the reason,
+  #   domain and action on a refusal it decides itself, for every method on the
+  #   scope-filtered band). Expected green on the next stand run; unit coverage
+  #   is services/iam/internal/authzguard/deny_details_test.go, which enumerates
+  #   the band FROM the catalog. Left recorded rather than deleted until a stand
+  #   run observes it — the fix is proven in-process, not end to end.
   #
   #   PRUNED 2026-07-26 (the list shrinks, never grows). Every name below matched
   #   NO request in ANY generated collection — the cases were deleted earlier and

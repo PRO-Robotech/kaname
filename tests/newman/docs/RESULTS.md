@@ -178,10 +178,19 @@ Re-measured **2026-07-28** on the kind stand, by running the suites:
 
 `PRO-Robotech/kacho#9`, `kacho-iam#212` and `kacho-iam#217` should be closed as fixed.
 
-One red in `iam-authz-grant-check-propagation` is **not** covered by any of this and is
+One red in `iam-authz-grant-check-propagation` was not covered by any of this and is
 **not** masked: `AUTHZGCP-BIND-LIST-BY-SUBJECT-FOREIGN-DENY :: inv-lists-aaa-subject`
-denies correctly, but the response carries no error detail, so the case cannot tell a
-scoped denial from a missing catalog entry. That is worth its own fix.
+denied correctly, but the response carried no error detail, so the case could not tell a
+scoped denial from a missing catalog entry.
+
+**Fixed in the service.** iam now attaches the machine-readable reason (`AUTHZ_DENIED`),
+domain and `metadata.action` to a refusal it decides itself — for every method on the
+scope-filtered band, where the edge runs no per-RPC check and therefore names no action.
+A method with no catalog row still gets nothing, so a catalog miss stays distinguishable,
+which is the discriminator the case asserts. Unit coverage enumerates the band from the
+catalog itself: `services/iam/internal/authzguard/deny_details_test.go`. The case is
+expected green on the next stand run; this row stays until a run observes it, because the
+fix is proven in-process and not yet end to end.
 
 ## Known failing — honest must-DENY canary (NOT whitelisted, NOT masked)
 
