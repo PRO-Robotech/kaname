@@ -151,7 +151,7 @@ type modelType struct {
 func parseModel(t *testing.T) map[string]*modelType {
 	t.Helper()
 	path := modelPath(t)
-	raw, err := os.ReadFile(path) //nolint:gosec // fixed in-repo path
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read canonical model %s: %v", path, err)
 	}
