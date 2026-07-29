@@ -58,8 +58,15 @@ func isBindableScope(scope string) bool {
 //
 // This triple is what `iam_access_binding.super_admin: super_admin from project or
 // admin from account or any_admin from cluster` resolves over — the sole enabler of
-// the cascade on a binding. ok=false when the scope is not a hierarchy parent or the
-// binding has no id.
+// the cascade on a binding. ok=false when the scope is not a hierarchy parent, the
+// binding has no id, or the scope has no id.
+//
+// The empty-scope-id case is unreachable through the API — validateScopeID pins the
+// cluster tier to the singleton id and requires a non-empty account/project id — and
+// the guard is here for what it prevents rather than for what it expects: without it
+// such a row projects `cluster:` with an empty object id, which the store rejects, and
+// a rejected write in the outbox is retried rather than dropped, so one malformed row
+// would hold up its partition indefinitely.
 //
 // It is deliberately INDEPENDENT of status. A revoked binding keeps its row, and it
 // is still a record that has to be readable and deletable by the administrator of its
