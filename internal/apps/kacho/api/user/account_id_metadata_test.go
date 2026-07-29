@@ -142,9 +142,6 @@ type fakeUsrRdr struct{ accID string }
 func (r *fakeUsrRdr) Get(_ context.Context, id domain.UserID) (domain.User, error) {
 	return domain.User{ID: id, AccountID: domain.AccountID(r.accID), CreatedAt: time.Now().UTC()}, nil
 }
-func (r *fakeUsrRdr) GetByExternalID(context.Context, domain.ExternalSubject) (domain.User, error) {
-	return domain.User{}, iamerr.ErrNotFound
-}
 func (r *fakeUsrRdr) GetByEmail(context.Context, domain.Email) (domain.User, error) {
 	return domain.User{}, iamerr.ErrNotFound
 }

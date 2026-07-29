@@ -79,9 +79,6 @@ type scopeUserRdr struct{ parent *scopeUserRepo }
 func (r *scopeUserRdr) Get(context.Context, domain.UserID) (domain.User, error) {
 	return domain.User{}, stderrors.New("not found")
 }
-func (r *scopeUserRdr) GetByExternalID(context.Context, domain.ExternalSubject) (domain.User, error) {
-	return domain.User{}, stderrors.New("not found")
-}
 func (r *scopeUserRdr) GetByEmail(context.Context, domain.Email) (domain.User, error) {
 	return domain.User{}, stderrors.New("not found")
 }

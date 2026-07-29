@@ -70,15 +70,6 @@ func (r *fakeUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, err
 	}
 	return domain.User{}, iamerr.ErrNotFound
 }
-func (r *fakeUserRdr) GetByExternalID(_ context.Context, ext domain.ExternalSubject) (domain.User, error) {
-	if r.parent.getByExtErr != nil {
-		return domain.User{}, r.parent.getByExtErr
-	}
-	if r.parent.user != nil && r.parent.user.ExternalID == ext {
-		return *r.parent.user, nil
-	}
-	return domain.User{}, iamerr.ErrNotFound
-}
 func (r *fakeUserRdr) GetByEmail(_ context.Context, email domain.Email) (domain.User, error) {
 	if r.parent.user != nil && r.parent.user.Email == email {
 		return *r.parent.user, nil
@@ -94,11 +85,36 @@ func (r *fakeUserRdr) FindPendingByEmail(context.Context, domain.Email) ([]domai
 func (r *fakeUserRdr) FindActiveByExternalID(context.Context, domain.ExternalSubject) ([]domain.User, error) {
 	return nil, nil
 }
-func (r *fakeUserRdr) FindByExternalIDInStatuses(context.Context, domain.ExternalSubject, []domain.InviteStatus) ([]domain.User, error) {
+
+// FindByExternalIDInStatuses отдаёт строку личности КАК ЕСТЬ, если её состояние
+// входит в запрошенный набор: use-case судит состояние сам, поэтому фейк не
+// вправе решать за него, отфильтровывая недействующие строки.
+func (r *fakeUserRdr) FindByExternalIDInStatuses(
+	_ context.Context, ext domain.ExternalSubject, statuses []domain.InviteStatus,
+) ([]domain.User, error) {
+	if r.parent.getByExtErr != nil {
+		return nil, r.parent.getByExtErr
+	}
+	if r.parent.user == nil || r.parent.user.ExternalID != ext {
+		return nil, nil
+	}
+	for _, s := range statuses {
+		if s == r.parent.user.InviteStatus {
+			return []domain.User{*r.parent.user}, nil
+		}
+	}
 	return nil, nil
 }
-func (r *fakeUserRdr) FindActiveByEmail(context.Context, domain.Email) ([]domain.User, error) {
-	return nil, nil
+
+// FindActiveByEmail — только действующие строки с этим адресом.
+func (r *fakeUserRdr) FindActiveByEmail(_ context.Context, email domain.Email) ([]domain.User, error) {
+	if r.parent.user == nil || r.parent.user.Email != email {
+		return nil, nil
+	}
+	if !r.parent.user.InviteStatus.MayAuthenticate() {
+		return nil, nil
+	}
+	return []domain.User{*r.parent.user}, nil
 }
 func (r *fakeUserRdr) ListAccountsForUser(context.Context, domain.UserID) ([]domain.AccountID, error) {
 	return nil, nil
@@ -127,6 +143,10 @@ func TestLookupSubject_ByExternalID_Happy(t *testing.T) {
 		ExternalID:  "zit-12345",
 		Email:       "alice@example.com",
 		DisplayName: "Alice",
+		// Состояние названо явно: резолв судит по нему, поэтому фикстура,
+		// которая его умалчивает, описывает не действующую личность, а строку
+		// с пустым состоянием — и проверяла бы не то, о чём заявлена.
+		InviteStatus: domain.InviteStatusActive,
 	}}
 	uc := NewLookupSubjectUseCase(repo)
 	resp, err := uc.Execute(context.Background(), &iamv1.LookupSubjectRequest{
@@ -162,9 +182,10 @@ func TestLookupSubject_ByExternalID_Empty(t *testing.T) {
 
 func TestLookupSubject_ByID_UserHappy(t *testing.T) {
 	repo := &fakeRepo{user: &domain.User{
-		ID:         "usr-001",
-		ExternalID: "ext-1",
-		Email:      "u@example.com",
+		ID:           "usr-001",
+		ExternalID:   "ext-1",
+		Email:        "u@example.com",
+		InviteStatus: domain.InviteStatusActive,
 	}}
 	uc := NewLookupSubjectUseCase(repo)
 	resp, err := uc.Execute(context.Background(), &iamv1.LookupSubjectRequest{
@@ -179,6 +200,7 @@ func TestLookupSubject_ByID_ServiceAccountHappy(t *testing.T) {
 		ID:        "sva-001",
 		AccountID: "acc-001",
 		Name:      "ci-runner",
+		Enabled:   true,
 	}}
 	uc := NewLookupSubjectUseCase(repo)
 	resp, err := uc.Execute(context.Background(), &iamv1.LookupSubjectRequest{
@@ -214,8 +236,9 @@ func TestLookupSubject_ByID_NotFound(t *testing.T) {
 
 func TestLookupSubject_ByEmail_Happy(t *testing.T) {
 	repo := &fakeRepo{user: &domain.User{
-		ID:    "usr-bob",
-		Email: "bob@example.com",
+		ID:           "usr-bob",
+		Email:        "bob@example.com",
+		InviteStatus: domain.InviteStatusActive,
 	}}
 	uc := NewLookupSubjectUseCase(repo)
 	resp, err := uc.Execute(context.Background(), &iamv1.LookupSubjectRequest{

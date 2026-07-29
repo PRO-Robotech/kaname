@@ -399,9 +399,6 @@ type fakeUserUR struct{ parent *fakeUserRepo }
 func (fakeUserUR) Get(context.Context, domain.UserID) (domain.User, error) {
 	return domain.User{}, stderrors.New("not stubbed")
 }
-func (fakeUserUR) GetByExternalID(context.Context, domain.ExternalSubject) (domain.User, error) {
-	return domain.User{}, stderrors.New("not stubbed")
-}
 func (fakeUserUR) GetByEmail(context.Context, domain.Email) (domain.User, error) {
 	return domain.User{}, stderrors.New("not stubbed")
 }

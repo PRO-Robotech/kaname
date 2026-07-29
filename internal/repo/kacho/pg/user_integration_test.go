@@ -8,7 +8,6 @@ package pg_test
 // Покрытие:
 // - 15a: Upsert NEW (created=true).
 // - 15b: Upsert EXISTING external_id → UPDATE email/display_name, created=false.
-// - 16: GetByExternalID happy + NotFound.
 // - 16b: GetByEmail happy + NotFound (case-insensitive).
 // - 41a: Delete без refs → OK.
 // - 41b: Delete с GroupMember → FailedPrecondition.
@@ -150,32 +149,6 @@ func TestUser_15b_Upsert_Existing_UpdatesProfile(t *testing.T) {
 	assert.Equal(t, first.ID, out.ID, "row id preserved (xmin's update doesn't change id)")
 	assert.Equal(t, domain.Email("new15b@example.com"), out.Email)
 	assert.Equal(t, domain.DisplayName("New Name"), out.DisplayName)
-}
-
-// ── 16: GetByExternalID ─────────────────────────────────────────────────────
-func TestUser_16_GetByExternalID(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
-	repo := kachopg.New(pool, nil)
-
-	u, _ := upsertUser(t, ctx, repo, "ext-16", "u16@example.com", "U16")
-
-	rd, err := repo.Reader(ctx)
-	require.NoError(t, err)
-	defer func() { _ = rd.Rollback(ctx) }()
-	got, err := rd.Users().GetByExternalID(ctx, "ext-16")
-	require.NoError(t, err)
-	assert.Equal(t, u.ID, got.ID)
-
-	_, err = rd.Users().GetByExternalID(ctx, "nonexistent-ext")
-	require.Error(t, err)
-	assert.True(t, stderrors.Is(err, iamerr.ErrNotFound))
 }
 
 // ── 16b: GetByEmail case-insensitive ────────────────────────────────────────

@@ -755,9 +755,6 @@ func (u *fakeUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, err
 	}
 	return domain.User{ID: id, AccountID: domain.AccountID(acc)}, nil
 }
-func (u *fakeUserRdr) GetByExternalID(_ context.Context, _ domain.ExternalSubject) (domain.User, error) {
-	return domain.User{}, stderrors.New("not implemented in fake")
-}
 func (u *fakeUserRdr) GetByEmail(_ context.Context, _ domain.Email) (domain.User, error) {
 	return domain.User{}, stderrors.New("not implemented in fake")
 }

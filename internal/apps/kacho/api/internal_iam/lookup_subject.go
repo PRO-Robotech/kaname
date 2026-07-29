@@ -51,6 +51,11 @@ func (uc *LookupSubjectUseCase) Execute(ctx context.Context, req *iamv1.LookupSu
 	}
 }
 
+// identityStates — состояния, в которых личность вообще может найтись по
+// внешнему идентификатору. PENDING-строка external_id не несёт (DB-CHECK
+// users_invite_status_consistency), поэтому этими двумя набор исчерпан.
+var identityStates = []domain.InviteStatus{domain.InviteStatusActive, domain.InviteStatusBlocked}
+
 func (uc *LookupSubjectUseCase) byExternalID(ctx context.Context, ext string) (*iamv1.LookupSubjectResponse, error) {
 	if ext == "" {
 		return nil, status.Error(codes.InvalidArgument, "external_id required")
@@ -61,12 +66,27 @@ func (uc *LookupSubjectUseCase) byExternalID(ctx context.Context, ext string) (*
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	u, err := rd.Users().GetByExternalID(ctx, domain.ExternalSubject(ext))
-	if err == nil {
-		return responseUser(u)
-	}
-	if !stderrors.Is(err, iamerr.ErrNotFound) {
+	// Строки читаются КАК ЕСТЬ и судятся по состоянию — не «дай действующие».
+	//
+	// Фильтр отвечал пустым множеством на заблокированную личность, а пустое
+	// множество на этом пути край читает как «личности не существует» и идёт
+	// заводить её заново. То есть отказ выдавал себя за приглашение
+	// провизионировать — ровно того, кому запрещено. Отличить «нет такой» от
+	// «есть, но нельзя» вызывающий обязан, и обязан получить это от владельца
+	// личности, а не выводить сам.
+	rows, err := rd.Users().FindByExternalIDInStatuses(ctx, domain.ExternalSubject(ext), identityStates)
+	if err != nil {
 		return nil, status.Error(codes.Internal, "user lookup")
+	}
+	// Строки упорядочены по created_at ASC — каноническая личность та же, что
+	// резолвят остальные пути (UpsertFromIdentity.resolveUserID).
+	for _, u := range rows {
+		if u.InviteStatus.MayAuthenticate() {
+			return responseUser(u)
+		}
+	}
+	if len(rows) > 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "identity %s is blocked", ext)
 	}
 	// Future: ServiceAccount external_id (Ory Hydra client identity) — отложен
 	// на SA-key-flow follow-up. Текущий behaviour: NOT_FOUND.
@@ -92,6 +112,12 @@ func (uc *LookupSubjectUseCase) byID(ctx context.Context, id string) (*iamv1.Loo
 			}
 			return nil, status.Error(codes.Internal, "user get")
 		}
+		// Чтение по идентификатору состояние не фильтрует — значит судить его
+		// обязан этот код. Иначе одна и та же личность резолвится по-разному
+		// в зависимости от того, каким ключом её спросили.
+		if !u.InviteStatus.MayAuthenticate() {
+			return nil, status.Errorf(codes.FailedPrecondition, "User %s %s", id, userStateReason(u.InviteStatus))
+		}
 		return responseUser(u)
 	case strings.HasPrefix(id, domain.PrefixServiceAccount):
 		sa, err := rd.ServiceAccounts().Get(ctx, domain.ServiceAccountID(id))
@@ -100,6 +126,9 @@ func (uc *LookupSubjectUseCase) byID(ctx context.Context, id string) (*iamv1.Loo
 				return nil, status.Errorf(codes.NotFound, "ServiceAccount %s not found", id)
 			}
 			return nil, status.Error(codes.Internal, "service account get")
+		}
+		if !sa.MayAuthenticate() {
+			return nil, status.Errorf(codes.FailedPrecondition, "ServiceAccount %s is disabled", id)
 		}
 		return responseServiceAccount(sa)
 	}
@@ -116,14 +145,38 @@ func (uc *LookupSubjectUseCase) byEmail(ctx context.Context, email string) (*iam
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
+	// Каноническая строка адреса — старейшая действующая (тот же выбор, что у
+	// ветки по внешнему идентификатору и у посева администратора).
+	actives, err := rd.Users().FindActiveByEmail(ctx, domain.Email(email))
+	if err != nil {
+		return nil, status.Error(codes.Internal, "user lookup by email")
+	}
+	if len(actives) > 0 {
+		return responseUser(actives[0])
+	}
+	// Действующих нет. Это либо «адрес никому не принадлежит», либо «строка
+	// есть, но аутентификация ей запрещена» — два разных ответа.
 	u, err := rd.Users().GetByEmail(ctx, domain.Email(email))
 	if err == nil {
-		return responseUser(u)
+		return nil, status.Errorf(codes.FailedPrecondition, "identity %s %s", email, userStateReason(u.InviteStatus))
 	}
 	if stderrors.Is(err, iamerr.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "subject not found by email=%s", email)
 	}
 	return nil, status.Error(codes.Internal, "user lookup by email")
+}
+
+// userStateReason — причина отказа словами, точная для конкретного состояния.
+//
+// PENDING — приглашение, которое ещё никто не подтвердил: такая строка не несёт
+// внешнего идентификатора, и подтвердит его тот, кто первым войдёт по этому
+// адресу почты. Назвать это «заблокирован» значило бы отправить администратора
+// снимать запрет, которого нет.
+func userStateReason(st domain.InviteStatus) string {
+	if st == domain.InviteStatusBlocked {
+		return "is blocked"
+	}
+	return "is not active"
 }
 
 func responseUser(u domain.User) (*iamv1.LookupSubjectResponse, error) {

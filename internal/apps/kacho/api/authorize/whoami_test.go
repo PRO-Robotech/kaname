@@ -103,9 +103,6 @@ func (r *fakeUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, err
 	}
 	return u, nil
 }
-func (r *fakeUserRdr) GetByExternalID(context.Context, domain.ExternalSubject) (domain.User, error) {
-	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "not used")
-}
 func (r *fakeUserRdr) GetByEmail(context.Context, domain.Email) (domain.User, error) {
 	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "not used")
 }

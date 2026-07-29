@@ -53,38 +53,17 @@ func (r *userReader) Get(ctx context.Context, id domain.UserID) (domain.User, er
 	return u, nil
 }
 
-// GetByExternalID — возвращает первую ACTIVE-row с таким external_id среди
-// всех Account'ов. Caller обычно знает targetAccount — используй
-// GetByAccountEmail или FindActiveByExternalID.
-//
-// `ORDER BY created_at ASC` — детерминированный выбор. Это тот же row, что
-// api-gateway резолвит через InternalIAMService.LookupSubject (subject-identity
-// для per-RPC authz). Без ORDER BY Postgres возвращал произвольный
-// physical-order row: для identity с N ACTIVE-rows (один человек = N rows,
-// по одной на Account) gateway мог резолвить один row, а invite-flow создать
-// AccessBinding на другой → FGA `no path`. Канонический row = старейший ACTIVE
-// — он же первый bootstrap-row identity, на него invite-flow и вешает
-// project-scoped grant.
-func (r *userReader) GetByExternalID(ctx context.Context, ext domain.ExternalSubject) (domain.User, error) {
-	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM users WHERE external_id = $1 AND invite_status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1`, userCols),
-		string(ext))
-	u, err := scanUser(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with external_id not found")
-		}
-		return domain.User{}, mapErr(err, "", string(ext))
-	}
-	return u, nil
-}
-
-// GetByEmail — cross-Account lookup, возвращает первую row (любого
-// invite_status). Caller должен знать target Account — используй
+// GetByEmail — cross-Account lookup, возвращает старейшую row с этим адресом
+// (любого invite_status). Caller должен знать target Account — используй
 // GetByAccountEmail.
+//
+// `ORDER BY created_at ASC, id ASC` — тот же детерминизм, что у остальных
+// резолвов по адресу: один адрес принадлежит N строкам по построению
+// (уникальность внутри аккаунта, не глобальная), и без упорядочивания выбор
+// оставался за физическим порядком строк.
 func (r *userReader) GetByEmail(ctx context.Context, email domain.Email) (domain.User, error) {
 	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM users WHERE lower(email) = lower($1) LIMIT 1`, userCols),
+		fmt.Sprintf(`SELECT %s FROM users WHERE lower(email) = lower($1) ORDER BY created_at ASC, id ASC LIMIT 1`, userCols),
 		string(email))
 	u, err := scanUser(row)
 	if err != nil {
@@ -199,10 +178,11 @@ func (r *userReader) FindByExternalIDInStatuses(ctx context.Context, externalID 
 }
 
 // FindActiveByEmail — все ACTIVE-row'ы по email (case-insensitive) через все
-// Account'ы. ORDER BY created_at ASC — actives[0] совпадает с тем, что
-// возвращает GetByExternalID (тот же ORDER) и, следовательно, api-gateway
-// InternalIAMService.LookupSubject. Используется invite-flow'ом для привязки
-// project-scoped AccessBinding к канонической identity-row.
+// Account'ы. ORDER BY created_at ASC — actives[0] и есть каноническая строка
+// личности: тот же выбор делает FindByExternalIDInStatuses (тот же ORDER) и,
+// следовательно, api-gateway через InternalIAMService.LookupSubject.
+// Используется invite-flow'ом для привязки project-scoped AccessBinding к
+// канонической identity-row.
 func (r *userReader) FindActiveByEmail(ctx context.Context, email domain.Email) ([]domain.User, error) {
 	if email == "" {
 		return nil, nil

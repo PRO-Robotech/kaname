@@ -118,9 +118,6 @@ func (r *updUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, erro
 	}
 	return r.parent.user, nil
 }
-func (r *updUserRdr) GetByExternalID(context.Context, domain.ExternalSubject) (domain.User, error) {
-	return domain.User{}, errNotFound
-}
 func (r *updUserRdr) GetByEmail(context.Context, domain.Email) (domain.User, error) {
 	return domain.User{}, errNotFound
 }

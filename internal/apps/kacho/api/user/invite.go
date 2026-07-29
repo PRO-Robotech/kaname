@@ -287,7 +287,8 @@ func (uc *InviteUserUseCase) doInvite(
 			//
 			// The AccessBinding subject must be the SAME user-row that the
 			// api-gateway resolves the invitee's JWT to (InternalIAMService.
-			// LookupSubject → GetByExternalID → oldest ACTIVE row). With the
+			// LookupSubject → the oldest row of the identity that may
+			// authenticate). With the
 			// user-per-Account model one identity has N user-rows (one per Account):
 			// `user` above is the per-Account row in `in.AccountID` (a fresh PENDING
 			// row, or an existing row in that Account). If the invitee is ALREADY
@@ -442,9 +443,9 @@ func (uc *InviteUserUseCase) writeInviteBindingHierarchyTuple(ctx context.Contex
 // the invitee's JWT to — the subject a project-scoped AccessBinding (and its
 // FGA tuple) must be granted to so the per-RPC authz Check finds a path.
 //
-// The gateway resolves a JWT via InternalIAMService.LookupSubject →
-// userReader.GetByExternalID → `WHERE external_id=$1 AND status='ACTIVE'
-// ORDER BY created_at ASC LIMIT 1` (the oldest ACTIVE row of the identity).
+// The gateway resolves a JWT via InternalIAMService.LookupSubject, which reads
+// the identity's rows by external_id ordered created_at ASC and answers with
+// the first one that may authenticate (the oldest ACTIVE row of the identity).
 // With the user-per-Account model one identity has N rows (one per Account);
 // the invite-flow works on the per-Account row in `in.AccountID`, which is
 // NOT necessarily that oldest ACTIVE row:
@@ -452,7 +453,7 @@ func (uc *InviteUserUseCase) writeInviteBindingHierarchyTuple(ctx context.Contex
 //   - the invitee may ALREADY be ACTIVE in another Account (e.g. a bootstrap
 //     personal Account) — that older row carries the external_id and is what
 //     the gateway resolves; the just-created per-Account PENDING row has an
-//     empty external_id and is invisible to GetByExternalID;
+//     empty external_id, so the identity lookup never reaches it;
 //   - so a project-grant on the per-Account row's id would be `no path` for
 //     the gateway-resolved subject.
 //
@@ -478,8 +479,8 @@ func (uc *InviteUserUseCase) resolveCanonicalSubjectID(
 		return fallback
 	}
 	// FindActiveByEmail is ordered created_at ASC — actives[0] is the oldest
-	// ACTIVE row, exactly the row GetByExternalID (and thus the gateway)
-	// resolves the invitee's JWT to.
+	// ACTIVE row, exactly the row LookupSubject (and thus the gateway) resolves
+	// the invitee's JWT to.
 	canonical := domain.SubjectID(actives[0].ID)
 	if uc.logger != nil && string(canonical) != string(perAccountRow.ID) {
 		uc.logger.Info("invite: project-grant bound to canonical identity row",

@@ -12,7 +12,6 @@ import (
 
 type ReaderIface interface {
 	Get(ctx context.Context, id domain.UserID) (domain.User, error)
-	GetByExternalID(ctx context.Context, ext domain.ExternalSubject) (domain.User, error)
 	GetByEmail(ctx context.Context, email domain.Email) (domain.User, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.User, string, error)
 
@@ -44,7 +43,7 @@ type ReaderIface interface {
 	// все Account'ы, ORDER BY created_at ASC. Используется invite-flow'ом
 	// чтобы привязать project-scoped AccessBinding к тому же (старейшему
 	// ACTIVE) user-row, который api-gateway резолвит из JWT invitee
-	// (GetByExternalID). Возвращает nil-срез если ACTIVE-row нет.
+	// (LookupSubject). Возвращает nil-срез если ACTIVE-row нет.
 	FindActiveByEmail(ctx context.Context, email domain.Email) ([]domain.User, error)
 
 	// ListAccountsForUser — все Account'ы, где у user'а есть ACTIVE-row.

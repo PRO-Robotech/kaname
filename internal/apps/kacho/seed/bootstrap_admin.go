@@ -92,7 +92,7 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 	//
 	//   active_id — каноническая строка личности: старейшая ДЕЙСТВУЮЩАЯ, тот же
 	//     выбор, что делают остальные пути резолва по адресу
-	//     (FindActiveByEmail / GetByExternalID). Без ORDER BY выбор оставался за
+	//     (FindActiveByEmail / LookupSubject). Без ORDER BY выбор оставался за
 	//     физическим порядком строк: тот же стенд, тот же адрес — а права
 	//     уровня кластера получала то одна строка, то другая. `id` вторым
 	//     ключом закрывает совпадение отметок времени.
