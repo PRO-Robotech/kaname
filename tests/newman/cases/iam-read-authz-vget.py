@@ -57,17 +57,16 @@ ROLE_VIEW = "rol1bda80f2be4d3658e"  # md5('view')[:17]
 
 
 def _revoke_teardown(name, acb_var):
-    """Best-effort revoke, чтобы re-run не споткнулся об active-grant UNIQUE.
-    AccessBinding.Delete async — но teardown best-effort, ждать не обязательно."""
-    return Step(
-        name=name,
-        method="DELETE",
-        path="/iam/v1/accessBindings/{{" + acb_var + "}}",
-        auth="jwtAccountAdminA",
-        test_script=[
-            "pm.test('teardown: revoke acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
-        ],
-    )
+    """RELIABLE revoke — общий помощник gen.py.
+
+    Прежняя редакция принимала 403 («отказано в правах») как успешную уборку и
+    ехала дальше. Отзыв при этом НЕ происходил: грант оставался ACTIVE в ОБЩЕМ
+    аккаунте после конца прогона, и следующий прогон видел субъекта, у которого
+    «нет ни одной выдачи», но которому тем не менее разрешено. Реализация была
+    исправлена в соседнем файле (iam-rbac-subjects), а здесь класс остался жив —
+    ровно потому, что помощник скопирован, а не общий. Теперь он один.
+    """
+    return reliable_delete(name, "/iam/v1/accessBindings/{{" + acb_var + "}}")
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +86,7 @@ CASES.append(Case(
             path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userINVId}}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                 "pm.environment.unset('rdAuthzDupAcbId');",
                 "if (pm.response.code === 200) {",
                 "  const arr = (pm.response.json() || {}).accessBindings || [];",
@@ -98,13 +97,15 @@ CASES.append(Case(
                 "if (!pm.environment.get('rdAuthzDupAcbId')) { pm.execution.setNextRequest('grant-view'); }",
             ],
         ),
-        Step(
+        poll_request_until_status(
+            retry_on=(403,),
+            
             name="del-dup",
             method="DELETE",
             path="/iam/v1/accessBindings/{{rdAuthzDupAcbId}}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+                "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                 # Delete async — дождаться revoked_at до strict-create, иначе race с
                 # active-grant partial UNIQUE → AlreadyExists.
                 "pm.environment.unset('rdAuthzDelOpId');",
@@ -202,7 +203,7 @@ CASES.append(Case(
                 "pm.test('owner is NOT the granted invitee (true non-owner read)', () => pm.expect(j.ownerUserId).to.not.eql(pm.environment.get('userINVId')));",
             ],
         ),
-        _revoke_teardown("teardown-grant", "rdAuthzAcbId"),
+        *_revoke_teardown("teardown-grant", "rdAuthzAcbId"),
     ],
 ))
 

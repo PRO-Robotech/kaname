@@ -161,7 +161,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
             path=f"/iam/v1/accessBindings:listBySubject?subjectType={subject_type}&subjectId={subject_id_tmpl}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('pre-clean list acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
                 f"pm.environment.unset('{dup_var}');",
                 "if (pm.response.code === 200) {",
                 "  const arr = (pm.response.json() || {}).accessBindings || [];",
@@ -171,13 +171,15 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 f"if (!pm.environment.get('{dup_var}')) {{ pm.execution.setNextRequest('{grant_step_name}'); }}",
             ],
         ),
-        Step(
+        poll_request_until_status(
+            retry_on=(403,),
+            
             name=f"{tag}-preclean-del",
             method="DELETE",
             path="/iam/v1/accessBindings/{{" + dup_var + "}}",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('del-dup acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));",
+                "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                 f"pm.environment.unset('{del_op_var}');",
                 "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('" + del_op_var + "', dj.id); }",
                 f"if (!pm.environment.get('{del_op_var}')) {{ pm.execution.setNextRequest('{grant_step_name}'); }}",
@@ -402,15 +404,12 @@ def revoke_then_gone(name_prefix, acb_var, fga_subject, claim, rev_op_var):
 
 
 def teardown(name, acb_var):
-    """Best-effort revoke (no await) — for cases whose access-gone is asserted by their own
-    flip step (removeMember / revoke) so the binding teardown is just cleanup."""
-    return Step(
-        name=name,
-        method="DELETE",
-        path="/iam/v1/accessBindings/{{" + acb_var + "}}",
-        auth="jwtAccountAdminA",
-        test_script=["pm.test('teardown acceptable', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 403]));"],
-    )
+    """RELIABLE revoke — общий помощник gen.py (см. его godoc: 403 не терминален).
+
+    Принимать отказ в правах за уборку значит оставить выдачу ACTIVE в общем
+    аккаунте до следующего прогона.
+    """
+    return reliable_delete(name, "/iam/v1/accessBindings/{{" + acb_var + "}}")
 
 
 def create_group(name, group_name, group_var, op_var):
@@ -534,7 +533,7 @@ CASES.append(Case(
         # the member's `v_get` resolution via group:G#member is gone — probe the FGA decision.
         check_until_deny("flip-gone", "user:{{userINVId}}", "v_get", "account:{{accountAId}}",
                          "group remove-member: access removed"),
-        teardown("teardown-flip", "chgFlipAcb"),
+        *teardown("teardown-flip", "chgFlipAcb"),
     ],
 ))
 

@@ -2539,7 +2539,7 @@
           ]
         },
         {
-          "name": "IAM-USR-DL-CRUD-OK :: delete-user-rya26",
+          "name": "IAM-USR-DL-CRUD-OK :: delete-user-rya29",
           "request": {
             "method": "DELETE",
             "header": [
