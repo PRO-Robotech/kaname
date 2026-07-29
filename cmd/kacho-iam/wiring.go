@@ -504,7 +504,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	clusterGrantReader := kachopg.NewClusterAdminGrantReader(pool)
 	clusterRelEmitter := kachopg.NewFGAOutboxEmitter()
 	clusterTxb := kachopg.NewPoolTxBeginner(pool)
-	clusterUserChecker := kachopg.NewUserExistenceChecker(pool)
+	clusterSubjectState := kachopg.NewSubjectStateReader(pool)
 
 	clusterGetUC := clusterapp.NewGetClusterUseCase(clusterReader)
 	// Durable audit_outbox emitter — emits the
@@ -518,7 +518,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// fail-closed inside the use-case if ever unwired.
 	clusterGrantUC := clusterapp.NewGrantAdminUseCase(
 		clusterGrantWriter, clusterGrantReader, clusterRelEmitter, clusterTxb, opsRepo,
-	).WithUserChecker(clusterUserChecker).WithAdminChecker(relationStore).
+	).WithSubjectStateReader(clusterSubjectState).WithAdminChecker(relationStore).
 		WithAuditEmitter(clusterAuditEmitter)
 	clusterRevokeUC := clusterapp.NewRevokeAdminUseCase(
 		clusterGrantWriter, clusterRelEmitter, clusterTxb, opsRepo,

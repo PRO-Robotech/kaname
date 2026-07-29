@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -51,8 +52,9 @@ type GrantAdminUseCase struct {
 	relations relationOutboxEmitter
 	txb       service.TxBeginner
 	opsRepo   operationRepo
-	// userCheck — user-existence guard; nil = skip (tests without user table seed).
-	userCheck userChecker
+	// subjectState — состояние субъекта выдачи; nil = skip (тесты без сида
+	// таблиц users/service_accounts).
+	subjectState subjectStateReader
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate. nil →
 	// fail-closed (requireClusterSystemAdmin denies). See admin_authz.go.
 	adminCheck adminChecker
@@ -61,7 +63,8 @@ type GrantAdminUseCase struct {
 	audit auditEmitter
 }
 
-// NewGrantAdminUseCase — constructor (user-existence guard wired separately via WithUserChecker).
+// NewGrantAdminUseCase — constructor (subject-state guard wired separately via
+// WithSubjectStateReader).
 func NewGrantAdminUseCase(
 	w grantWriter,
 	r grantReader,
@@ -79,9 +82,9 @@ func (uc *GrantAdminUseCase) WithAuditEmitter(a auditEmitter) *GrantAdminUseCase
 	return uc
 }
 
-// WithUserChecker — wires the user-existence guard.
-func (uc *GrantAdminUseCase) WithUserChecker(c userChecker) *GrantAdminUseCase {
-	uc.userCheck = c
+// WithSubjectStateReader — wires the subject-state guard.
+func (uc *GrantAdminUseCase) WithSubjectStateReader(c subjectStateReader) *GrantAdminUseCase {
+	uc.subjectState = c
 	return uc
 }
 
@@ -114,18 +117,19 @@ func (uc *GrantAdminUseCase) Execute(
 		return nil, err
 	}
 
-	// Subject must exist in this DB — per type, since subject_id is polymorphic
-	// and no FK can cover it.
-	if uc.userCheck != nil {
-		var cerr error
-		switch styp {
-		case domain.GrantSubjectTypeServiceAccount:
-			cerr = uc.userCheck.ExistsServiceAccount(ctx, subjectID)
-		default:
-			cerr = uc.userCheck.ExistsUser(ctx, subjectID)
-		}
-		if cerr != nil {
-			return nil, shared.MapRepoErr(cerr)
+	// Субъект обязан не только существовать, но и быть в состоянии, которое
+	// допускает выдачу. Право уровня кластера, выданное личности, которой
+	// запрещено аутентифицироваться, не аннулируется вместе с запретом: оно
+	// лежит и срабатывает в тот день, когда запрет снимут — то есть выдача
+	// пережила решение, которого никто не принимал. Поэтому запрет отвергается
+	// здесь, ДО записи, и отказ называет причину, а не выдаёт себя за
+	// отсутствие строки (тогда администратор «чинил» бы несуществующую опечатку
+	// в идентификаторе).
+	//
+	// Чтение — по типу, т.к. subject_id полиморфен и FK его не покрывает.
+	if uc.subjectState != nil {
+		if err := uc.assertSubjectMayHoldGrant(ctx, styp, subjectID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -188,6 +192,54 @@ func (uc *GrantAdminUseCase) Execute(
 	op.Response = resp
 
 	return shared.OperationToProto(&op), nil
+}
+
+// assertSubjectMayHoldGrant — вердикт о состоянии субъекта выдачи.
+//
+// Предикат тот же, что спрашивают пути выдачи токена
+// (`InviteStatus.MayAuthenticate` / `ServiceAccount.MayAuthenticate`), и это не
+// совпадение: право имеет смысл ровно постольку, поскольку им можно
+// воспользоваться. Личность, которой аутентификация запрещена, не «получит
+// право попозже» — она получит его молча и целиком в момент снятия запрета.
+//
+// Отсутствие строки остаётся InvalidArgument «<Resource> %s not found»
+// (вызывающий назвал несуществующего субъекта); запрет — FailedPrecondition
+// с названной причиной. Два разных ответа на два разных вопроса.
+func (uc *GrantAdminUseCase) assertSubjectMayHoldGrant(
+	ctx context.Context, styp domain.GrantSubjectType, subjectID string,
+) error {
+	switch styp {
+	case domain.GrantSubjectTypeServiceAccount:
+		// `enabled` — и есть предикат domain.ServiceAccount.MayAuthenticate;
+		// колонка прочитана запросом выше, поэтому судить есть по чему.
+		enabled, err := uc.subjectState.ServiceAccountEnabled(ctx, subjectID)
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		if !enabled {
+			return shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+				"ServiceAccount %s is disabled", subjectID))
+		}
+	default:
+		st, err := uc.subjectState.UserInviteStatus(ctx, subjectID)
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		if !st.MayAuthenticate() {
+			// Причина называется точно. PENDING — приглашение, которое ещё
+			// никто не подтвердил: его строка не несёт external_id, а
+			// подтверждает его тот, кто первым войдёт по этому адресу почты.
+			// Право уровня кластера, повешенное на такую строку, достаётся
+			// именно ему — поэтому отказ здесь тот же, а текст другой.
+			reason := "is not active"
+			if st == domain.InviteStatusBlocked {
+				reason = "is blocked"
+			}
+			return shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+				"User %s %s", subjectID, reason))
+		}
+	}
+	return nil
 }
 
 // grantOperationPayload — the terminal (metadata, response) pair declared by

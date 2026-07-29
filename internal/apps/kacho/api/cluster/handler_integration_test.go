@@ -65,7 +65,7 @@ func buildHandler(t *testing.T, dsn string) *clusterapp.Handler {
 	fgaEmitter := kachopg.NewFGAOutboxEmitter()
 	txb := kachopg.NewPoolTxBeginner(pool)
 
-	userChecker := kachopg.NewUserExistenceChecker(pool)
+	subjectState := kachopg.NewSubjectStateReader(pool)
 
 	// Allowing ReBAC checker: these integration tests exercise the SQL CAS /
 	// outbox path (the principal is the caller seeded per-test). The
@@ -78,7 +78,7 @@ func buildHandler(t *testing.T, dsn string) *clusterapp.Handler {
 
 	getUC := clusterapp.NewGetClusterUseCase(clusterReader)
 	grantUC := clusterapp.NewGrantAdminUseCase(grantWriter, grantReader, fgaEmitter, txb, opsRepo).
-		WithUserChecker(userChecker).
+		WithSubjectStateReader(subjectState).
 		WithAdminChecker(adminChecker).
 		WithAuditEmitter(auditEmitter)
 	revokeUC := clusterapp.NewRevokeAdminUseCase(grantWriter, fgaEmitter, txb, opsRepo).

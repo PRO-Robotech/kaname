@@ -77,14 +77,20 @@ type auditEmitter interface {
 	EmitTx(ctx context.Context, tx service.Tx, ev service.AuditEvent) error
 }
 
-// userChecker — guard: checks the grant subject exists in this DB.
-// Implemented by *kachopg.UserExistenceChecker.
+// subjectStateReader — состояние субъекта, которому выдают право. Реализуется
+// *kachopg.SubjectStateReader.
 //
-// cluster_admin_grants.subject_id is polymorphic, so the guard is per-type:
-// ExistsUser reads kacho_iam.users, ExistsServiceAccount reads
-// kacho_iam.service_accounts. (No FK is possible for a polymorphic column —
-// PostgreSQL has no conditional FK — so this stays a request-path check.)
-type userChecker interface {
-	ExistsUser(ctx context.Context, userID string) error
-	ExistsServiceAccount(ctx context.Context, svaID string) error
+// Порт отдаёт СОСТОЯНИЕ, а не «нашлось / не нашлось»: решение о выдаче права
+// принимает use-case, и принимать его по факту наличия строки нельзя —
+// заблокированный пользователь и отключённая служебная учётка существуют оба.
+// Прежняя форма (`ExistsUser(...) error`) сделать этого не позволяла by
+// construction: сквозь неё не проходило ничего, кроме факта наличия.
+//
+// cluster_admin_grants.subject_id полиморфен, поэтому чтение — по типу:
+// UserInviteStatus читает kacho_iam.users, ServiceAccountEnabled —
+// kacho_iam.service_accounts. (Условного FK на полиморфную колонку в PostgreSQL
+// нет, поэтому проверка остаётся на request-path.)
+type subjectStateReader interface {
+	UserInviteStatus(ctx context.Context, userID string) (domain.InviteStatus, error)
+	ServiceAccountEnabled(ctx context.Context, svaID string) (bool, error)
 }
