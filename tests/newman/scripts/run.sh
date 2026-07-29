@@ -103,30 +103,67 @@ run_one() {
 # если у любого stem: нет out/<stem>.json (MISSING), assertions.failed>0 или rc!=0.
 aggregate_verdict() {
   local out_dir="$1"; shift
-  local bad=0 stem json rcfile rc total failed requests
-  printf "%-38s %10s %10s %10s %8s\n" "RESOURCE" "ASSERT" "FAILED" "REQUESTS" "RC"
+  local bad=0 stem json rcfile rc total failed requests unanswered note
+  local reported=0 expected=$# s_req=0 s_unans=0 s_ass=0 s_fail=0 s_mute=0
+  printf "%-38s %10s %10s %10s %12s %8s  %s\n" \
+    "RESOURCE" "ASSERT" "FAILED" "REQUESTS" "UNANSWERED" "RC" "NOTE"
   for stem in "$@"; do
     json="${out_dir}/${stem}.json"
     rcfile="${out_dir}/${stem}.rc"
     rc="n/a"
     [[ -f "$rcfile" ]] && rc="$(cat "$rcfile")"
     if [[ ! -f "$json" ]]; then
-      printf "%-38s %10s %10s %10s %8s\n" "$stem" "-" "-" "-" "MISSING"
+      printf "%-38s %10s %10s %10s %12s %8s  %s\n" "$stem" "-" "-" "-" "-" "MISSING" \
+        "нет отчёта — коллекция не отработала"
       bad=1
       continue
     fi
-    total=0; failed=0; requests=0
-    read -r total failed requests < <(
-      jq -r '"\(.run.stats.assertions.total) \(.run.stats.assertions.failed) \(.run.stats.requests.total)"' \
-        "$json" 2>/dev/null || echo "0 0 0"
+    reported=$((reported + 1))
+    total=0; failed=0; requests=0; unanswered=0
+    read -r total failed requests unanswered < <(
+      jq -r '"\(.run.stats.assertions.total) \(.run.stats.assertions.failed) \(.run.stats.requests.total) \(.run.stats.requests.failed // 0)"' \
+        "$json" 2>/dev/null || echo "0 0 0 0"
     )
-    [[ "$total" =~ ^[0-9]+$ ]]    || total=0
-    [[ "$failed" =~ ^[0-9]+$ ]]   || failed=0
-    [[ "$requests" =~ ^[0-9]+$ ]] || requests=0
-    printf "%-38s %10s %10s %10s %8s\n" "$stem" "$total" "$failed" "$requests" "$rc"
+    [[ "$total" =~ ^[0-9]+$ ]]      || total=0
+    [[ "$failed" =~ ^[0-9]+$ ]]     || failed=0
+    [[ "$requests" =~ ^[0-9]+$ ]]   || requests=0
+    [[ "$unanswered" =~ ^[0-9]+$ ]] || unanswered=0
+
+    # Два измерения, которых у этого вердикта не было — единственного из восьми
+    # агрегаторов дерева (у vpc, compute, geo, storage, registry, nlb и gateway они
+    # есть). Оба читаются как безупречный прогон, если смотреть только на число
+    # упавших утверждений: провалов ноль, потому что проверять было нечего.
+    note=""
+    if [[ "$total" -eq 0 ]]; then
+      note="NOTHING RAN — 0 утверждений; суита, которая ничего не спросила, не проходит"
+      s_mute=$((s_mute + 1))
+      bad=1
+    fi
+    if [[ "$unanswered" -gt 0 ]]; then
+      note="${note:+$note; }UNANSWERED — запросы без ответа НЕ вычитаются"
+      bad=1
+    fi
+
+    printf "%-38s %10s %10s %10s %12s %8s  %s\n" \
+      "$stem" "$total" "$failed" "$requests" "$unanswered" "$rc" "$note"
+
+    # Назвать то, что не ответило: счётчик сам по себе не действие.
+    if [[ "$unanswered" -gt 0 ]]; then
+      jq -r '[.run.failures[]? | select((.error.name? // "") != "AssertionError")
+              | "    NOT EXECUTED: \(.source.name? // "?") <- \(.error.message? // "нет ответа")"]
+             | unique | .[]' "$json" 2>/dev/null || true
+    fi
+
+    s_req=$((s_req + requests)); s_unans=$((s_unans + unanswered))
+    s_ass=$((s_ass + total));    s_fail=$((s_fail + failed))
+
     if [[ "$failed" -gt 0 ]]; then bad=1; fi
     if [[ "$rc" != "0" ]];    then bad=1; fi
   done
+  # Вердикт в числах. Первая пара читается ПЕРВОЙ: при оборванном прогоне все
+  # остальные счётчики выглядят здоровыми.
+  printf "TOTAL: %d/%d коллекций отчиталось — %d запрос(ов), %d без ответа, %d утверждени(й), %d упавших, %d немых отчёт(ов)\n" \
+    "$reported" "$expected" "$s_req" "$s_unans" "$s_ass" "$s_fail" "$s_mute"
   return "$bad"
 }
 
