@@ -63,6 +63,13 @@ func TestGrantAdmin_DeniesWhenSubjectStateUnreadable(t *testing.T) {
 		WithSubjectStateReader(&fakeSubjectState{userErr: context.DeadlineExceeded})
 
 	_, err := uc.Execute(ctxUser(validUserA), iamv1.ClusterGrantSubjectType_USER, validUserB)
-	require.Error(t, err)
-	require.NotEqual(t, codes.OK, status.Code(err))
+	require.Error(t, err, "недоступность чтения состояния — не «да»")
+	// Код и текст названы точно. «Не OK» прошло бы на ЛЮБОЙ ошибке, включая
+	// возникшую совсем в другом месте, — тогда проба зеленела бы не по своей
+	// причине. Незамапленная ошибка чтения обязана уйти постоянным текстом,
+	// не вынося наружу текст хранилища.
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Equal(t, "internal error", status.Convert(err).Message())
+	require.NotContains(t, status.Convert(err).Message(), "deadline",
+		"причина остаётся в логе, а не в ответе")
 }
