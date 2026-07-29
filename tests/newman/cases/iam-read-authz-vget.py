@@ -148,7 +148,11 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accessBindings",
             body={
-                "subjects": [{"type": "user", "id": "{{userINVId}}"}],
+                # Wire form of the enum, not the console's internal lowercase label:
+                # the edge refuses an enum value outside the dictionary, and this is a
+                # PRECONDITION step — a 400 here would fail the case for a reason that
+                # has nothing to do with what it asserts.
+                "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}],
                 "roleId": ROLE_VIEW,
                 "scopeType": "iam.account",
                 "scopeId": "{{accountAId}}",

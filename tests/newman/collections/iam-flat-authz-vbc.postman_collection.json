@@ -24,11 +24,11 @@
   ],
   "item": [
     {
-      "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE — AccessBinding.Create with lowercase subject type (`user`) + usr-prefixed id → derive → Operation(iop) done",
+      "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE — AccessBinding.Create with no subject type + usr-prefixed id → derive → Operation(iop) done",
       "description": "class:VAL | class:CRUD | priority:P1",
       "item": [
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: pre-clean-revoke",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: pre-clean-revoke",
           "request": {
             "method": "GET",
             "header": [
@@ -81,14 +81,14 @@
                   "       && b.scopeId === pm.environment.get('accountAId'));",
                   "  if (dup && dup.id) pm.environment.set('vbcDupAcbId', dup.id);",
                   "}",
-                  "if (!pm.environment.get('vbcDupAcbId')) { pm.execution.setNextRequest('IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: create-derive'); }"
+                  "if (!pm.environment.get('vbcDupAcbId')) { pm.execution.setNextRequest('IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: create-derive'); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: del-dup",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: del-dup",
           "request": {
             "method": "DELETE",
             "header": [
@@ -140,14 +140,14 @@
                   "  const dj = pm.response.json() || {};",
                   "  if (dj.id) pm.environment.set('vbcDelOpId', dj.id);",
                   "}",
-                  "if (!pm.environment.get('vbcDelOpId')) { pm.execution.setNextRequest('IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: create-derive'); }"
+                  "if (!pm.environment.get('vbcDelOpId')) { pm.execution.setNextRequest('IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: create-derive'); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: await-del-dup",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: await-del-dup",
           "request": {
             "method": "GET",
             "header": [
@@ -213,7 +213,7 @@
           ]
         },
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: create-derive",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: create-derive",
           "request": {
             "method": "POST",
             "header": [
@@ -235,7 +235,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"user\", \"id\": \"{{userNOBId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"id\": \"{{userNOBId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -268,7 +268,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "pm.test('lowercase subject derive accepted (200)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                  "pm.test('subject type derived from id prefix (200)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope returned', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
@@ -291,7 +291,7 @@
           ]
         },
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: poll-op",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: poll-op",
           "request": {
             "method": "GET",
             "header": [
@@ -371,7 +371,7 @@
           ]
         },
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: op-success",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: op-success",
           "request": {
             "method": "GET",
             "header": [
@@ -427,7 +427,7 @@
           ]
         },
         {
-          "name": "IAM-VBC-ACB-LOWERCASE-SUBJECT-DERIVE :: teardown-vbc16",
+          "name": "IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE :: teardown-vbc16",
           "request": {
             "method": "DELETE",
             "header": [
