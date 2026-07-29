@@ -357,6 +357,13 @@ func runServe(cfg config.Config) error {
 		// request instead of crashing the whole PDP process (metrics still
 		// records the Internal code because recovery is inner of it).
 		grpcmw.UnaryRecovery(logger),
+		// Outermost of the authz interceptors so it sees the refusal produced by
+		// ANY of them and by the handler: attaches the machine-readable reason a
+		// client keys on. It matters most where iam decides authorization itself
+		// over the data (scope-filtered rows) — there the edge runs no per-RPC
+		// check, so nothing else on the path names the action, and a refusal by
+		// scope was byte-identical to a catalog miss. See deny_details.go.
+		authzguard.DenyDetailUnary(permRegistry),
 	}, identityUnary(cfg)...)
 	publicUnary = append(publicUnary,
 		publicCallerPolicy.Unary(),
@@ -422,6 +429,12 @@ func runServe(cfg config.Config) error {
 		// not crash the process (fail-closed cluster-wide); it degrades to a
 		// logged codes.Internal for that one request.
 		grpcmw.UnaryRecovery(logger),
+		// Same reason as on the public chain, and on the same terms: a refusal
+		// this listener produces carries the machine-readable reason too, so a
+		// client does not have to know which listener (or which layer) said no.
+		// It appends — the step-up PreconditionFailure raised by the acr floor
+		// below survives untouched. See deny_details.go.
+		authzguard.DenyDetailUnary(permRegistry),
 	}, identityUnary(cfg)...)
 	internalUnary = append(internalUnary,
 		internalCallerPolicy.Unary(),

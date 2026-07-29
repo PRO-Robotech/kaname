@@ -44,6 +44,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kacho/pkg/authz/catalogparity"
 )
 
 // PermissionEntry — one row from permission_catalog.json.
@@ -56,6 +58,14 @@ type PermissionEntry struct {
 		FromRequestField string `json:"from_request_field"`
 	} `json:"scope_extractor"`
 	RequiredACRMin string `json:"required_acr_min,omitempty"`
+
+	// ScopeFiltered — the method is authorized over the DATA by its owning
+	// service: the edge runs no per-RPC check and passes the call through, so
+	// the refusal (and the machine-readable reason on it) is iam's to produce.
+	// Mirrors `kacho.iam.authz.v1.scope_filtered` in the proto. Without this
+	// field parsed here iam could not even enumerate the band it is responsible
+	// for authorizing.
+	ScopeFiltered bool `json:"scope_filtered,omitempty"`
 }
 
 // permissionCatalogJSON — embedded catalog (primary path: embed).
@@ -228,4 +238,22 @@ func isReadVerb(perm string) bool {
 	default:
 		return false
 	}
+}
+
+// ActionForMethod — the permission name the catalog gives a method, or "" when
+// the catalog has no entry for it or the entry is exempt.
+//
+// "" is meaningful, not merely absent: an empty action is exactly how a caller
+// recognises "this method is in no catalog row", so a row that names no
+// permission must not be reported as if it named one.
+//
+// Implements authzguard.DenyActionLookup. fqn is the full method name WITHOUT
+// the leading slash — the same normalisation the edge applies before its own
+// catalog lookup, so both layers key on one string.
+func (r *PermissionRegistry) ActionForMethod(fqn string) string {
+	e, ok := r.byFQN[fqn]
+	if !ok || e.Permission == catalogparity.ExemptPermission {
+		return ""
+	}
+	return e.Permission
 }
