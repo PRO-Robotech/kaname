@@ -351,6 +351,28 @@ for col in "${collections[@]}"; do
   # counter-list survived their subject; all are pruned above. Whatever the redesigned
   # suite needs — if anything — must be argued from ITS names on ITS evidence, not
   # inherited from the retired one.
+  # NARROWED 2026-07-29 — THE ENTRY BELOW USED TO SUBTRACT BY FOLDER, AND A FOLDER IS NOT
+  # A SUBJECT. `.parent.name` is the case folder, so matching it removed EVERY failing
+  # assertion in that folder from the verdict, whatever it was about. Measured over the
+  # generated collections: the seventeen nlb/lst folders hold 259 assertions, of which
+  # exactly 27 sit on the read-your-writes-wrapped steps this entry describes. The other
+  # 232 were absorbed for standing next to them — including the fixture-integrity
+  # guards (`fixture operation succeeded (no phantom resource id)`) and every `poll status
+  # 200` in those folders, i.e. precisely the checks that tell a real create from a
+  # phantom one. An entry written for one narrow timing effect had quietly become a
+  # blanket waiver for seventeen cases, and it would have gone on absorbing any NEW
+  # assertion added to them.
+  #
+  # It now subtracts by STEP: the folder must match AND the failing step must be one the
+  # generator renamed `-rya<N>`, which is exactly and only what `retry_until_authorized`
+  # wraps — the first post-create access of the caller's OWN fresh resource. That is the
+  # thing the justification below is about; nothing else in the folder is.
+  #
+  # PREMISE THIS RESTS ON, stated so it cannot rot silently: `retry_until_authorized` in
+  # services/nlb/tests/newman/scripts/gen.py appends `-rya<N>` to the step name. If that
+  # ever stops, this entry matches nothing and subtracts nothing — the gate gets STRICTER,
+  # never quieter, so the failure direction is safe.
+  #
   # NLB owner-tuple materialization lag (kacho#11) — NLB-{CR,UPD,DEL,MV,LIFECYCLE}
   #   + LST-{GET,UPD}-* (parent.name). The START / STOP / ATT / DEL-STATE-HAS-ATTACHED
   #   arms of this enumeration were pruned 2026-07-26 (see the second sweep above): Start
@@ -448,7 +470,7 @@ for col in "${collections[@]}"; do
   # variable could be absorbed by an unrelated alternation entry and the suite would
   # go quiet again in exactly the way this whole mechanism exists to prevent.
   if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("inv-get-account-allow-warm-cache")) or (.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW|^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")))] | length' "$report")
+    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("inv-get-account-allow-warm-cache")) or (.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW")) or ((.parent.name? // "" | test("^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")) and (.source.name? // "" | test("-rya[0-9]+$"))))] | length' "$report")
     fails=$((fails - known_red))
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi
