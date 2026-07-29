@@ -8,14 +8,18 @@ package pg_test
 // (operations LRO) against a real Postgres.
 //
 // Scenario trace:
-//   - TestOnRecoveryCompleted_S01_Blocked_ReEnable_Revoke_Audit_Idempotent
-//   - TestOnRecoveryCompleted_S02_Active_NoopReEnable_Revoke_Audit
+//   - TestOnRecoveryCompleted_S01_Blocked_KeepBlocked_Revoke_Audit_Idempotent
+//   - TestOnRecoveryCompleted_S02_Active_Revoke_Audit
 //   - TestOnRecoveryCompleted_S03_UnknownExternalID_NotFound_NoSideEffects
 //   - TestOnRecoveryCompleted_S04_EmailMismatch_FailedPrecondition_NoSideEffects
 //   - TestOnRecoveryCompleted_S05_DuplicateJTI_IdempotentNoop (concurrent goroutines)
 //   - sync-validation → covered by use-case unit tests (internal_on_recovery_test.go)
 //   - TestOnRecoveryCompleted_S07_MidTxFailure_FullRollback (fault-injection)
 //   - TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll
+//
+// Восстановление возвращает учётные данные, но не право пользоваться ими:
+// заблокированная строка остаётся заблокированной (снимает запрет
+// администратор), отсечка сессий ставится на каждой затронутой строке.
 
 import (
 	"context"
@@ -98,7 +102,7 @@ func auditRowCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, recove
 }
 
 // ── S01 ─────────────────────────────────────────────────────────────────
-func TestOnRecoveryCompleted_S01_Blocked_ReEnable_Revoke_Audit_Idempotent(t *testing.T) {
+func TestOnRecoveryCompleted_S01_Blocked_KeepBlocked_Revoke_Audit_Idempotent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -128,11 +132,12 @@ func TestOnRecoveryCompleted_S01_Blocked_ReEnable_Revoke_Audit_Idempotent(t *tes
 	assert.Equal(t, string(uid), meta.GetUserId())
 	assert.GreaterOrEqual(t, meta.GetRevokedSessionCount(), int32(1))
 
-	// re-enabled: invite_status = ACTIVE
+	// Запрет пережил восстановление: снимает его администратор, а не тот, кто
+	// доказал владение почтовым ящиком.
 	var statusDB string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status FROM users WHERE id = $1`, string(uid)).Scan(&statusDB))
-	assert.Equal(t, "ACTIVE", statusDB, "BLOCKED → ACTIVE re-enable")
+	assert.Equal(t, "BLOCKED", statusDB, "BLOCKED остаётся BLOCKED")
 
 	// revoke-all cutoff present, reason password-change
 	var reason string
@@ -140,17 +145,12 @@ func TestOnRecoveryCompleted_S01_Blocked_ReEnable_Revoke_Audit_Idempotent(t *tes
 		`SELECT reason FROM user_token_revocations WHERE user_id = $1`, string(uid)).Scan(&reason))
 	assert.Equal(t, "password-change", reason)
 
-	// exactly one audit row, re_enabled=true, tenant=acc
+	// exactly one audit row, tenant=acc
 	assert.Equal(t, 1, auditRowCount(t, ctx, pool, "rec_flow_001"))
-	var (
-		reEnabled bool
-		tenant    string
-	)
+	var tenant string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT (event_payload->>'re_enabled')::bool, tenant_account_id
-		  FROM kacho_iam.audit_outbox
-		 WHERE event_payload->>'recovery_jti' = $1`, "rec_flow_001").Scan(&reEnabled, &tenant))
-	assert.True(t, reEnabled)
+		SELECT tenant_account_id FROM kacho_iam.audit_outbox
+		 WHERE event_payload->>'recovery_jti' = $1`, "rec_flow_001").Scan(&tenant))
 	assert.Equal(t, string(accID), tenant)
 
 	// ledger row exists
@@ -161,7 +161,7 @@ func TestOnRecoveryCompleted_S01_Blocked_ReEnable_Revoke_Audit_Idempotent(t *tes
 }
 
 // ── S02 ─────────────────────────────────────────────────────────────────
-func TestOnRecoveryCompleted_S02_Active_NoopReEnable_Revoke_Audit(t *testing.T) {
+func TestOnRecoveryCompleted_S02_Active_Revoke_Audit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -186,7 +186,7 @@ func TestOnRecoveryCompleted_S02_Active_NoopReEnable_Revoke_Audit(t *testing.T) 
 	var statusDB string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status FROM users WHERE id = $1`, string(uid)).Scan(&statusDB))
-	assert.Equal(t, "ACTIVE", statusDB, "ACTIVE stays ACTIVE (re-enable no-op)")
+	assert.Equal(t, "ACTIVE", statusDB, "ACTIVE stays ACTIVE")
 
 	meta, err := operations.MetadataFor[*iamv1.OnRecoveryCompletedMetadata](done)
 	require.NoError(t, err)
@@ -198,11 +198,6 @@ func TestOnRecoveryCompleted_S02_Active_NoopReEnable_Revoke_Audit(t *testing.T) 
 	assert.Equal(t, "password-change", reason)
 
 	assert.Equal(t, 1, auditRowCount(t, ctx, pool, "rec_flow_002"))
-	var reEnabled bool
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT (event_payload->>'re_enabled')::bool FROM kacho_iam.audit_outbox
-		 WHERE event_payload->>'recovery_jti' = $1`, "rec_flow_002").Scan(&reEnabled))
-	assert.False(t, reEnabled, "re_enabled=false for an already-ACTIVE user")
 }
 
 // ── S03 ─────────────────────────────────────────────────────────────────
@@ -335,7 +330,7 @@ func TestOnRecoveryCompleted_S07_MidTxFailure_FullRollback(t *testing.T) {
 	uid, _ := seedAccountAndUser(t, ctx, pool, "krt_dan", "dan@example.com", "BLOCKED")
 
 	// Fault-injection: a repo whose Writer fails on EmitAuditEvent (after the
-	// idempotency-insert + re-enable + cutoff, before commit) → full rollback.
+	// idempotency-insert + cutoff, before commit) → full rollback.
 	faulty := &faultyAuditRepo{Repository: realRepo}
 	uc := userapp.NewOnRecoveryCompletedUseCase(faulty, opsRepo)
 
@@ -350,7 +345,7 @@ func TestOnRecoveryCompleted_S07_MidTxFailure_FullRollback(t *testing.T) {
 	var statusDB string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status FROM users WHERE id = $1`, string(uid)).Scan(&statusDB))
-	assert.Equal(t, "BLOCKED", statusDB, "re-enable rolled back")
+	assert.Equal(t, "BLOCKED", statusDB, "состояние не тронуто")
 
 	var cutoffN int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -386,9 +381,8 @@ func TestOnRecoveryCompleted_S07_MidTxFailure_FullRollback(t *testing.T) {
 // This test pins the canonical single-non-PENDING multi-account shape: a single
 // non-PENDING (here BLOCKED, the canonical identity row) matched by external_id
 // plus a PENDING sibling in another Account (external_id=” → NOT matched by
-// external_id). Recovery re-enables + revokes the canonical row; the PENDING
-// sibling is untouched. The BLOCKED+ACTIVE collision degradation is covered by
-// TestOnRecoveryCompleted_S09b_BlockedActiveAcrossAccounts_SkipReEnable_StillRevokeAudit.
+// external_id). Recovery revokes the canonical row's sessions and leaves its
+// state alone; the PENDING sibling is untouched.
 func TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -413,11 +407,11 @@ func TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll(t *testing.T) {
 	done := awaitOp(t, ctx, opsRepo, op.ID)
 	require.Nil(t, done.Error)
 
-	// Canonical row re-enabled BLOCKED → ACTIVE.
+	// Каноническая строка остаётся заблокированной — восстановление запрет не снимает.
 	var s1 string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status FROM users WHERE id = $1`, string(u1)).Scan(&s1))
-	assert.Equal(t, "ACTIVE", s1, "canonical row BLOCKED → ACTIVE")
+	assert.Equal(t, "BLOCKED", s1, "canonical row stays BLOCKED")
 
 	// Canonical row got a revoke-all cutoff (reason password-change).
 	var reason string
@@ -445,87 +439,6 @@ func TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll(t *testing.T) {
 	assert.Equal(t, 1, auditRowCount(t, ctx, pool, "rec_flow_009"))
 }
 
-// ── S09b — BLOCKED + ACTIVE across two accounts (SAVEPOINT-bounded skip) ───
-//
-// A multi-account identity with an
-// ACTIVE row in Account A AND a BLOCKED row in Account B (a REACHABLE stored
-// state — migration 0011's `users_active_external_id_uniq` is GLOBAL: ≤1 ACTIVE
-// per external_id, but BLOCKED rows are unrestricted). Re-enabling the BLOCKED
-// row → ACTIVE raises 23505 against the global guard. The recovery worker runs
-// all steps in ONE writer-tx; without a SAVEPOINT, that 23505 aborts the tx
-// (25P02) and the subsequent revoke/audit/commit all fail — so the advertised
-// "skip the colliding re-enable, still revoke + audit" degradation is impossible.
-//
-// With the SAVEPOINT fix, the colliding re-enable is rolled back to the savepoint
-// (tx stays usable), that row is skipped (stays BLOCKED), but revoke-all + audit
-// DO commit and the whole Operation succeeds. This test MUST be RED before the
-// SAVEPOINT fix (the op aborts) and GREEN after.
-func TestOnRecoveryCompleted_S09b_BlockedActiveAcrossAccounts_SkipReEnable_StillRevokeAudit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
-	repo := kachopg.New(pool, nil)
-	opsRepo := operations.NewRepo(pool, "kacho_iam")
-
-	// ACTIVE row in Account A (older = canonical primary), BLOCKED row in Account
-	// B (newer), both sharing external_id krt_frank + email frank@example.com.
-	// This is INSERT-able: 0011 only forbids two ACTIVE per external_id, not
-	// BLOCKED+ACTIVE.
-	uActive, accA := seedAccountAndUser(t, ctx, pool, "krt_frank", "frank@example.com", "ACTIVE")
-	uBlocked, _ := seedAccountAndUser(t, ctx, pool, "krt_frank", "frank@example.com", "BLOCKED")
-
-	uc := userapp.NewOnRecoveryCompletedUseCase(repo, opsRepo)
-	op, err := uc.Execute(ctx, userapp.OnRecoveryCompletedInput{
-		ExternalID: "krt_frank", RecoveryJTI: "rec_flow_009b", Email: "frank@example.com",
-	})
-	require.NoError(t, err)
-	done := awaitOp(t, ctx, opsRepo, op.ID)
-	require.Nil(t, done.Error, "operation must SUCCEED (not abort): the colliding re-enable is skipped via SAVEPOINT, revoke+audit commit")
-
-	// The ACTIVE row stays ACTIVE (re-enable no-op).
-	var sActive string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT invite_status FROM users WHERE id = $1`, string(uActive)).Scan(&sActive))
-	assert.Equal(t, "ACTIVE", sActive, "ACTIVE sibling stays ACTIVE")
-
-	// The BLOCKED row's re-enable COLLIDED on the global guard → skipped → stays BLOCKED.
-	var sBlocked string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT invite_status FROM users WHERE id = $1`, string(uBlocked)).Scan(&sBlocked))
-	assert.Equal(t, "BLOCKED", sBlocked, "colliding BLOCKED→ACTIVE re-enable is skipped (stays BLOCKED)")
-
-	// BUT revoke-all cutoff committed for BOTH matched rows (security goal: revoke
-	// the identity's old sessions even when one row's re-enable collides).
-	var revActive, revBlocked string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT reason FROM user_token_revocations WHERE user_id = $1`, string(uActive)).Scan(&revActive))
-	assert.Equal(t, "password-change", revActive, "ACTIVE row got revoke-all cutoff")
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT reason FROM user_token_revocations WHERE user_id = $1`, string(uBlocked)).Scan(&revBlocked))
-	assert.Equal(t, "password-change", revBlocked, "BLOCKED row STILL got revoke-all cutoff (degradation requirement)")
-
-	// Audit row committed (the op did NOT abort).
-	assert.Equal(t, 1, auditRowCount(t, ctx, pool, "rec_flow_009b"), "audit row commits despite the collision")
-
-	// Ledger row committed (the idempotency gate is intact for this jti).
-	var ledgerN int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM recovery_completions WHERE recovery_jti = $1`, "rec_flow_009b").Scan(&ledgerN))
-	assert.Equal(t, 1, ledgerN, "ledger row committed")
-
-	// metadata: primary user_id = canonical ACTIVE row; revoked count = 2 (both matched rows).
-	meta, err := operations.MetadataFor[*iamv1.OnRecoveryCompletedMetadata](done)
-	require.NoError(t, err)
-	assert.Equal(t, string(uActive), meta.GetUserId(), "primary = canonical ACTIVE row (first by created_at)")
-	assert.Equal(t, int32(2), meta.GetRevokedSessionCount(), "both matched rows revoked")
-	_ = accA
-}
-
 // assertNoSideEffects — no cutoff / no audit / no ledger row for the given jti.
 func assertNoSideEffects(t *testing.T, ctx context.Context, pool *pgxpool.Pool, recoveryJTI string) {
 	t.Helper()
@@ -542,7 +455,7 @@ func assertNoSideEffects(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 }
 
 // faultyAuditRepo wraps a real Repository; its Writer fails on EmitAuditEvent so
-// the recovery writer-tx fails AFTER the idempotency-insert + re-enable + cutoff
+// the recovery writer-tx fails AFTER the idempotency-insert + cutoff
 // but BEFORE commit (fault-injection path). Everything else delegates to the
 // real tx, so the rollback is the real Postgres rollback.
 type faultyAuditRepo struct {

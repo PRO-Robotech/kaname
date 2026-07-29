@@ -119,7 +119,7 @@ type Writer interface {
 	// Runs `INSERT … ON CONFLICT (recovery_jti) DO NOTHING` and
 	// then reads back the stored row, all on THIS writer-tx:
 	//   - inserted=true  → this recovery_jti is new → caller runs the side-effects
-	//     (re-enable + revoke-all cutoff + audit) in the SAME tx, then commits.
+	//     (revoke-all cutoff + audit) in the SAME tx, then commits.
 	//   - inserted=false → already processed → idempotent no-op; the returned
 	//     domain.RecoveryCompletion carries the stored user_id /
 	//     revoked_session_count for the replayed Operation.metadata.
@@ -131,38 +131,10 @@ type Writer interface {
 	// UpsertUserTokenRevokeAll — per-user "revoke-all-before" cutoff written on
 	// THIS writer-tx (kacho_iam.user_token_revocations, migration 0012). Same
 	// monotonic GREATEST upsert as the pool-scoped path, but tx-scoped so the
-	// cutoff commits atomically with the recovery re-enable + audit
+	// cutoff commits atomically with the recovery audit event
 	// (запрет #10). The cutoff never moves backwards; the PK row-lock
 	// serializes concurrent writers.
 	UpsertUserTokenRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
-
-	// Savepoint / RollbackToSavepoint / ReleaseSavepoint — tx-scoped savepoint
-	// primitives for bounding a statement that may raise a recoverable SQLSTATE
-	// (e.g. 23505) WITHOUT aborting the whole writer-tx.
-	//
-	// Postgres puts a tx into the aborted state (25P02) after ANY error, so every
-	// subsequent statement fails — UNLESS the error is rolled back to a SAVEPOINT
-	// taken before the failing statement. The recovery worker uses
-	// these to skip a per-row BLOCKED→ACTIVE re-enable that collides with the
-	// global `users_active_external_id_uniq` (a sibling is already ACTIVE) while
-	// still running the revoke-all cutoff + audit on the now-clean tx:
-	//
-	//	if err := w.Savepoint(ctx, name); err != nil { return err }
-	//	_, _, rerr := w.UsersW().ReEnable(ctx, id)
-	//	if errors.Is(rerr, ErrAlreadyExists) {
-	//	    _ = w.RollbackToSavepoint(ctx, name) // tx usable again, row skipped
-	//	} else if rerr != nil {
-	//	    return rerr                           // other error → full rollback
-	//	} else {
-	//	    _ = w.ReleaseSavepoint(ctx, name)     // success → drop the savepoint
-	//	}
-	//
-	// `name` MUST be a safe SQL identifier (static literal or sanitized — never
-	// raw user input). The pg adapter validates it and panics on an unsafe name
-	// (programmer error, not a runtime/tenant-facing condition).
-	Savepoint(ctx context.Context, name string) error
-	RollbackToSavepoint(ctx context.Context, name string) error
-	ReleaseSavepoint(ctx context.Context, name string) error
 
 	// AdvisoryXactLock takes a transaction-scoped
 	// pg_advisory_xact_lock(hashtext(key)) on THIS writer-tx. It serializes

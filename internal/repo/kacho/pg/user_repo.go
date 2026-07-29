@@ -477,45 +477,6 @@ func (w *userWriter) InsertActive(ctx context.Context, u domain.User) (domain.Us
 	return out, nil
 }
 
-// ReEnable — атомарный CAS BLOCKED → ACTIVE для recovery (OnRecoveryCompleted).
-//
-// SQL (single-statement UPDATE … FROM (SELECT … FOR UPDATE)):
-//
-//	UPDATE users u
-//	   SET invite_status = 'ACTIVE'
-//	  FROM (SELECT id, invite_status FROM users WHERE id = $1 FOR UPDATE) old
-//	 WHERE u.id = old.id AND old.invite_status IN ('ACTIVE','BLOCKED')
-//	RETURNING u.<cols>, (old.invite_status = 'BLOCKED') AS was_blocked
-//
-// The `FROM (… FOR UPDATE)` subquery snapshots the PRE-image row (and row-locks
-// it) before the UPDATE applies, so `old.invite_status` is the OLD value while
-// `RETURNING u.*` is the new row — was_blocked is computed correctly in one
-// statement. Idempotent: an already-ACTIVE row passes (no-op, not an error). 0
-// rows RETURNING → ErrNotFound (row absent or PENDING — recovery works only on
-// ACTIVE/BLOCKED). The row-lock serializes concurrent writers (запрет #10, not
-// TOCTOU).
-func (w *userWriter) ReEnable(ctx context.Context, userID domain.UserID) (domain.User, bool, error) {
-	q := fmt.Sprintf(`
-		UPDATE users u
-		   SET invite_status = 'ACTIVE'
-		  FROM (SELECT id, invite_status FROM users WHERE id = $1 FOR UPDATE) old
-		 WHERE u.id = old.id AND old.invite_status IN ('ACTIVE', 'BLOCKED')
-		RETURNING %s, (old.invite_status = 'BLOCKED') AS was_blocked`, userColsQualified("u"))
-	row := w.tx.QueryRow(ctx, q, string(userID))
-	var (
-		out        domain.User
-		wasBlocked bool
-	)
-	if err := scanUserWithBool(row, &out, &wasBlocked); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.User{}, false, iamerr.Wrapf(iamerr.ErrNotFound,
-				"User %s not found", userID)
-		}
-		return domain.User{}, false, mapErr(err, "", string(userID))
-	}
-	return out, wasBlocked, nil
-}
-
 // Delete — атомарный DELETE с гвардом NOT EXISTS на access_bindings +
 // access_binding_subjects + group_members.
 //
@@ -685,22 +646,6 @@ func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
 
 func scanUserWithInserted(row scanner, out *domain.User, inserted *bool) error {
 	return scanUserWithCreated(row, out, inserted)
-}
-
-// scanUserWithBool — scanUser + одна trailing bool-колонка (used by ReEnable's
-// was_blocked). Shares the same column order as userCols.
-func scanUserWithBool(row scanner, out *domain.User, b *bool) error {
-	return scanUserWithCreated(row, out, b)
-}
-
-// userColsQualified — userCols с table-alias-префиксом (для CTE-JOIN SELECT'ов,
-// где userCols фигурируют как `upd.*`-эквивалент колонок без ambiguity).
-func userColsQualified(alias string) string {
-	parts := strings.Split(userCols, ", ")
-	for i, p := range parts {
-		parts[i] = alias + "." + p
-	}
-	return strings.Join(parts, ", ")
 }
 
 func nullableAccountID(id domain.AccountID) any {

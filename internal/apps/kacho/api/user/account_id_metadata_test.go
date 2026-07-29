@@ -132,10 +132,7 @@ func (w *fakeUsrWriter) InsertRecoveryCompletion(context.Context, domain.Recover
 func (w *fakeUsrWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *fakeUsrWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *fakeUsrWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *fakeUsrWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *fakeUsrWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
+func (w *fakeUsrWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeUsrRdr struct{ accID string }
 
@@ -180,9 +177,6 @@ func (w *fakeUsrWtr) ActivateInvite(_ context.Context, id domain.UserID, _ domai
 }
 func (w *fakeUsrWtr) InsertActive(_ context.Context, u domain.User) (domain.User, error) {
 	return u, nil
-}
-func (w *fakeUsrWtr) ReEnable(_ context.Context, id domain.UserID) (domain.User, bool, error) {
-	return domain.User{ID: id}, false, nil
 }
 func (w *fakeUsrWtr) Delete(context.Context, domain.UserID) error { return nil }
 func (w *fakeUsrWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {

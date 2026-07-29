@@ -273,10 +273,7 @@ func (w *fakeProjWriter) InsertRecoveryCompletion(context.Context, domain.Recove
 func (w *fakeProjWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *fakeProjWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *fakeProjWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *fakeProjWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *fakeProjWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
+func (w *fakeProjWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeProjPRdr struct {
 	parent *fakeProjRepo

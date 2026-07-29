@@ -5,7 +5,7 @@ package user
 
 // internal_on_recovery_test.go — unit-tests (mock-port) for the sync stages of
 // InternalUserService.OnRecoveryCompleted. The async writer-tx
-// (idempotency / re-enable / revoke / audit) is covered by the testcontainers
+// (idempotency / revoke / audit) is covered by the testcontainers
 // integration tests; here we pin the synchronous gates that must reject BEFORE
 // the Operation is spawned (no side-effects), via mock ports.
 //

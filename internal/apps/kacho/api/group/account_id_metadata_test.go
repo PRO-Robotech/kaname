@@ -147,10 +147,7 @@ func (w *fakeGrpWriter) InsertRecoveryCompletion(context.Context, domain.Recover
 func (w *fakeGrpWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *fakeGrpWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *fakeGrpWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *fakeGrpWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *fakeGrpWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
+func (w *fakeGrpWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeAccRdr struct{}
 

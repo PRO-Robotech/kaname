@@ -574,9 +574,6 @@ func (w *abFakeWriter) InsertRecoveryCompletion(context.Context, domain.Recovery
 func (w *abFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *abFakeWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *abFakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *abFakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
 func (w *abFakeWriter) AdvisoryXactLock(_ context.Context, key string) error {
 	w.repo.recordTxOp("advisory_xact_lock:" + key)
 	return nil

@@ -322,10 +322,7 @@ func (w *fakeUWtr) InsertRecoveryCompletion(context.Context, domain.RecoveryComp
 func (w *fakeUWtr) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *fakeUWtr) Savepoint(context.Context, string) error           { return nil }
-func (w *fakeUWtr) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *fakeUWtr) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *fakeUWtr) AdvisoryXactLock(context.Context, string) error    { return nil }
+func (w *fakeUWtr) AdvisoryXactLock(context.Context, string) error { return nil }
 
 // Stubs нужные для bootstrap-path (InsertActive + Account.Insert +
 // Project.Insert + AB.Insert). Возвращают входной argument как success.
@@ -507,9 +504,6 @@ func (w *fakeUserUW) InsertActive(_ context.Context, u domain.User) (domain.User
 	w.parent.mu.Unlock()
 	u.CreatedAt = time.Now().UTC()
 	return u, nil
-}
-func (w *fakeUserUW) ReEnable(_ context.Context, id domain.UserID) (domain.User, bool, error) {
-	return domain.User{ID: id, InviteStatus: domain.InviteStatusActive}, false, nil
 }
 func (w *fakeUserUW) Delete(context.Context, domain.UserID) error { return nil }
 func (w *fakeUserUW) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {

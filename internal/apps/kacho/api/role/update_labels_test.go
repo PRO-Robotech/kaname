@@ -234,12 +234,9 @@ func (w *rlUpdWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryC
 func (w *rlUpdWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *rlUpdWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *rlUpdWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *rlUpdWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *rlUpdWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
-func (w *rlUpdWriter) Commit(context.Context) error                      { return nil }
-func (w *rlUpdWriter) Rollback(context.Context) error                    { return nil }
+func (w *rlUpdWriter) AdvisoryXactLock(context.Context, string) error { return nil }
+func (w *rlUpdWriter) Commit(context.Context) error                   { return nil }
+func (w *rlUpdWriter) Rollback(context.Context) error                 { return nil }
 
 type rlRoleWtr struct{ parent *rlUpdRepo }
 

@@ -451,10 +451,7 @@ func (w *fakeWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCo
 func (w *fakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *fakeWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *fakeWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *fakeWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *fakeWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
+func (w *fakeWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeAcctReader struct{}
 

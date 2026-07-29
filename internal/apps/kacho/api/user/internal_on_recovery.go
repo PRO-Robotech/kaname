@@ -18,23 +18,28 @@ package user
 //           ON CONFLICT DO NOTHING — the DB-level idempotency gate; 0-rows →
 //           idempotent no-op (replay stored user_id / revoked_session_count, no
 //           side-effects);
-//        b. re-enable every BLOCKED row of the identity → ACTIVE (ACTIVE → no-op);
-//        c. revoke-all cutoff (reason=password-change) for every affected row;
-//
-//     (b) and (c) are the two halves of one act and only make sense together.
-//     Re-enabling restores the identity's ability to authenticate — which is
-//     also what stops REFUSING the sessions an attacker may already hold, since
-//     a blocked row is refused at issuance on its own. From that instant the
-//     cutoff is the only thing standing between those live sessions and a fresh
-//     token, so it must be enforced where tokens are ISSUED. Until recently it
-//     was read only where a token is refreshed, and a personal access token —
-//     whose grant has no refresh hook — was never re-examined at all: recovery
-//     handed back an account that the person who compromised it could keep
-//     using. The issuance-side gate (internal/handler/iamhooks) is what makes
-//     this step mean what it says.
-//        d. emit iam.user.recovery_completed audit (tenant_account_id =
+//        b. revoke-all cutoff (reason=password-change) for every affected row;
+//        c. emit iam.user.recovery_completed audit (tenant_account_id =
 //           primary User.AccountID);
-//        e. commit (all-or-nothing — a mid-tx failure leaves no stuck key).
+//        d. commit (all-or-nothing — a mid-tx failure leaves no stuck key).
+//
+// Восстановление возвращает УЧЁТНЫЕ ДАННЫЕ, но не право пользоваться ими.
+// Прежде тот же шаг переводил каждую заблокированную строку личности в
+// действующую — то есть самостоятельное действие отменяло административное.
+// Основанием служило «строка есть в {действующая, заблокированная}», хотя
+// предметом было её состояние; выходило, что две половины одного пути
+// компрометации смотрели в противоположные стороны: выдача токена
+// заблокированному отказывала, а восстановление возвращало его в строй.
+// Блокировка — административный акт; снимает её администратор. Самостоятельное
+// восстановление доказывает владение почтовым ящиком — ровно то, чего
+// администратор, ставя запрет, под сомнение не ставил.
+//
+// Отсечка (b) остаётся на КАЖДОЙ затронутой строке, включая заблокированную:
+// обрубить живые сессии личности, чьи учётные данные только что сменили,
+// полезно независимо от того, разрешено ли ей входить. Энфорсится она там, где
+// токены ВЫДАЮТСЯ (internal/handler/iamhooks) — на обновлении одного её мало:
+// у персонального токена доступа нет хука обновления, и такой токен не
+// пересматривался бы вовсе.
 //
 // The idempotency key is the flow-scoped recovery_jti (one Kratos recovery flow
 // = one event), NOT (user_id): one identity may own N User-rows across N
@@ -49,7 +54,6 @@ package user
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -215,7 +219,7 @@ func matchByEmail(rows []domain.User, email domain.Email) []domain.User {
 	return out
 }
 
-// doRecovery — the single writer-tx: idempotency-gate → re-enable → revoke-all
+// doRecovery — the single writer-tx: idempotency-gate → revoke-all
 // → audit → commit. On the conflict (already-processed) path it runs NONE of the
 // side-effects and replays the stored metadata.
 func (uc *OnRecoveryCompletedUseCase) doRecovery(
@@ -238,84 +242,18 @@ func (uc *OnRecoveryCompletedUseCase) doRecovery(
 				return domain.User{}, err
 			}
 			if !inserted {
-				// Already processed → idempotent no-op: run NO side-effects. The
-				// returned user reflects the (already-ACTIVE) primary row.
-				replay := primary
-				replay.InviteStatus = domain.InviteStatusActive
-				return replay, nil
+				// Already processed → idempotent no-op: run NO side-effects.
+				return primary, nil
 			}
 
-			// (b) re-enable every affected row (BLOCKED → ACTIVE; ACTIVE no-op).
+			// (b) revoke-all cutoff (reason=password-change) per affected row.
 			//
-			// Schema reality (migration 0011 users_active_external_id_uniq):
-			// at most ONE ACTIVE row may exist per external_id GLOBALLY, but
-			// BLOCKED rows are unrestricted. So a matched-set CAN hold an ACTIVE
-			// row in one Account AND a BLOCKED row in another (a reachable stored
-			// state — see docs/architecture/recovery-completion-multi-account.md).
-			// Re-enabling that BLOCKED row → ACTIVE collides with the
-			// ACTIVE sibling on the global guard (23505 → ErrAlreadyExists).
-			//
-			// A raw 23505 inside a bare tx aborts it (25P02) → every following
-			// statement (revoke / audit / commit) fails. The security goal of
-			// recovery is to revoke the identity's old sessions even when one
-			// row's re-enable collides (the identity already has its canonical
-			// ACTIVE presence via the sibling). So each per-row re-enable is
-			// bounded by a SAVEPOINT: a caught collision rolls back to the
-			// savepoint (tx stays usable) and the row is skipped; revoke-all +
-			// audit then run on the clean tx and the whole op commits.
-			const reEnableSP = "sp_reenable"
-			var (
-				reEnabledAny bool
-				primaryAfter domain.User
-				primarySet   bool
-			)
-			for _, id := range matchedIDs {
-				if sperr := w.Savepoint(ctx, reEnableSP); sperr != nil {
-					return domain.User{}, sperr
-				}
-				reEnabled, wasBlocked, rerr := w.UsersW().ReEnable(ctx, id)
-				if rerr != nil {
-					if stderrors.Is(rerr, iamerr.ErrAlreadyExists) {
-						// Canonical ACTIVE sibling exists — the 23505 aborted only
-						// up to the savepoint; roll back to it so the tx is usable
-						// again, then skip this row (leave it BLOCKED). Fall back to
-						// the pre-image for the primary so audit/response carry
-						// account_id.
-						if rberr := w.RollbackToSavepoint(ctx, reEnableSP); rberr != nil {
-							return domain.User{}, rberr
-						}
-						if id == primary.ID && !primarySet {
-							primaryAfter = primary
-							primarySet = true
-						}
-						continue
-					}
-					// Any other error → propagate (DoWithWriteTx full-rollbacks).
-					return domain.User{}, rerr
-				}
-				// Success → drop the savepoint (keeps the savepoint stack shallow).
-				if relerr := w.ReleaseSavepoint(ctx, reEnableSP); relerr != nil {
-					return domain.User{}, relerr
-				}
-				if wasBlocked {
-					reEnabledAny = true
-				}
-				if id == primary.ID {
-					primaryAfter = reEnabled
-					primarySet = true
-				}
-			}
-			if !primarySet {
-				// All matched rows skipped (constraint) — use the pre-image.
-				primaryAfter = primary
-			}
-
-			// (c) revoke-all cutoff (reason=password-change) per affected row.
-			//
-			// Same instant for every row and the same tx as the re-enable above:
-			// the moment the identity's credential changed. A session that
-			// authenticated at or before it is refused at issuance; the person
-			// completing recovery authenticates after it and is served.
+			// Один и тот же момент для всех строк — момент смены учётных данных
+			// личности. Сессия, аутентифицировавшаяся до него, на выдаче
+			// отвергается; тот, кто завершает восстановление, аутентифицируется
+			// после и обслуживается. Заблокированная строка отсекается наравне с
+			// прочими: её состояние решает, пустят ли её дальше, а не нужно ли
+			// обрубать её старые сессии.
 			var revokedCount int32
 			for _, id := range matchedIDs {
 				marker := domain.UserTokenRevocation{
@@ -332,25 +270,28 @@ func (uc *OnRecoveryCompletedUseCase) doRecovery(
 				revokedCount++
 			}
 
-			// (d) audit — same writer-tx (запрет #10). tenant_account_id =
+			// (c) audit — same writer-tx (запрет #10). tenant_account_id =
 			// primary User.AccountID. No secrets in payload.
+			//
+			// Поля «сняли ли блокировку» здесь больше нет: восстановление её не
+			// снимает, и признак, который всегда ложь, — не запись о событии, а
+			// обещание возможности, которой нет.
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventUserRecoveryCompleted,
-				TenantAccountID: string(primaryAfter.AccountID),
+				TenantAccountID: string(primary.AccountID),
 				Payload: map[string]any{
 					"actor":                 "system",
-					"user_id":               string(primaryAfter.ID),
+					"user_id":               string(primary.ID),
 					"external_id":           string(in.ExternalID),
 					"email":                 string(in.Email),
 					"recovery_jti":          in.RecoveryJTI,
-					"re_enabled":            reEnabledAny,
 					"revoked_session_count": revokedCount,
 				},
 			}); aerr != nil {
 				return domain.User{}, aerr
 			}
 
-			return primaryAfter, nil
+			return primary, nil
 		})
 	if err != nil {
 		return nil, err

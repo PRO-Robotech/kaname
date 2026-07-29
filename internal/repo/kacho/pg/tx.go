@@ -11,7 +11,6 @@ package pg
 
 import (
 	"context"
-	"regexp"
 
 	"github.com/jackc/pgx/v5"
 
@@ -156,46 +155,13 @@ func (w *writeTx) InsertRecoveryCompletion(ctx context.Context, rc domain.Recove
 // UpsertUserTokenRevokeAll — per-user monotonic revoke-all cutoff on THIS
 // writer-tx (user_token_revocations, migration 0012). Reuses the canonical
 // GREATEST upsert (single source of truth with the pool-scoped repo) so the
-// cutoff commits atomically with the recovery re-enable + audit (запрет #10).
+// cutoff commits atomically with the recovery audit event (запрет #10).
 func (w *writeTx) UpsertUserTokenRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	_, err := w.tx.Exec(ctx, upsertRevokeAllSQL,
 		string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy),
 	)
 	if err != nil {
 		return mapErr(err, "", string(u.UserID))
-	}
-	return nil
-}
-
-// Savepoint / RollbackToSavepoint / ReleaseSavepoint — tx-scoped SAVEPOINT
-// primitives on THIS writer-tx's pgx.Tx. SAVEPOINT names cannot be parameterized
-// in SQL, so the name is spliced into the statement; safeSavepointName guards
-// against injection (panic on an unsafe name — programmer error, callers pass
-// static literals).
-//
-// These let a caller bound a statement that may raise a recoverable SQLSTATE
-// (e.g. 23505) without aborting the whole tx (25P02) — see the recovery worker
-// in internal/apps/kacho/api/user/internal_on_recovery.go.
-func (w *writeTx) Savepoint(ctx context.Context, name string) error {
-	n := safeSavepointName(name)
-	if _, err := w.tx.Exec(ctx, "SAVEPOINT "+n); err != nil {
-		return mapErr(err, "", "")
-	}
-	return nil
-}
-
-func (w *writeTx) RollbackToSavepoint(ctx context.Context, name string) error {
-	n := safeSavepointName(name)
-	if _, err := w.tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+n); err != nil {
-		return mapErr(err, "", "")
-	}
-	return nil
-}
-
-func (w *writeTx) ReleaseSavepoint(ctx context.Context, name string) error {
-	n := safeSavepointName(name)
-	if _, err := w.tx.Exec(ctx, "RELEASE SAVEPOINT "+n); err != nil {
-		return mapErr(err, "", "")
 	}
 	return nil
 }
@@ -211,20 +177,6 @@ func (w *writeTx) AdvisoryXactLock(ctx context.Context, key string) error {
 	}
 	return nil
 }
-
-// safeSavepointName validates a SAVEPOINT identifier (must match
-// [A-Za-z_][A-Za-z0-9_]*). SAVEPOINT names can't be passed as bind parameters,
-// so the name is concatenated into the SQL text; an unsafe name is a programmer
-// error (callers pass static literals), so we panic rather than silently
-// proceed — this can never originate from tenant input.
-func safeSavepointName(name string) string {
-	if !savepointNameRe.MatchString(name) {
-		panic("pg: unsafe savepoint name: " + name)
-	}
-	return name
-}
-
-var savepointNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Compile-time interface satisfaction guards.
 var (

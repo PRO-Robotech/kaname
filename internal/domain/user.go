@@ -16,8 +16,17 @@ import (
 // login; the invitee has not yet confirmed identity through Kratos.
 // ACTIVE  — either self-signup via `UpsertFromIdentity` without a pending
 // invite, or a PENDING row activated on first-login (matched by email).
-// BLOCKED — reserved for a future feature (admin blocks a user in an
-// Account); the field exists but no RPC sets it today.
+// BLOCKED — административный запрет на членство в Account'е. Продуктового пути,
+// который его СТАВИТ, сегодня нет ни одного (проверяется гейтом
+// blocked_state_reachability_test.go): запрет ставится прямым вмешательством
+// оператора в базу, и у него же есть обратное утверждение.
+//
+// Снимать запрет самостоятельным действием нельзя: восстановление пароля
+// доказывает владение почтовым ящиком — ровно то, чего администратор, ставя
+// запрет, под сомнение не ставил (см. internal_on_recovery.go). Поэтому день,
+// когда путь блокировки появится, обязан быть и днём, когда появится
+// административный путь снятия — иначе заблокированный окажется заперт
+// навсегда. Гейт делает это упавшей сборкой, а не открытием.
 type InviteStatus string
 
 const (

@@ -192,12 +192,9 @@ func (w *updUserWriter) InsertRecoveryCompletion(context.Context, domain.Recover
 func (w *updUserWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
-func (w *updUserWriter) Savepoint(context.Context, string) error           { return nil }
-func (w *updUserWriter) RollbackToSavepoint(context.Context, string) error { return nil }
-func (w *updUserWriter) ReleaseSavepoint(context.Context, string) error    { return nil }
-func (w *updUserWriter) AdvisoryXactLock(context.Context, string) error    { return nil }
-func (w *updUserWriter) Commit(context.Context) error                      { return nil }
-func (w *updUserWriter) Rollback(context.Context) error                    { return nil }
+func (w *updUserWriter) AdvisoryXactLock(context.Context, string) error { return nil }
+func (w *updUserWriter) Commit(context.Context) error                   { return nil }
+func (w *updUserWriter) Rollback(context.Context) error                 { return nil }
 
 type updUserWtr struct{ parent *updUserRepo }
 
@@ -212,9 +209,6 @@ func (w *updUserWtr) ActivateInvite(context.Context, domain.UserID, domain.Exter
 }
 func (w *updUserWtr) InsertActive(context.Context, domain.User) (domain.User, error) {
 	return domain.User{}, nil
-}
-func (w *updUserWtr) ReEnable(context.Context, domain.UserID) (domain.User, bool, error) {
-	return domain.User{}, false, nil
 }
 func (w *updUserWtr) Delete(context.Context, domain.UserID) error { return nil }
 func (w *updUserWtr) UpdateLabels(_ context.Context, id domain.UserID, labels domain.Labels) (domain.User, error) {
