@@ -80,7 +80,7 @@ func TestEnrichClaims_UserToken_HappyPath(t *testing.T) {
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, fixed)
 
-	claims, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{
+	claims, _, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{
 		CnfJkt:     "jkt-thumb",
 		CnfX5tS256: "x5t-thumb",
 		ACR:        "3",
@@ -118,7 +118,7 @@ func TestEnrichClaims_UserToken_UserGone_OmitsAccount(t *testing.T) {
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, fixed)
 
-	claims, err := svc.EnrichClaims(context.Background(), "client-gone", TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), "client-gone", TokenHookContext{})
 	require.NoError(t, err)
 	assert.Equal(t, "usr-gone", claims["kacho_principal_id"])
 	assert.Equal(t, "uoc-777", claims["kacho_user_token_id"])
@@ -135,7 +135,7 @@ func TestEnrichClaims_UserToken_LookupError_Propagates(t *testing.T) {
 	// DID fall through would surface as a wrong (non-error) result, caught below.
 	svc := newUserTokenEnricher(stubUserPort{}, ut, time.Unix(1, 0))
 
-	claims, err := svc.EnrichClaims(context.Background(), "client-err", TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), "client-err", TokenHookContext{})
 	require.Error(t, err)
 	assert.Nil(t, claims)
 	assert.Contains(t, err.Error(), "lookup user-token oauth client")
@@ -150,7 +150,7 @@ func TestEnrichClaims_UserToken_GetUserError_Propagates(t *testing.T) {
 	}
 	svc := newUserTokenEnricher(stubUserPort{}, ut, time.Unix(1, 0))
 
-	claims, err := svc.EnrichClaims(context.Background(), "client-9", TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), "client-9", TokenHookContext{})
 	require.Error(t, err)
 	assert.Nil(t, claims)
 	assert.Contains(t, err.Error(), "get user")

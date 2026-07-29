@@ -90,7 +90,7 @@ func newStateSAHook(t *testing.T, enabled bool, audit *fakeAudit) *iamhooks.Toke
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
 			HydraIssuer:      "https://hydra.test.cloud",
-		}, enricher, audit, logger)
+		}, enricher, newFakeRevocations(), audit, logger)
 }
 
 func saClientCredentialsBody() string {

@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/bootstraptokenwire"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
@@ -435,6 +437,18 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
+		// ...and ENDS the session at the provider. The cutoff alone stops tokens
+		// from being issued but leaves the browser holding a live session, which
+		// then presents its original authentication instant forever and is
+		// refused forever, with nothing prompting a re-login. Same lever the
+		// self-service logout at the edge already pulls for its own caller.
+		WithProviderSessions(
+			clients.NewHydraAdminClient(
+				cfg.AuthN.ResolveHydraAdminURL(),
+				os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
+			),
+			&forceLogoutSubjectResolver{users: kachopg.NewUserPoolRepo(pool)},
+		).
 		// ForceLogout returns an Operation — the row it names is persisted here,
 		// before the cutoff is written and terminally after it, so the id the
 		// admin gets back is queryable and the force-logout shows up in the
@@ -744,4 +758,22 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 		conditions:        conditionsH,
 		internalAuthorize: internalAuthH,
 	}
+}
+
+// forceLogoutSubjectResolver names a kacho user to the identity provider.
+//
+// Composition-root shim: the use-case states what it needs (a `users.id` → the
+// provider's subject) without taking a repository type. The provider keys its
+// login sessions on the subject it issued, which is a different namespace from
+// `users.id` — handing it the wrong one would delete nothing and report success.
+type forceLogoutSubjectResolver struct {
+	users *kachopg.UserPoolRepo
+}
+
+func (r *forceLogoutSubjectResolver) ExternalIDOf(ctx context.Context, id domain.UserID) (string, error) {
+	u, err := r.users.GetByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return string(u.ExternalID), nil
 }

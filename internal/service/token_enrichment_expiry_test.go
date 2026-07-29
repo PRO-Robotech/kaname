@@ -96,7 +96,7 @@ func TestEnrichClaims_SAKey_Expired_Denied(t *testing.T) {
 	expired := now.Add(-time.Second)
 	svc := newExpirySAEnricher(t, &expired, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
+	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.Error(t, err, "an expired SA key must not mint a token")
 	assert.True(t, stderrors.Is(err, ErrCredentialExpired),
@@ -113,7 +113,7 @@ func TestEnrichClaims_SAKey_ExpiringExactlyNow_Denied(t *testing.T) {
 	atInstant := now
 	svc := newExpirySAEnricher(t, &atInstant, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
+	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.Error(t, err, "expires_at == now must be treated as expired (deny at the instant)")
 	assert.True(t, stderrors.Is(err, ErrCredentialExpired), "got %v", err)
@@ -131,7 +131,7 @@ func TestEnrichClaims_SAKey_ExpiredInAnotherZone_Denied(t *testing.T) {
 	expired := now.Add(-time.Second).In(time.FixedZone("UTC+14", 14*3600))
 	svc := newExpirySAEnricher(t, &expired, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
+	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.Error(t, err, "expiry must compare instants, not wall-clock fields")
 	assert.True(t, stderrors.Is(err, ErrCredentialExpired), "got %v", err)
@@ -145,7 +145,7 @@ func TestEnrichClaims_SAKey_NotYetExpired_Mints(t *testing.T) {
 	live := now.Add(time.Nanosecond)
 	svc := newExpirySAEnricher(t, &live, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
+	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.NoError(t, err)
 	assert.Equal(t, "service_account", claims["kacho_principal_type"])
@@ -159,7 +159,7 @@ func TestEnrichClaims_SAKey_NoExpiry_Mints(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	svc := newExpirySAEnricher(t, nil, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
+	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.NoError(t, err, "a NULL expiry is non-expiring — the bootstrap-admin row shape")
 	assert.Equal(t, expirySvaID, claims["kacho_principal_id"])
@@ -192,7 +192,7 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 	).WithSAPort(port)
 	svc.now = func() time.Time { return now }
 
-	claims, err := svc.EnrichClaims(context.Background(), "external-subject", TokenHookContext{
+	claims, _, err := svc.EnrichClaims(context.Background(), "external-subject", TokenHookContext{
 		GrantType:      "urn:ietf:params:oauth:grant-type:jwt-bearer",
 		ExternalIssuer: "https://idp.example.com",
 		OAuthClientID:  expiryClientID,
@@ -222,7 +222,7 @@ func TestEnrichClaims_UserToken_Expired_Denied(t *testing.T) {
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
 
 	require.Error(t, err, "an expired user token must not mint a token")
 	assert.True(t, stderrors.Is(err, ErrCredentialExpired), "got %v", err)
@@ -242,7 +242,7 @@ func TestEnrichClaims_UserToken_NoExpiry_Mints(t *testing.T) {
 	}
 	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, now)
 
-	claims, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "user", claims["kacho_principal_type"])
@@ -258,7 +258,7 @@ func TestEnrichClaims_ExpiredSAKey_DoesNotFallThroughToUserPath(t *testing.T) {
 	// stubUserPort{t: t} fails the test if the interactive path is reached.
 	svc := newExpirySAEnricher(t, &expired, now)
 
-	_, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{})
+	_, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{})
 
 	require.Error(t, err)
 	assert.False(t, stderrors.Is(err, iamerr.ErrNotFound),

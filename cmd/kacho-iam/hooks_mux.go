@@ -71,6 +71,10 @@ func buildHooksMux(
 			HydraIssuer:      hydraIssuer,
 		},
 		tokenEnricher,
+		// The SAME revocation adapter the refresh hook holds. Both hooks ask the
+		// same question about the same row; one reader is what keeps the two
+		// answers from drifting apart.
+		revsPg,
 		auditAdapter,
 		logger,
 	)

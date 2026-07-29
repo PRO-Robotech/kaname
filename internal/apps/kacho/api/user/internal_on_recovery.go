@@ -20,6 +20,18 @@ package user
 //           side-effects);
 //        b. re-enable every BLOCKED row of the identity → ACTIVE (ACTIVE → no-op);
 //        c. revoke-all cutoff (reason=password-change) for every affected row;
+//
+//     (b) and (c) are the two halves of one act and only make sense together.
+//     Re-enabling restores the identity's ability to authenticate — which is
+//     also what stops REFUSING the sessions an attacker may already hold, since
+//     a blocked row is refused at issuance on its own. From that instant the
+//     cutoff is the only thing standing between those live sessions and a fresh
+//     token, so it must be enforced where tokens are ISSUED. Until recently it
+//     was read only where a token is refreshed, and a personal access token —
+//     whose grant has no refresh hook — was never re-examined at all: recovery
+//     handed back an account that the person who compromised it could keep
+//     using. The issuance-side gate (internal/handler/iamhooks) is what makes
+//     this step mean what it says.
 //        d. emit iam.user.recovery_completed audit (tenant_account_id =
 //           primary User.AccountID);
 //        e. commit (all-or-nothing — a mid-tx failure leaves no stuck key).
@@ -299,6 +311,11 @@ func (uc *OnRecoveryCompletedUseCase) doRecovery(
 			}
 
 			// (c) revoke-all cutoff (reason=password-change) per affected row.
+			//
+			// Same instant for every row and the same tx as the re-enable above:
+			// the moment the identity's credential changed. A session that
+			// authenticated at or before it is refused at issuance; the person
+			// completing recovery authenticates after it and is served.
 			var revokedCount int32
 			for _, id := range matchedIDs {
 				marker := domain.UserTokenRevocation{

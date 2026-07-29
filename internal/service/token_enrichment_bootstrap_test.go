@@ -83,7 +83,7 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 	svc.now = func() time.Time { return fixed }
 
 	// For client_credentials, Hydra's `subject` == the client_id.
-	claims, err := svc.EnrichClaims(context.Background(), bootstrapClientID, TokenHookContext{ACR: "0"})
+	claims, _, err := svc.EnrichClaims(context.Background(), bootstrapClientID, TokenHookContext{ACR: "0"})
 	require.NoError(t, err)
 
 	assert.Equal(t, "service_account", claims["kacho_principal_type"],
@@ -106,7 +106,7 @@ func TestEnrichClaims_UnknownClient_NotBootstrapSA(t *testing.T) {
 		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
 		fallthroughUserPort{},
 	).WithSAPort(sa)
-	_, err := svc.EnrichClaims(context.Background(), "some-other-client", TokenHookContext{})
+	_, _, err := svc.EnrichClaims(context.Background(), "some-other-client", TokenHookContext{})
 	require.True(t, stderrors.Is(err, iamerr.ErrNotFound), "unknown client resolves to neither SA nor user")
 }
 

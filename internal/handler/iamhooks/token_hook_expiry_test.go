@@ -82,6 +82,7 @@ func newExpiryTokenHook(t *testing.T, expiresAt *time.Time, audit *fakeAudit) *i
 			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
+		newFakeRevocations(),
 		audit,
 		logger,
 	)

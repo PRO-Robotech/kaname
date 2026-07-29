@@ -91,7 +91,7 @@ func newSAEnricher(port TokenEnrichmentSAPort) *TokenEnrichmentService {
 func TestEnrichClaims_DisabledServiceAccount_Refused(t *testing.T) {
 	svc := newSAEnricher(saPortWithState(false))
 
-	claims, err := svc.EnrichClaims(context.Background(), disabledSAClientID,
+	claims, _, err := svc.EnrichClaims(context.Background(), disabledSAClientID,
 		TokenHookContext{GrantType: "client_credentials", OAuthClientID: disabledSAClientID})
 
 	require.Error(t, err, "a service account that may not authenticate must not mint a token")
@@ -110,7 +110,7 @@ func TestEnrichClaims_DisabledServiceAccount_Refused(t *testing.T) {
 func TestEnrichClaims_EnabledServiceAccount_StillMints(t *testing.T) {
 	svc := newSAEnricher(saPortWithState(true))
 
-	claims, err := svc.EnrichClaims(context.Background(), disabledSAClientID,
+	claims, _, err := svc.EnrichClaims(context.Background(), disabledSAClientID,
 		TokenHookContext{GrantType: "client_credentials", OAuthClientID: disabledSAClientID})
 
 	require.NoError(t, err, "an enabled service account must keep minting; refusing it trades "+
@@ -126,7 +126,7 @@ func TestEnrichClaims_EnabledServiceAccount_StillMints(t *testing.T) {
 func TestEnrichClaims_DisabledFederatedServiceAccount_Refused(t *testing.T) {
 	svc := newSAEnricher(fedSAPortWithState{inner: saPortWithState(false)})
 
-	claims, err := svc.EnrichClaims(context.Background(), disabledSAExtSub, TokenHookContext{
+	claims, _, err := svc.EnrichClaims(context.Background(), disabledSAExtSub, TokenHookContext{
 		GrantType:      "urn:ietf:params:oauth:grant-type:jwt-bearer",
 		ExternalIssuer: disabledSAIssuer,
 		OAuthClientID:  disabledSAClientID,
@@ -141,7 +141,7 @@ func TestEnrichClaims_DisabledFederatedServiceAccount_Refused(t *testing.T) {
 func TestEnrichClaims_EnabledFederatedServiceAccount_StillMints(t *testing.T) {
 	svc := newSAEnricher(fedSAPortWithState{inner: saPortWithState(true)})
 
-	claims, err := svc.EnrichClaims(context.Background(), disabledSAExtSub, TokenHookContext{
+	claims, _, err := svc.EnrichClaims(context.Background(), disabledSAExtSub, TokenHookContext{
 		GrantType:      "urn:ietf:params:oauth:grant-type:jwt-bearer",
 		ExternalIssuer: disabledSAIssuer,
 		OAuthClientID:  disabledSAClientID,
@@ -168,7 +168,7 @@ func TestEnrichClaims_ServiceAccountRowMissing_IsNotReportedAsDisabled(t *testin
 	port.saErr = iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", disabledSAID)
 	svc := newSAEnricher(port)
 
-	claims, err := svc.EnrichClaims(context.Background(), disabledSAClientID,
+	claims, _, err := svc.EnrichClaims(context.Background(), disabledSAClientID,
 		TokenHookContext{GrantType: "client_credentials", OAuthClientID: disabledSAClientID})
 
 	require.NoError(t, err, "an unresolved account row is the pre-existing not-found path, "+
