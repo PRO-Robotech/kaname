@@ -1,0 +1,100 @@
+{
+  "info": {
+    "_postman_id": "aa8763e4-9aa8-5848-a59e-5692f762d461",
+    "name": "kacho-iam / newman / authz-failclosed",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runId') || pm.environment.get('runId') === '') {",
+          "  // runId формат: только [a-z0-9], без точки, начинается с буквы — чтобы проходить compute name regex",
+          "  const t = Date.now().toString(36);",
+          "  const r = Math.floor(Math.random() * 1e9).toString(36);",
+          "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
+          "}",
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "AUTHZ-FAILCLOSED-OPENFGA-DOWN — gateway returns 503 Unavailable when the authorization store is unreachable (fail-closed)",
+      "description": "class:AUTHZ | class:FLOW | class:FAIL_CLOSED | priority:P0",
+      "item": [
+        {
+          "name": "AUTHZ-FAILCLOSED-OPENFGA-DOWN :: any-authz-gated-rpc-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// fail-closed: когда хранилище прав недостижимо, слой авторизации",
+                  "// шлюза уходит в ветвь ошибки и при FailOpen=false отвечает",
+                  "// 503 Unavailable / gRPC 14. НИКОГДА 200.",
+                  "//",
+                  "// Условие создаёт scripts/run-failclosed.sh (своя волна прогона):",
+                  "// он сворачивает хранилище прав, ждёт истечения кэша решений шлюза,",
+                  "// гоняет эту коллекцию и поднимает хранилище обратно.",
+                  "pm.test('[FAIL-CLOSED] gateway 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, 'got ' + pm.response.code + ' ' + pm.response.text()).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] grpc code 14 (Unavailable)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(14);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": []
+}
