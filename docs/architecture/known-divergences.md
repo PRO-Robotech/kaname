@@ -390,3 +390,33 @@ not a one-line cap. Tracked as a scalability item; no correctness or security
 gap exists today given the server-side FGA bounds.
 
 _Reviewed 2026-07-06 (r8b security-hardening audit)._
+
+---
+
+## 12. Refusal `ErrorInfo.domain` is `kacho.cloud.iam.v1`, not the `<service>.kacho.cloud` form
+
+**Convention** (`api-conventions.md`, error-format): a machine-readable refusal
+carries `google.rpc.ErrorInfo` whose `domain` is written `"<service>.kacho.cloud"`.
+
+**Divergence**: `internal/authzguard/deny_details.go` stamps
+`domain = "kacho.cloud.iam.v1"` — the value the api-gateway authz middleware has
+been putting on the wire since it began emitting `AUTHZ_DENIED` / `AUTHN_REQUIRED`.
+
+**Why (by design, not a defect)**: the two layers refuse the SAME class of request
+on the same band. The gateway answers when it runs the per-RPC check; iam answers
+when the row is scope-filtered and the decision is made here over the data. A
+client keying on `(reason, domain)` must not have to know which of them said no —
+if the two stamped different domains, that pair would stop identifying "an authz
+refusal from the platform" and start identifying "which component happened to
+handle it", which is not a distinction any caller can act on. Matching the
+incumbent producer is therefore the only choice that keeps the token usable;
+changing the gateway to the documented form is an edge-owned, cross-service wire
+change (every consumer already keying on the current value), out of scope for a
+service-side fix.
+
+**Converging** would mean changing the value in `gateway/internal/middleware/
+permission_denied_response.go` and here in one step, with the newman assertions
+that read `details[]` updated together — and only after establishing that no
+external consumer pins the current domain.
+
+_Reviewed 2026-07-29 (contract-residue pass)._
