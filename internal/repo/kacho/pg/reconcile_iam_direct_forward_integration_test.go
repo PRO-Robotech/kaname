@@ -39,9 +39,10 @@ package pg_test
 //                          containment resolves the account through the COALESCE(o.account_id,
 //                          p.account_id) join (the complex-containment case the reviewers
 //                          flagged): forward ≡ full owner relation-set, no drift.
-//   08 SA-FWD ≡ FULL      — iam.serviceAccount BYTE-IDENTITY on the account-scoped SA AND a
-//                          project-scoped SA (parentProject = COALESCE(o.project_id,'')
-//                          projection) — forward ≡ full owner relation-set.
+//   08 SA-FWD ≡ FULL      — iam.serviceAccount BYTE-IDENTITY on the account-scoped SA —
+//                          forward ≡ full owner relation-set. (Проектной области у
+//                          служебной учётки больше нет: колонка снята вместе с полем
+//                          контракта, писателя у неё не было ни одного.)
 //   09 USER/GROUP ≡ FULL  — iam.user + iam.group (the simpler account-scoped siblings)
 //                          forward ≡ full owner relation-set (table-driven).
 //
@@ -59,7 +60,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/ids"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -417,13 +417,14 @@ func TestIAMDirectForward_07_Role_ForwardEqualsFull_AccountAndProjectScoped(t *t
 }
 
 // Test 08 — SA-FWD ≡ FULL: iam.serviceAccount forward path derives a BYTE-IDENTICAL owner
-// relation-set to the FULL ReconcileObject on a twin, for BOTH an account-scoped SA and a
-// PROJECT-scoped SA (account_id set + project_id set → parentProject = COALESCE(o.project_id,
-// ”) projection in iamDirectScanSpecs["iam.serviceAccount"]). The account-owner contains
-// the SA through parentAccount = o.account_id in both cases; the project_id projection must
-// not perturb the derived owner tuple-set (no drift) — the containment risk the reviewers
-// flagged for the SA feed.
-func TestIAMDirectForward_08_ServiceAccount_ForwardEqualsFull_AccountAndProjectScoped(t *testing.T) {
+// relation-set to the FULL ReconcileObject on a twin. The account-owner contains the SA
+// through parentAccount = o.account_id.
+//
+// Проектной половины у этой пробы больше нет: она сеяла служебную учётку с
+// проектной колонкой руками — состояние, которого продуктовый код произвести не
+// мог, потому что писателя у колонки не было ни одного. Колонка снята вместе с
+// полем контракта.
+func TestIAMDirectForward_08_ServiceAccount_ForwardEqualsFull(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -440,18 +441,6 @@ func TestIAMDirectForward_08_ServiceAccount_ForwardEqualsFull_AccountAndProjectS
 	ownerUser := "user:" + string(owner)
 	rec, _ := newReconciler(pool)
 
-	// seedProjectScopedSA inserts an SA carrying BOTH account_id and project_id (there is no
-	// account/project XOR on service_accounts) so parentProject is a non-empty projection.
-	seedProjectScopedSA := func(suffix string, prjID domain.ProjectID) string {
-		sid := ids.NewID(domain.PrefixServiceAccount)
-		_, e := pool.Exec(ctx,
-			`INSERT INTO kacho_iam.service_accounts (id, account_id, project_id, name)
-			 VALUES ($1, $2, $3, $4)`,
-			sid, string(acc.ID), string(prjID), "sa-"+suffix)
-		require.NoError(t, e, "seed project-scoped service_account")
-		return sid
-	}
-
 	// --- account-scoped SA twins ---
 	saAccFwd := seedNativeSA(t, ctx, pool, acc.ID, "idf8accfwd")
 	saAccFull := seedNativeSA(t, ctx, pool, acc.ID, "idf8accfull")
@@ -466,21 +455,6 @@ func TestIAMDirectForward_08_ServiceAccount_ForwardEqualsFull_AccountAndProjectS
 	assert.True(t, ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", "iam_service_account:"+saAccFwd),
 		"forward materializes the owner admin tuple on the account-scoped SA")
 
-	// --- project-scoped SA twins (project_id projection) ---
-	prj := seedProject(t, ctx, repo, acc.ID, "idf8prj")
-	saProjFwd := seedProjectScopedSA("idf8prjfwd", prj.ID)
-	saProjFull := seedProjectScopedSA("idf8prjfull", prj.ID)
-	require.NoError(t, rec.ReconcileObjectForward(ctx, "iam.serviceAccount", saProjFwd))
-	require.NoError(t, rec.ReconcileObject(ctx, "iam.serviceAccount", saProjFull))
-
-	relProjFwd := ledgerRelationsForObject(t, ctx, pool, ownerBID, "iam_service_account:"+saProjFwd)
-	relProjFull := ledgerRelationsForObject(t, ctx, pool, ownerBID, "iam_service_account:"+saProjFull)
-	require.NotEmpty(t, relProjFwd,
-		"forward materialized owner tuples on the project-scoped SA (parentProject = COALESCE(project_id,''))")
-	assert.Equal(t, relProjFull, relProjFwd,
-		"project-scoped iam.serviceAccount: forward ≡ full owner relation-set (project_id projection byte-identical)")
-	assert.True(t, ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", "iam_service_account:"+saProjFwd),
-		"account-owner materializes admin on the project-scoped SA (contained via account_id)")
 }
 
 // Test 09 — USER/GROUP ≡ FULL: the two simpler account-scoped siblings. iam.user and

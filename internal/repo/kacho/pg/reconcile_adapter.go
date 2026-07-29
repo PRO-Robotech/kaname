@@ -293,7 +293,9 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 		objectType: "iam.account", table: "kacho_iam.accounts",
 		parentAccountExpr: "o.id", parentProjectExpr: "''",
 	},
-	// account-scoped content (role may also be project-scoped; SA may carry project_id).
+	// account-scoped content (a role may also be project-scoped; a service
+	// account is account-scoped only — её проектная колонка снята вместе с
+	// полем контракта, писателя у неё не было).
 	"iam.role": {
 		objectType: "iam.role", table: "kacho_iam.roles",
 		// A project-scoped role has account_id NULL → resolve it through its project.
@@ -307,8 +309,7 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 	},
 	"iam.serviceAccount": {
 		objectType: "iam.serviceAccount", table: "kacho_iam.service_accounts",
-		parentAccountExpr: "o.account_id",
-		parentProjectExpr: "COALESCE(o.project_id, '')",
+		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
 	},
 	"iam.user": {
 		objectType: "iam.user", table: "kacho_iam.users",

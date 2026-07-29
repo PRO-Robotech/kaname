@@ -485,9 +485,6 @@ func (s *TokenEnrichmentService) saClaims(soc domain.ServiceAccountOAuthClient, 
 	if sa.ID != "" {
 		claims["kacho_account_id"] = string(sa.AccountID)
 		claims["kacho_active_account"] = string(sa.AccountID)
-		if sa.ProjectID != "" {
-			claims["kacho_project_id"] = string(sa.ProjectID)
-		}
 	}
 	return claims
 }
@@ -519,9 +516,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 	if sa.ID != "" {
 		claims["kacho_account_id"] = string(sa.AccountID)
 		claims["kacho_active_account"] = string(sa.AccountID)
-		if sa.ProjectID != "" {
-			claims["kacho_project_id"] = string(sa.ProjectID)
-		}
 	}
 	return claims
 }

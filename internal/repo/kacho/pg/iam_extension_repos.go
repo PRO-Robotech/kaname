@@ -123,13 +123,12 @@ func (r *SAOAuthClientRepo) GetServiceAccount(ctx context.Context, id domain.Ser
 	var (
 		sa                domain.ServiceAccount
 		name, description string
-		projectID         sql.NullString
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, account_id, name, description, created_at, enabled, project_id
+		`SELECT id, account_id, name, description, created_at, enabled
 		   FROM service_accounts WHERE id = $1`, string(id)).Scan(
 		(*string)(&sa.ID), (*string)(&sa.AccountID),
-		&name, &description, &sa.CreatedAt, &sa.Enabled, &projectID,
+		&name, &description, &sa.CreatedAt, &sa.Enabled,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
@@ -139,7 +138,6 @@ func (r *SAOAuthClientRepo) GetServiceAccount(ctx context.Context, id domain.Ser
 	}
 	sa.Name = domain.SvcAccountName(name)
 	sa.Description = domain.Description(description)
-	sa.ProjectID = domain.ProjectID(projectID.String)
 	return sa, nil
 }
 

@@ -10,15 +10,17 @@ import (
 )
 
 // ServiceAccount — Account-scoped (account_id FK ON DELETE RESTRICT).
-// : добавлены `project_id` (optional, FK projects RESTRICT)
-// и `enabled` (default true). Migration 0011.
+//
+// Проектной области у служебной учётки нет: поле `project_id` и его колонка
+// сняты — заполнить их было нечем (ни запроса, ни записи, ни выборки), а claim,
+// который из них выводился, не читал никто. Понадобятся проектные служебные
+// учётки — они заводятся отдельной подсистемой со своей приёмкой.
 type ServiceAccount struct {
 	ID          ServiceAccountID
 	AccountID   AccountID
-	ProjectID   ProjectID // nullable —
 	Name        SvcAccountName
 	Description Description
-	Enabled     bool //  (default true)
+	Enabled     bool // default true
 	CreatedAt   time.Time
 	// Labels — tenant-facing метки. Делают ServiceAccount label-selectable
 	// наравне с account/project (ARM_LABELS-грант на iam.serviceAccount → v_list
