@@ -19,6 +19,15 @@ package domain_test
 // обязан появиться административный путь снятия, а здесь обязана появиться
 // строка, называющая его.
 //
+// Форма, которую этот писатель обязан принять, уже посажена на машинном
+// двойнике (`ServiceAccountService.Disable`/`Enable`): состояние доступа меняется
+// ДЕЙСТВИЕМ, а не изменяемым полем. Довод переносится дословно — при пустой
+// маске конвенция предписывает полную замену объекта, а булево в proto3
+// неотличимо от незаданного, поэтому клиент, не приславший поле, отключил бы
+// личность тихо и массово. Действие вдобавок видно в аудите событием, несёт
+// ярус повышенной аутентификации (это изменение постуры безопасности) и
+// идемпотентно по построению, потому что аргумент — состояние, а не переход.
+//
 // Гейт проверяет СВОЮ предпосылку и объявляет объём осмотренного: если он не
 // прочитал ни одного файла (переехало дерево, сменилось имя пакета), он падает
 // — «ноль находок» обязано быть отличимо от «ноль прочитанного».
@@ -110,8 +119,48 @@ func TestBlockedState_HasNoProductWriterWithoutALiftPath(t *testing.T) {
 			"Самостоятельное восстановление пароля запрет НЕ снимает (осознанное решение —\n"+
 			"см. internal/apps/kacho/api/user/internal_on_recovery.go). Значит вместе с путём\n"+
 			"блокировки в ТОМ ЖЕ изменении обязан появиться административный путь снятия,\n"+
-			"иначе заблокированный оказывается заперт навсегда. Добавив его, впиши файл в\n"+
-			"blockedWriters вместе со ссылкой на путь снятия.", found)
+			"иначе заблокированный оказывается заперт навсегда.\n\n"+
+			"Форму бери с машинного двойника — ServiceAccountService.Disable/Enable\n"+
+			"(services/iam/internal/apps/kacho/api/service_account/set_enabled.go):\n"+
+			"ДЕЙСТВИЕ с операцией, а не поле маски; идемпотентно по состоянию, а не по\n"+
+			"переходу; событие в аудит; ярус повышенной аутентификации. Добавив путь,\n"+
+			"впиши его файл в blockedWriters вместе со ссылкой на путь снятия.", found)
+}
+
+// TestBlockedState_ReadersExistWhichIsWhyTheWriterMatters — число, а не память:
+// у запрета есть читатели, решающие доступ, и это ровно то, что делает
+// отсутствие писателя предметом, а не мелочью. Проба падает, если читатели
+// исчезнут: тогда и весь этот гейт теряет предмет.
+func TestBlockedState_ReadersExistWhichIsWhyTheWriterMatters(t *testing.T) {
+	readers := 0
+	scanned := 0
+	for _, root := range scanRoots {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || !strings.HasSuffix(info.Name(), ".go") ||
+				strings.HasSuffix(info.Name(), "_test.go") {
+				return nil
+			}
+			body, rerr := os.ReadFile(path) //nolint:gosec // фиксированное дерево репозитория
+			if rerr != nil {
+				return rerr
+			}
+			scanned++
+			if strings.Contains(string(body), "InviteStatusBlocked") {
+				readers++
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	require.Greater(t, scanned, 100, "прочитано %d файлов — дерево не то", scanned)
+	require.Greater(t, readers, 0,
+		"у BLOCKED не осталось ни одного читателя — тогда состояние вообще ни на что не влияет, "+
+			"и связку «запрет ↔ путь снятия» надо пересматривать целиком")
+	t.Logf("BLOCKED: файлов-читателей=%d при нуле писателей (см. гейт выше); осмотрено файлов=%d",
+		readers, scanned)
 }
 
 // TestBlockedState_GateSeesAnInjectedWriter — доказательство обратной стороны:
