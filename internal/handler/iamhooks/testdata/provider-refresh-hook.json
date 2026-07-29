@@ -1,0 +1,75 @@
+{
+  "subject": "cap-user-external-sub",
+  "session": {
+    "id_token": {
+      "id_token_claims": {
+        "jti": "",
+        "iss": "http://127.0.0.1:4454/",
+        "sub": "cap-user-external-sub",
+        "aud": [
+          "cap-inter"
+        ],
+        "nonce": "",
+        "exp": "0001-01-01T00:00:00Z",
+        "iat": "2026-07-29T03:18:41Z",
+        "rat": "2026-07-29T03:18:40Z",
+        "auth_time": "2026-07-29T03:18:40Z",
+        "at_hash": "",
+        "acr": "2",
+        "amr": [
+          "pwd",
+          "otp"
+        ],
+        "c_hash": "",
+        "ext": {
+          "sid": "bf756cf9-78bd-41dd-a36a-242a99a8dfdc"
+        }
+      },
+      "headers": {
+        "extra": {
+          "kid": "f38abbd7-db94-44a4-859e-a2a4f1c3f5da"
+        }
+      },
+      "expires_at": {
+        "access_token": "2026-07-29T07:18:41Z",
+        "authorize_code": "2026-07-29T03:19:41.07271412Z",
+        "refresh_token": "2026-08-28T03:18:41Z"
+      },
+      "subject": "cap-user-external-sub"
+    },
+    "extra": {
+      "ext_claims": {
+        "captured": true
+      }
+    },
+    "kid": "f1735c09-9c4e-43dc-85d8-37a19b3117e4",
+    "client_id": "cap-inter",
+    "consent_challenge": "a45c6d7f157f4ba0910a909a903b339e",
+    "exclude_not_before_claim": false,
+    "allowed_top_level_claims": [
+      "ext_claims"
+    ],
+    "mirror_top_level_claims": true
+  },
+  "requester": {
+    "client_id": "cap-inter",
+    "granted_scopes": [
+      "openid",
+      "offline_access"
+    ],
+    "granted_audience": [
+      "kacho"
+    ],
+    "grant_types": [
+      "refresh_token"
+    ]
+  },
+  "client_id": "cap-inter",
+  "granted_scopes": [
+    "openid",
+    "offline_access"
+  ],
+  "granted_audience": [
+    "kacho"
+  ]
+}

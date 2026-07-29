@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -35,22 +36,34 @@ type TokenHookConfig struct {
 // claims assembly / device-compliance heuristics / mfa_at derivation live in
 // the service layer. Implemented by *service.TokenEnrichmentService.
 type TokenEnricher interface {
-	EnrichClaims(ctx context.Context, subject string, hookCtx service.TokenHookContext) (map[string]any, error)
+	EnrichClaims(ctx context.Context, subject string, hookCtx service.TokenHookContext) (map[string]any, service.ResolvedPrincipal, error)
 	MinimalClaims(subject string) map[string]any
 }
 
 // TokenHookHandler — HTTP handler.
 type TokenHookHandler struct {
-	cfg      TokenHookConfig
-	enricher TokenEnricher
-	audit    AuditEmitter
-	logger   *slog.Logger
+	cfg         TokenHookConfig
+	enricher    TokenEnricher
+	revocations UserRevocationLookup
+	audit       AuditEmitter
+	logger      *slog.Logger
 }
 
 // NewTokenHookHandler — constructor.
+//
+// revocations is what makes "log this person out of everything" mean anything
+// at the moment a token is MINTED. Without it the cutoff had three writers and
+// one reader, on the path taken only when an EXISTING token is refreshed — so
+// an administrator's force-logout returned success while the subject's live
+// session kept obtaining fresh tokens on demand, and a personal access token,
+// whose grant has no refresh hook at all, was never re-examined even once.
+//
+// A nil reader is accepted so an in-process fixture can wire the hook without a
+// revocation store; the composition root has no branch that leaves it out.
 func NewTokenHookHandler(
 	cfg TokenHookConfig,
 	enricher TokenEnricher,
+	revocations UserRevocationLookup,
 	audit AuditEmitter,
 	logger *slog.Logger,
 ) *TokenHookHandler {
@@ -58,10 +71,11 @@ func NewTokenHookHandler(
 		logger = slog.Default()
 	}
 	return &TokenHookHandler{
-		cfg:      cfg,
-		enricher: enricher,
-		audit:    audit,
-		logger:   logger,
+		cfg:         cfg,
+		enricher:    enricher,
+		revocations: revocations,
+		audit:       audit,
+		logger:      logger,
 	}
 }
 
@@ -82,22 +96,32 @@ const (
 // question the machine-credential refusal turns on. The sibling refresh hook
 // DOES carry a top-level subject — a different body, decoded by its own type.
 //
-// KNOWN, NOT FIXED HERE: `auth_time`, `acr` and `amr` are declared at the top of
-// the session below, and the provider carries them one level deeper, alongside
-// the subject. They are therefore empty on every real request, and the claims
-// derived from them are correspondingly blank. Correcting that changes what
-// downstream assurance rules can conclude — it is a behavioural change with its
-// own verification, not a rename — so it is deliberately left for that work
-// rather than folded into the subject fix. Do not read the placement of these
-// three as evidence of where the provider puts them.
+// The session's authentication time, assurance level and methods sit DEEPER
+// still — among the OIDC claims of that same token-shaped part, at
+// `session.id_token.id_token_claims` — and `auth_time` is an RFC3339 STRING
+// there, not a unix integer. They used to be declared at the top of the session
+// and typed as a number, which has no producer at all: both readings were empty
+// on every real request, so the assurance claims derived from them were blank
+// forever and the session's authentication instant — the thing a revoke-all
+// cutoff is weighed against — was permanently zero.
+//
+// This placement is not inferred from the provider's types. It is taken from
+// captured bodies of the provider at the version this stand runs; see
+// testdata/README.md, which also records how to re-take them.
 type hydraTokenHookRequest struct {
 	Session struct {
 		ClientID string `json:"client_id"`
-		AuthTime int64  `json:"auth_time"`
-		AMR      []any  `json:"amr"`
-		ACR      string `json:"acr"`
 		IDToken  struct {
 			Subject string `json:"subject"`
+			// Claims — the session's OIDC claim set. The provider sends the zero
+			// instant ("0001-01-01T00:00:00Z") for a session it never
+			// authenticated, so "absent" and "never authenticated" are the same
+			// observation here and every reader below treats them alike.
+			Claims struct {
+				AuthTime time.Time `json:"auth_time"`
+				ACR      string    `json:"acr"`
+				AMR      []any     `json:"amr"`
+			} `json:"id_token_claims"`
 		} `json:"id_token"`
 		Cnf struct {
 			Jkt     string `json:"jkt"`
@@ -228,17 +252,18 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if grantType == grantTypeJWTBearer {
 		assertionIssuer = decodeAssertionIssuer(firstFormValue(payload.Request.Payload, "assertion"))
 	}
+	sessionAuthTime := payload.Session.IDToken.Claims.AuthTime
 	hookCtx := service.TokenHookContext{
 		GrantedScopes:  payload.Request.GrantedScopes,
-		AuthTime:       payload.Session.AuthTime,
-		ACR:            payload.Session.ACR,
+		AuthTime:       unixOrZero(sessionAuthTime),
+		ACR:            payload.Session.IDToken.Claims.ACR,
 		CnfJkt:         payload.Session.Cnf.Jkt,
 		CnfX5tS256:     payload.Session.Cnf.X5tS256,
 		OAuthClientID:  payload.Request.ClientID,
 		GrantType:      grantType,
 		ExternalIssuer: assertionIssuer,
 	}
-	enriched, err := h.enricher.EnrichClaims(ctx, subject, hookCtx)
+	enriched, principal, err := h.enricher.EnrichClaims(ctx, subject, hookCtx)
 	if err != nil {
 		// The credential behind this request is past its stated expiry. Deny —
 		// 403 is the only status Hydra reads as "refuse this token request"
@@ -326,6 +351,21 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The subject may have been logged out of everything since they last
+	// authenticated. That is a question about the SAME row the enricher just
+	// read, asked with the identifier this service keys it on — which is why it
+	// is asked here, with the resolved principal, rather than from the
+	// provider's subject (an external identity or a client registration,
+	// neither of which the cutoff is keyed on).
+	//
+	// Asked at ISSUANCE, which is the point. The cutoff had three writers and
+	// one reader, on the path taken only when an existing token is refreshed.
+	if denied, reason := h.revokedAtIssuance(ctx, principal, sessionAuthTime); denied {
+		h.denyRevoked(ctx, subject, payload, reason)
+		http.Error(w, `{"error":"invalid_grant"}`, http.StatusForbidden)
+		return
+	}
+
 	resp := hydraTokenHookResponse{}
 	resp.Session.AccessToken = map[string]any{
 		"ext_claims": enriched,
@@ -341,7 +381,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"client_id":        payload.Request.ClientID,
 				"granted_scopes":   payload.Request.GrantedScopes,
 				"granted_audience": payload.Request.GrantedAudience,
-				"acr":              payload.Session.ACR,
+				"acr":              payload.Session.IDToken.Claims.ACR,
 				"jkt":              payload.Session.Cnf.Jkt,
 				"x5t_s256":         payload.Session.Cnf.X5tS256,
 			},
@@ -476,4 +516,79 @@ func decodeAssertionIssuer(assertion string) string {
 		return ""
 	}
 	return claims.Iss
+}
+
+// unixOrZero converts an instant to unix seconds, keeping the zero instant a
+// zero. The service-layer context carries this as a number and reads 0 as "not
+// stated", so the zero instant must not arrive there as 62135596800.
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
+// revokedAtIssuance reports whether a revoke-all cutoff forbids minting for this
+// principal, and the reason to record.
+//
+// What the cutoff is weighed against depends on what the exchange presented,
+// and the three cases are genuinely different questions:
+//
+//   - a MACHINE credential (service account) is not a person's session. A user
+//     logged out of everything says nothing about a service account that merely
+//     shares an account with them, and treating it as if it did would take
+//     machine credentials offline as a side effect of an unrelated
+//     administrative act. Its own lifetime bounds it, enforced on its own path;
+//   - an INTERACTIVE session states when it authenticated. At or before the
+//     cutoff is exactly what the cutoff names; after it is the subject proving
+//     themselves again, which is what stops a force-logout from being a
+//     permanent lockout;
+//   - a STANDING personal credential has no session and never re-authenticates,
+//     so its anchor is when it was minted. This is the case with no other point
+//     of enforcement anywhere: its grant has no refresh hook, so a token minted
+//     through it is never re-examined after issuance.
+//
+// Two unknowns are refusals, not permissions. A cutoff with no instant to weigh
+// against cannot be shown to be satisfied, and an unavailable revocation store
+// is not an answer of "no" — this is an authoritative gate and fails closed,
+// the same discipline the refresh path states for the same read.
+func (h *TokenHookHandler) revokedAtIssuance(ctx context.Context, p service.ResolvedPrincipal, sessionAuthTime time.Time) (bool, string) {
+	if h.revocations == nil || p.Kind != service.PrincipalUser || p.UserID == "" {
+		return false, ""
+	}
+	cutoff, found, err := h.revocations.UserRevokedBefore(ctx, p.UserID)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "token_hook: revoke-all lookup failed — failing closed",
+			"user_id", p.UserID, "err", err)
+		return true, "revocation_check_failed"
+	}
+	if !found {
+		return false, ""
+	}
+	anchor := issuanceAnchor(p, sessionAuthTime)
+	if anchor.IsZero() || !anchor.After(cutoff) {
+		return true, "user_revoked"
+	}
+	return false, ""
+}
+
+// issuanceAnchor returns the instant this exchange's authority dates from: the
+// standing credential's issuance when there is one, otherwise the session's own
+// authentication instant. A zero result means the exchange stated neither.
+func issuanceAnchor(p service.ResolvedPrincipal, sessionAuthTime time.Time) time.Time {
+	if p.StandingCredentialIssuedAt != nil {
+		return *p.StandingCredentialIssuedAt
+	}
+	return sessionAuthTime
+}
+
+// denyRevoked records the refusal of a subject logged out of everything.
+// `invalid_grant`, not `invalid_client`: what is no longer good is the authority
+// behind the request, not the client's authentication — and it is the word the
+// refresh path answers for the same state, so one question asked at two doors
+// cannot come back as two different verdicts.
+func (h *TokenHookHandler) denyRevoked(ctx context.Context, subject string, payload hydraTokenHookRequest, reason string) {
+	h.logger.WarnContext(ctx, "token_hook: subject revoked — token request denied",
+		"subject", subject, "client_id", payload.Request.ClientID, "reason", reason)
+	h.auditDenied(ctx, subject, payload, reason)
 }

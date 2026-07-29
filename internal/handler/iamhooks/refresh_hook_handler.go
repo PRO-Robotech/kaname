@@ -15,10 +15,18 @@
 //     вправе аутентифицироваться → 403 user_disabled с причиной user_blocked.
 //     Hydra пропагирует оба как invalid_grant. Тот же вердикт применяет
 //     token-hook, поэтому разойтись они больше не могут.
-//  3. Требует jti; пустой jti → 403 invalid_grant (revocation-gate не skippable).
-//  4. Проверяет session_revocations cache — если jti revoked → reject.
-//  5. Re-injects ext_claims (same as token_hook).
-//  6. Audit emit `authn.refresh.issued` (либо `authn.refresh.denied`).
+//  3. Применяет user-level revoke-all cutoff (ForceLogout / Revoke(revoke_all) /
+//     восстановление пароля), сверяя его с моментом аутентификации сессии.
+//  4. Re-injects ext_claims (same as token_hook).
+//  5. Audit emit `authn.refresh.issued` (либо `authn.refresh.denied`).
+//
+// Пер-jti гейта здесь НЕТ, и это не упущение: тело этого хука вообще не несёт
+// claims предъявленного токена (см. testdata/README.md), поэтому гейт,
+// ключевавшийся на jti, ни разу не выполнился по существу — он отклонял
+// КАЖДОЕ обновление за отсутствием поля, у которого нет источника, и делал
+// недостижимым всё, что стояло за ним. Отзыв конкретного токена проверяется
+// там, где предъявленный токен есть: на краю, интроспекцией, плюс
+// `InternalSessionRevocationsService.IsRevoked`.
 package iamhooks
 
 import (
@@ -44,7 +52,7 @@ type RefreshHookConfig struct {
 type RefreshHookHandler struct {
 	cfg         RefreshHookConfig
 	users       UserLookupPort
-	revocations SessionRevocationsWriter
+	revocations UserRevocationLookup
 	audit       AuditEmitter
 	logger      *slog.Logger
 	now         func() time.Time
@@ -54,7 +62,7 @@ type RefreshHookHandler struct {
 func NewRefreshHookHandler(
 	cfg RefreshHookConfig,
 	users UserLookupPort,
-	revocations SessionRevocationsWriter,
+	revocations UserRevocationLookup,
 	audit AuditEmitter,
 	logger *slog.Logger,
 ) *RefreshHookHandler {
@@ -72,30 +80,68 @@ func NewRefreshHookHandler(
 }
 
 // hydraRefreshHookRequest — payload от Hydra.
+//
+// This is NOT the token hook's body, and the two differ in every place this
+// type used to assume they matched. Taken from a captured refresh of the
+// provider at the version this stand runs (testdata/README.md):
+//
+//   - the subject IS top-level here (the token hook has none);
+//   - the session's authentication instant and assurance level sit at
+//     `session.id_token.id_token_claims`, as an RFC3339 string — not at the top
+//     of the session and not as a number;
+//   - the exchange is described by `requester`, plus a top-level `client_id` /
+//     `granted_scopes` / `granted_audience`. There is no `request` object, so
+//     reading one left a blank client id in every audit record this hook wrote
+//     and no granted scopes for the device-compliance derivation;
+//   - there is NO token-claims object of any kind. `access_token_claims` does
+//     not occur anywhere in the provider binary.
 type hydraRefreshHookRequest struct {
 	Subject string `json:"subject"`
 	Session struct {
 		ClientID string `json:"client_id"`
-		ACR      string `json:"acr"`
-		// AuthTime — session authentication time (unix seconds). Carried by the
-		// Hydra session envelope (same field the token_hook reads). The
-		// user-level revoke-all gate compares this against the per-user
-		// revoke_before cutoff: a session that authenticated at-or-before the
-		// cutoff is denied; a re-auth past the cutoff is allowed.
-		AuthTime int64 `json:"auth_time"`
-		Cnf      struct {
+		IDToken  struct {
+			// Claims — the session's OIDC claim set. AuthTime is what the
+			// revoke-all gate weighs the cutoff against: a session that
+			// authenticated at or before the cutoff is denied; one that
+			// authenticated after it is a re-authentication and is allowed.
+			Claims struct {
+				AuthTime time.Time `json:"auth_time"`
+				ACR      string    `json:"acr"`
+			} `json:"id_token_claims"`
+		} `json:"id_token"`
+		Cnf struct {
 			Jkt     string `json:"jkt"`
 			X5tS256 string `json:"x5t#S256"`
 		} `json:"cnf"`
 	} `json:"session"`
-	Request struct {
+	// Requester — the exchange, as this hook's body names it.
+	Requester struct {
 		ClientID        string   `json:"client_id"`
 		GrantedScopes   []string `json:"granted_scopes"`
 		GrantedAudience []string `json:"granted_audience"`
-	} `json:"request"`
-	AccessTokenClaims struct {
-		Jti string `json:"jti"`
-	} `json:"access_token_claims"`
+	} `json:"requester"`
+	// The same three are ALSO stated top-level. Both are read, `requester`
+	// first: the provider fills both today and names neither as authoritative,
+	// so a reader that picks only one is one release away from being blank
+	// again — which is the defect this type is being corrected for.
+	ClientID      string   `json:"client_id"`
+	GrantedScopes []string `json:"granted_scopes"`
+}
+
+// clientID — the OAuth client this refresh ran for.
+func (p hydraRefreshHookRequest) clientID() string {
+	if p.Requester.ClientID != "" {
+		return p.Requester.ClientID
+	}
+	return p.ClientID
+}
+
+// grantedScopes — the scopes granted to the refreshed token.
+func (p hydraRefreshHookRequest) grantedScopes() []string {
+	if len(p.Requester.GrantedScopes) > 0 {
+		return p.Requester.GrantedScopes
+	}
+	return p.GrantedScopes
 }
 
 // hydraRefreshHookResponse — успешный ответ.
@@ -165,46 +211,19 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Require a jti on the refresh path. The per-jti revocation gate (step 3)
-	// keys on access_token_claims.jti; an empty jti previously SKIPPED that gate
-	// entirely (fail-OPEN) — a token minted/refreshed without a jti would never
-	// be subject to revocation. Treat a missing jti as unverifiable and deny
-	// (fail-closed), the same 403 invalid_grant shape used for a revoked jti.
-	if h.revocations != nil && payload.AccessTokenClaims.Jti == "" {
-		h.denyAndAudit(ctx, payload, "missing_jti")
-		http.Error(w, `{"error":"invalid_grant"}`, http.StatusForbidden)
-		return
-	}
-
-	// 3. Check session_revocations cache. This is an authoritative revocation
-	// gate, so it MUST fail-closed: a lookup error means we cannot prove the
-	// jti is NOT revoked, so we deny (never fall through and mint a refreshed
-	// token). Both a revoked jti and a check error reject with 403 invalid_grant.
+	// 2. User-level revoke-all gate (admin ForceLogout / Revoke(revoke_all) /
+	// password recovery). Deny if ANY of the identity's user-rows has a cutoff at
+	// or after the session's authentication instant: the token's session predates
+	// the revoke-all, so it must not be refreshed. Fail-closed on a lookup error.
+	// An absent instant with a cutoff present is also a denial — we cannot show
+	// the token post-dates the revoke-all, and an unprovable claim is not a
+	// permission.
+	//
+	// This is now THE gate on this path rather than the last of three: the per-jti
+	// gate that used to precede it keyed on a field this body does not carry, so
+	// it refused every refresh and this block was never reached.
 	if h.revocations != nil {
-		revoked, err := h.revocations.IsRevoked(ctx, payload.AccessTokenClaims.Jti)
-		if err != nil {
-			h.logger.Error("refresh_hook: revocation check failed — failing closed",
-				"subject", payload.Subject, "jti", payload.AccessTokenClaims.Jti, "err", err)
-			h.denyAndAudit(ctx, payload, "revocation_check_failed")
-			http.Error(w, `{"error":"invalid_grant"}`, http.StatusForbidden)
-			return
-		}
-		if revoked {
-			h.denyAndAudit(ctx, payload, "jti_revoked")
-			http.Error(w, `{"error":"invalid_grant"}`, http.StatusForbidden)
-			return
-		}
-	}
-
-	// 4. User-level revoke-all gate (admin ForceLogout / Revoke(revoke_all)).
-	// Deny if ANY of the identity's user-rows has a revoke_before cutoff at-or-
-	// after the session auth_time: the token's session predates the revoke-all,
-	// so it must not be refreshed. Same fail-closed discipline as the jti gate:
-	// a lookup error denies. If auth_time is absent (0) but a cutoff exists, we
-	// cannot prove the token post-dates the revoke-all → fail-safe deny (never a
-	// silent allow).
-	if h.revocations != nil {
-		if denied, reason, derr := h.userLevelRevoked(ctx, users, payload.Session.AuthTime); derr != nil {
+		if denied, reason, derr := h.userLevelRevoked(ctx, users, payload.Session.IDToken.Claims.AuthTime); derr != nil {
 			h.logger.Error("refresh_hook: user-level revocation check failed — failing closed",
 				"subject", payload.Subject, "err", derr)
 			h.denyAndAudit(ctx, payload, "revocation_check_failed")
@@ -217,7 +236,7 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Re-inject ext_claims.
+	// 3. Re-inject ext_claims.
 	claims, err := h.refreshClaims(primary, &payload)
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
@@ -233,7 +252,7 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"ext_claims": claims,
 	}
 
-	// 6. Audit emit success. Log-and-continue on failure (mirrors
+	// 4. Audit emit success. Log-and-continue on failure (mirrors
 	// token_hook.authn.token.issued): a failing/backpressured audit sink must
 	// not be invisible — swallowing the error silently drops the authn audit
 	// record with zero operator signal (OWASP A09 / CWE-778).
@@ -244,8 +263,7 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Payload: map[string]any{
 				"subject":   payload.Subject,
 				"user_id":   string(primary.ID),
-				"client_id": payload.Request.ClientID,
-				"jti":       payload.AccessTokenClaims.Jti,
+				"client_id": payload.clientID(),
 				"jkt":       payload.Session.Cnf.Jkt,
 				"x5t_s256":  payload.Session.Cnf.X5tS256,
 			},
@@ -266,16 +284,13 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // revoke-all cutoff. It checks every user-row of the identity (robust across
 // multi-account membership) and returns (denied, auditReason, err).
 //
-//   - A token is denied when a cutoff exists with revoke_before >= the session
-//     auth_time (the session was established at-or-before the revoke-all).
-//   - auth_time == 0 (absent) + an existing cutoff → fail-safe deny: we cannot
-//     prove the token post-dates the revoke-all.
+//   - A token is denied when a cutoff exists at or after the session's
+//     authentication instant (the session was established at-or-before the
+//     revoke-all).
+//   - An absent instant + an existing cutoff → fail-safe deny: we cannot prove
+//     the token post-dates the revoke-all.
 //   - Any lookup error is returned so the caller fails closed.
-func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domain.User, authTimeUnix int64) (bool, string, error) {
-	var authTime time.Time
-	if authTimeUnix > 0 {
-		authTime = time.Unix(authTimeUnix, 0).UTC()
-	}
+func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domain.User, authTime time.Time) (bool, string, error) {
 	for _, u := range users {
 		cutoff, found, err := h.revocations.UserRevokedBefore(ctx, string(u.ID))
 		if err != nil {
@@ -311,12 +326,12 @@ func (h *RefreshHookHandler) refreshClaims(u domain.User, p *hydraRefreshHookReq
 		"kacho_device_compliance": "unknown",
 		"kacho_jkt":               p.Session.Cnf.Jkt,
 		"kacho_x5t_s256":          p.Session.Cnf.X5tS256,
-		"kacho_acr":               p.Session.ACR,
+		"kacho_acr":               p.Session.IDToken.Claims.ACR,
 		"kacho_audience":          h.cfg.Domain,
 		"kacho_issuer":            h.cfg.HydraIssuer,
 		"kacho_issued_at":         h.now().Unix(),
 	}
-	for _, sc := range p.Request.GrantedScopes {
+	for _, sc := range p.grantedScopes() {
 		if sc == "webauthn" || sc == "passkey" {
 			claims["kacho_device_compliance"] = "attested"
 			break
@@ -336,8 +351,7 @@ func (h *RefreshHookHandler) denyAndAudit(ctx context.Context, p hydraRefreshHoo
 		Payload: map[string]any{
 			"subject":   p.Subject,
 			"reason":    reason,
-			"client_id": p.Request.ClientID,
-			"jti":       p.AccessTokenClaims.Jti,
+			"client_id": p.clientID(),
 		},
 	}); emitErr != nil {
 		h.logger.Warn("refresh_hook: audit emit failed",

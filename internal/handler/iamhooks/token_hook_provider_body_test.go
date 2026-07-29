@@ -73,6 +73,7 @@ func newTokenHookWithSAPort(t *testing.T, users *fakeUserLookup, sas *fakeSAPort
 			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
+		newFakeRevocations(),
 		audit,
 		logger,
 	)

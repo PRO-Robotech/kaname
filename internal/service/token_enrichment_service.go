@@ -152,6 +152,54 @@ type TokenHookContext struct {
 	ExternalIssuer string
 }
 
+// PrincipalKind names WHOSE authority a token carries, as the enricher resolved
+// it. Not a claim and not a copy of one: it is what a caller needs in order to
+// ask a FURTHER question about the same row the enricher just read.
+type PrincipalKind string
+
+const (
+	// PrincipalUnresolved — nothing in kacho answers to this subject. Only the
+	// reduced claim set can be minted, and there is no identifier to look
+	// anything else up by.
+	PrincipalUnresolved PrincipalKind = ""
+	// PrincipalUser — a person, whether they authenticated interactively or
+	// presented a personal access token they had issued earlier.
+	PrincipalUser PrincipalKind = "user"
+	// PrincipalServiceAccount — a machine credential. Not a person's session, so
+	// a person's revoke-all cutoff says nothing about it.
+	PrincipalServiceAccount PrincipalKind = "service_account"
+)
+
+// ResolvedPrincipal — who the enricher decided the token is for, expressed in
+// the identifiers this service's own tables are keyed on rather than in the
+// terms of the claim set.
+//
+// It exists because the subject the provider states is NOT such an identifier:
+// interactively it is the external identity from the login provider, and for a
+// machine-shaped exchange it is an OAuth client registration. The revoke-all
+// cutoff is keyed on `users.id`, and until this type existed only the claim
+// assembly ever learned that id — so a caller wanting to weigh the cutoff had
+// either to resolve the subject a second time or to scrape the answer back out
+// of the claims it had just been handed.
+type ResolvedPrincipal struct {
+	// Kind — whose authority the token carries.
+	Kind PrincipalKind
+	// UserID — `users.id`. Set only when Kind is PrincipalUser.
+	UserID string
+	// StandingCredentialIssuedAt — when the long-lived credential behind this
+	// exchange was issued, for the exchanges that HAVE one (a personal access
+	// token). nil for an interactive exchange, where the session states its own
+	// authentication instant and that is the instant to weigh.
+	//
+	// The distinction is the whole reason this field exists. A person forced out
+	// re-authenticates and their session moves past the cutoff; a standing
+	// credential never re-authenticates, so its anchor is the moment it was
+	// minted — one minted after the cutoff is authority the subject established
+	// since, and one minted before it is exactly what "log this person out
+	// everywhere" is about.
+	StandingCredentialIssuedAt *time.Time
+}
+
 // TokenEnrichmentService — use-case for token-hook claims assembly.
 type TokenEnrichmentService struct {
 	cfg        TokenEnrichmentConfig
@@ -186,7 +234,15 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 	return s
 }
 
-// EnrichClaims assembles the kacho-specific ext_claims map for an access_token.
+// EnrichClaims assembles the kacho-specific ext_claims map for an access_token,
+// and states WHO it resolved the subject to.
+//
+// The second return is not a summary of the first. The claim set is what the
+// provider will stamp into a token; the ResolvedPrincipal is what this service
+// knows the subject to be, in identifiers the claim set does not fully carry —
+// a standing credential's issuance instant is not a claim and must not become
+// one. A caller needing to ask a further question about the subject asks it
+// with this.
 //
 // Resolution order:
 //  1. Federated SA (Phase 3b): `GrantType == urn:ietf:params:oauth:grant-
@@ -205,7 +261,7 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 //     credential (its client is not a kacho credential) and falls back to
 //     MinimalClaims only for an interactive identity whose mirror has not
 //     committed yet.
-func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject string, hookCtx TokenHookContext) (map[string]any, error) {
+func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject string, hookCtx TokenHookContext) (map[string]any, ResolvedPrincipal, error) {
 	// 1. Federated SA path (Phase 3b). `subject` here is the EXTERNAL
 	//    assertion sub; `hookCtx.OAuthClientID` is the kacho-issued client.
 	//    We only enter this branch when Hydra signalled jwt-bearer — falling
@@ -217,23 +273,24 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 			// Terminal on expiry — never fall through to the bare-SA branch
 			// below, which would mint for a credential we just refused.
 			if s.expired(soc.ExpiresAt) {
-				return nil, fmt.Errorf("federated sa-key %s: %w", soc.ID, ErrCredentialExpired)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("federated sa-key %s: %w", soc.ID, ErrCredentialExpired)
 			}
 			sa, saErr := s.sas.GetServiceAccount(ctx, soc.SvaID)
 			if saErr != nil && !stderrors.Is(saErr, iamerr.ErrNotFound) {
-				return nil, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
 			}
 			// Federation-in reaches the same account by another door, so it owes
 			// the same answer: a state that stops one branch and not the other is
 			// not a state, it is a suggestion.
 			if saErr == nil && !sa.MayAuthenticate() {
-				return nil, fmt.Errorf("federated sa-key %s: service account %s: %w",
+				return nil, ResolvedPrincipal{}, fmt.Errorf("federated sa-key %s: service account %s: %w",
 					soc.ID, soc.SvaID, ErrServiceAccountDisabled)
 			}
-			return s.federatedClaims(soc, sa, subject, hookCtx), nil
+			return s.federatedClaims(soc, sa, subject, hookCtx),
+				ResolvedPrincipal{Kind: PrincipalServiceAccount}, nil
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
-			return nil, fmt.Errorf("lookup federated sa (iss=%s, sub=%s): %w", hookCtx.ExternalIssuer, subject, err)
+			return nil, ResolvedPrincipal{}, fmt.Errorf("lookup federated sa (iss=%s, sub=%s): %w", hookCtx.ExternalIssuer, subject, err)
 		}
 		// fall through — maybe a misconfigured assertion; treat the
 		// `OAuthClientID` as a bare SA token below.
@@ -251,11 +308,11 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 		soc, err := s.sas.LookupByOAuthClientID(ctx, domain.OAuthClientID(lookupID))
 		if err == nil {
 			if s.expired(soc.ExpiresAt) {
-				return nil, fmt.Errorf("sa-key %s: %w", soc.ID, ErrCredentialExpired)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("sa-key %s: %w", soc.ID, ErrCredentialExpired)
 			}
 			sa, saErr := s.sas.GetServiceAccount(ctx, soc.SvaID)
 			if saErr != nil && !stderrors.Is(saErr, iamerr.ErrNotFound) {
-				return nil, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("get sa %s: %w", soc.SvaID, saErr)
 			}
 			// The account states whether it may authenticate at all, and this is
 			// where a token stops being issued to one that may not. The check is
@@ -264,16 +321,17 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 			// every mapping whose account read missed — a different verdict
 			// wearing this one's clothes.
 			if saErr == nil && !sa.MayAuthenticate() {
-				return nil, fmt.Errorf("sa-key %s: service account %s: %w",
+				return nil, ResolvedPrincipal{}, fmt.Errorf("sa-key %s: service account %s: %w",
 					soc.ID, soc.SvaID, ErrServiceAccountDisabled)
 			}
 			// sa may be zero-value when the mapping outlives the SA (SA
 			// deleted, OAuth client cleanup pending); still emit
 			// principal_type/id, omit account_id in that case.
-			return s.saClaims(soc, sa, lookupID, hookCtx), nil
+			return s.saClaims(soc, sa, lookupID, hookCtx),
+				ResolvedPrincipal{Kind: PrincipalServiceAccount}, nil
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
-			return nil, fmt.Errorf("lookup sa oauth client %s: %w", lookupID, err)
+			return nil, ResolvedPrincipal{}, fmt.Errorf("lookup sa oauth client %s: %w", lookupID, err)
 		}
 	}
 
@@ -287,11 +345,11 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 		uoc, err := s.userTokens.LookupByOAuthClientID(ctx, domain.OAuthClientID(subject))
 		if err == nil {
 			if s.expired(uoc.ExpiresAt) {
-				return nil, fmt.Errorf("user-token %s: %w", uoc.ID, ErrCredentialExpired)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("user-token %s: %w", uoc.ID, ErrCredentialExpired)
 			}
 			u, uErr := s.userTokens.GetUser(ctx, uoc.UserID)
 			if uErr != nil && !stderrors.Is(uErr, iamerr.ErrNotFound) {
-				return nil, fmt.Errorf("get user %s: %w", uoc.UserID, uErr)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("get user %s: %w", uoc.UserID, uErr)
 			}
 			// A personal token is its owner's authority, so it cannot outlive
 			// the owner's ability to authenticate. This path resolves the owner
@@ -300,12 +358,19 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 			// principal id and account included: strictly more than the
 			// interactive path handed the same user.
 			if uErr == nil && !u.InviteStatus.MayAuthenticate() {
-				return nil, fmt.Errorf("user-token %s owner %s: %w", uoc.ID, uoc.UserID, ErrSubjectNotActive)
+				return nil, ResolvedPrincipal{}, fmt.Errorf("user-token %s owner %s: %w", uoc.ID, uoc.UserID, ErrSubjectNotActive)
 			}
-			return s.userTokenClaims(uoc, u, subject, hookCtx), nil
+			// A personal token carries no session, so the instant its authority
+			// dates from is its own issuance.
+			issued := uoc.CreatedAt
+			return s.userTokenClaims(uoc, u, subject, hookCtx), ResolvedPrincipal{
+				Kind:                       PrincipalUser,
+				UserID:                     string(uoc.UserID),
+				StandingCredentialIssuedAt: &issued,
+			}, nil
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
-			return nil, fmt.Errorf("lookup user-token oauth client %s: %w", subject, err)
+			return nil, ResolvedPrincipal{}, fmt.Errorf("lookup user-token oauth client %s: %w", subject, err)
 		}
 	}
 
@@ -317,21 +382,22 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	// reduced claim set meant for first login was minted for a blocked user.
 	users, err := s.users.FindByExternalID(ctx, domain.ExternalSubject(subject))
 	if err != nil {
-		return nil, fmt.Errorf("find users by external_id: %w", err)
+		return nil, ResolvedPrincipal{}, fmt.Errorf("find users by external_id: %w", err)
 	}
 	for _, u := range users {
 		if u.InviteStatus.MayAuthenticate() {
 			// A membership set may mix states across accounts; the first row that
 			// may authenticate is the default active account.
-			return s.userClaims(u, subject, hookCtx), nil
+			return s.userClaims(u, subject, hookCtx),
+				ResolvedPrincipal{Kind: PrincipalUser, UserID: string(u.ID)}, nil
 		}
 	}
 	if len(users) > 0 {
 		// The subject is present and refused, not missing.
-		return nil, fmt.Errorf("subject %s: %w", subject, ErrSubjectNotActive)
+		return nil, ResolvedPrincipal{}, fmt.Errorf("subject %s: %w", subject, ErrSubjectNotActive)
 	}
 
-	return nil, iamerr.Wrapf(iamerr.ErrNotFound, "subject %s not found (neither user nor service-account oauth client)", subject)
+	return nil, ResolvedPrincipal{}, iamerr.Wrapf(iamerr.ErrNotFound, "subject %s not found (neither user nor service-account oauth client)", subject)
 }
 
 // expired reports whether a credential with this stated expiry may no longer

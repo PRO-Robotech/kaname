@@ -94,6 +94,7 @@ func newFullyWiredTokenHook(t *testing.T, users *fakeUserLookup, sas stubMappedS
 			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
+		newFakeRevocations(),
 		audit,
 		logger,
 	)

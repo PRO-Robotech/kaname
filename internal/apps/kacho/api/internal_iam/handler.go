@@ -115,6 +115,13 @@ type Handler struct {
 	// in, before the mutation and terminally after it. nil → the RPC fails
 	// closed Unavailable rather than returning an id that names no row.
 	operations forceLogoutOperationRepo
+
+	// providerSessions / externalIDs — the identity provider's login-session
+	// surface and the resolver naming a kacho user to it, used by ForceLogout to
+	// END the session rather than only record that it must not be honoured.
+	// Both nil when that surface is not configured.
+	providerSessions providerSessions
+	externalIDs      externalIDResolver
 }
 
 // NewHandler — builder. `authz` may be nil when the FGA stack is not

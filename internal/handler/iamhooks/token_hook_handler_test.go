@@ -92,6 +92,7 @@ func newTokenHookHandler(t *testing.T, users *fakeUserLookup, audit *fakeAudit) 
 			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
+		newFakeRevocations(),
 		audit,
 		logger,
 	)
@@ -332,6 +333,7 @@ func TestTokenHook_EmptyHookSecret_FailsClosed(t *testing.T) {
 	h := iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{HookSharedSecret: "", Domain: "x", HydraIssuer: "y"},
 		enricher,
+		newFakeRevocations(),
 		&fakeAudit{},
 		logger,
 	)

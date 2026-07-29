@@ -189,7 +189,7 @@ func TestEnrichClaims_BlockedUser_IsNotNotFound(t *testing.T) {
 		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
 		&fakeUserLookup{users: []domain.User{blockedUserRow()}})
 
-	_, err := svc.EnrichClaims(context.Background(), blockedSubject, service.TokenHookContext{})
+	_, _, err := svc.EnrichClaims(context.Background(), blockedSubject, service.TokenHookContext{})
 	require.Error(t, err)
 	require.ErrorIs(t, err, service.ErrSubjectNotActive)
 	assert.NotContains(t, err.Error(), "not found",
@@ -203,7 +203,7 @@ func TestEnrichClaims_ActiveUser_Unaffected(t *testing.T) {
 		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
 		&fakeUserLookup{users: []domain.User{active}})
 
-	claims, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
 	require.NoError(t, err)
 	assert.Equal(t, string(active.ID), claims["kacho_user_id"])
 	assert.Equal(t, string(active.AccountID), claims["kacho_account_id"])
@@ -221,7 +221,7 @@ func TestEnrichClaims_MixedMembership_PicksTheActiveRow(t *testing.T) {
 		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
 		&fakeUserLookup{users: []domain.User{blocked, active}})
 
-	claims, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
+	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
 	require.NoError(t, err)
 	assert.Equal(t, string(active.ID), claims["kacho_user_id"])
 }
@@ -246,7 +246,7 @@ func TestTokenHook_BlockedUserPersonalToken_Refused(t *testing.T) {
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
 			HydraIssuer:      "https://hydra.test.cloud",
-		}, enricher, audit, logger)
+		}, enricher, newFakeRevocations(), audit, logger)
 
 	w := postHook(t, h, "/iam/v1/hooks/token", "secret-hook-token",
 		`{"session":{"client_id":"`+clientID+`"},

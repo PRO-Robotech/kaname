@@ -92,6 +92,7 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 	h := iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
 		enricher,
+		newFakeRevocations(),
 		&fakeAudit{},
 		logger,
 	)
@@ -167,6 +168,7 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	h := iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "x", HydraIssuer: "y"},
 		enricher,
+		newFakeRevocations(),
 		&fakeAudit{},
 		logger,
 	)

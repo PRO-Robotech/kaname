@@ -24,36 +24,21 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
 )
 
+// fakeRevocations — the revoke-all cutoff store, as both hooks read it.
+//
+// It carries ONLY what the port declares. It used to also model per-jti
+// revocations and the write path, which no consumer in this package asks for —
+// a double wider than its port lets a case describe a state the handler can
+// never be in.
 type fakeRevocations struct {
-	mu           sync.Mutex
-	revoked      map[string]bool
-	calls        []domain.SessionRevocation
-	isRevokedErr error // when non-nil, IsRevoked returns this error (backend down)
-
-	// User-level revoke-all cutoffs keyed by user_id.
+	mu sync.Mutex
+	// Cutoffs keyed by user_id.
 	userBefore    map[string]time.Time
 	userBeforeErr error // when non-nil, UserRevokedBefore returns this error
 }
 
 func newFakeRevocations() *fakeRevocations {
-	return &fakeRevocations{revoked: map[string]bool{}, userBefore: map[string]time.Time{}}
-}
-
-func (f *fakeRevocations) Revoke(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.revoked[rev.TokenJTI] = true
-	f.calls = append(f.calls, rev)
-	return nil
-}
-
-func (f *fakeRevocations) IsRevoked(ctx context.Context, jti string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.isRevokedErr != nil {
-		return false, f.isRevokedErr
-	}
-	return f.revoked[jti], nil
+	return &fakeRevocations{userBefore: map[string]time.Time{}}
 }
 
 func (f *fakeRevocations) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
@@ -64,12 +49,6 @@ func (f *fakeRevocations) UserRevokedBefore(ctx context.Context, userID string) 
 	}
 	t, ok := f.userBefore[userID]
 	return t, ok, nil
-}
-
-func (f *fakeRevocations) MarkRevoked(jti string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.revoked[jti] = true
 }
 
 func (f *fakeRevocations) MarkUserRevokedBefore(userID string, before time.Time) {
@@ -107,9 +86,12 @@ func TestRefreshHook_HappyPath(t *testing.T) {
 
 	body := `{
 		"subject": "kratos-uuid-1",
-		"session": {"client_id":"kacho-ui","acr":"2","cnf":{"jkt":"abc"}},
-		"request": {"client_id":"kacho-ui","granted_scopes":["openid","webauthn"]},
-		"access_token_claims": {"jti":"A1"}
+		"session": {"client_id":"kacho-ui","cnf":{"jkt":"abc"},
+		            "id_token":{"subject":"kratos-uuid-1",
+		                        "id_token_claims":{"auth_time":"2026-07-29T03:18:40Z","acr":"2"}}},
+		"requester": {"client_id":"kacho-ui","granted_scopes":["openid","webauthn"],"granted_audience":["kacho"]},
+		"client_id": "kacho-ui",
+		"granted_scopes": ["openid","webauthn"]
 	}`
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
@@ -179,68 +161,6 @@ func TestRefreshHook_UserNotFound_403(t *testing.T) {
 	assert.Equal(t, "user_not_found", events[0].Payload["reason"])
 }
 
-func TestRefreshHook_RevokedJti_403(t *testing.T) {
-	users := &fakeUserLookup{
-		users: []domain.User{{
-			ID:           "usr_01abcdefghjkmnpqr",
-			AccountID:    "acc_01abcdefghjkmnpqr",
-			ExternalID:   "kratos-uuid-1",
-			InviteStatus: domain.InviteStatusActive,
-		}},
-	}
-	revs := newFakeRevocations()
-	revs.MarkRevoked("A1")
-	audit := &fakeAudit{}
-	h := newRefreshHandler(t, users, revs, audit)
-
-	body := `{"subject":"kratos-uuid-1","session":{},"request":{},"access_token_claims":{"jti":"A1"}}`
-	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
-	req.Header.Set("X-Kacho-Hook-Token", "secret")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusForbidden, w.Code)
-	assert.Contains(t, w.Body.String(), "invalid_grant")
-	events := audit.Events()
-	require.Len(t, events, 1)
-	assert.Equal(t, "authn.refresh.denied", events[0].EventType)
-	assert.Equal(t, "jti_revoked", events[0].Payload["reason"])
-}
-
-// TestRefreshHook_RevocationCheckError_FailsClosed — H1: a non-nil IsRevoked
-// error MUST fail-closed (403 invalid_grant + denied audit), never fall
-// through and mint a refreshed token. The revocation cache is an authoritative
-// gate; an error means "cannot prove the jti is NOT revoked" → deny.
-func TestRefreshHook_RevocationCheckError_FailsClosed(t *testing.T) {
-	users := &fakeUserLookup{
-		users: []domain.User{{
-			ID:           "usr_01abcdefghjkmnpqr",
-			AccountID:    "acc_01abcdefghjkmnpqr",
-			ExternalID:   "kratos-uuid-1",
-			InviteStatus: domain.InviteStatusActive,
-		}},
-	}
-	revs := newFakeRevocations()
-	revs.isRevokedErr = errors.New("session_revocations: backend unavailable")
-	audit := &fakeAudit{}
-	h := newRefreshHandler(t, users, revs, audit)
-
-	body := `{"subject":"kratos-uuid-1","session":{},"request":{},"access_token_claims":{"jti":"A1"}}`
-	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
-	req.Header.Set("X-Kacho-Hook-Token", "secret")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-
-	// MUST deny — fail-closed on an authoritative revocation gate.
-	require.Equal(t, http.StatusForbidden, w.Code, "revocation-check error must fail-closed, not mint a token; body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "invalid_grant")
-	events := audit.Events()
-	require.Len(t, events, 1)
-	assert.Equal(t, "authn.refresh.denied", events[0].EventType,
-		"revocation-check error must emit a denied event, never authn.refresh.issued")
-	assert.Equal(t, "revocation_check_failed", events[0].Payload["reason"])
-}
-
 // refreshUser — a single ACTIVE user-row helper for the user-level gate tests.
 func refreshUser(id, ext string) *fakeUserLookup {
 	return &fakeUserLookup{users: []domain.User{{
@@ -251,13 +171,27 @@ func refreshUser(id, ext string) *fakeUserLookup {
 	}}}
 }
 
-// refreshBody builds a refresh-hook payload with the Hydra session auth_time
-// (unix seconds) carried — the session timestamp the user-level gate compares
-// against the per-user revoke_before cutoff.
-func refreshBody(subject, jti string, authTime int64) string {
+// refreshBody builds a refresh-hook payload in the shape the provider actually
+// posts (testdata/README.md): the subject top-level, the session's
+// authentication instant among the OIDC claims of the token-shaped part as an
+// RFC3339 string, and the exchange under `requester`.
+//
+// It used to state the instant as a unix number one level up and to carry an
+// `access_token_claims.jti`, neither of which the provider sends. Every case
+// built on it therefore exercised a body that could not occur, which is how a
+// hook that refused every real refresh kept a green suite.
+func refreshBody(subject string, authTime int64) string {
+	instant := "0001-01-01T00:00:00Z"
+	if authTime > 0 {
+		instant = time.Unix(authTime, 0).UTC().Format(time.RFC3339)
+	}
 	return fmt.Sprintf(
-		`{"subject":%q,"session":{"auth_time":%d},"request":{},"access_token_claims":{"jti":%q}}`,
-		subject, authTime, jti)
+		`{"subject":%q,
+		  "session":{"client_id":"kacho-ui","id_token":{"subject":%q,
+		     "id_token_claims":{"auth_time":%q,"acr":"2","amr":["pwd"]}}},
+		  "requester":{"client_id":"kacho-ui","granted_scopes":["openid"],"granted_audience":["kacho"]},
+		  "client_id":"kacho-ui","granted_scopes":["openid"],"granted_audience":["kacho"]}`,
+		subject, subject, instant)
 }
 
 // TestRefreshHook_UserLevelRevocation_DeniesOlderToken — the core fix: a
@@ -274,7 +208,7 @@ func TestRefreshHook_UserLevelRevocation_DeniesOlderToken(t *testing.T) {
 	h := newRefreshHandler(t, users, revs, audit)
 
 	// Token's session authenticated 1h ago → before the cutoff → DENY.
-	body := refreshBody("kratos-uuid-1", "live-jti-1", now.Add(-time.Hour).Unix())
+	body := refreshBody("kratos-uuid-1", now.Add(-time.Hour).Unix())
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
 	w := httptest.NewRecorder()
@@ -302,7 +236,7 @@ func TestRefreshHook_UserLevelRevocation_AllowsNewerToken(t *testing.T) {
 	h := newRefreshHandler(t, users, revs, audit)
 
 	// Token's session authenticated AFTER the cutoff (just now) → ALLOW.
-	body := refreshBody("kratos-uuid-1", "fresh-jti-1", time.Now().UTC().Unix())
+	body := refreshBody("kratos-uuid-1", time.Now().UTC().Unix())
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
 	w := httptest.NewRecorder()
@@ -325,7 +259,7 @@ func TestRefreshHook_UserLevelRevocation_OtherUserUnaffected(t *testing.T) {
 	audit := &fakeAudit{}
 	h := newRefreshHandler(t, users, revs, audit)
 
-	body := refreshBody("kratos-uuid-2", "bystander-jti", time.Now().UTC().Add(-2*time.Hour).Unix())
+	body := refreshBody("kratos-uuid-2", time.Now().UTC().Add(-2*time.Hour).Unix())
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
 	w := httptest.NewRecorder()
@@ -346,7 +280,7 @@ func TestRefreshHook_UserLevelRevocation_NoAuthTime_DeniesWhenRevoked(t *testing
 	audit := &fakeAudit{}
 	h := newRefreshHandler(t, users, revs, audit)
 
-	body := refreshBody("kratos-uuid-1", "no-authtime-jti", 0) // auth_time absent
+	body := refreshBody("kratos-uuid-1", 0) // auth_time absent
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
 	w := httptest.NewRecorder()
@@ -367,7 +301,7 @@ func TestRefreshHook_UserLevelRevocationCheckError_FailsClosed(t *testing.T) {
 	audit := &fakeAudit{}
 	h := newRefreshHandler(t, users, revs, audit)
 
-	body := refreshBody("kratos-uuid-1", "jti-x", time.Now().UTC().Unix())
+	body := refreshBody("kratos-uuid-1", time.Now().UTC().Unix())
 	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
 	req.Header.Set("X-Kacho-Hook-Token", "secret")
 	w := httptest.NewRecorder()
@@ -380,43 +314,6 @@ func TestRefreshHook_UserLevelRevocationCheckError_FailsClosed(t *testing.T) {
 	require.Len(t, events, 1)
 	assert.Equal(t, "authn.refresh.denied", events[0].EventType)
 	assert.Equal(t, "revocation_check_failed", events[0].Payload["reason"])
-}
-
-// TestRefreshHook_MissingJti_FailsClosed — the jti gate must not be skippable.
-// A refresh payload with an empty access_token_claims.jti previously bypassed
-// the IsRevoked check entirely (fail-OPEN): a token minted/refreshed without a
-// jti was never subject to revocation. The refresh path now REQUIRES a jti — an
-// empty one is denied (403 invalid_grant + denied audit), consistent with the
-// way a revoked jti is denied. Never fall through and mint a refreshed token.
-func TestRefreshHook_MissingJti_FailsClosed(t *testing.T) {
-	users := &fakeUserLookup{
-		users: []domain.User{{
-			ID:           "usr_01abcdefghjkmnpqr",
-			AccountID:    "acc_01abcdefghjkmnpqr",
-			ExternalID:   "kratos-uuid-1",
-			InviteStatus: domain.InviteStatusActive,
-		}},
-	}
-	revs := newFakeRevocations()
-	audit := &fakeAudit{}
-	h := newRefreshHandler(t, users, revs, audit)
-
-	// Active user, no per-jti or user-level revocation set — the ONLY reason to
-	// deny is the missing jti. The happy-path body is identical except jti="".
-	body := `{"subject":"kratos-uuid-1","session":{"auth_time":1},"request":{},"access_token_claims":{"jti":""}}`
-	req := httptest.NewRequest("POST", "/iam/v1/hooks/refresh", strings.NewReader(body))
-	req.Header.Set("X-Kacho-Hook-Token", "secret")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusForbidden, w.Code,
-		"a refresh without a jti must fail-closed (the revocation gate is unskippable); body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "invalid_grant")
-	events := audit.Events()
-	require.Len(t, events, 1)
-	assert.Equal(t, "authn.refresh.denied", events[0].EventType,
-		"missing jti must emit a denied event, never authn.refresh.issued")
-	assert.Equal(t, "missing_jti", events[0].Payload["reason"])
 }
 
 func TestRefreshHook_AuthFailure(t *testing.T) {

@@ -70,6 +70,43 @@ type forceLogoutOperationRepo interface {
 // pg-side session taxonomy + audit_outbox_event_type CHECK.
 const eventSessionForceLogout = "iam.session.force_logout"
 
+// providerSessions — the identity provider's login-session surface.
+//
+// Force-logout writes a cutoff that stops tokens from being ISSUED. That is the
+// authoritative half, and on its own it leaves the person's browser holding a
+// live session: when that session asks again it presents its ORIGINAL
+// authentication instant, which the cutoff refuses — correctly, and forever,
+// with nothing prompting the re-authentication that would clear it. Ending the
+// session is what turns a standing refusal into a logout.
+//
+// Implemented by *clients.HydraAdminClient. nil when the provider-admin surface
+// is not configured: the cutoff is still recorded and still enforced.
+type providerSessions interface {
+	DeleteLoginSessions(ctx context.Context, subject string) error
+}
+
+// externalIDResolver maps a kacho user id to the identity the provider knows.
+//
+// The two are different namespaces and neither substitutes for the other:
+// force-logout names a `users.id`, the provider keys its sessions on the
+// subject it issued. Passing one where the other belongs would delete nothing
+// and report success.
+type externalIDResolver interface {
+	ExternalIDOf(ctx context.Context, id domain.UserID) (string, error)
+}
+
+// WithProviderSessions — attaches the provider's login-session surface and the
+// resolver that names a user to it. Both or neither: a teardown that cannot
+// resolve its subject is not a teardown.
+func (h *Handler) WithProviderSessions(p providerSessions, r externalIDResolver) *Handler {
+	if p == nil || r == nil {
+		return h
+	}
+	h.providerSessions = p
+	h.externalIDs = r
+	return h
+}
+
 // WithSessionRevoker — attaches the session-revocation writer used by
 // ForceLogout. Composition-root only (cmd/kacho-iam/wiring.go).
 func (h *Handler) WithSessionRevoker(r sessionRevoker) *Handler {
@@ -210,6 +247,28 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 		return nil, gerr
 	}
 
+	// End the session at the provider, now that the cutoff is durable.
+	//
+	// Order is deliberate. The cutoff goes first because it is the half that
+	// holds without anyone's cooperation; the teardown follows because it is the
+	// half that makes the refusal recoverable. If the provider cannot be reached
+	// the cutoff STAYS — it is protective and idempotent — but the call reports
+	// failure: an administrator told "logged out" while the session is still
+	// standing is worse off than one told to retry. Retrying re-applies the same
+	// cutoff and re-attempts the same teardown, both idempotent.
+	if h.providerSessions != nil {
+		if err := h.endProviderSession(ctx, marker.UserID); err != nil {
+			gerr := status.Error(codes.Unavailable, "could not end the session at the identity provider")
+			slog.ErrorContext(ctx, "ForceLogout: provider session teardown failed",
+				"operation_id", op.ID, "user_id", userID, "err", err.Error())
+			if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
+				slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
+					"operation_id", op.ID, "err", merr.Error())
+			}
+			return nil, gerr
+		}
+	}
+
 	// Complete the Operation: done=true, metadata + the declared response.
 	//
 	// revoked_count counts the revocation records this call committed — one
@@ -256,4 +315,20 @@ func forceLogoutOperationPayload(userID string) (meta, resp *anypb.Any, err erro
 		return nil, nil, fmt.Errorf("marshal force-logout response: %w", err)
 	}
 	return meta, resp, nil
+}
+
+// endProviderSession resolves the target to the identity the provider knows and
+// ends every login session it holds for them.
+//
+// A subject that cannot be resolved is an error, not a skip: silently doing
+// nothing here is exactly the shape of the defect this closes.
+func (h *Handler) endProviderSession(ctx context.Context, userID domain.UserID) error {
+	subject, err := h.externalIDs.ExternalIDOf(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("resolve external subject of %s: %w", userID, err)
+	}
+	if subject == "" {
+		return fmt.Errorf("user %s has no external subject to end sessions for", userID)
+	}
+	return h.providerSessions.DeleteLoginSessions(ctx, subject)
 }
