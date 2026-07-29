@@ -277,9 +277,11 @@ func TestAccountOwnerCanDeleteHisAccountWhileQueueHasNotDelivered(t *testing.T) 
 		acc      = "acc-ciqueue4"
 		owner    = "usr-ciqueueown4"
 		outsider = "usr-ciqueueout4"
+		delegate = "usr-ciqueuedel4"
 	)
 	w.seedAccountWithOwner(t, acc, owner)
 	w.seedUser(t, outsider, acc)
+	w.seedUser(t, delegate, acc)
 
 	// Nothing at all is in the store. The account was just created.
 	for _, verb := range ciVerbs {
@@ -290,6 +292,22 @@ func TestAccountOwnerCanDeleteHisAccountWhileQueueHasNotDelivered(t *testing.T) 
 		require.False(t, w.allowed(t, "user:"+outsider, verb, "account:"+acc),
 			"a non-owner must not reach the account object (%s)", verb)
 	}
+
+	// The boundary the levels are written with: the DELEGATED account administrator
+	// cascades WITHIN the account and never onto the account itself — tearing down
+	// the tenancy stays with its owner and with the cloud. Supplying the account's
+	// structural facts at request time must not blur that: `account`'s verbs read
+	// `owner` and `super_admin`, never the `admin` tier, and this holds it.
+	w.harness.Write(t, "user:"+delegate, "admin", "account:"+acc)
+	for _, verb := range ciVerbs {
+		require.False(t, w.allowed(t, "user:"+delegate, verb, "account:"+acc),
+			"the delegated account administrator must not reach the account object itself (%s)", verb)
+	}
+	// He is nevertheless an administrator INSIDE the account.
+	w.seedRole(t, "rol-ciqueue4", acc)
+	w.seedBinding(t, "abn-ciqueue4", outsider, "rol-ciqueue4", "account", acc)
+	require.True(t, w.allowed(t, "user:"+delegate, "v_delete", "iam_access_binding:abn-ciqueue4"),
+		"the delegated account administrator must reach a grant inside his account")
 }
 
 // TestCloudAdministratorAlreadyIndependentOfTheQueue — level 1 is the tier the
