@@ -8,7 +8,7 @@ client_credentials** (Ory Hydra) по выпущенным SA-ключам (priv
 см. [`05-sa-keys.md`](05-sa-keys.md)).
 
 Каждый SA backed Hydra OAuth client'ом (хранится в Hydra, не в kacho-iam).
-kacho-iam держит только запись с id, именем, account_id и project_id.
+kacho-iam держит только запись с id, именем и account_id.
 
 **Use-cases:**
 - Сервисная учетка для CI/CD pipeline (терраформ применяет ресурсы как SA).
@@ -28,7 +28,6 @@ kacho-iam держит только запись с id, именем, account_id
 |---------------|---------------------------|--------------|-----------|---------------------------------------------------|
 | `id`          | `ServiceAccountID`        | да           | да        | `sva<17-char>`. Длина 20.                         |
 | `account_id`  | `AccountID`               | да           | **да**    | FK → `accounts(id) ON DELETE RESTRICT`.           |
-| `project_id`  | `ProjectID`               | нет          | через Move| FK → `projects(id) ON DELETE RESTRICT`.           |
 | `name`        | `SvcAccountName`          | да           | нет       | `^[a-z][-a-z0-9]{2,62}$`.                         |
 | `description` | `Description`             | нет          | нет       | len ≤256.                                          |
 | `enabled`     | `bool`                    | да           | нет       | default `true`. Disabled SA не выпускает токены.  |
@@ -41,7 +40,6 @@ kacho-iam держит только запись с id, именем, account_id
 
 ```
 accounts(id) ──RESTRICT── service_accounts.account_id
-projects(id) ──RESTRICT── service_accounts.project_id (nullable)
 service_accounts(id) ──CASCADE── service_account_oauth_clients.service_account_id
 service_accounts(id) ──RESTRICT── access_bindings.subject_id (когда subject_type='service_account')
 ```
@@ -93,7 +91,7 @@ sequenceDiagram
 |-----------|------------|-------------------------------------------------|
 | `Create`  | async      | Создает SA в Account (опционально в Project).   |
 | `Get`     | sync       | Получает SA по id.                              |
-| `List`    | sync       | Список (filter by `account_id`, `project_id`).  |
+| `List`    | sync       | Список (filter by `account_id`).                |
 | `Update`  | async      | UpdateMask: `name`, `description`, `enabled`.   |
 | `Delete`  | async      | RESTRICT-FK если есть active bindings/ключи.    |
 
@@ -126,7 +124,7 @@ SA-ключи — отдельный service (см. [`05-sa-keys.md`](05-sa-keys
 RESP=$(curl -s -X POST http://localhost:18080/iam/v1/serviceAccounts \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"account_id":"acc_xxx","project_id":"prj_yyy","name":"ci-pipeline"}')
+  -d '{"account_id":"acc_xxx","name":"ci-pipeline"}')
 SA_ID=...
 
 # Get.
@@ -155,7 +153,6 @@ grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
 | Сценарий                                          | gRPC code             | HTTP | Текст                                                    |
 |---------------------------------------------------|------------------------|------|----------------------------------------------------------|
 | Имя занято в Account                              | `ALREADY_EXISTS`       | 409  | `ServiceAccount with name ci-pipeline already exists`    |
-| `project_id` принадлежит другому Account          | `FAILED_PRECONDITION`  | 412  | `project_id belongs to a different account`              |
 | Delete при active key                             | `FAILED_PRECONDITION`  | 412  | `service_account has active oauth clients`               |
 | Delete при active AccessBinding                   | `FAILED_PRECONDITION`  | 412  | `service_account is referenced by access_bindings`       |
 
@@ -170,7 +167,7 @@ cd kacho-iam && SERVICE=iam-service-account ./tests/newman/scripts/run.sh
 
 # psql:
 cd kacho-deploy && make psql SVC=iam
-# > SELECT id, account_id, project_id, name, enabled FROM kacho_iam.service_accounts;
+# > SELECT id, account_id, name, enabled FROM kacho_iam.service_accounts;
 
 # Integration:
 cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s -run TestServiceAccount \
@@ -184,7 +181,7 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s -run TestServic
 - **Repo:** `internal/repo/kacho/pg/service_account_repo.go`.
 - **Hydra integration:** SA сам по себе не делает запросы в Hydra — только
   IssueSAKey (см. [`05-sa-keys.md`](05-sa-keys.md)). Сам SA — просто запись в БД.
-- **DB:** `service_accounts(id, account_id, project_id, name, description, enabled, created_at)`.
+- **DB:** `service_accounts(id, account_id, name, description, labels, enabled, created_at)`.
 - **Indexes:** PK, UNIQUE `service_accounts_account_name_unique`, INDEX по account/project.
 - **CHECK:** имя через `kacho_labels_valid`-style helper.
 
@@ -193,7 +190,11 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s -run TestServic
 - **`enabled=false` НЕ revokes уже выданные access_tokens** — они валидны до
   expires_at (обычно 1h). Только новые requests блокируются. Для немедленного
   отзыва — Delete сервис-аккаунта или revoke его OAuth-clients в Hydra.
-- **project_id nullable** — SA может жить только в Account (cross-project SA).
+- **Проектной области у SA нет.** Поле `project_id` снято с контракта и из схемы
+  (миграция 0071): его не принимал ни один запрос, не писала ни одна запись и не
+  выбирало чтение агрегата — значение было пустым всегда и у всех, а claim,
+  который из него выводился, не читал никто. Понадобятся проектные служебные
+  учётки — их заводит отдельная подсистема со своей приёмкой.
 - **Delete cascade на oauth_clients** — при Delete SA удаляются и записи в
   `service_account_oauth_clients` (через CASCADE FK), но **в Hydra** OAuth
   clients остаются — sa_keys.RevokeUseCase должен очистить их явно (см.
