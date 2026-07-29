@@ -300,16 +300,41 @@ for col in "${collections[@]}"; do
   #     sweep — see the kacho#9 block near the top of this comment. The FLIP entry
   #     had already been carried "WITHOUT a mechanism, pending a healthy run": that
   #     run happened, and the case passes, so it is gone rather than re-justified.)
-  # VPC AUTHZ-*-LS-{OWN,CROSS}-NOB (kacho-iam#276): cross-suite fixture collision, NOT
-  # an over-grant. The iam-suite IAM-ACB-CR-CRUD-OK grants `userNOB` the global `*.*` view
-  # role on account-A/-B (iam LS-NOB cases assert NOB DOES see), so the iam reconciler
-  # legitimately materializes per-object viewer/v_list on every network in scope (#224
-  # owner-materialization parity). The vpc LS-NOB cases assume NOB = no-access. NOB is in
-  # fact authorized → these stay RED until the owner-decided semantics/test-hygiene fix
-  # (kacho-iam#276 A vs B). Assertions still RUN and report; the canary in newman-e2e.yml
-  # encodes the live no-leak gate for a genuinely grant-less subject.
+  # VPC AUTHZ-*-LS-{OWN,CROSS}-NOB — REMOVED 2026-07-30, same class as the entry below it:
+  # the fix this entry was waiting for LANDED, and the entry outlived it.
+  #
+  # The justification read: the iam suites really do grant `jwtNoBindings` a view role on
+  # account-A/-B for the duration of their run, so under parallel fan-out the account→project
+  # containment transitively authorized the "no bindings" subject and the vpc LIST-DENY
+  # guards went falsely red. True when written.
+  #
+  # But `services/vpc/tests/newman/cases/authz-deny.py` no longer binds the NOB subject-code
+  # to `jwtNoBindings`. Since 33cf29a5 (2026-07-19) it binds `jwtPureNoBindings` — the
+  # DEDICATED never-granted principal that no suite grants (no ensure_binding, no 4b-cleanup
+  # touches it), introduced as the kacho-iam#276 fix. The case file states the consequence
+  # itself: "с pure-субъектом эти LIST-DENY leak-guard'ы строгие и зелёные", and calls this
+  # very whitelist entry "избыточна-но-безвредна: subtraction clamps to 0".
+  #
+  # Redundant it was; harmless it was not. An exclusion with nothing left to exclude is a
+  # FINDING, not a leftover: it goes on absorbing whatever later reuses the name, and here it
+  # covered 16 folders whose single assertion is a leak guard
+  # (`[<CASE>] LIST no-access: 403 OR 200+empty (no leak)`). So 16 leak guards were
+  # un-gated on the strength of a collision that had already been engineered away.
+  #
+  # Failure direction of removing it is safe: if the guards are green — as the case file
+  # says they are — the verdict does not move, because the subtraction was already clamping
+  # to 0. If any of them is red, that is a leak guard failing, and it MUST fire the gate.
+  # @mask-subject AUTHZ-.*-LS-OWN-AAB services/vpc/tests/newman/cases/authz-deny.py jwtAccountAdminB
   # VPC AUTHZ-*-LS-OWN-AAB (kacho-iam#276 extend): the SAME cross-suite collision as
-  # LS-*-NOB. The iam-suite RBACSUBJ-GROUP-GRANTS-MEMBER-OK adds `userAAB` to a group and
+  # LS-*-NOB — but unlike NOB, this one's subject has NOT been swapped out: authz-deny.py
+  # still binds the AAB subject-code to `jwtAccountAdminB` and still expects DENY on
+  # project-A1, while the iam suite still grants that principal account-A view through a
+  # group. NOT re-verified against a live stand on 2026-07-30 (the stand was in use by
+  # another measurement), and said here rather than left as a silent gap: the entry stands on
+  # the 2026-07-28 evidence below, not on a fresh run. The machine-readable
+  # `@mask-subject` line above is what services/iam/tools/newmanmask enforces — if the case
+  # stops naming that subject, the gate fails instead of the paragraph quietly going stale.
+  # The iam-suite RBACSUBJ-GROUP-GRANTS-MEMBER-OK adds `userAAB` to a group and
   # binds ROLE_VIEW (`*.*` read/list) to that group @ ACCOUNT:{{accountAId}} (=authz-test-a,
   # the shared umbrella env account) → AAB gains account-A viewer/v_list via the group-userset;
   # keystone (e195632) legitimately materializes per-object v_list on every account-A object →
@@ -318,27 +343,59 @@ for col in "${collections[@]}"; do
   # blanket bug would leak symmetrically). Only LS-OWN-AAB is whitelisted — LS-CROSS-AAB is a
   # legit ALLOW (AAB owns account-B) and stays enforced. Real fix = de-share the umbrella
   # account across suites (kacho-iam#276); until then RED-by-fixture-collision, same as NOB.
-  # IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW (kacho-iam#276 family, SAME-SUITE variant): NOT a leak.
-  # The case asserts jwtInvitee — modelled as a "plain member of accountB, no user-viewer
-  # grant" — lists accountB users and MUST see 0. But the SHARED tests/authz-fixtures/setup.sh
-  # seeds `ensure_binding "$USER_INV" "$ROLE_ADMIN" "account" "$ACCOUNT_B" "$JWT_AAB"` (~L434,
-  # comment "INV — owner-of-B (his home) — admin in account-B") → jwtInvitee holds an ACTIVE
-  # ROLE_ADMIN AccessBinding on accountB, so the account-tier cascade LEGITIMATELY resolves
-  # viewer/v_list on accountB's users → user.List?accountId=accountBId returns ≥1. The
-  # "no-grant member" premise is contradicted by the fixture; jwtInvitee IS authorized —
-  # independently proven GREEN by IAM-ACC-LS-AUTHZ-SCOPE-INVITED-ADMIN-SEES (asserts the
-  # invitee's admin binding on accountB is visible). Legit ALLOW, not membership-over-show.
-  # CHECKED 2026-07-28 — the three kacho-iam#276 fixture-collision entries above
-  # (LS-*-NOB, LS-OWN-AAB, MEMBER-NO-OVERSHOW) are STILL TRUE, on two counts. The
-  # seed line they name is still there (tests/authz-fixtures/setup.sh:706 binds the
-  # invitee as an admin of account-B), and the collision is directly observable:
-  # `GET /iam/v1/accounts/<account-A>` as the "no bindings" subject returns 200 on
-  # the live stand. These subjects ARE authorized; the cases assume they are not.
-  # The fix is fixture separation, not a mask edit — do not re-justify, de-share.
+  # IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW — REMOVED 2026-07-30. The entry outlived its
+  # subject, and the paragraph that justified it described a case that no longer exists.
+  #
+  # It was written for `jwtInvitee`: the case modelled that subject as "a plain member of
+  # accountB with no user-viewer grant", the shared seed binds the invitee as an ADMIN of
+  # accountB, so the subject was in fact authorized and the case's premise was wrong. That
+  # reasoning was sound WHEN WRITTEN. On 2026-07-21 (7e73478f) the case was changed to use
+  # `jwtPureNoBindings` — the dedicated never-granted subject — precisely because the
+  # no-over-show property "only a genuinely unbound subject can assert". From that commit on,
+  # the premise the mask contradicted was no longer the premise the case held.
+  #
+  # So the mask was subtracting the failures of a P1 canary about a genuinely grant-less
+  # subject — which is exactly what the last line of this very block promised stays gated.
+  # Worse, the folder holds ONE step carrying THREE assertions (`status 200`, `… does NOT
+  # see accountB users (no over-show)`, `no leak of accountB owner to a no-grant subject`),
+  # so a folder-level subtraction took the leak assertion with the rest.
+  #
+  # Nothing about the product was verified to remove this: the case's own subject changed,
+  # which retires the justification by itself. If the redirected case turns out to fail, it
+  # fails honestly and gets read on its own evidence — not inherited from the old subject.
+  # CHECKED 2026-07-28 — recorded here as it was written, and CORRECTED 2026-07-30.
+  # The note claimed the THREE kacho-iam#276 fixture-collision entries (LS-*-NOB,
+  # LS-OWN-AAB, MEMBER-NO-OVERSHOW) were "STILL TRUE, on two counts". For the two
+  # remaining entries it holds and its evidence stands: the seed line is still there
+  # (tests/authz-fixtures/setup.sh:706 binds the invitee as an admin of account-B) and
+  # the collision is directly observable — `GET /iam/v1/accounts/<account-A>` as the
+  # "no bindings" subject returns 200 on the live stand. Those subjects ARE authorized;
+  # those cases assume they are not, and the fix is fixture separation, not a mask edit.
+  # For the third entry the note was ALREADY FALSE when written: the case had stopped
+  # naming that subject a week earlier (2026-07-21). A re-check that re-affirms an
+  # entry without re-reading the case it points at can only confirm the paragraph, not
+  # the claim — which is how "verified, still true" came to attest to something that
+  # did not exist. Re-checks name the case file and the subject they actually read.
   # Real fix = de-share the umbrella accountB across iam suites (kacho-iam#276); until then
   # RED-by-fixture-collision. The assertion still RUNS and reports; a genuinely grant-less
-  # subject's no-leak stays gated by IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY, which is NOT
-  # whitelisted (a real over-show still fails honestly).
+  # subject's no-leak stays gated by IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY and by
+  # IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW, NEITHER of which is whitelisted (a real
+  # over-show still fails honestly).
+  # NARROWED 2026-07-30 — the two surviving kacho-iam#276 arcs now subtract BY STEP, the
+  # same shape the nlb arc was given 2026-07-29. Until now the folder-to-step narrowing had
+  # been applied to ONE arc of the four in this expression while three matched by folder
+  # name alone; the asymmetry was not reasoned, it was simply where the previous pass
+  # stopped. Measured over the generated collections: the NOB arc matches 16 folders and the
+  # AAB arc 8, and each of those folders holds exactly ONE step with exactly ONE assertion
+  # (`[<CASE>] LIST no-access: 403 OR 200+empty (no leak)`), so step-narrowing subtracts the
+  # same 24 assertions it did before — the verdict does not move today. What changes is the
+  # future: a new step or a second assertion added to any of those 24 folders is no longer
+  # absorbed for standing next to the one this entry was written for.
+  # PREMISE, stated so it cannot rot silently: the generator names these steps
+  # `get-abs<N>`. If that ever changes, the arcs match nothing and subtract nothing — the
+  # gate gets STRICTER, never quieter, so the failure direction is safe. The gate in
+  # services/iam/tools/newmanmask enforces exactly this: an alternation token that matches
+  # no case in the tree is a finding, because that is how the entry removed above survived.
   # COMPUTE instance-suite — the whole block that stood here (INST-AD-* / INST-DD-* /
   # INST-DISK-DEL-WHILE-ATTACHED / INST-DEL-STATE-* / INST-NIC-*, justified as
   # storage.enabled=false + Noop'd vpc-internal :9091 CI-infra gaps) DESCRIBED CASES
@@ -470,7 +527,7 @@ for col in "${collections[@]}"; do
   # variable could be absorbed by an unrelated alternation entry and the suite would
   # go quiet again in exactly the way this whole mechanism exists to prevent.
   if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("inv-get-account-allow-warm-cache")) or (.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-(OWN|CROSS)-NOB|^AUTHZ-[A-Z-]+-LS-OWN-AAB|^IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW")) or ((.parent.name? // "" | test("^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")) and (.source.name? // "" | test("-rya[0-9]+$"))))] | length' "$report")
+    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("inv-get-account-allow-warm-cache")) or ((.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-OWN-AAB")) and (.source.name? // "" | test("^get-abs[0-9]+$"))) or ((.parent.name? // "" | test("^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")) and (.source.name? // "" | test("-rya[0-9]+$"))))] | length' "$report")
     fails=$((fails - known_red))
     if [ "$fails" -lt 0 ]; then fails=0; fi
   fi
