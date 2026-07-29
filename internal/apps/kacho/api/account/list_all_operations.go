@@ -12,12 +12,27 @@ package account
 // This is the server-side scope the IAM "Operations" nav page consumes; the VPC
 // client-side fan-out pattern does not apply (IAM is not project-scoped).
 //
-// Authorisation = "self (account owner) OR account-admin (FGA admin@account)" —
-// the same authority rule as access_binding.requireAccountAdmin / ListByAccount.
-// Distinct from the per-resource AccountService.ListOperations (which filters by
-// the account's own resource_id rows); this one filters by the account_id
-// column to aggregate every child resource's operations (no per-creator
-// filter — viewer-scope parity with the existing per-resource lists).
+// Authorisation = "cluster-admin OR self (account owner) OR account-admin (FGA
+// admin@account)" — the same authority rule as access_binding.requireAccountAdmin
+// / ListByAccount. Distinct from the per-resource AccountService.ListOperations,
+// which filters by the account's own resource_id rows.
+//
+// ЯРУС: административный, и потому выдача здесь НЕ сужается по создателю
+// операции — в отличие от всех per-resource списков, которые сужены
+// (operations.ListForCaller). Обоснование — сама политика ярусов: администратор
+// аккаунта может всё в пределах аккаунта, каскадом; аудит чужих действий внутри
+// СВОЕЙ тенантности — это и есть предмет данного RPC («ListAll»), а не побочный
+// эффект. Сужение по создателю сделало бы его тождественным per-resource списку
+// и убрало бы единственную поверхность, на которой владелец аккаунта видит, что
+// в его аккаунте происходило.
+//
+// Прежняя редакция этого комментария обосновывала отсутствие фильтра «паритетом
+// с существующими per-resource списками». После их сужения такое обоснование
+// стало ложным, поэтому заменено на настоящее — ярус доступа.
+//
+// Границы яруса: гейт ниже пропускает ТОЛЬКО кластерного администратора,
+// владельца аккаунта и делегированного администратора аккаунта. Обычный тенант с
+// правом на список сюда не попадает вовсе.
 
 import (
 	"context"

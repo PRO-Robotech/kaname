@@ -25,6 +25,15 @@ import (
 
 // ListIamOperationsUseCase lists every IAM operation of the cluster, optionally
 // narrowed to one account_id. Admin-tier gated.
+//
+// ЯРУС: внутренний, кластерный администратор (system_admin @ cluster), RPC живёт
+// только на internal-листенере. Выдача здесь НЕ сужается по создателю операции —
+// в отличие от всех tenant-facing списков, которые сужены
+// (operations.ListForCaller). Это ровно тот случай, который godoc
+// operations.Repo.List называет законным: несуженный путь — для доверенного
+// внутреннего вызывающего, уже авторизованного иначе. Кластерный аудит по
+// определению обязан видеть чужие операции; сужение по создателю обнулило бы
+// смысл RPC.
 type ListIamOperationsUseCase struct {
 	opsRepo operations.Repo
 	// checker — narrow ReBAC port (Check). Satisfied by clients.RelationStore.
