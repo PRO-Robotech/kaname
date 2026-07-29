@@ -221,6 +221,12 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	// precondition. Validate SYNC so a well-formed-but-unknown user fails
 	// FAILED_PRECONDITION here, never as an async code-9. Skipped when created_by
 	// == the target user (already resolved just above — the common self-issue path).
+	//
+	// state-not-consulted: здесь спрашивают только про существование строки под
+	// внешним ключом. Автор не назывался вызывающим — handler подставляет
+	// АУТЕНТИФИЦИРОВАННОГО принципала и отвергает несовпадающий created_by в
+	// теле, поэтому состояние автора уже решено на входе: заблокированный сюда
+	// не доходит.
 	if in.CreatedByUserID != string(in.UserID) {
 		if _, _, cerr := u.repo.AccountForUser(ctx, domain.UserID(in.CreatedByUserID)); cerr != nil {
 			if errors.Is(cerr, iamerr.ErrNotFound) {
@@ -519,9 +525,11 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 	}
 	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
 	// иначе account-scoped /iam/operations исключает token-операции.
-	// Состояние владельца здесь намеренно не читается: оно запрещает
-	// АУТЕНТИФИКАЦИЮ, а не уборку за собой. Иначе заблокировать пользователя и
-	// отозвать его живые токены стало бы взаимоисключающим.
+	// state-not-consulted: отзыв — уборка за собой, а не аутентификация.
+	// Состояние владельца запрещает ВХОД; читать его здесь значило бы сделать
+	// «заблокировать пользователя» и «отозвать его живые токены»
+	// взаимоисключающими, то есть оставить учётные данные там, где их нужнее
+	// всего снять.
 	accountID, _, err := u.repo.AccountForUser(ctx, in.UserID)
 	if err != nil {
 		return nil, mapPGErr(err)

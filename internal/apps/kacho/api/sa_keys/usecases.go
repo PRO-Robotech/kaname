@@ -945,10 +945,11 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 	}
 	// Resolve the owning account so the Operation metadata carries account_id —
 	// the account-scoped /iam/operations feed otherwise excludes token operations.
-	// The account's state is deliberately not consulted here. It says the account
-	// may not AUTHENTICATE; taking away the ability to revoke its keys as well
-	// would make disabling an account something an operator cannot finish, and
-	// would strand live credentials exactly where they most need removing.
+	// state-not-consulted: отзыв ключа — уборка, а не аутентификация. Состояние
+	// говорит, что учётке нельзя ВХОДИТЬ; отняв вместе с этим возможность
+	// отозвать её ключи, мы сделали бы отключение учётки действием, которое
+	// оператор не может довести до конца, и оставили бы живые учётные данные
+	// ровно там, где их нужнее всего снять.
 	accountID, _, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
 	if err != nil {
 		return nil, mapPGErr(err)
