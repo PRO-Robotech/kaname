@@ -30,39 +30,17 @@ func NewUserPoolRepo(pool *pgxpool.Pool) *UserPoolRepo {
 	return &UserPoolRepo{pool: pool}
 }
 
-// FindActiveByExternalID — все ACTIVE rows для identity (Kratos sub).
-// Pool-scoped query (no TX). Возвращает empty slice если ни одной row не найдено.
-func (r *UserPoolRepo) FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
-	const q = `
-		SELECT id, account_id, external_id, email, display_name, invite_status, invited_by, created_at
-		  FROM users
-		 WHERE external_id = $1 AND invite_status = 'ACTIVE'
-		 ORDER BY created_at ASC`
-	rows, err := r.pool.Query(ctx, q, string(externalID))
-	if err != nil {
-		return nil, mapErr(err, "", string(externalID))
-	}
-	defer rows.Close()
-	var out []domain.User
-	for rows.Next() {
-		u, err := scanUserFromRows(rows)
-		if err != nil {
-			return nil, mapErr(err, "", string(externalID))
-		}
-		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
 // FindByExternalID — ВСЕ rows для identity (Kratos sub), независимо от
 // invite_status. Pool-scoped query (no TX).
 //
-// Отличается от FindActiveByExternalID ровно отсутствием фильтра, и это не
-// удобство: фильтр отвечает «дай пригодные строки», а хук спрашивает «в каком
-// состоянии субъект». Заблокированный пользователь под фильтром возвращается
-// пустым результатом, неотличимым от identity без зеркала, — и урезанный набор
-// claims, существующий для второго, выдавался первому. Строку возвращаем как
-// есть, вердикт выносит domain.InviteStatus.MayAuthenticate.
+// ACTIVE-фильтрующего близнеца здесь СОЗНАТЕЛЬНО нет (был, удалён вместе с
+// последним вызывающим). Фильтр отвечает «дай пригодные строки», а хук
+// спрашивает «в каком состоянии субъект»: заблокированный пользователь под
+// фильтром возвращался пустым результатом, неотличимым от identity без
+// зеркала, — и урезанный набор claims, существующий для второго, выдавался
+// первому. Строку возвращаем как есть, вердикт выносит
+// domain.InviteStatus.MayAuthenticate. Tx-scoped userReader свой ACTIVE-only
+// вариант сохраняет: у upsert-пути вопрос действительно «дай пригодные».
 func (r *UserPoolRepo) FindByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
 	const q = `
 		SELECT id, account_id, external_id, email, display_name, invite_status, invited_by, created_at
