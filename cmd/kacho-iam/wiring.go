@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"os"
 
@@ -450,10 +451,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// refused forever, with nothing prompting a re-login. Same lever the
 		// self-service logout at the edge already pulls for its own caller.
 		WithProviderSessions(
-			clients.NewHydraAdminClient(
-				cfg.AuthN.ResolveHydraAdminURL(),
-				os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
-			),
+			mustProviderAdminClient(cfg),
 			&forceLogoutSubjectResolver{users: kachopg.NewUserPoolRepo(pool)},
 		).
 		// ForceLogout returns an Operation — the row it names is persisted here,
@@ -497,8 +495,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// runtime can never disagree about it. Empty → mint disabled (fail-closed).
 	bootstrapTokenH := bootstraptokenwire.Build(pool, bootstraptokenwire.BuildConfig{
 		SigningKeyPEM:     cfg.AuthN.BootstrapMint.ResolveSigningKeyPEM(),
-		HydraAdminURL:     cfg.AuthN.ResolveHydraAdminURL(),
-		HydraAdminToken:   os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
+		HydraAdmin:        mustProviderAdminClient(cfg),
 		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
 		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 		GatewayAudience:   bootstrapAudience,
@@ -589,13 +586,35 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	}
 }
 
+// mustProviderAdminClient builds the single client every provider-admin consumer
+// in this process shares, resolving the hop's trust anchor once.
+//
+// Fatal on an unusable anchor, deliberately and at the composition root: the
+// alternative — carrying on against the system root store — is the state nobody
+// can see, because the operator has configured verification against the internal
+// CA, the process is not doing it, and everything works until a certificate
+// rotates. Config.Validate has already refused a production configuration that
+// omits the anchor while addressing the hop over TLS; this catches the anchor
+// that is named but unreadable, which only opening the file can tell.
+func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
+	c, err := clients.NewHydraAdminClientWithCA(
+		cfg.AuthN.ResolveHydraAdminURL(),
+		os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
+		cfg.AuthN.ResolveHydraAdminCAFile(),
+	)
+	if err != nil {
+		log.Fatalf("provider-admin client: %v", err)
+	}
+	return c
+}
+
 // buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
 // via Hydra OAuth2 client_credentials.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config, logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kachopg.NewSAOAuthClientRepo(pool)
 
 	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
-	hydraAdmin := clients.NewHydraAdminClient(hydraAdminURL, os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"))
+	hydraAdmin := mustProviderAdminClient(cfg)
 
 	// Durable audit_outbox emitter — emits iam.sa_key.issued /
 	// iam.sa_key.revoked rows inside the SAKey worker-tx, atomic with the
@@ -657,7 +676,7 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	userClientRepo := kachopg.NewUserOAuthClientRepo(pool)
 
 	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
-	hydraAdmin := clients.NewHydraAdminClient(hydraAdminURL, os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"))
+	hydraAdmin := mustProviderAdminClient(cfg)
 
 	// Durable audit_outbox emitter — эмитит iam.user_token.{issued,revoked} строки
 	// внутри worker-tx, атомарно с token-mapping-мутацией (запрет #10). Payload без

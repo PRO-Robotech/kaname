@@ -18,6 +18,10 @@ import (
 // satisfy, and leaving it empty would make unrelated tests fail on it. Tests
 // that are ABOUT the allow-list overwrite the field explicitly
 // (trusted_forwarders_test.go).
+//
+// The provider-admin address is seeded on the same terms and for the same reason
+// — production demands it be DECLARED (never derived) and over TLS. Tests that
+// are ABOUT that hop overwrite it (validate_provider_admin_hop_test.go).
 func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 	return config.Config{
 		APIServer: config.APIServerConfig{
@@ -33,6 +37,8 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 		AuthN: config.AuthNConfig{
 			Mode:                 mode,
 			TrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
+			HydraAdminURL:        "https://kacho-umbrella-hydra-admin.kacho.svc:4445",
+			HydraAdminCAFile:     "/etc/kacho-iam/tls/server/ca.crt",
 		},
 		// Positive cache knobs so the (unrelated) conditions validation passes;
 		// RegisterDefaults sets these in the real load path.

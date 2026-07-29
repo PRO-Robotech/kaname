@@ -108,11 +108,37 @@ func (c AuthNConfig) ResolveAudience() string {
 // (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
 // cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
 // even when the external issuer host does not resolve in-cluster.
-func (c AuthNConfig) ResolveHydraAdminURL() string {
+// DeclaredHydraAdminURL returns the admin-API address an operator actually
+// WROTE — the YAML setting or its ENV override — and the empty string when
+// neither is set.
+//
+// It exists because ResolveHydraAdminURL below never returns empty: it falls back
+// to a derivation from the issuer. That makes "declared" and "guessed"
+// indistinguishable at the call sites, which is precisely what let a production
+// profile ship with no declaration at all. The production boot guard
+// (config.validateProductionProviderAdminHop) reads THIS, not the resolved value.
+func (c AuthNConfig) DeclaredHydraAdminURL() string {
 	if v := strings.TrimSpace(c.HydraAdminURL); v != "" {
 		return v
 	}
-	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_ADMIN_URL")); v != "" {
+	return strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_ADMIN_URL"))
+}
+
+// ResolveHydraAdminCAFile — path to the PEM bundle the provider-admin hop is
+// verified against. Explicit setting, then ENV; empty when neither is set.
+//
+// Deliberately NOT derived from any other path: an anchor that is always
+// non-empty would make the hop read as verified on a profile that never
+// configured one, which is the same defect as a derived address.
+func (c AuthNConfig) ResolveHydraAdminCAFile() string {
+	if v := strings.TrimSpace(c.HydraAdminCAFile); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_ADMIN_CA_FILE"))
+}
+
+func (c AuthNConfig) ResolveHydraAdminURL() string {
+	if v := c.DeclaredHydraAdminURL(); v != "" {
 		return v
 	}
 	if iss := c.ResolveHydraIssuer(); iss != "" {
