@@ -24,17 +24,20 @@ import (
 type Handler struct {
 	iamv1.UnimplementedServiceAccountServiceServer
 
-	create *CreateServiceAccountUseCase
-	update *UpdateServiceAccountUseCase
-	delete *DeleteServiceAccountUseCase
-	get    *GetServiceAccountUseCase
-	list   *ListServiceAccountsUseCase
-	listOp *shared.ListOperationsUseCase
+	create  *CreateServiceAccountUseCase
+	update  *UpdateServiceAccountUseCase
+	delete  *DeleteServiceAccountUseCase
+	get     *GetServiceAccountUseCase
+	list    *ListServiceAccountsUseCase
+	disable *DisableServiceAccountUseCase
+	enable  *EnableServiceAccountUseCase
+	listOp  *shared.ListOperationsUseCase
 }
 
 func NewHandler(c *CreateServiceAccountUseCase, u *UpdateServiceAccountUseCase, d *DeleteServiceAccountUseCase,
-	g *GetServiceAccountUseCase, l *ListServiceAccountsUseCase) *Handler {
-	return &Handler{create: c, update: u, delete: d, get: g, list: l}
+	g *GetServiceAccountUseCase, l *ListServiceAccountsUseCase,
+	disable *DisableServiceAccountUseCase, enable *EnableServiceAccountUseCase) *Handler {
+	return &Handler{create: c, update: u, delete: d, get: g, list: l, disable: disable, enable: enable}
 }
 
 // WithListOperations wires the per-resource operation-listing use-case.
@@ -84,6 +87,25 @@ func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateServiceAccountReq
 
 func (h *Handler) Delete(ctx context.Context, req *iamv1.DeleteServiceAccountRequest) (*operationpb.Operation, error) {
 	op, err := h.delete.Execute(ctx, domain.ServiceAccountID(req.GetServiceAccountId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// Disable — the account may no longer authenticate. An action, not a masked
+// field: see set_enabled.go for why the difference is not cosmetic.
+func (h *Handler) Disable(ctx context.Context, req *iamv1.DisableServiceAccountRequest) (*operationpb.Operation, error) {
+	op, err := h.disable.Execute(ctx, domain.ServiceAccountID(req.GetServiceAccountId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// Enable — the account may authenticate again.
+func (h *Handler) Enable(ctx context.Context, req *iamv1.EnableServiceAccountRequest) (*operationpb.Operation, error) {
+	op, err := h.enable.Execute(ctx, domain.ServiceAccountID(req.GetServiceAccountId()))
 	if err != nil {
 		return nil, err
 	}

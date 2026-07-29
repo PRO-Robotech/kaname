@@ -47,7 +47,7 @@ func TestServiceAccount_ListOperations_ReturnsRecordedOps(t *testing.T) {
 	repo := &fakeOpsList{ops: []operations.Operation{
 		{ID: "iop00000000000000001", Description: "Create service account x", CreatedAt: time.Unix(1, 0), Principal: opsCaller},
 	}, next: "tok"}
-	h := serviceaccount.NewHandler(nil, nil, nil, nil, nil).
+	h := serviceaccount.NewHandler(nil, nil, nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(repo))
 
 	resp, err := h.ListOperations(opsCallerCtx(),
@@ -64,7 +64,7 @@ func TestServiceAccount_ListOperations_ReturnsRecordedOps(t *testing.T) {
 }
 
 func TestServiceAccount_ListOperations_MalformedID_InvalidArgument(t *testing.T) {
-	h := serviceaccount.NewHandler(nil, nil, nil, nil, nil).
+	h := serviceaccount.NewHandler(nil, nil, nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(&fakeOpsList{}))
 
 	_, err := h.ListOperations(context.Background(),

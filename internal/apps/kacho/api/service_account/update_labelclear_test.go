@@ -175,6 +175,10 @@ func (w *lcsSaWtr) Update(_ context.Context, sa domain.ServiceAccount, mask []st
 	return w.parent.sa, nil
 }
 func (w *lcsSaWtr) Delete(context.Context, domain.ServiceAccountID) error { return nil }
+func (w *lcsSaWtr) SetEnabled(_ context.Context, _ domain.ServiceAccountID, enabled bool) (domain.ServiceAccount, error) {
+	w.parent.sa.Enabled = enabled
+	return w.parent.sa, nil
+}
 
 // ── fake ops repo (no-op; worker runs via operations.Run + Wait) ────────────────
 

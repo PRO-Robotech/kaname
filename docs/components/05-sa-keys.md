@@ -44,7 +44,8 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 - Только Hydra-backed (production без Hydra → Issue падает Unavailable).
 - `private_key_pem` не восстановим после первого ответа (no "show key again").
-- `enabled=false` SA → Issue блокируется.
+- `enabled=false` SA → Issue блокируется (снять состояние — действием
+  `ServiceAccountService.Disable`/`Enable`, см. [`04-service-account.md`](04-service-account.md)).
 - Алгоритм фиксирован на `ES256` (RS256 / EdDSA — будущее расширение).
 
 ## Доменная модель — `service_account_oauth_clients`
@@ -113,7 +114,7 @@ sequenceDiagram
     GW->>IAM: SAKeyService.Issue
     IAM->>DB: SELECT sa WHERE id=$saId
     alt sa.enabled=false
-        IAM-->>GW: FailedPrecondition "service_account disabled"
+        IAM-->>GW: FailedPrecondition "ServiceAccount <id> is disabled and cannot be issued a key"
     end
     IAM->>IAM: ecdsa.GenerateKey(P-256) → {priv_pem, pub_pem, jwk(kid=soc_…)}
     IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"],<br/> token_endpoint_auth_method:"private_key_jwt",<br/> jwks:{keys:[pub_jwk]}, scope, audience}
@@ -250,7 +251,7 @@ curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys -H "Authorization
 
 | Сценарий                             | gRPC code             | HTTP | Текст                                          |
 |--------------------------------------|------------------------|------|------------------------------------------------|
-| SA disabled                          | `FAILED_PRECONDITION`  | 412  | `service_account disabled`                     |
+| SA disabled                          | `FAILED_PRECONDITION`  | 400  | `ServiceAccount <id> is disabled and cannot be issued a key` |
 | SA не найден                         | `NOT_FOUND`            | 404  | `ServiceAccount sva_xxx not found`             |
 | Hydra недоступен                     | `UNAVAILABLE`          | 503  | `hydra admin api unreachable`                  |
 | Anonymous IssueSAKey                 | `UNAUTHENTICATED`      | 401  | `anonymous principal rejected`                 |

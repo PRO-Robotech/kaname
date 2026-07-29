@@ -105,6 +105,18 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindUpdate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
 	case *iamv1.DeleteServiceAccountMetadata:
 		return resolveExistence(ctx, kindDelete, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
+	case *iamv1.DisableServiceAccountMetadata:
+		// Disable/Enable RETAIN the row and change its state, so both resolve like
+		// an Update (resource present afterwards → response = the service account),
+		// never like a Delete. Without these two cases an ORPHANED disable — the
+		// worker died between minting the Operation and committing — falls to the
+		// default arm, is skipped forever, and the Operation stays `done=false`
+		// while being re-claimed on every sweep. The operator who pulled a machine
+		// identity during an incident would be left polling an answer that never
+		// comes.
+		return resolveExistence(ctx, kindUpdate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
+	case *iamv1.EnableServiceAccountMetadata:
+		return resolveExistence(ctx, kindUpdate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
 
 	case *iamv1.CreateGroupMetadata:
 		return resolveExistence(ctx, kindCreate, m.GetGroupId(), rd.Groups().Get, marshalGroup)

@@ -1256,6 +1256,26 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.iam.v1.ServiceAccountService/Disable",
+    "permission": "iam.service_accounts.disable",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "iam_service_account",
+      "from_request_field": "service_account_id"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.ServiceAccountService/Enable",
+    "permission": "iam.service_accounts.enable",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "iam_service_account",
+      "from_request_field": "service_account_id"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/Get",
     "permission": "iam.service_accounts.get",
     "required_relation": "v_get",

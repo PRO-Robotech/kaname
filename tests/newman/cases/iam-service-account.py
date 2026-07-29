@@ -887,3 +887,379 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# ---------------------------------------------------------------------------
+# IAM-SVA-DIS-CRUD-OK — the whole loop, black box: an enabled service account is
+# issued a credential; :disable; the SAME request is refused; :enable; it works.
+#
+# This is the case that proves the WRITER and the READER met. `enabled` was read
+# by the token hook, by key issuance and by the docker-token validator long
+# before anything could set it, so every one of those refusals was unreachable
+# in practice. What is asserted here is not that a field changed — it is that
+# the platform's answer to "may this machine identity be handed a credential"
+# changed, and changed back.
+#
+# The credential-issuance RPC and both actions carry catalog
+# `required_acr_min=2`, so every mutating step presents the step-up'd token.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-SVA-DIS-CRUD-OK",
+    title="Enabled SA is issued a key → :disable → key issuance REFUSED → :enable → issued again",
+    classes=["CRUD", "AUTHZ"],
+    priority="P0",
+    steps=[
+        Step(
+            name="create-sa",
+            method="POST",
+            path="/iam/v1/serviceAccounts",
+            body={"accountId": "{{accountAId}}", "name": "svadis{{runId}}",
+                  "description": "newman disable/enable loop probe"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("create-sa"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.serviceAccountId", "disSvaId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+
+        Step(
+            name="get-confirms-enabled",
+            method="GET",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("get-confirms-enabled"),
+                *assert_status(200),
+                # The starting state is asserted, not assumed. Without this the
+                # later `enabled === false` proves only "false at the end", which
+                # a field that was never true also satisfies.
+                "pm.test('a fresh service account starts enabled', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.enabled, JSON.stringify(j)).to.eql(true);",
+                "});",
+            ],
+        ),
+
+        # ── 1. Enabled: a credential IS issued. The control case, and it must come
+        #      first: `enabled` is false in every zero value, so a gate reading an
+        #      unloaded field refuses EVERY account — and a case that only checked
+        #      the refusal would report green while machine access was dead.
+        retry_until_authorized(Step(
+            name="issue-key-while-enabled",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}/keys",
+            body={"description": "newman key before disable"},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("issue-key-while-enabled"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+
+        # ── 2. Disable — an ACTION with no field mask to forget.
+        retry_until_authorized(Step(
+            name="disable",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}:disable",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("disable"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+
+        Step(
+            name="get-confirms-disabled",
+            method="GET",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("get-confirms-disabled"),
+                *assert_status(200),
+                "pm.test('SA.enabled is false — the state an operator set is a state they can SEE', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.enabled, JSON.stringify(j)).to.eql(false);",
+                "});",
+            ],
+        ),
+
+        # ── 3. Disabled: the SAME request is refused. Synchronous, because the
+        #      request is well-formed and the answer is known now.
+        Step(
+            name="issue-key-while-disabled",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}/keys",
+            body={"description": "newman key while disabled"},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("issue-key-while-disabled"),
+                *assert_status(400),
+                *assert_grpc_code(9, "FAILED_PRECONDITION"),
+                "pm.test('message names the reason (contract tone)', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.message, JSON.stringify(j)).to.include('is disabled and cannot be issued a key');",
+                "});",
+            ],
+        ),
+
+        # ── 4. Disabling again is a success: the state is the subject, not the
+        #      transition. The safe direction must never fail on retry.
+        Step(
+            name="disable-again-idempotent",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}:disable",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("disable-again-idempotent"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+
+        # ── 5. Enable — and the platform answers yes again.
+        Step(
+            name="enable",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}:enable",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("enable"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+
+        retry_until_authorized(Step(
+            name="issue-key-after-enable",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}/keys",
+            body={"description": "newman key after enable"},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("issue-key-after-enable"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+
+        Step(
+            name="get-confirms-enabled-again",
+            method="GET",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("get-confirms-enabled-again"),
+                *assert_status(200),
+                "pm.test('and the state an operator can SEE came back too', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.enabled, JSON.stringify(j)).to.eql(true);",
+                "});",
+            ],
+        ),
+
+        # Cleanup: the suite's own fixture does not outlive it (a leaked SA grows
+        # the account listing and moves other cases' list contracts).
+        Step(
+            name="cleanup-delete-sa",
+            method="DELETE",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("cleanup-delete-sa"),
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        # The cleanup is asserted, not merely attempted: a Delete that fails
+        # asynchronously is invisible, and the comment above would then be
+        # claiming a teardown that did not happen while the account listing grows
+        # every run.
+        assert_op_success(auth="jwtAccountAdminA"),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# NOT COVERED HERE — the step-up floor on :disable / :enable.
+#
+# This is an OPEN DEBT with a number attached (1 invariant, 2 RPCs), not an
+# invariant this suite quietly reports green.
+#
+# A case was written asserting "disable without a step-up'd session → 403" and
+# removed on review, because on this stand it could not fail for the reason its
+# title claimed. Three independent reasons, any one sufficient:
+#
+#   1. the floor runs on ONE arm of the edge — the asymmetric-JWT path. The
+#      fixture tokens here are symmetric dev-secret JWTs and take the other
+#      path, which never consults the claim at all. Both fixture identities then
+#      carry the same subject, the same tuples and the same verdict;
+#   2. where the floor DOES run, its answer is 401, not 403 — so the assertion
+#      could not be satisfied by a step-up denial on any stand;
+#   3. what does produce 403 here is the ordinary per-object deny during the
+#      owner-tuple materialization window — which the very next step of the same
+#      case required to have CLOSED. Green would have meant "the grant had not
+#      propagated yet", i.e. the opposite of what was claimed.
+#
+# What DOES pin the classification, decisively and in the differential sense, is
+# the Go gate over the permission catalog
+# (gateway/internal/middleware/permission_catalog_acr_invariant_test.go): both
+# RPCs are named in the sensitive set, the set is asserted in BOTH directions,
+# and lowering either one to the routine floor fails it. That covers the
+# DECLARATION.
+#
+# What remains uncovered is the ENFORCEMENT of that declaration end-to-end, and
+# it needs a stand where the floor is live (production-mode / asymmetric tokens)
+# plus a fixture that can present both an elevated and a non-elevated session.
+# Until such a wave exists, this invariant is not black-box tested. Said plainly
+# rather than papered over with a probe that always passes.
+
+# ---------------------------------------------------------------------------
+# IAM-SVA-DIS-NEG-NOTFOUND — :disable on a well-formed but absent id.
+# Authz-first: the gateway's scope extractor cannot resolve the target, so a
+# 403 is as defensible as a 404 here. Never 200.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-SVA-DIS-NEG-NOTFOUND",
+    title="Disable a well-formed but absent service account → scoped authz deny on the action",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="disable-absent",
+            method="POST",
+            path=f"/iam/v1/serviceAccounts/{GARBAGE_SVA}:disable",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            # A bare `oneOf([403, 404])` here would be a tautology: it also holds
+            # when the route template is misspelled (404), when the catalog entry
+            # is missing (403 fail-closed) and when the FQN never reached the
+            # allowlist (403). Every one of those means the RPC does not work,
+            # and the probe would have called them all a pass.
+            #
+            # The discriminator is the RESOLVED ACTION in the error detail: a real
+            # per-object deny names the permission it denied, while a catalog miss
+            # carries an empty one (the descriptor is built before the entry is
+            # known). Pinning the object too — the extractor reads the id straight
+            # off the path, so it is deterministic.
+            test_script=[
+                *assert_answered("disable-absent"),
+                *assert_scoped_authz_deny(
+                    "iam.service_accounts.disable",
+                    f"'iam_service_account:{GARBAGE_SVA}'",
+                ),
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-SVA-DIS-NEG-CROSS-ACCOUNT — the admin of account B cannot disable a service
+# account of account A.
+#
+# The single most valuable negative for a new object-scoped action, and the whole
+# reason the RPC carries a scope extractor: without one, any authenticated caller
+# who can name an id could take another tenant's machine identity out of service.
+# Denial-of-service against a neighbour is a low bar to clear and a high one to
+# notice — the victim sees their automation stop authenticating, with nothing in
+# their own account to explain it.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-SVA-DIS-NEG-CROSS-ACCOUNT",
+    title="Account B admin disabling an account A service account → scoped deny, never 200",
+    classes=["NEG", "AUTHZ"],
+    priority="P0",
+    steps=[
+        Step(
+            name="create-victim-sa",
+            method="POST",
+            path="/iam/v1/serviceAccounts",
+            body={"accountId": "{{accountAId}}", "name": "svavict{{runId}}",
+                  "description": "newman cross-account probe target"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("create-victim-sa"),
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.serviceAccountId", "victimSvaId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        # The victim must really exist before the deny means anything: a deny on a
+        # resource that was never created proves only that nothing is there.
+        assert_op_success(auth="jwtAccountAdminA"),
+        Step(
+            name="cross-account-disable-denied",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{victimSvaId}}:disable",
+            body={},
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_answered("cross-account-disable-denied"),
+                *assert_scoped_authz_deny(
+                    "iam.service_accounts.disable",
+                    "'iam_service_account:' + pm.environment.get('victimSvaId')",
+                ),
+            ],
+        ),
+        # And the victim is untouched — a deny that still had an effect is not a
+        # deny. This is the assertion that separates "refused" from "refused the
+        # caller a receipt".
+        Step(
+            name="victim-still-enabled",
+            method="GET",
+            path="/iam/v1/serviceAccounts/{{victimSvaId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("victim-still-enabled"),
+                *assert_status(200),
+                "pm.test('the neighbour could not touch it: enabled is still true', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.enabled, JSON.stringify(j)).to.eql(true);",
+                "});",
+            ],
+        ),
+        Step(
+            name="cleanup-victim-sa",
+            method="DELETE",
+            path="/iam/v1/serviceAccounts/{{victimSvaId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("cleanup-victim-sa"),
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+    ],
+))
