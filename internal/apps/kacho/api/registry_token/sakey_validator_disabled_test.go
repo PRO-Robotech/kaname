@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,18 +36,14 @@ import (
 // question is whether the owner may authenticate.
 type stateLookup struct{ key RegisteredKey }
 
+var errNoSuchClient = errors.New("no such client")
+
 func (l stateLookup) KeyByClientID(_ context.Context, clientID string) (RegisteredKey, error) {
 	if clientID != l.key.ClientID {
-		return RegisteredKey{}, assertNoSuchClient
+		return RegisteredKey{}, errNoSuchClient
 	}
 	return l.key, nil
 }
-
-var assertNoSuchClient = errNoSuchClient{}
-
-type errNoSuchClient struct{}
-
-func (errNoSuchClient) Error() string { return "no such client" }
 
 // newMatchingKeyPair returns a PKCS#8 private-key PEM and the SPKI public PEM
 // registered against it — a credential that authenticates on its own merits, so
