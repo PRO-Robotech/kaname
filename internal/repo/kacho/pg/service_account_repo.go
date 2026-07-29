@@ -192,6 +192,32 @@ func (w *saWriter) Update(ctx context.Context, sa domain.ServiceAccount, updateM
 	return out, nil
 }
 
+// SetEnabled writes `enabled` — the state that decides whether this service
+// account may authenticate.
+//
+// One statement, and the argument is the state rather than a transition: the
+// row ends up holding what was asked for whether or not it already did. There
+// is nothing to serialise, because two callers asking for the same state agree,
+// and two asking for opposite states are answered in whatever order the row
+// lock grants — both outcomes are ones an operator asked for. A compare-and-set
+// here would buy no invariant and would turn the retry of a disable into a
+// failure, which is the direction that must never be hard to reach.
+//
+// The whole row comes back so the caller can name the account in an audit
+// record without a second read.
+func (w *saWriter) SetEnabled(ctx context.Context, id domain.ServiceAccountID, enabled bool) (domain.ServiceAccount, error) {
+	q := fmt.Sprintf(`UPDATE service_accounts SET enabled = $2 WHERE id = $1 RETURNING %s`, saCols)
+	row := w.tx.QueryRow(ctx, q, string(id), enabled)
+	out, err := scanSA(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
+		}
+		return domain.ServiceAccount{}, mapErr(err, "ServiceAccount.SetEnabled", string(id))
+	}
+	return out, nil
+}
+
 // Delete — атомарный DELETE с гвардом NOT EXISTS на access_bindings +
 // access_binding_subjects + group_members.
 //
