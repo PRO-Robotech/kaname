@@ -122,10 +122,45 @@ type services struct {
 // and that capability must be proven at compile time, not type-asserted here.
 func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	kachoRepo kachorepo.Repository,
-	relationStore *clients.OpenFGAHTTPClient,
+	fgaTransport *clients.OpenFGAHTTPClient,
 	metricsReg *metrics.Registry,
 	cfg config.Config, logger *slog.Logger) *services {
 	_ = slavePool // kachoRepo is built and passed in by main()
+
+	// structuralFacts — the facts the super-access cascade resolves over, read from iam's
+	// OWN committed rows (internal/authzcascade). Built on a PRIMARY-ONLY repository,
+	// deliberately: the rows it reads are ones that were just committed, which is exactly
+	// what a replica lags on, so a replica read would swap one delivery pipeline for
+	// another. WithBatch adds the page-shaped read of the same facts — measured, a page
+	// that derives them one object at a time costs a transaction per object, and page size
+	// is part of the contract up to 1000.
+	structuralRepo := kachopg.NewStructuralFactsRepo(pool)
+	structuralFacts := authzcascade.New(kachopg.New(pool, nil)).
+		WithConditions(kachopg.NewConditionsRepo(pool)).
+		WithBatch(authzcascade.BatchSourceFunc(
+			func(ctx context.Context) (authzcascade.StructuralSnapshot, error) {
+				return structuralRepo.StructuralSnapshot(ctx)
+			}))
+
+	// relationStore — THE relation value iam's own gates receive, and the reason a gate
+	// cannot ask the store without the second chance the edge gives: there is no other
+	// value here to hand it. Everything below wires this; the bare transport is used only
+	// where the subject of the question is DELIVERY itself (the boot verify gate) or where
+	// a concrete field of the client is needed.
+	relationStore := authzcascade.Wrap(fgaTransport, structuralFacts)
+	// Refuse to run gates that have silently gone back to waiting for a queue. Losing
+	// either half of this in a refactor would put iam's own answers back out of step with
+	// the edge's, and nothing else would say so.
+	//
+	// NOT conditioned on the authentication mode: every deployed stand runs production
+	// posture, and a guard absent from the stands where anyone would notice it firing is
+	// not a guard.
+	if !relationStore.SecondChanceReachable() {
+		logger.Error("refusing to start: iam's own authorization gates would answer from " +
+			"delivered relations only, disagreeing with the gate the api-gateway asks " +
+			"(structural-fact resolver not wired into the relation store)")
+		os.Exit(1)
+	}
 
 	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
 	// explicit-model 2026 P4). Shared by AccessBinding.Create, the Role.Update
@@ -385,7 +420,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore, cfg.Conditions, cfg.AuthN.Mode.IsProduction(), logger)
+	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, fgaTransport, relationStore,
+		structuralFacts, cfg.Conditions, cfg.AuthN.Mode.IsProduction(), logger)
 
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
@@ -581,9 +617,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// UserToken (персональные access-токены пользователя via Hydra).
 		userTokensHandler: userTokensH,
 
-		// Expose relationStore so runServe can reuse the same instance for the
-		// fga_outbox drainer wiring.
-		relationStore: relationStore,
+		// Expose the TRANSPORT so runServe can reuse the same instance for the
+		// fga_outbox drainer wiring. The drainer writes tuples; it asks no
+		// authorization question, so it has nothing to gain from the wrapper.
+		relationStore: fgaTransport,
 	}
 }
 
@@ -720,12 +757,20 @@ type authzServiceBundle struct {
 //
 // The FGA model is the sole policy gate: AuthorizeService does not evaluate any
 // additional guardrail overlay after the FGA Check.
+// fgaTransport is the bare client; ownGates is the value iam's own gates hold (the same
+// client, wrapped so a denied question gets the second chance the edge gives). Both are
+// passed rather than one derived here: AuthorizeService gives that second chance ITSELF and
+// asks the cheap flat cluster super-gate first, so routing it through the wrapper would make
+// a cloud administrator pay a structural read before the gate that was going to admit him.
+// The two must nevertheless never disagree, which is asserted on the observable answer in
+// service/own_gates_agree_with_edge_integration_test.go.
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
-	kachoRepo kachorepo.Repository, relationStore *clients.OpenFGAHTTPClient,
+	kachoRepo kachorepo.Repository, fgaTransport *clients.OpenFGAHTTPClient,
+	ownGates *authzcascade.Client, structuralFacts *authzcascade.Resolver,
 	condCfg config.ConditionsConfig, prodMode bool, logger *slog.Logger) authzServiceBundle {
-	modelID := relationStore.AuthorizationModel
+	modelID := fgaTransport.AuthorizationModel
 	logger.Info("openfga extended client wired for AuthZ",
-		"endpoint", relationStore.Endpoint, "store_id", relationStore.StoreID, "model_id", modelID)
+		"endpoint", fgaTransport.Endpoint, "store_id", fgaTransport.StoreID, "model_id", modelID)
 
 	// AuthorizeService use-case. ClusterAdminChecker wires the flat cluster-admin
 	// short-circuit (RBAC explicit-model 2026 P5, D-9): the same OpenFGA client
@@ -738,16 +783,12 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// three tiers exactly as delivery-dependent as the flat index they were chosen
 	// over — the ConditionsRepo is attached so iam_condition is covered too.
 	//
-	// Built on a PRIMARY-ONLY repository (no replica), deliberately: the rows it reads
-	// are ones that were just committed, which is exactly what a replica lags on, so a
-	// replica read would swap one delivery pipeline for another. It shares the master
-	// pool with the ordinary repository; only the read routing differs.
-	structuralFacts := authzcascade.New(kachopg.New(pool, nil)).
-		WithConditions(kachopg.NewConditionsRepo(pool))
+	// It is the SAME resolver the own-gate wrapper uses — built once by the caller — so the
+	// two surfaces cannot come to derive facts from different places.
 	authSvc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
-		Relations:           relationStore,
+		Relations:           fgaTransport,
 		ModelID:             modelID,
-		ClusterAdminChecker: relationStore,
+		ClusterAdminChecker: fgaTransport,
 		StructuralFacts:     structuralFacts,
 	})
 	// Refuse to run a cascade that has silently gone back to waiting for a queue.
@@ -764,7 +805,7 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 			"(structural-fact resolver or contextual-tuple Check not wired)")
 		os.Exit(1)
 	}
-	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kachoRepo, relationStore)
+	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kachoRepo, ownGates)
 	// WithCallerAuthority wires the caller-authority gate (a tenant principal may
 	// only query authz decisions about itself, a resource it administers, or as a
 	// cluster-admin). The SAME OpenFGA client answers the authority Check; a
@@ -776,11 +817,11 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// the public and internal listeners cannot be told apart. Fail-closed is the
 	// default; only a non-production AuthN mode opts out.
 	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC).
-		WithCallerAuthority(relationStore).
+		WithCallerAuthority(ownGates).
 		WithInsecureAnonymousPeer(!prodMode)
 
 	// RelationProjector — used by InternalAuthorizeService.
-	tupleWriter := service.NewRelationProjector(relationStore)
+	tupleWriter := service.NewRelationProjector(fgaTransport)
 	internalAuthH := internalauthorizeapp.NewHandler(tupleWriter, opsRepo, modelID)
 
 	// ConditionsService — Postgres-backed.
@@ -791,7 +832,7 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// the condition's owning project(folder) scope (cluster-admin short-circuits),
 	// mirroring the sibling IAM resources. Without this, ConditionsService had no
 	// server-side authorization (cross-tenant BOLA read + tamper).
-	condSvc.WithRelationStore(relationStore)
+	condSvc.WithRelationStore(ownGates)
 	// Durable audit_outbox emitter — emits
 	// iam.condition.created / .updated / .deleted rows inside the ConditionsService
 	// worker-tx, atomic with the conditions-row mutation (запрет #10). Payload

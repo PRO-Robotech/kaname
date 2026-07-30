@@ -78,6 +78,12 @@ type Relations interface {
 	// committed rows.
 	CheckWithContextualTuples(ctx context.Context, subject, relation, object string,
 		condCtx map[string]any, contextual []authztypes.TupleKey) (bool, error)
+	// ListUsers — the graph-expanded principal set of (object, relation). Not a Check and
+	// not decorated; it is here because a gate that resolves "who can do this" is wired
+	// from the same value as the gates that ask "may this subject", and requiring the
+	// composition root to keep a second value around for it is exactly how the two
+	// surfaces drifted apart.
+	ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) (principals []string, storeTruncated bool, err error)
 }
 
 // FactSource — the structural facts iam can prove from its own committed rows.

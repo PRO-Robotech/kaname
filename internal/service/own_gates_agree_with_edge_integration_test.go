@@ -88,7 +88,17 @@ func newAgreeWorld(t *testing.T, withFacts bool) *agreeWorld {
 	repo := kachopg.New(ci.pool, nil)
 	var facts authzcascade.FactSource
 	if withFacts {
-		facts = authzcascade.New(repo).WithConditions(kachopg.NewConditionsRepo(ci.pool))
+		// Mirrors the composition root, INCLUDING the batch source: the page filter
+		// prefetches through it in production, so an agreement test that left it out would
+		// be checking a shape production does not run. The single-object gates below take
+		// the per-object path either way, so both are exercised here.
+		structuralRepo := kachopg.NewStructuralFactsRepo(ci.pool)
+		facts = authzcascade.New(repo).
+			WithConditions(kachopg.NewConditionsRepo(ci.pool)).
+			WithBatch(authzcascade.BatchSourceFunc(
+				func(ctx context.Context) (authzcascade.StructuralSnapshot, error) {
+					return structuralRepo.StructuralSnapshot(ctx)
+				}))
 	}
 	store := authzcascade.Wrap(ci.harness.Client, facts)
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
