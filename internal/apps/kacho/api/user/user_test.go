@@ -574,3 +574,8 @@ func (r *fakeOpsRepoUser) Cancel(_ context.Context, id string) error {
 func (w *fakeUWtr) EmitReconcileEvent(context.Context, string, string, string) error {
 	return nil
 }
+
+// SetInviteStatus — заглушка: bootstrap-пути этот писатель не касается.
+func (w *fakeUserUW) SetInviteStatus(context.Context, domain.UserID, domain.InviteStatus) (domain.User, error) {
+	return domain.User{}, nil
+}

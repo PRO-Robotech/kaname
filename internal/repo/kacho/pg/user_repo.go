@@ -550,7 +550,108 @@ func (w *userWriter) UpdateLabels(ctx context.Context, id domain.UserID, labels 
 	return out, nil
 }
 
+// SetInviteStatus — писатель административного запрета участию и его снятия
+// (`UserService.Block` / `Unblock`). Меняет состояние ОДНОЙ строки членства.
+//
+// Аргумент — целевое СОСТОЯНИЕ, а не переход, поэтому повтор проходит: строка
+// оказывается там, где просили, независимо от того, была ли она там уже.
+// Compare-and-set по прежнему состоянию не купил бы здесь ни одного инварианта
+// и превратил бы повтор запрета в отказ — направление, которое обязано быть
+// самым лёгким.
+//
+// ПОЧЕМУ ОДИН СТЕЙТМЕНТ, А НЕ ПРОВЕРКА-ДО-ЗАПИСИ. Инвариант «приглашение без
+// подтверждённой личности не переводится ни в ACTIVE, ни в BLOCKED» выражен
+// предикатом самого UPDATE (запрет #10). Такая строка не несёт внешнего
+// идентификатора, и DB-CHECK users_invite_status_consistency отверг бы запись —
+// то есть без предиката вместо внятного отказа приходило бы нарушение
+// констрейнта из глубины драйвера.
+//
+// ПОЧЕМУ ВОЗВРАЩАЕТСЯ ПРИЗНАК СУЩЕСТВОВАНИЯ. Предикат состояния даёт ноль строк
+// в ДВУХ разных случаях — строки нет вовсе и строка есть, но PENDING. Ответы
+// на них разные («User %s not found» против «is not active»), и различить их
+// обязана сама запись: иначе строка, удалённая между синхронным пречеком
+// use-case'а и работой воркера, получила бы FAILED_PRECONDITION там, где
+// контракт-тон требует NOT_FOUND. LEFT JOIN на однострочный источник
+// гарантирует ровно одну строку ответа, поэтому это по-прежнему один
+// round-trip, а не «попробовал, потом уточнил».
+func (w *userWriter) SetInviteStatus(ctx context.Context, id domain.UserID, st domain.InviteStatus) (domain.User, error) {
+	if err := st.Validate(); err != nil {
+		return domain.User{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	// Целевое состояние — bind-параметр: значение решает вызывающий, а SQL несёт
+	// только инвариант.
+	const q = `
+		WITH upd AS (
+			UPDATE users
+			   SET invite_status = $2
+			 WHERE id = $1 AND invite_status <> 'PENDING'
+			RETURNING id, account_id, external_id, email, display_name,
+			          invite_status, invited_by, created_at, labels
+		)
+		SELECT EXISTS(SELECT 1 FROM users WHERE id = $1) AS row_exists,
+		       u.id, u.account_id, u.external_id, u.email, u.display_name,
+		       u.invite_status, u.invited_by, u.created_at, u.labels
+		  FROM (SELECT 1) AS one
+		  LEFT JOIN upd u ON true`
+	row := w.tx.QueryRow(ctx, q, string(id), string(st))
+
+	out, updated, rowExists, err := scanUserStateWrite(row)
+	if err != nil {
+		return domain.User{}, mapErr(err, "User.SetInviteStatus", string(id))
+	}
+	switch {
+	case updated:
+		return out, nil
+	case !rowExists:
+		return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+	default:
+		// Строка есть, но её состояние записи не допускает — единственный
+		// оставшийся случай при этом предикате.
+		return domain.User{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s is not active", id)
+	}
+}
+
 // ---- helpers ---------------------------------------------------------------
+
+// scanUserStateWrite читает ответ SetInviteStatus: признак существования строки
+// плюс её колонки, которые NULL, когда UPDATE не сматчился.
+func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowExists*/, error) {
+	var (
+		rowExists    bool
+		userID       sql.NullString
+		accountID    sql.NullString
+		externalID   sql.NullString
+		email        sql.NullString
+		displayName  sql.NullString
+		inviteStatus sql.NullString
+		invitedBy    sql.NullString
+		createdAt    sql.NullTime
+		labelsJSON   []byte
+	)
+	if err := row.Scan(&rowExists, &userID, &accountID, &externalID, &email,
+		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON); err != nil {
+		return domain.User{}, false, false, err
+	}
+	if !userID.Valid {
+		return domain.User{}, false, rowExists, nil
+	}
+	u := domain.User{
+		ID:           domain.UserID(userID.String),
+		AccountID:    domain.AccountID(accountID.String),
+		ExternalID:   domain.ExternalSubject(externalID.String),
+		Email:        domain.Email(email.String),
+		DisplayName:  domain.DisplayName(displayName.String),
+		InviteStatus: domain.InviteStatus(inviteStatus.String),
+		InvitedBy:    domain.UserID(invitedBy.String),
+		CreatedAt:    createdAt.Time,
+	}
+	labels, err := unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.User{}, false, rowExists, err
+	}
+	u.Labels = labels
+	return u, true, rowExists, nil
+}
 
 func scanUser(row scanner) (domain.User, error) {
 	var (

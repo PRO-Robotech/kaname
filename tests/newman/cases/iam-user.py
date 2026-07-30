@@ -1199,3 +1199,281 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# ---------------------------------------------------------------------------
+# Административный запрет участию — `:block` / `:unblock`.
+#
+# ЧТО ЗДЕСЬ ЕСТЬ И ЧЕГО НЕТ, СКАЗАНО ПРЯМО.
+#
+# Через край закреплены: маршрут целиком (allowlist → каталог → scope-extractor →
+# обработчик → use-case), отказ на неподтверждённом приглашении, отсутствующий id,
+# анонимный вызов и кросс-аккаунтный отказ.
+#
+# Положительного пути (действующее членство → запрет → снятие) здесь НЕТ, и это
+# открытый долг с числом: 1 сценарий. Причина не «сложно», а конкретная: ему нужно
+# РАСХОДУЕМОЕ действующее членство внутри аккаунта, которым мы администрируем, а
+# фикстура такого не сеет — каждому принципалу провизионируется его собственный
+# домашний аккаунт, поэтому в accountA/accountB нет ни одного чужого действующего
+# членства. Заблокировать принципала фикстуры нельзя: его токен перестанет
+# работать, снять запрет он себе не сможет (самостоятельного пути нет
+# by construction), и остаток прогона поедет на сломанной фикстуре. Наблюдаемый
+# исход поэтому закреплён на настоящей базе и настоящих читателях выдачи
+# (services/iam/internal/apps/kacho/api/audit/user_block_integration_test.go), а
+# здесь — то, что через край проверяемо без порчи общего состояния.
+#
+# ПОЧЕМУ ОТКАЗ НА PENDING — НЕ СЛАБАЯ ПРОБА, А РАЗЛИЧАЮЩАЯ. Ответ
+# FAILED_PRECONDITION не может прийти ни от промаха маршрута (404 без деталей), ни
+# от промаха каталога (403 fail-closed с пустым action), ни от authz-отказа. Его
+# может произвести ТОЛЬКО use-case, дошедший до синхронной проверки состояния, —
+# то есть зелёный тут означает, что вся цепочка живая.
+#
+# Приглашение создаётся своё, со своим адресом: переиспользовать
+# `invitedUserId` из IAM-USR-INV-CRUD-OK нельзя — порядок кейсов не контракт, а
+# чужая фикстура, на которую наш отказ не должен опираться.
+# ---------------------------------------------------------------------------
+
+# Шаги создания расходуемого PENDING-приглашения в accountA. Общие для кейсов
+# ниже, поэтому собираются функцией: копия в каждом кейсе разъехалась бы.
+def _invite_block_probe(var: str, email_tag: str):
+    return [
+        Step(
+            name=f"invite-{email_tag}",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={
+                "accountId": "{{accountAId}}",
+                "projectId": "{{projectA1Id}}",
+                "email": f"{email_tag}-{{{{runId}}}}@kacho.local",
+                "roleId": ROLE_VIEW,
+            },
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered(f"invite-{email_tag}"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.userId", var),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        # Приглашение обязано РЕАЛЬНО состояться: отказ, снятый с несозданной
+        # строки, доказывает только то, что строки нет. Kachō кладёт
+        # предвыделенный id в metadata даже у операции, завершившейся ошибкой,
+        # поэтому без этой проверки дальше поехал бы фантом.
+        assert_op_success(auth="jwtAccountAdminA"),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-BLK-NEG-PENDING — `:block` на неподтверждённом приглашении.
+# verifies: маршрут действия живой целиком, и состояние решает синхронно.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-BLK-NEG-PENDING",
+    title="Block a PENDING invitation → 412 FAILED_PRECONDITION \"is not active\" (route proven live)",
+    classes=["NEG", "VAL"],
+    priority="P0",
+    steps=[
+        *_invite_block_probe("blkPendingId", "blockprobe"),
+        retry_until_authorized(Step(
+            name="block-pending",
+            method="POST",
+            path="/iam/v1/users/{{blkPendingId}}:block",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("block-pending"),
+                # 412/9 — единственный исход, который НЕЛЬЗЯ получить ни промахом
+                # маршрута, ни промахом каталога, ни authz-отказом.
+                *assert_status(412),
+                *assert_grpc_code(9, "FAILED_PRECONDITION"),
+                "pm.test('reason is the state, named in words', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.message || '', JSON.stringify(j)).to.include('is not active');",
+                "});",
+            ],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+        # Состояние не изменилось: отказ, у которого остался эффект, — не отказ.
+        Step(
+            name="pending-still-pending",
+            method="GET",
+            path="/iam/v1/users/{{blkPendingId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("pending-still-pending"),
+                *assert_status(200),
+                "pm.test('invite is still PENDING', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-UBK-NEG-PENDING — та же проба для обратного направления.
+# Симметрия проверяется, а не предполагается: асимметрия между запретом и
+# снятием — это дверь, которую оператор находит запертой в худший момент.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-UBK-NEG-PENDING",
+    title="Unblock a PENDING invitation → 412 FAILED_PRECONDITION (activation is a different path)",
+    classes=["NEG", "VAL"],
+    priority="P1",
+    steps=[
+        *_invite_block_probe("ubkPendingId", "unblockprobe"),
+        retry_until_authorized(Step(
+            name="unblock-pending",
+            method="POST",
+            path="/iam/v1/users/{{ubkPendingId}}:unblock",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("unblock-pending"),
+                *assert_status(412),
+                *assert_grpc_code(9, "FAILED_PRECONDITION"),
+                "pm.test('reason is the state, named in words', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.message || '', JSON.stringify(j)).to.include('is not active');",
+                "});",
+            ],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-BLK-NEG-NOTFOUND — `:block` по корректному по форме, но отсутствующему id.
+# Авторизация идёт до backend-валидации, поэтому 403 здесь так же защитим, как
+# 404; чего быть не может — это 200.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-BLK-NEG-NOTFOUND",
+    title="Block a well-formed but absent user id → 404 or scoped 403, never 200",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="block-absent",
+            method="POST",
+            path="/iam/v1/users/usr00000000000notfnd:block",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("block-absent"),
+                "pm.test('404 or 403, never 200', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
+                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                "pm.test('code 5 (NOT_FOUND) or 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code).to.be.oneOf([5, 7]));",
+                # Голое «404 или 403» было бы тавтологией: оно держится и когда путь
+                # написан с опечаткой, и когда записи в каталоге нет вовсе. Поэтому
+                # при 403 требуется РАЗРЕШЁННОЕ действие в деталях: у промаха
+                # каталога оно пустое (дескриптор строится раньше, чем известна
+                # запись), у настоящего per-object отказа — названо.
+                "pm.test('a 403 here is the per-object deny, not a permission-catalog miss', () => {",
+                "  if (pm.response.code !== 403) { pm.expect(true).to.be.true; return; }",
+                "  const det = (j && j.details) || [];",
+                "  const info = det.find(d => (d['@type'] || '').includes('ErrorInfo')) || {};",
+                "  const md = info.metadata || {};",
+                "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): '"
+                " + JSON.stringify(j)).to.eql('iam.users.block');",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-BLK-AUTHZ-ANON-DENY — `:block` без аутентификации.
+# Анонимность не может быть личностью: приостановить участие человека по
+# распоряжению, за которое некого назвать, не должен уметь никто.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-BLK-AUTHZ-ANON-DENY",
+    title="Block as anonymous → 401/403, never 200",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        Step(
+            name="block-anon",
+            method="POST",
+            path="/iam/v1/users/{{userAAAId}}:block",
+            body={},
+            auth=None,
+            test_script=[
+                *assert_answered("block-anon"),
+                "pm.test('401 or 403, never 200', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));",
+            ],
+        ),
+        Step(
+            name="unblock-anon",
+            method="POST",
+            path="/iam/v1/users/{{userAAAId}}:unblock",
+            body={},
+            auth=None,
+            test_script=[
+                *assert_answered("unblock-anon"),
+                "pm.test('401 or 403, never 200', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-BLK-NEG-CROSS-ACCOUNT — администратор аккаунта B запрещает участие в
+# аккаунте A.
+#
+# Самый ценный негатив для нового объектного действия и вся причина, по которой у
+# RPC есть scope-extractor: без него любой аутентифицированный, кто может назвать
+# id, вышибал бы члена соседнего тенанта. Отказ в обслуживании соседу — низкая
+# планка для атакующего и высокая для заметности: жертва видит, что человек
+# перестал входить, и в своём аккаунте объяснения не находит.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-BLK-NEG-CROSS-ACCOUNT",
+    title="Account B admin blocking an account A membership → scoped deny, victim untouched",
+    classes=["NEG", "AUTHZ"],
+    priority="P0",
+    steps=[
+        *_invite_block_probe("crossVictimId", "crossprobe"),
+        Step(
+            name="cross-account-block-denied",
+            method="POST",
+            path="/iam/v1/users/{{crossVictimId}}:block",
+            body={},
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_answered("cross-account-block-denied"),
+                *assert_scoped_authz_deny(
+                    "iam.users.block",
+                    "'iam_user:' + pm.environment.get('crossVictimId')",
+                ),
+            ],
+        ),
+        # И жертва не тронута — отказ, у которого остался эффект, не отказ. Это то
+        # утверждение, которое отличает «отказали» от «отказали в квитанции».
+        Step(
+            name="victim-untouched",
+            method="GET",
+            path="/iam/v1/users/{{crossVictimId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("victim-untouched"),
+                *assert_status(200),
+                "pm.test('the neighbour could not touch it: state unchanged', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                "});",
+            ],
+        ),
+    ],
+))

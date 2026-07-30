@@ -276,7 +276,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler)
 	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kachoRepo, opsRepo).
 		WithLogger(logger)
-	userHandler := userapp.NewHandler(userGet, userList, userUpdate, userDelete, userInvite).
+	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
+	// типа, поэтому перестановка их здесь — ошибка компиляции, а не контроль,
+	// тихо ставший своей противоположностью.
+	userBlock := userapp.NewBlockUserUseCase(kachoRepo, opsRepo)
+	userUnblock := userapp.NewUnblockUserUseCase(kachoRepo, opsRepo)
+	userHandler := userapp.NewHandler(userGet, userList, userUpdate, userDelete, userInvite,
+		userBlock, userUnblock).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
 

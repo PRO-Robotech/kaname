@@ -24,16 +24,19 @@ import (
 type Handler struct {
 	iamv1.UnimplementedUserServiceServer
 
-	get    *GetUserUseCase
-	list   *ListUsersUseCase
-	update *UpdateUserUseCase
-	delete *DeleteUserUseCase
-	invite *InviteUserUseCase
-	listOp *shared.ListOperationsUseCase
+	get     *GetUserUseCase
+	list    *ListUsersUseCase
+	update  *UpdateUserUseCase
+	delete  *DeleteUserUseCase
+	invite  *InviteUserUseCase
+	block   *BlockUserUseCase
+	unblock *UnblockUserUseCase
+	listOp  *shared.ListOperationsUseCase
 }
 
-func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d *DeleteUserUseCase, i *InviteUserUseCase) *Handler {
-	return &Handler{get: g, list: l, update: u, delete: d, invite: i}
+func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d *DeleteUserUseCase,
+	i *InviteUserUseCase, block *BlockUserUseCase, unblock *UnblockUserUseCase) *Handler {
+	return &Handler{get: g, list: l, update: u, delete: d, invite: i, block: block, unblock: unblock}
 }
 
 // WithListOperations wires the per-resource operation-listing use-case.
@@ -120,6 +123,25 @@ func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateUserRequest) (*op
 
 func (h *Handler) Delete(ctx context.Context, req *iamv1.DeleteUserRequest) (*operationpb.Operation, error) {
 	op, err := h.delete.Execute(ctx, domain.UserID(req.GetUserId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// Block — участие в Account'е запрещается. Действие, а не поле маски: почему
+// разница не косметическая — см. set_blocked.go.
+func (h *Handler) Block(ctx context.Context, req *iamv1.BlockUserRequest) (*operationpb.Operation, error) {
+	op, err := h.block.Execute(ctx, domain.UserID(req.GetUserId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// Unblock — участие разрешается снова.
+func (h *Handler) Unblock(ctx context.Context, req *iamv1.UnblockUserRequest) (*operationpb.Operation, error) {
+	op, err := h.unblock.Execute(ctx, domain.UserID(req.GetUserId()))
 	if err != nil {
 		return nil, err
 	}

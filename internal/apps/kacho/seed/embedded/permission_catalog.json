@@ -1315,6 +1315,16 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.iam.v1.UserService/Block",
+    "permission": "iam.users.block",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.UserService/Delete",
     "permission": "iam.users.delete",
     "required_relation": "v_delete",
@@ -1362,6 +1372,16 @@
       "from_request_field": "user_id"
     },
     "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.UserService/Unblock",
+    "permission": "iam.users.unblock",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "2"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Update",

@@ -35,7 +35,7 @@
 | `external_id`  | `ExternalSubject`| зависит от status | **да** | OIDC `sub` (Ory). PENDING → "", ACTIVE/BLOCKED → non-empty.         |
 | `email`        | `Email`          | да           | нет       | `^[^\s@]+@[^\s@]+\.[^\s@]+$`, ≤254.                                 |
 | `display_name` | `DisplayName`    | нет          | нет       | len 1..128.                                                          |
-| `invite_status`| `InviteStatus`   | да           | нет       | `PENDING | ACTIVE | BLOCKED`.                                       |
+| `invite_status`| `InviteStatus`   | да           | нет       | `PENDING | ACTIVE | BLOCKED`. Меняется ТОЛЬКО действиями `Block`/`Unblock`, НЕ через `Update`. |
 | `invited_by`   | `UserID`         | нет          | да        | Кто пригласил (для PENDING). "" если self-signup.                   |
 | `created_at`   | `time.Time`      | да (server)  | да        | UTC.                                                                |
 
@@ -133,7 +133,10 @@ sequenceDiagram
 | `Get`    | sync       | Получает User по id.                                  |
 | `List`   | sync       | Список (filter by `account_id`).                      |
 | `Invite` | async      | Создает PENDING-User + AccessBinding + Kratos magic-link |
+| `Update` | async      | Единственное mutable-поле — `labels`.                 |
 | `Delete` | async      | Удаление. RESTRICT-FK если есть AccessBinding.        |
+| `Block`  | async      | Участие в Account'е запрещено. Идемпотентно по состоянию; `v_update` + порог повышенной аутентификации. |
+| `Unblock`| async      | Участие разрешено снова. Та же форма и то же право.   |
 | ~~`Create`~~ | — | **Намеренно отсутствует.** Используйте Invite или OIDC self-signup. |
 
 ### Internal gRPC (порт 9091)
@@ -150,7 +153,57 @@ sequenceDiagram
 | GET     | `/iam/v1/users/{userId}`          | `UserService.Get`         |
 | GET     | `/iam/v1/users`                   | `UserService.List`        |
 | POST    | `/iam/v1/users:invite`            | `UserService.Invite`      |
+| PATCH   | `/iam/v1/users/{userId}`          | `UserService.Update`      |
 | DELETE  | `/iam/v1/users/{userId}`          | `UserService.Delete`      |
+| POST    | `/iam/v1/users/{userId}:block`    | `UserService.Block`       |
+| POST    | `/iam/v1/users/{userId}:unblock`  | `UserService.Unblock`     |
+
+## Административный запрет участию (`:block` / `:unblock`)
+
+**Предмет — СТРОКА ЧЛЕНСТВА, а не человек.** `users` — строка на пару (личность,
+Account); одна личность держит по строке на каждый Account. Запрет принадлежит тому
+Account'у, который его наложил, и администратор Account A не выключает человека в
+Account B.
+
+**Инвариант схемы, который важно знать оператору:** миграция 0011 держит
+глобальный частичный UNIQUE по `external_id` среди `ACTIVE`-строк — «одна
+действующая строка на личность». Поэтому набор строк личности это одно действующее
+членство плюс сколько угодно запрещённых, и запрет действующего членства лишает
+личность единственной действующей строки: аутентификация прекращается везде. Это
+следствие инварианта схемы, а не области действия записи.
+
+Следствие для снятия: снять запрет со второй строки, когда у личности уже есть
+действующая, **нельзя** — `ALREADY_EXISTS` («User with external_id already
+exists»). Сначала запретите действующее членство, потом возвращайте нужное.
+
+**Почему действие, а не поле `Update`.** У пустой `update_mask` семантика полной
+замены объекта, а enum в proto3 неотличим от незаданного: клиент, не приславший
+поле, запретил бы участие каждому, кого коснулся. У действия маски нет. Плюс это
+СОБЫТИЕ, и след обязан уметь это сказать: `iam.user.blocked` / `iam.user.unblocked`
+(не `iam.user.updated` с полем внутри). `invite_status` в `update_mask` → 400 с
+текстом, называющим действия.
+
+**Идемпотентно по состоянию, а не по переходу**: запрет уже запрещённого — успех.
+След пишется и на повторе: кто-то с правом попросил.
+
+**Кто вправе** — `v_update` на `iam_user`, то есть администратор владеющего
+Account'а (`super_admin: admin from account`) и, каскадом, администратор облака.
+Обычный участник этого права на своей строке не держит, поэтому снять запрет с себя
+нельзя — и это осознанно: восстановление пароля блокировку не снимает
+(самостоятельное действие не отменяет административное). Порог повышенной
+аутентификации — интерактивный; машинный принципал от него освобождён.
+
+**Что НЕ делает.** Уже выданный access-токен доживает свой срок. Немедленно
+прекращается ВЫДАЧА нового — на каждой двери (хук токена, хук обновления, выдача
+персонального токена, резолв субъекта на краю). Отсечка живых сессий
+(`user_token_revocations`) здесь не применяется намеренно: её область — вся
+личность, и она обрубила бы сессии там, где личность активна законно. Для «выгнать
+человека целиком» есть `ForceLogout`.
+
+**PENDING не блокируется и не разблокируется** → `FAILED_PRECONDITION`
+«User \<id\> is not active». У приглашения нет подтверждённой личности (DB-CHECK
+`users_invite_status_consistency`), а перевод приглашённого в действующего — это
+активация при первом входе, свой путь. Приглашение отзывают, а не разблокируют.
 
 ## Конфигурация
 
@@ -211,6 +264,10 @@ grpcurl -plaintext -d '{
 | Email невалиден                           | `INVALID_ARGUMENT`     | 400  | `Illegal argument email: invalid format`       |
 | Delete user, на которого ссылается binding| `FAILED_PRECONDITION`  | 412  | `user is referenced by access_bindings`        |
 | Update с `externalId` (через internal)    | `INVALID_ARGUMENT`     | 400  | `externalId is immutable after User.Create`    |
+| Update с `inviteStatus` в маске           | `INVALID_ARGUMENT`     | 400  | `inviteStatus is not updatable; use UserService.Block / UserService.Unblock` |
+| Block/Unblock на PENDING-приглашении      | `FAILED_PRECONDITION`  | 412  | `User <id> is not active`                      |
+| Block/Unblock по отсутствующему id        | `NOT_FOUND`            | 404  | `User <id> not found`                          |
+| Unblock, когда у личности уже есть ACTIVE | `ALREADY_EXISTS`       | 409  | `User with external_id already exists`         |
 
 ## Как воспроизвести локально
 

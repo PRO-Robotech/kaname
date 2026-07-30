@@ -3441,6 +3441,1265 @@
           ]
         }
       ]
+    },
+    {
+      "name": "IAM-USR-BLK-NEG-PENDING — Block a PENDING invitation → 412 FAILED_PRECONDITION \"is not active\" (route proven live)",
+      "description": "class:NEG | class:VAL | priority:P0",
+      "item": [
+        {
+          "name": "IAM-USR-BLK-NEG-PENDING :: invite-blockprobe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"projectId\": \"{{projectA1Id}}\", \"email\": \"blockprobe-{{runId}}@kacho.local\", \"roleId\": \"rol1bda80f2be4d3658e\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminAStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminAStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('invite-blockprobe: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.userId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('blkPendingId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-PENDING :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-PENDING :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-PENDING :: block-pending-rya30",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{blkPendingId}}:block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{blkPendingId}}:block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminAStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminAStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 20) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('block-pending: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 412', () => pm.expect(pm.response.code).to.eql(412));",
+                  "pm.test('grpc code 9 (FAILED_PRECONDITION)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(9);",
+                  "});",
+                  "pm.test('reason is the state, named in words', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('is not active');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-PENDING :: pending-still-pending",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{blkPendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{blkPendingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('pending-still-pending: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('invite is still PENDING', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-USR-UBK-NEG-PENDING — Unblock a PENDING invitation → 412 FAILED_PRECONDITION (activation is a different path)",
+      "description": "class:NEG | class:VAL | priority:P1",
+      "item": [
+        {
+          "name": "IAM-USR-UBK-NEG-PENDING :: invite-unblockprobe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"projectId\": \"{{projectA1Id}}\", \"email\": \"unblockprobe-{{runId}}@kacho.local\", \"roleId\": \"rol1bda80f2be4d3658e\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminAStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminAStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('invite-unblockprobe: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.userId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('ubkPendingId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-UBK-NEG-PENDING :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-UBK-NEG-PENDING :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-UBK-NEG-PENDING :: unblock-pending-rya31",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{ubkPendingId}}:unblock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{ubkPendingId}}:unblock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminAStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminAStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403].includes(pm.response.code) && _arc < 20) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 500) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('unblock-pending: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 412', () => pm.expect(pm.response.code).to.eql(412));",
+                  "pm.test('grpc code 9 (FAILED_PRECONDITION)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(9);",
+                  "});",
+                  "pm.test('reason is the state, named in words', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include('is not active');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-USR-BLK-NEG-NOTFOUND — Block a well-formed but absent user id → 404 or scoped 403, never 200",
+      "description": "class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "IAM-USR-BLK-NEG-NOTFOUND :: block-absent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/usr00000000000notfnd:block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "usr00000000000notfnd:block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminAStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminAStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('block-absent: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('404 or 403, never 200', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('code 5 (NOT_FOUND) or 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code).to.be.oneOf([5, 7]));",
+                  "pm.test('a 403 here is the per-object deny, not a permission-catalog miss', () => {",
+                  "  if (pm.response.code !== 403) { pm.expect(true).to.be.true; return; }",
+                  "  const det = (j && j.details) || [];",
+                  "  const info = det.find(d => (d['@type'] || '').includes('ErrorInfo')) || {};",
+                  "  const md = info.metadata || {};",
+                  "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.block');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-USR-BLK-AUTHZ-ANON-DENY — Block as anonymous → 401/403, never 200",
+      "description": "class:AUTHZ | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "IAM-USR-BLK-AUTHZ-ANON-DENY :: block-anon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{userAAAId}}:block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{userAAAId}}:block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('block-anon: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('401 or 403, never 200', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-AUTHZ-ANON-DENY :: unblock-anon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{userAAAId}}:unblock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{userAAAId}}:unblock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('unblock-anon: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('401 or 403, never 200', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-USR-BLK-NEG-CROSS-ACCOUNT — Account B admin blocking an account A membership → scoped deny, victim untouched",
+      "description": "class:NEG | class:AUTHZ | priority:P0",
+      "item": [
+        {
+          "name": "IAM-USR-BLK-NEG-CROSS-ACCOUNT :: invite-crossprobe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users:invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users:invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"projectId\": \"{{projectA1Id}}\", \"email\": \"crossprobe-{{runId}}@kacho.local\", \"roleId\": \"rol1bda80f2be4d3658e\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminAStepUp'",
+                  "const __t = pm.environment.get('jwtAccountAdminAStepUp') || pm.variables.get('jwtAccountAdminAStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminAStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminAStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('invite-crossprobe: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.userId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('crossVictimId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-CROSS-ACCOUNT :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-CROSS-ACCOUNT :: assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-CROSS-ACCOUNT :: cross-account-block-denied",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{crossVictimId}}:block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{crossVictimId}}:block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('cross-account-block-denied: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('403 PermissionDenied (code 7)', () => {",
+                  "  pm.expect(pm.response.code).to.eql(403);",
+                  "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
+                  "});",
+                  "pm.test('deny is the scoped authz deny on iam.users.block, not a permission-catalog miss', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                  "  const md = info.metadata || {};",
+                  "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.block');",
+                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_user:' + pm.environment.get('crossVictimId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-USR-BLK-NEG-CROSS-ACCOUNT :: victim-untouched",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{crossVictimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{crossVictimId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('victim-untouched: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('the neighbour could not touch it: state unchanged', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

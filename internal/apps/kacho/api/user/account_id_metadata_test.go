@@ -239,3 +239,9 @@ func (r *fakeUsrOps) Cancel(_ context.Context, id string) error { return nil }
 func (w *fakeUsrWriter) EmitReconcileEvent(context.Context, string, string, string) error {
 	return nil
 }
+
+// SetInviteStatus — заглушка: этот фейк проверяет метаданные операции, а не
+// состояние членства.
+func (w *fakeUsrWtr) SetInviteStatus(context.Context, domain.UserID, domain.InviteStatus) (domain.User, error) {
+	return domain.User{}, nil
+}
