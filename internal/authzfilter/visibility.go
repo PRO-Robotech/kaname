@@ -76,6 +76,25 @@ type ObjectChecker interface {
 	CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (allowed bool, err error)
 }
 
+// pagePreparer — OPTIONAL capability of an ObjectChecker: prepare, once, whatever the
+// per-object questions of a whole page would otherwise prepare row by row.
+//
+// It is declared here as a narrow port and satisfied elsewhere, so this package keeps
+// knowing nothing about what is being prepared. The contract is deliberately weak, and
+// that is what makes it safe to call blind:
+//
+//   - it returns a context, never an error. A preparation that fails must return the
+//     context it was given, so the per-object path runs exactly as it would have — the
+//     capability can cost speed, never an answer;
+//   - it must not decide anything. Nothing here reads its result; the per-object question
+//     is still the only thing that decides.
+//
+// Absence is invisible to correctness and visible to cost, so cost is where it is
+// asserted (the implementor's page-cost measurement), not here.
+type pagePreparer interface {
+	PrefetchStructural(ctx context.Context, objectType string, ids []string) context.Context
+}
+
 // Visible reports whether `subject` may read `<objectType>:<id>` — the
 // `viewer ∪ v_list` union, evaluated per-object.
 //
@@ -129,6 +148,20 @@ func VisibleSet(ctx context.Context, chk ObjectChecker, subject, objectType stri
 	}
 	if len(pending) == 0 {
 		return out, nil
+	}
+
+	// One preparation for the whole page, if the checker has one to offer. The
+	// per-object question may need a fact about the object's place in the hierarchy;
+	// resolving that per row makes the page cost grow with the page, and page size is
+	// part of the contract up to 1000 while narrowing it to fit a budget is forbidden.
+	// Asking here — the one place that knows the whole page — keeps that cost flat.
+	//
+	// OPTIONAL and best-effort by contract (see the port's doc): a checker without the
+	// capability, or a preparation that fails, returns a context the per-object path
+	// works with unchanged. So this can cost speed and never an answer, and this package
+	// stays a leaf that knows nothing about where those facts come from.
+	if p, ok := chk.(pagePreparer); ok {
+		ctx = p.PrefetchStructural(ctx, objectType, pending)
 	}
 
 	// Bounded fan-out over a fixed worker pool (workers, not goroutine-per-id, so

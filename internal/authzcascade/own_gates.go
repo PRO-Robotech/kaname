@@ -126,6 +126,9 @@ func (c *Client) SecondChanceReachable() bool {
 
 // Check — clients.RelationStore / authzguard.RelationChecker.
 func (c *Client) Check(ctx context.Context, subject, relation, object string) (bool, error) {
+	if facts, known := c.memoFacts(ctx, object); known {
+		return c.askOnce(ctx, subject, relation, object, nil, facts)
+	}
 	allowed, err := c.Relations.Check(ctx, subject, relation, object)
 	if allowed || err != nil {
 		return allowed, err
@@ -137,11 +140,35 @@ func (c *Client) Check(ctx context.Context, subject, relation, object string) (b
 func (c *Client) CheckWithContext(
 	ctx context.Context, subject, relation, object string, condCtx map[string]any,
 ) (bool, error) {
+	if facts, known := c.memoFacts(ctx, object); known {
+		return c.askOnce(ctx, subject, relation, object, condCtx, facts)
+	}
 	allowed, err := c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
 	if allowed || err != nil {
 		return allowed, err
 	}
 	return c.secondChance(ctx, subject, relation, object, condCtx)
+}
+
+// askOnce asks the question ONCE, carrying facts that are already known for this object.
+//
+// This is not a shortcut past the ordinary resolve: a contextual tuple can only ADD a
+// resolution path, so one question carrying true facts has exactly the answer the
+// ask-then-re-ask pair has. It exists because on a page the facts were read for every row
+// up front (page_memo.go), so paying a second relation question per row would double the
+// dominant cost of the filter for nothing.
+func (c *Client) askOnce(
+	ctx context.Context, subject, relation, object string,
+	condCtx map[string]any, facts []authztypes.TupleKey,
+) (bool, error) {
+	if len(facts) == 0 {
+		// Read, and there is nothing to add — the plain question is the whole answer.
+		if condCtx == nil {
+			return c.Relations.Check(ctx, subject, relation, object)
+		}
+		return c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
+	}
+	return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
 }
 
 // CheckStored — the question WITHOUT the second chance: does the STORE, on its own

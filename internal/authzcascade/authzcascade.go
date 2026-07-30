@@ -120,6 +120,10 @@ type PrimaryReaderSource interface {
 type Resolver struct {
 	repo       PrimaryReaderSource
 	conditions ConditionReader
+	// batch — OPTIONAL page-shaped read of the same facts (batch.go). Absent ⇒ every
+	// question resolves its own object, which is the right shape for a gate about one
+	// object and the wrong one for a page.
+	batch StructuralBatchSource
 	// readTimeout bounds ONE structural read. The read sits on the request path of an
 	// authorization decision, so an unresponsive database must cost a bounded wait and
 	// a fail-closed answer rather than a held goroutine (architecture.md, per-call
