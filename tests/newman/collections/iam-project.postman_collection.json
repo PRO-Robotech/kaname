@@ -482,8 +482,8 @@
       ]
     },
     {
-      "name": "IAM-PRJ-CR-NEG-ACCOUNT-MISSING — Create project with non-existent accountId → Operation.error FAILED_PRECONDITION (9)",
-      "description": "class:NEG | priority:P1",
+      "name": "IAM-PRJ-CR-NEG-ACCOUNT-MISSING — Create project under an account with no authorization path → 403 PERMISSION_DENIED at the edge (anti-oracle)",
+      "description": "class:NEG | class:AUTHZ | priority:P1",
       "item": [
         {
           "name": "IAM-PRJ-CR-NEG-ACCOUNT-MISSING :: create-bad-account",
@@ -540,75 +540,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('sync 200 or 400 or 403', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403]));",
-                  "const j = pm.response.json();",
-                  "if (pm.response.code === 400) {",
-                  "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                  "} else if (pm.response.code === 200) {",
-                  "  pm.environment.set('badAccPrjOpId', j.id || '');",
-                  "} else {",
-                  "  pm.environment.set('badAccPrjOpId', '');",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-PRJ-CR-NEG-ACCOUNT-MISSING :: poll-bad-account",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{badAccPrjOpId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{badAccPrjOpId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (!pm.environment.get('badAccPrjOpId')) {",
-                  "  pm.execution.skipRequest();",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('badAccPrjOpId')) {",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('error code 9 or 3 (FK violation or invalid arg)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                  "  });",
-                  "}"
+                  "pm.test('status 403', () => pm.expect(pm.response.code).to.eql(403));",
+                  "pm.test('grpc code 7 (PERMISSION_DENIED)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
+                  "});",
+                  "pm.test('отказ называет действие, а не судьбу объекта', () =>   pm.expect(pm.response.json().message||'').to.include('iam.projects.create'));",
+                  "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
+                  "  const m = (pm.response.json().message || '').toLowerCase();",
+                  "  pm.expect(m).to.not.contain('not found');",
+                  "  pm.expect(m).to.not.contain('does not exist');",
+                  "});"
                 ]
               }
             }
@@ -3011,13 +2953,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 or 404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([200, 403, 404]));",
-                  "if (pm.response.code === 200) {",
-                  "  pm.test('operations array present', () => {",
-                  "    const j = pm.response.json();",
-                  "    pm.expect(j.operations, 'operations field').to.be.an('array');",
-                  "  });",
-                  "}"
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('operations array present', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.operations, 'operations field').to.be.an('array');",
+                  "});",
+                  "pm.test('и содержит хотя бы одну операцию — создание самого проекта', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect((j.operations || []).length, JSON.stringify(j)).to.be.greaterThan(0);",
+                  "});"
                 ]
               }
             }

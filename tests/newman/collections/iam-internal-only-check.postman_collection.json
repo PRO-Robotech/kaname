@@ -1240,19 +1240,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('INT-LOOKUPSUBJ: status 200 or 404 (valid internal response, NOT mux-404)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([200, 404]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
-                  "if (pm.response.code === 200) {",
-                  "  // LookupSubject returns {user: {id: '...', ...}} or {serviceAccount: {...}}.",
-                  "  const subjectId = (j.user && j.user.id) || (j.serviceAccount && j.serviceAccount.id) || j.subjectId;",
-                  "  pm.test('INT-LOOKUPSUBJ: subjectId present', () => pm.expect(subjectId, 'subject id must be set').to.be.a('string').with.length.greaterThan(0));",
-                  "  pm.test('INT-LOOKUPSUBJ: subjectId matches upserted user', () => {",
-                  "    const prev = pm.environment.get('createdInternalUserId');",
-                  "    if (prev) pm.expect(subjectId).to.eql(prev);",
-                  "  });",
-                  "} else {",
-                  "  pm.test('INT-LOOKUPSUBJ: 404 grpc code 5 (NOT_FOUND from service)', () => pm.expect(j.code).to.eql(5));",
-                  "}"
+                  "// LookupSubject returns {user: {id: '...', ...}} or {serviceAccount: {...}}.",
+                  "const subjectId = (j.user && j.user.id) || (j.serviceAccount && j.serviceAccount.id) || j.subjectId;",
+                  "pm.test('INT-LOOKUPSUBJ: subjectId present', () => pm.expect(subjectId, 'subject id must be set').to.be.a('string').with.length.greaterThan(0));",
+                  "pm.test('INT-LOOKUPSUBJ: subjectId matches upserted user', () => {",
+                  "  const prev = pm.environment.get('createdInternalUserId');",
+                  "  pm.expect(prev, 'фикстура обязана была записать createdInternalUserId').to.be.a('string').and.not.empty;",
+                  "  pm.expect(subjectId).to.eql(prev);",
+                  "});"
                 ]
               }
             }

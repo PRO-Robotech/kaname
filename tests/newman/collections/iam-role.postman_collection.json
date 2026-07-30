@@ -1686,11 +1686,11 @@
       ]
     },
     {
-      "name": "IAM-ROL-UP-NEG-SYSTEM-IMMUTABLE — Update system role ROLE_VIEW → 400 InvalidArgument or async FAILED_PRECONDITION (system immutable)",
-      "description": "class:NEG | class:STATE | priority:P1",
+      "name": "IAM-ROL-UP-NEG-SYSTEM-NO-PATH — Update system role as a tenant-tier subject → 403 PERMISSION_DENIED at the edge (immutability itself is pinned by IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG under jwtBootstrap)",
+      "description": "class:NEG | class:AUTHZ | priority:P1",
       "item": [
         {
-          "name": "IAM-ROL-UP-NEG-SYSTEM-IMMUTABLE :: update-system",
+          "name": "IAM-ROL-UP-NEG-SYSTEM-NO-PATH :: update-system",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1745,76 +1745,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('400 or 403 or 200 (then async fail)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 200]));",
-                  "const j = pm.response.json();",
-                  "pm.environment.unset('sysMutOpId');",
-                  "if (pm.response.code === 400) {",
-                  "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                  "} else if (pm.response.code === 403) {",
-                  "  pm.test('403 code 7', () => pm.expect(j.code).to.eql(7));",
-                  "} else {",
-                  "  pm.environment.set('sysMutOpId', j.id || '');",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ROL-UP-NEG-SYSTEM-IMMUTABLE :: poll-system-update",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{sysMutOpId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{sysMutOpId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (!pm.environment.get('sysMutOpId')) {",
-                  "  pm.execution.skipRequest();",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (pm.environment.get('sysMutOpId')) {",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('error code 3 or 9 (system immutable)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                  "  });",
-                  "}"
+                  "pm.test('status 403', () => pm.expect(pm.response.code).to.eql(403));",
+                  "pm.test('grpc code 7 (PERMISSION_DENIED)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
+                  "});",
+                  "pm.test('отказ называет действие', () =>   pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                  "pm.test('отказ не раскрывает свойства роли', () =>   pm.expect((pm.response.json().message||'').toLowerCase()).to.not.contain('system role'));"
                 ]
               }
             }

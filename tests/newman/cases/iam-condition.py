@@ -347,19 +347,25 @@ CASES.append(Case(
             path="/iam/v1/conditions?projectId={{projectA1Id}}",
             auth="jwtPureNoBindings",
             test_script=[
-                "pm.test('a caller with no bindings is refused, or sees an empty page', () => {",
-                "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 403]);",
-                "  if (pm.response.code === 200) {",
-                "    const j = pm.response.json();",
-                "    pm.expect(j.conditions || [], JSON.stringify(j)).to.have.lengthOf(0);",
-                "  }",
-                "});",
-                "pm.test('and specifically cannot see the condition the owner just saw', () => {",
-                "  if (pm.response.code !== 200) return;",
-                "  const j = pm.response.json();",
-                "  const leaked = pm.environment.get('cndDenyId');",
-                "  pm.expect((j.conditions || []).map(c => c.id), JSON.stringify(j)).to.not.include(leaked);",
-                "});",
+                # Полоса одна: запись каталога прав для этого перечисления требует
+                # `viewer` на объекте проекта из запроса и НЕ объявлена
+                # scope-filtered — значит вопрос задаётся краем один раз, до чтения
+                # данных, и «пустая страница» на этом пути не рождается. У типа
+                # `project` отношение `viewer` подстановочным туплом не выполняется
+                # (только editor/admin/super_admin), а у никогда-не-гранченого
+                # субъекта нет ни одного из них. Отказ терминальный.
+                #
+                # Прежнее `oneOf([200, 403])` принимало и отказ, и пустую страницу;
+                # утверждение об отсутствии утечки при этом стояло ВНУТРИ ветки 200
+                # (`if (code !== 200) return`), поэтому на реально происходящем 403
+                # оно не выполнялось вовсе — то есть страж утечки был немым в
+                # единственном достижимом исходе.
+                *assert_status(403),
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                # Тело отказа обязано быть пустым по существу: ни id условия,
+                # которое владелец только что видел, ни его содержимого.
+                "pm.test('в теле отказа нет условия, которое видел владелец', () => "
+                "  pm.expect(pm.response.text()).to.not.contain(pm.environment.get('cndDenyId')));",
             ],
         ),
         Step(

@@ -1993,19 +1993,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('a caller with no bindings is refused, or sees an empty page', () => {",
-                  "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 403]);",
-                  "  if (pm.response.code === 200) {",
-                  "    const j = pm.response.json();",
-                  "    pm.expect(j.conditions || [], JSON.stringify(j)).to.have.lengthOf(0);",
-                  "  }",
-                  "});",
-                  "pm.test('and specifically cannot see the condition the owner just saw', () => {",
-                  "  if (pm.response.code !== 200) return;",
+                  "pm.test('status 403', () => pm.expect(pm.response.code).to.eql(403));",
+                  "pm.test('grpc code 7 (PERMISSION_DENIED)', () => {",
                   "  const j = pm.response.json();",
-                  "  const leaked = pm.environment.get('cndDenyId');",
-                  "  pm.expect((j.conditions || []).map(c => c.id), JSON.stringify(j)).to.not.include(leaked);",
-                  "});"
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
+                  "});",
+                  "pm.test('в теле отказа нет условия, которое видел владелец', () =>   pm.expect(pm.response.text()).to.not.contain(pm.environment.get('cndDenyId')));"
                 ]
               }
             }

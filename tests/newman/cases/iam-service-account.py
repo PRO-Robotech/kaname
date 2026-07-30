@@ -196,14 +196,33 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-SVA-CR-NEG-PROJECT-MISSING — non-existent accountId → async FailedPrecondition
+# IAM-SVA-CR-NEG-PROJECT-MISSING — аккаунт без пути прав → отказ на краю
 # (Coverage list uses "PROJECT-MISSING" but this service is account-scoped on IAM.)
 # ---------------------------------------------------------------------------
 
+# Создание под аккаунтом, к которому у вызывающего нет пути прав, решается НА КРАЮ и
+# отказом — до того как сервис вообще набирается.
+#
+# Запись каталога прав для этого метода несёт `required_relation: editor` +
+# `scope_extractor {object_type: account, from_request_field: account_id}`. Идентификатор
+# `acc00000000000notfnd` формой валиден (узнаваемый префикс), поэтому синхронного 400 по
+# формату нет — край выполняет вопрос к модели. Объекта аккаунта не существовало никогда,
+# значит тупла у него нет ни у кого, значит `no path`, значит терминальный 403. Каскад
+# верхних уровней здесь не при чём: вызывающий — обычный владелец своего аккаунта, не
+# администратор облака.
+#
+# Отсюда следует, чего кейс НЕ проверяет и не может: полосу FK на вставке (async
+# `FAILED_PRECONDITION`), которую обещал его прежний заголовок. Сервис на этом пути
+# недостижим. Прежнее `oneOf([200, 400, 403])` принимало три исхода, из которых
+# реализуем один, — то есть не могло упасть ни на смене полосы, ни на приёме запроса.
+#
+# Ценность кейса — в другом, и она настоящая: отказ обязан быть терминальным (403, код 7)
+# и НЕ должен сообщать, существует ли названный аккаунт. Иначе отличие «нет доступа» от
+# «нет объекта» становится оракулом существования аккаунтов чужих тенантов.
 CASES.append(Case(
     id="IAM-SVA-CR-NEG-PROJECT-MISSING",
-    title="Create SA with non-existent accountId → Operation.error FAILED_PRECONDITION (9)",
-    classes=["NEG"],
+    title="Create service account under an account with no authorization path → 403 PERMISSION_DENIED at the edge (anti-oracle)",
+    classes=["NEG", "AUTHZ"],
     priority="P1",
     steps=[
         Step(
@@ -213,39 +232,17 @@ CASES.append(Case(
             body={"accountId": "acc00000000000notfnd", "name": "svabadacc{{runId}}"},
             auth="jwtAccountAdminA",
             test_script=[
-                # 403 is also acceptable — the authz middleware checks FGA for the
-                # account scope before creating the Operation. A non-existent accountId has
-                # no FGA tuples, so FGA denies with PERMISSION_DENIED(7)/403.
-                # Accepted outcomes: 200 (async Op created), 400 (sync validation), 403 (FGA deny).
-                "pm.test('sync 200 or 400 or 403', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403]));",
-                "const j = pm.response.json();",
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                "} else if (pm.response.code === 200) {",
-                "  pm.environment.set('badAccSvaOpId', j.id || '');",
-                "} else {",
-                "  pm.environment.set('badAccSvaOpId', '');",
-                "}",
-            ],
-        ),
-        Step(
-            name="poll-bad-account",
-            method="GET",
-            path="/operations/{{badAccSvaOpId}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                "if (!pm.environment.get('badAccSvaOpId')) {",
-                "  pm.execution.skipRequest();",
-                "}",
-            ],
-            test_script=[
-                "const j = pm.response.json();",
-                "if (pm.environment.get('badAccSvaOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 9 or 3 (FAILED_PRECONDITION — account FK)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                "  });",
-                "}",
+                *assert_status(403),
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                "pm.test('отказ называет действие, а не судьбу объекта', () => "
+                "  pm.expect(pm.response.json().message||'').to.include('iam.service_accounts.create'));",
+                # Анти-оракул: по тексту отказа нельзя отличить «аккаунта нет» от
+                # «доступа нет».
+                "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
+                "  const m = (pm.response.json().message || '').toLowerCase();",
+                "  pm.expect(m).to.not.contain('not found');",
+                "  pm.expect(m).to.not.contain('does not exist');",
+                "});",
             ],
         ),
     ],

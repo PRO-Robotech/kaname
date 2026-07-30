@@ -849,14 +849,29 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-ROL-UP-NEG-SYSTEM-IMMUTABLE — Update system role → FailedPrecondition
+# IAM-ROL-UP-NEG-SYSTEM-NO-PATH — системная роль недостижима тенантному субъекту
 # System roles are immutable (name, is_system are hard-immutable).
 # ---------------------------------------------------------------------------
 
+# IAM-ROL-UP-NEG-SYSTEM-NO-PATH — тенантный субъект до системной роли не доходит
+#
+# Неизменяемость системной роли и НЕДОСТУПНОСТЬ системной роли — разные утверждения, и
+# этот кейс проверяет второе. Запись каталога прав для обновления роли требует `v_update`
+# на объекте `iam_role`; у типа `iam_role` в модели нет ни каскада от кластера, ни
+# wildcard — только прямая выдача и `super_admin: admin from account`. У системной роли
+# аккаунта нет вовсе (`account_id` пуст), значит вторая ветка недостижима, а прямой выдачи
+# у `jwtAccountAdminA` нет. Отказ терминальный и выносится краем: сервис не набирается,
+# и его собственный страж «System role is read-only» на этом пути НЕ исполняется.
+#
+# Сам страж покрыт отдельно и правильно — `IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG` идёт под
+# `jwtBootstrap`, действительно доходит до сервиса и пинит точный текст. Прежний заголовок
+# здесь обещал ровно это, чего кейс сделать не мог, а `oneOf([400, 403, 200])` принимало
+# все три исхода — включая приём обновления системной роли.
 CASES.append(Case(
-    id="IAM-ROL-UP-NEG-SYSTEM-IMMUTABLE",
-    title="Update system role ROLE_VIEW → 400 InvalidArgument or async FAILED_PRECONDITION (system immutable)",
-    classes=["NEG", "STATE"],
+    id="IAM-ROL-UP-NEG-SYSTEM-NO-PATH",
+    title="Update system role as a tenant-tier subject → 403 PERMISSION_DENIED at the edge "
+          "(immutability itself is pinned by IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG under jwtBootstrap)",
+    classes=["NEG", "AUTHZ"],
     priority="P1",
     steps=[
         Step(
@@ -866,40 +881,14 @@ CASES.append(Case(
             body={"description": "trying to update system role", "updateMask": "description"},
             auth="jwtAccountAdminA",
             test_script=[
-                # Could be sync 400 (system role detected before Operation)
-                # or async FailedPrecondition (Operation.error.code=9).
-                # Or could be sync 403 if authz is enforced (cluster-role-mutate).
-                "pm.test('400 or 403 or 200 (then async fail)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 200]));",
-                "const j = pm.response.json();",
-                # Clear FIRST — the 400/403 branches mint no Operation.
-                "pm.environment.unset('sysMutOpId');",
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                "} else if (pm.response.code === 403) {",
-                "  pm.test('403 code 7', () => pm.expect(j.code).to.eql(7));",
-                "} else {",
-                "  pm.environment.set('sysMutOpId', j.id || '');",
-                "}",
-            ],
-        ),
-        Step(
-            name="poll-system-update",
-            method="GET",
-            path="/operations/{{sysMutOpId}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                "if (!pm.environment.get('sysMutOpId')) {",
-                "  pm.execution.skipRequest();",
-                "}",
-            ],
-            test_script=[
-                "const j = pm.response.json();",
-                "if (pm.environment.get('sysMutOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 3 or 9 (system immutable)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                "  });",
-                "}",
+                *assert_status(403),
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                "pm.test('отказ называет действие', () => "
+                "  pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                # Отказ не должен раскрывать, что роль системная: это свойство объекта,
+                # а вызывающему нечего о нём знать без доступа.
+                "pm.test('отказ не раскрывает свойства роли', () => "
+                "  pm.expect((pm.response.json().message||'').toLowerCase()).to.not.contain('system role'));",
             ],
         ),
     ],

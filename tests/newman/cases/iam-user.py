@@ -533,21 +533,31 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/users/{{invitedUserId}}",
             auth="jwtAccountAdminA",
-            pre_script=[
-                "if (!pm.environment.get('invitedUserId')) {",
-                "  pm.execution.skipRequest();",
-                "}",
-            ],
             test_script=[
-                # BUG-2: a verb-bearing IAM read-deny hides existence (404 / code 5),
-                # not 403 — so the deny branch here is 404, never 403.
-                "pm.test('invited user status 200 or 404 (FGA may restrict cross-get → hide existence)', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                "if (pm.response.code === 200) {",
-                "  pm.test('User.id prefix usr', () => {",
-                "    const j = pm.response.json();",
-                "    pm.expect(j.id, 'id must start with usr').to.match(/^usr[a-z0-9]+$/);",
-                "  });",
-                "}",
+                # Читает ТОТ ЖЕ вызывающий, который только что пригласил, и право
+                # `v_get` на новом объекте пользователя материализуется СИНХРОННО
+                # внутри самого приглашения (реконсайл объекта вызывается до того, как
+                # операция помечена done, ровно чтобы закрыть окно «пригласил → сразу
+                # читаю»). Значит исход один.
+                #
+                # Прежнее `oneOf([200, 404])` оправдывалось тем, что «FGA может
+                # ограничить cross-get → скрытие существования». Скрытие существования
+                # относится к ДРУГОМУ вызывающему — тому, у кого права нет; этот кейс
+                # такого не ставит вовсе. Поэтому 404 здесь означал бы потерю права у
+                # приглашающего, то есть дефект, а утверждение его принимало.
+                #
+                # Пропуск шага по пустому `invitedUserId` тоже снят: пустая переменная —
+                # это сорванная фикстура, и она обязана краснеть, а не отменять
+                # проверку молча (кейс иначе зеленел на промахе).
+                "pm.test('фикстура записала id приглашённого', () => "
+                "  pm.expect(pm.environment.get('invitedUserId'), 'invitedUserId').to.be.a('string').and.not.empty);",
+                *assert_status(200),
+                "pm.test('User.id prefix usr', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.id, 'id must start with usr').to.match(/^usr[a-z0-9]+$/);",
+                "});",
+                "pm.test('и это именно тот пользователь, которого пригласили', () => "
+                "  pm.expect(pm.response.json().id).to.eql(pm.environment.get('invitedUserId')));",
             ],
         ),
     ],
@@ -586,11 +596,30 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-INV-NEG-ROLE-MISSING — Invite with non-existent roleId → async FailedPrecondition
+#
+# ЧЕГО КЕЙС НЕ ДЕЛАЛ. Тело несло `roleId` БЕЗ `projectId`, а проект обязателен всегда,
+# когда задана роль (`invite.go`, проверка стоит до создания операции). Поэтому приглашение
+# отвергалось синхронным 400 «Illegal argument project_id: required when role_id is set»
+# на КАЖДОМ прогоне: операции не возникало, поллинг себя пропускал, и полоса, ради которой
+# кейс существует — несуществующая роль на вставке выдачи, — не выполнялась НИ РАЗУ.
+# Утверждение `oneOf([200, 400])` это и скрывало: оно проходило и на том отказе, и на
+# другом, и на отсутствии отказа вовсе.
+#
+# Это ТОТ ЖЕ дефект авторства, который сосед `IAM-USR-INV-IDEM-REINVITE` уже разобрал и
+# починил у себя (см. его шапку). Здесь он остался жив — потому что правку применили к
+# одному кейсу, а не к классу.
+#
+# ЧТО ТЕПЕРЬ. Проект назван, поэтому вставка выдачи действительно доходит до БД и
+# упирается в FK на роль (`access_bindings_role_fk`) — полоса АСИНХРОННАЯ: вызывающий
+# получает конверт операции, а отказ живёт в самой операции. Заявлены код и контрактный
+# текст: `FAILED_PRECONDITION` + «Role <id> not found» (pgmaperr, direction-sensitive —
+# на вставке это «роли нет», на удалении роли текст другой). Текст пинит, КАКОЙ это
+# отказ, иначе кейс прошёл бы на любом постороннем.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-INV-NEG-ROLE-MISSING",
-    title="Invite with non-existent roleId → Operation.error FAILED_PRECONDITION (9)",
+    title="Invite with non-existent roleId → Operation.error FAILED_PRECONDITION (9) \"Role <id> not found\"",
     classes=["NEG"],
     priority="P1",
     steps=[
@@ -598,21 +627,16 @@ CASES.append(Case(
             name="invite-bad-role",
             method="POST",
             path="/iam/v1/users:invite",
-            body={"accountId": "{{accountAId}}", "email": "badrole-{{runId}}@kacho.local", "roleId": "rol00000000000notfnd"},
+            body={"accountId": "{{accountAId}}", "projectId": "{{projectA1Id}}",
+                  "email": "badrole-{{runId}}@kacho.local", "roleId": "rol00000000000notfnd"},
             auth="jwtAccountAdminA",
             test_script=[
-                # Sync 200 (Operation accepted) or sync 400 (role id format invalid).
-                "pm.test('sync 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                "const j = pm.response.json();",
-                # Clear FIRST: the sync-400 branch mints no Operation, and a leftover
-                # id from an earlier case would make the poll below confirm THAT
-                # operation instead of skipping.
-                "pm.environment.unset('badRoleInvOpId');",
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                "} else {",
-                "  pm.environment.set('badRoleInvOpId', j.id || '');",
-                "}",
+                # Полоса одна: форма id роли валидна (узнаваемый префикс), поэтому
+                # синхронного отказа по формату нет, и приглашение принимается конвертом
+                # операции. Отказ выносит операция — шагом ниже.
+                *assert_status(200),
+                "pm.test('200 — это конверт операции', () => pm.expect(pm.response.json().id, pm.response.text()).to.be.a('string').and.not.empty);",
+                "pm.environment.set('badRoleInvOpId', pm.response.json().id);",
             ],
         ),
         Step(
@@ -621,18 +645,31 @@ CASES.append(Case(
             path="/operations/{{badRoleInvOpId}}",
             auth="jwtAccountAdminA",
             pre_script=[
-                "if (!pm.environment.get('badRoleInvOpId')) {",
-                "  pm.execution.skipRequest();",
+                # Реальная пауза между поллами: newman исполняет test-script синхронно и
+                # вызывает setNextRequest ДО любого setTimeout, поэтому busy-wait —
+                # единственный способ действительно разнести опросы (testing.md).
+                "if (pm.environment.get('_badRoleStarted') !== pm.info.requestName) {",
+                "  pm.environment.set('_badRolePolls', '0');",
+                "  pm.environment.set('_badRoleStarted', pm.info.requestName);",
                 "}",
             ],
             test_script=[
+                *assert_status(200),
                 "const j = pm.response.json();",
-                "if (pm.environment.get('badRoleInvOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 9 (FAILED_PRECONDITION — role not found)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                "  });",
+                "const pc = parseInt(pm.environment.get('_badRolePolls') || '0', 10);",
+                "if (!j.done && pc < 30) {",
+                "  pm.environment.set('_badRolePolls', String(pc + 1));",
+                "  const _bp = Date.now(); while (Date.now() - _bp < 500) void 0;",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
                 "}",
+                "pm.environment.unset('_badRolePolls');",
+                "pm.environment.unset('_badRoleStarted');",
+                "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                "pm.test('error code 9 (FAILED_PRECONDITION — role not found)', () => "
+                "  pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
+                "pm.test('и контрактный текст называет роль', () => "
+                "  pm.expect(((j.error||{}).message||'')).to.include('Role rol00000000000notfnd not found'));",
             ],
         ),
     ],

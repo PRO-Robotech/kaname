@@ -611,20 +611,28 @@ CASES.append(Case(
             # internal-rest listener enforces authN — send a valid JWT (see UPSERT above).
             auth="jwtAccountAdminA",
             test_script=[
-                # 200 if upserted user exists, 404 if not (both are valid internal-service responses).
-                "pm.test('INT-LOOKUPSUBJ: status 200 or 404 (valid internal response, NOT mux-404)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([200, 404]));",
+                # Субъект был заведён шагами выше, и его операция upsert'а дождана до
+                # done ПЕРЕД этим вызовом — значит строка закоммичена, состояние
+                # активное, и поиск по внешнему идентификатору её находит. Исход один.
+                #
+                # Прежнее `oneOf([200, 404])` («оба ответа валидны для internal-сервиса»)
+                # смешивало предмет кейса с его отрицанием: 404 означал бы, что только
+                # что созданный субъект не резолвится, — то есть ровно тот дефект, ради
+                # которого кейс и написан. Отличие сервисного 404 от mux-404 проверяет
+                # соседний кейс на НЕизвестном идентификаторе, где 404 и есть предмет.
+                *assert_status(200),
                 "const j = pm.response.json();",
-                "if (pm.response.code === 200) {",
-                "  // LookupSubject returns {user: {id: '...', ...}} or {serviceAccount: {...}}.",
-                "  const subjectId = (j.user && j.user.id) || (j.serviceAccount && j.serviceAccount.id) || j.subjectId;",
-                "  pm.test('INT-LOOKUPSUBJ: subjectId present', () => pm.expect(subjectId, 'subject id must be set').to.be.a('string').with.length.greaterThan(0));",
-                "  pm.test('INT-LOOKUPSUBJ: subjectId matches upserted user', () => {",
-                "    const prev = pm.environment.get('createdInternalUserId');",
-                "    if (prev) pm.expect(subjectId).to.eql(prev);",
-                "  });",
-                "} else {",
-                "  pm.test('INT-LOOKUPSUBJ: 404 grpc code 5 (NOT_FOUND from service)', () => pm.expect(j.code).to.eql(5));",
-                "}",
+                "// LookupSubject returns {user: {id: '...', ...}} or {serviceAccount: {...}}.",
+                "const subjectId = (j.user && j.user.id) || (j.serviceAccount && j.serviceAccount.id) || j.subjectId;",
+                "pm.test('INT-LOOKUPSUBJ: subjectId present', () => pm.expect(subjectId, 'subject id must be set').to.be.a('string').with.length.greaterThan(0));",
+                # Сверка с ранее созданным id — БЕЗУСЛОВНАЯ: если фикстура не записала
+                # id, это провал фикстуры, а не повод пропустить сверку (прежде стояло
+                # `if (prev)`, и пустая переменная тихо отменяла главное утверждение).
+                "pm.test('INT-LOOKUPSUBJ: subjectId matches upserted user', () => {",
+                "  const prev = pm.environment.get('createdInternalUserId');",
+                "  pm.expect(prev, 'фикстура обязана была записать createdInternalUserId').to.be.a('string').and.not.empty;",
+                "  pm.expect(subjectId).to.eql(prev);",
+                "});",
             ],
         ),
     ],

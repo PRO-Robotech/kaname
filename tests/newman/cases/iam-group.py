@@ -253,13 +253,32 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-CR-NEG-ACCOUNT-MISSING — non-existent accountId → async FailedPrecondition
+# IAM-GRP-CR-NEG-ACCOUNT-MISSING — аккаунт без пути прав → отказ на краю
 # ---------------------------------------------------------------------------
 
+# Создание под аккаунтом, к которому у вызывающего нет пути прав, решается НА КРАЮ и
+# отказом — до того как сервис вообще набирается.
+#
+# Запись каталога прав для этого метода несёт `required_relation: editor` +
+# `scope_extractor {object_type: account, from_request_field: account_id}`. Идентификатор
+# `acc00000000000notfnd` формой валиден (узнаваемый префикс), поэтому синхронного 400 по
+# формату нет — край выполняет вопрос к модели. Объекта аккаунта не существовало никогда,
+# значит тупла у него нет ни у кого, значит `no path`, значит терминальный 403. Каскад
+# верхних уровней здесь не при чём: вызывающий — обычный владелец своего аккаунта, не
+# администратор облака.
+#
+# Отсюда следует, чего кейс НЕ проверяет и не может: полосу FK на вставке (async
+# `FAILED_PRECONDITION`), которую обещал его прежний заголовок. Сервис на этом пути
+# недостижим. Прежнее `oneOf([200, 400, 403])` принимало три исхода, из которых
+# реализуем один, — то есть не могло упасть ни на смене полосы, ни на приёме запроса.
+#
+# Ценность кейса — в другом, и она настоящая: отказ обязан быть терминальным (403, код 7)
+# и НЕ должен сообщать, существует ли названный аккаунт. Иначе отличие «нет доступа» от
+# «нет объекта» становится оракулом существования аккаунтов чужих тенантов.
 CASES.append(Case(
     id="IAM-GRP-CR-NEG-ACCOUNT-MISSING",
-    title="Create group with non-existent accountId → Operation.error FAILED_PRECONDITION (9)",
-    classes=["NEG"],
+    title="Create group under an account with no authorization path → 403 PERMISSION_DENIED at the edge (anti-oracle)",
+    classes=["NEG", "AUTHZ"],
     priority="P1",
     steps=[
         Step(
@@ -269,39 +288,17 @@ CASES.append(Case(
             body={"accountId": "acc00000000000notfnd", "name": "grpbadacc{{runId}}"},
             auth="jwtAccountAdminA",
             test_script=[
-                # 403 is also acceptable — the authz middleware checks FGA for the
-                # account scope before creating the Operation. A non-existent accountId has
-                # no FGA tuples, so FGA denies with PERMISSION_DENIED(7)/403.
-                # Accepted outcomes: 200 (async Op created), 400 (sync validation), 403 (FGA deny).
-                "pm.test('sync 200 or 400 or 403', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 403]));",
-                "const j = pm.response.json();",
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                "} else if (pm.response.code === 200) {",
-                "  pm.environment.set('badAccGrpOpId', j.id || '');",
-                "} else {",
-                "  pm.environment.set('badAccGrpOpId', '');",
-                "}",
-            ],
-        ),
-        Step(
-            name="poll-bad-account",
-            method="GET",
-            path="/operations/{{badAccGrpOpId}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                "if (!pm.environment.get('badAccGrpOpId')) {",
-                "  pm.execution.skipRequest();",
-                "}",
-            ],
-            test_script=[
-                "const j = pm.response.json();",
-                "if (pm.environment.get('badAccGrpOpId')) {",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 9 or 3 (FAILED_PRECONDITION — account FK)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]);",
-                "  });",
-                "}",
+                *assert_status(403),
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                "pm.test('отказ называет действие, а не судьбу объекта', () => "
+                "  pm.expect(pm.response.json().message||'').to.include('iam.groups.create'));",
+                # Анти-оракул: по тексту отказа нельзя отличить «аккаунта нет» от
+                # «доступа нет».
+                "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
+                "  const m = (pm.response.json().message || '').toLowerCase();",
+                "  pm.expect(m).to.not.contain('not found');",
+                "  pm.expect(m).to.not.contain('does not exist');",
+                "});",
             ],
         ),
     ],
@@ -846,19 +843,25 @@ CASES.append(Case(
             body={"memberType": "user", "memberId": "usr0000000000000ghst"},
             auth="jwtAccountAdminA",
             test_script=[
-                # May be sync 400 (soft validation before Operation) or 200 (Operation).
-                "pm.test('sync 200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                "const j = pm.response.json();",
-                # Clear FIRST — the sync-400 branch mints no Operation (see iam-user.py).
+                # ПОЛОСА ОДНА, И ОНА АСИНХРОННАЯ. Существование участника проверяет
+                # триггер БД внутри вставки, а вставка живёт в worker'е: use-case
+                # синхронно валидирует только форму и возвращает конверт операции.
+                # Синхронного 400 на несуществующем участнике не бывает — прежнее
+                # `oneOf([200, 400])` принимало исход, которого нет, и заодно проходило
+                # бы при ПРИЁМЕ фантомного участника.
+                *assert_status(200),
                 "pm.environment.unset('opId');",
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync code 3 or 9', () => pm.expect(j.code).to.be.oneOf([3, 9]));",
-                "} else {",
-                "  pm.environment.set('opId', j.id || '');",
-                "}",
+                "pm.test('200 — это конверт операции', () => pm.expect(pm.response.json().id, pm.response.text()).to.be.a('string').and.not.empty);",
+                "pm.environment.set('opId', pm.response.json().id);",
             ],
         ),
-        assert_op_error(9, "FAILED_PRECONDITION", msg_substr="not found"),
+        # Текст — тот, который ДОХОДИТ до клиента, а не тот, который поднимает триггер:
+        # маппер намеренно заменяет сообщение общим («referenced resource not found or
+        # still in use»), потому что текст триггера несёт имя таблицы/значение, то есть
+        # разведку схемы. Пинить надо доставленный текст — иначе следующий читатель
+        # «починит» кейс под формулировку триггера и утверждение станет ложным.
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_substr="referenced resource not found or still in use"),
     ],
 ))
 
