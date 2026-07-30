@@ -284,7 +284,13 @@ func TestRegisterResource_GrantRevokeGrant_NotCollapsed(t *testing.T) {
 
 	assert.Equal(t, 2, rig.emitter.writes,
 		"the re-grant after a revoke must be re-emitted — never collapsed into grant → revoke")
-	assert.Len(t, rig.recon.snapshot(), 2, "the re-grant re-runs the forward reconcile")
+	// Three passes, one per step: both grants AND the revoke in between drive their
+	// materialisation in-process. The revoke's pass is what keeps withdrawal off the
+	// reconcile queue's critical path (see unregister_resource_sync_revoke_test.go);
+	// before it, this sequence produced two passes and the middle step's removal waited
+	// for the drainer.
+	assert.Len(t, rig.recon.snapshot(), 3,
+		"grant, revoke and re-grant each drive their own post-commit pass")
 }
 
 // TestRegisterResource_UnregisterAlwaysMaterializes — revokes are never gated. An
