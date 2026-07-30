@@ -20,6 +20,27 @@
           "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
         ]
       }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "try {",
+          "  const _ct = (pm.response && pm.response.headers && pm.response.headers.get('Content-Type')) || '';",
+          "  if (_ct.indexOf('json') !== -1) {",
+          "    const _j = pm.response.json();",
+          "    if (_j && _j.done === true && typeof _j.id === 'string' && _j.id !== '') {",
+          "      if (_j.error) {",
+          "        const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+          "        _pv.forEach(function (k) { pm.environment.unset(k); });",
+          "      }",
+          "      pm.environment.unset('_provisionalIds');",
+          "    }",
+          "  }",
+          "} catch (e) { /* не JSON, не Operation — регистрация остаётся как есть */ }"
+        ]
+      }
     }
   ],
   "item": [
@@ -857,14 +878,6 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "if (j.done && j.error) {",
-                  "  try {",
-                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
-                  "  } catch (e) {}",
-                  "  pm.environment.unset('_provisionalIds');",
-                  "}",
-                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -1023,14 +1036,6 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "if (j.done && j.error) {",
-                  "  try {",
-                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
-                  "  } catch (e) {}",
-                  "  pm.environment.unset('_provisionalIds');",
-                  "}",
-                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2207,14 +2212,6 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "if (j.done && j.error) {",
-                  "  try {",
-                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
-                  "  } catch (e) {}",
-                  "  pm.environment.unset('_provisionalIds');",
-                  "}",
-                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2769,14 +2766,6 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "if (j.done && j.error) {",
-                  "  try {",
-                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
-                  "  } catch (e) {}",
-                  "  pm.environment.unset('_provisionalIds');",
-                  "}",
-                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2921,14 +2910,6 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "if (j.done && j.error) {",
-                  "  try {",
-                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
-                  "  } catch (e) {}",
-                  "  pm.environment.unset('_provisionalIds');",
-                  "}",
-                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
