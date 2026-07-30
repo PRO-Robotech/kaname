@@ -113,6 +113,40 @@ type services struct {
 	relationStore *clients.OpenFGAHTTPClient
 }
 
+// ownGateWiringComplaint reports why iam's own authorization gates cannot be trusted with
+// this wiring, or "" when they can. The composition root turns a complaint into a refusal to
+// start; it is a separate function so the refusal is testable — an os.Exit inside the builder
+// can only be read, not exercised, and a guard nobody can exercise is one nobody knows works.
+//
+// Neither condition is gated on the authentication mode. Every deployed stand runs production
+// posture, and a guard absent from the stands where anyone would notice it firing is not a
+// guard.
+//
+// The message names the knob and the consequence deliberately: it is what an operator sees
+// when the stand will not come up, and a refusal that does not say what to fix cannot be
+// acted on.
+func ownGateWiringComplaint(store *authzcascade.Client, facts *authzcascade.Resolver) string {
+	// The second chance is a CORRECTNESS condition: without it iam's own gates answer from
+	// delivered relations only, and disagree with the gate the api-gateway asks about the
+	// same subject and the same object.
+	if !store.SecondChanceReachable() {
+		return "iam's own authorization gates would answer from delivered relations only, " +
+			"disagreeing with the gate the api-gateway asks (structural-fact resolver not " +
+			"wired into the relation store)"
+	}
+	// The page read is a CONTRACT condition, and refusing to start over it is deliberate.
+	// Without it the gates stay correct and every list filter resolves one object at a time —
+	// measured at 200 primary transactions for a page of 100, while page size is part of the
+	// contract up to 1000 and narrowing it to fit a budget is forbidden. That is a broken
+	// contract at scale rather than a slow path, and it is invisible from outside until a
+	// large page arrives. A control whose absence nobody can notice is not a control.
+	if !facts.BatchReachable() {
+		return "the structural page read is not wired, so every list filter would resolve " +
+			"one object at a time and a contract-sized page would not fit its request budget"
+	}
+	return ""
+}
+
 // buildServices создает все repo'ы поверх pool и собирает бизнес-сервисы.
 // Composition root passes a fully-configured OpenFGA HTTP client — wiring
 // of every per-resource use-case is unconditional (no fallback stub).
@@ -155,22 +189,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// NOT conditioned on the authentication mode: every deployed stand runs production
 	// posture, and a guard absent from the stands where anyone would notice it firing is
 	// not a guard.
-	if !relationStore.SecondChanceReachable() {
-		logger.Error("refusing to start: iam's own authorization gates would answer from " +
-			"delivered relations only, disagreeing with the gate the api-gateway asks " +
-			"(structural-fact resolver not wired into the relation store)")
-		os.Exit(1)
-	}
-	// The page read is guarded too, and refusing to start over it is deliberate. Without it
-	// the gates stay CORRECT and every page filter goes back to one transaction per row —
-	// measured at 200 transactions for a page of 100, and page size is part of the contract
-	// up to 1000 while narrowing it to fit a budget is forbidden. That is a broken contract
-	// at scale, not a slow path, and it is invisible from the outside until a large page
-	// arrives. A control whose absence nobody can notice is not a control.
-	if !structuralFacts.BatchReachable() {
-		logger.Error("refusing to start: the structural page read is not wired, so every list " +
-			"filter would resolve one object at a time and a contract-sized page would not " +
-			"fit its request budget")
+	if complaint := ownGateWiringComplaint(relationStore, structuralFacts); complaint != "" {
+		logger.Error("refusing to start: " + complaint)
 		os.Exit(1)
 	}
 
