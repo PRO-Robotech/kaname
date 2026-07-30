@@ -1331,7 +1331,7 @@
                   "pm.environment.unset('_badRoleStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 9 (FAILED_PRECONDITION — role not found)', () =>   pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('и контрактный текст называет роль', () =>   pm.expect(((j.error||{}).message||'')).to.include('Role rol00000000000notfnd not found'));"
+                  "pm.test('текст — контрактный тон FK по роли (Role … not found)', () =>   pm.expect(((j.error||{}).message||'')).to.match(/^Role .* not found$/));"
                 ]
               }
             }

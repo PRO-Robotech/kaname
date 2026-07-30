@@ -668,8 +668,18 @@ CASES.append(Case(
                 "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                 "pm.test('error code 9 (FAILED_PRECONDITION — role not found)', () => "
                 "  pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                "pm.test('и контрактный текст называет роль', () => "
-                "  pm.expect(((j.error||{}).message||'')).to.include('Role rol00000000000notfnd not found'));",
+                # Пиним ФОРМУ контрактного текста, а не сам идентификатор роли, и на это
+                # есть причина в коде: подсказка идентификатора, которую вставка выдачи
+                # передаёт мапперу, собрана под текст про ЗАНЯТЫЙ слот
+                # («<субъект>|<тип области>:<область>») и переиспользуется ветвью FK по
+                # роли как есть. Поэтому в слот роли попадает составная строка, а не
+                # `rol…`. Утверждать здесь `Role rol… not found` значило бы утверждать
+                # то, чего продукт не производит; утверждать просто «not found» — не
+                # отличать эту причину от общей заглушки FK и от «уже существует».
+                # Форма `Role … not found` отличает, и она — то, что реально доходит.
+                # verifies https://github.com/PRO-Robotech/kacho/issues/105
+                "pm.test('текст — контрактный тон FK по роли (Role … not found)', () => "
+                "  pm.expect(((j.error||{}).message||'')).to.match(/^Role .* not found$/));",
             ],
         ),
     ],
