@@ -39,11 +39,13 @@ const mtlsEnvPrefix = "KACHO_IAM"
 // KEYFILE,CLIENTCAFILES}. Enable=false (default) → insecure/plaintext (dev
 // backward-compat). Per-edge enable → независимый rollback.
 //
-// Четыре server-edge'а:
+// Server-edge'и:
 //   - PublicServerMTLS   — gRPC public listener (:9090), grpc.ServerOption.
 //   - InternalServerMTLS — gRPC internal listener (:9091), grpc.ServerOption.
 //   - HooksServerMTLS    — HTTP Hydra/Kratos hooks listener (:9092), *tls.Config.
 //   - MetricsServerMTLS  — HTTP Prometheus /metrics listener (:9095), *tls.Config.
+//   - JWKSProxyServerMTLS     — HTTP Hydra-JWKS proxy (:9097), *tls.Config.
+//   - RegistryTokenServerMTLS — HTTP docker-token shim (:9096), *tls.Config.
 //
 // gRPC-ребра отдают grpc.ServerOption (передается в grpcsrv.NewServer);
 // HTTP-ребра отдают *tls.Config (оборачивает net.Listener через tls.NewListener
@@ -113,6 +115,32 @@ type MTLSConfig struct {
 	// не client-cert — mutual сломал бы «verifier untouched»). Неизвестный режим →
 	// fail-closed.
 	JWKSProxyClientAuthMode string `envconfig:"JWKSPROXY_SERVER_MTLS_CLIENTAUTHMODE"`
+
+	// RegistryTokenServerMTLS — server-creds для HTTP docker-token listener
+	// (:9096, `/iam/token`).
+	//
+	// ЧТО ПО НЕМУ ЕДЕТ: `docker login` предъявляет HTTP Basic, и пароль в этой паре
+	// — ПРИВАТНЫЙ КЛЮЧ ключа служебной учётки. Сервер его не хранит вовсе (выводит
+	// SPKI из предъявленного и сверяет с сохранённым публичным), поэтому этот хоп —
+	// единственное место в системе, где приватный ключ транзитит; срок его жизни не
+	// ограничен и ротации нет, так что снятый с провода credential предъявляется
+	// напрямую, без окна TTL. Соседний jwks-proxy возит только ПУБЛИЧНЫЙ материал и
+	// TLS получил раньше — эта нога осталась открытой при несимметричной починке
+	// того же класса.
+	//
+	// Режим — server-tls-only (ONE-WAY): caller-auth на этом эндпоинте и ЕСТЬ Basic
+	// (в этом его смысл), не хватало именно шифрования и аутентификации сервера;
+	// mutual потребовал бы client-cert у nginx-sidecar реестра. Default-off →
+	// (nil, nil) → plaintext (dev байт-идентичен); в production listener без TLS
+	// отказывается стартовать (requireRegistryTokenTLS). Env:
+	// KACHO_IAM_REGISTRYTOKEN_SERVER_MTLS_{ENABLE,CERTFILE,KEYFILE,CLIENTCAFILES}.
+	RegistryTokenServerMTLS grpcsrv.TLSServer `envconfig:"REGISTRYTOKEN_SERVER_MTLS"`
+
+	// RegistryTokenClientAuthMode — per-edge TLS ClientAuth-режим для docker-token
+	// listener'а (:9096). Env:
+	// KACHO_IAM_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE. Пустая строка (unset) при
+	// enabled-ребре → server-tls-only. Неизвестный режим → fail-closed.
+	RegistryTokenClientAuthMode string `envconfig:"REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE"`
 }
 
 // clientAuthMode — TLS ClientAuth-режим per-edge для HTTP-listener'ов.
@@ -202,15 +230,24 @@ func (m MTLSConfig) JWKSProxyServerTLSConfig() (*tls.Config, error) {
 	return serverTLSConfig(m.JWKSProxyServerMTLS, resolveClientAuthMode(m.JWKSProxyClientAuthMode))
 }
 
+// RegistryTokenServerTLSConfig возвращает *tls.Config для HTTP docker-token
+// listener (:9096, `/iam/token`). Тот же контракт, что HooksServerTLSConfig;
+// дефолт — server-tls-only (caller-auth на этом эндпоинте — сам Basic, не
+// client-cert). Default-off → (nil, nil) → listener остаётся PLAINTEXT (dev).
+func (m MTLSConfig) RegistryTokenServerTLSConfig() (*tls.Config, error) {
+	return serverTLSConfig(m.RegistryTokenServerMTLS, resolveClientAuthMode(m.RegistryTokenClientAuthMode))
+}
+
 // Validate проверяет, что каждое включенное ребро несет корректный cert-set под
 // свой ClientAuth-режим. Включенное-но-некорректное ребро → fail-closed error на
-// старте (aggregated через multierr для всех четырех ребер сразу). Disabled-ребра
+// старте (aggregated через multierr по ВСЕМ ребрам сразу). Disabled-ребра
 // не валидируются (default-off, нулевая регрессия). Вызывается из composition
 // root до запуска listener'ов.
 //
 // gRPC-ребра (public/internal) — всегда mutual-семантика (grpcsrv.TLSServerCreds
 // строит RequireAndVerifyClientCert): требуют полный cert-trio. HTTP-ребра
-// (hooks/metrics) — per-edge clientAuthMode: server-tls-only нуждается только в
+// (hooks/metrics/jwks-proxy/registry-token) — per-edge clientAuthMode:
+// server-tls-only нуждается только в
 // cert+key (client-CA не нужен), mutual — в полном trio; неизвестный режим —
 // ошибка.
 func (m MTLSConfig) Validate() error {
@@ -234,9 +271,10 @@ func (m MTLSConfig) Validate() error {
 		edge grpcsrv.TLSServer
 		mode string
 	}{
-		"hooks-server":      {m.HooksServerMTLS, resolveClientAuthMode(m.HooksClientAuthMode)},
-		"metrics-server":    {m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode)},
-		"jwks-proxy-server": {m.JWKSProxyServerMTLS, resolveClientAuthMode(m.JWKSProxyClientAuthMode)},
+		"hooks-server":          {m.HooksServerMTLS, resolveClientAuthMode(m.HooksClientAuthMode)},
+		"metrics-server":        {m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode)},
+		"jwks-proxy-server":     {m.JWKSProxyServerMTLS, resolveClientAuthMode(m.JWKSProxyClientAuthMode)},
+		"registry-token-server": {m.RegistryTokenServerMTLS, resolveClientAuthMode(m.RegistryTokenClientAuthMode)},
 	} {
 		if !e.edge.Enable {
 			continue

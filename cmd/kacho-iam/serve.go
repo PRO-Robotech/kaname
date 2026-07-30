@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -238,6 +239,14 @@ func runServe(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("jwks-proxy listener mTLS config: %w", err)
 	}
+	// docker-token listener (:9096) server-TLS: ONE-WAY. По нему едет HTTP Basic,
+	// чей пароль — приватный ключ ключа служебной учётки (сервер его не хранит,
+	// срок жизни не ограничен), поэтому в production plaintext здесь запрещён —
+	// requireRegistryTokenTLS ниже.
+	registryTokenTLSConfig, err := mtlsCfg.RegistryTokenServerTLSConfig()
+	if err != nil {
+		return fmt.Errorf("registry-token listener mTLS config: %w", err)
+	}
 
 	// M1 — startup invariant: production mode MUST run the cluster-internal
 	// listener (:9091) under mTLS RequireAndVerifyClientCert. Without it the
@@ -252,6 +261,10 @@ func runServe(cfg config.Config) error {
 		if !mtlsCfg.PublicServerMTLS.Enable {
 			return fmt.Errorf("production mode requires public listener mTLS (TLS); refusing to start with insecure :9090")
 		}
+	}
+	if err := requireRegistryTokenTLS(productionMode,
+		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
+		return err
 	}
 
 	// Самоотчёт о security-posture: ПОСЛЕ boot-guard'ов (cfg.Validate() в main,
@@ -552,6 +565,13 @@ func runServe(cfg config.Config) error {
 				_ = metricsListener.Close()
 			}
 			return fmt.Errorf("registry token http listener: %w", err)
+		}
+		// Default-off: registryTokenTLSConfig == nil → plaintext (dev). Включённое
+		// ребро оборачивает listener, и `docker login` едет по TLS — на этом хопе
+		// предъявляется приватный ключ ключа служебной учётки, который сервер не
+		// хранит и который не истекает.
+		if registryTokenTLSConfig != nil {
+			registryTokenListener = tls.NewListener(registryTokenListener, registryTokenTLSConfig)
 		}
 		registryTokenMux, err := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
 			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
@@ -1084,4 +1104,31 @@ func identityStream(cfg config.Config) []grpc.StreamServerInterceptor {
 		grpcsrv.StreamTrustedPrincipalExtract(
 			grpcsrv.WithTrustedForwarders(cfg.AuthN.TrustedForwarders()...)),
 	}
+}
+
+// requireRegistryTokenTLS — слушатель docker-token (`/iam/token`, :9096) в
+// production обязан нести TLS.
+//
+// По этому сокету едет HTTP Basic, чей пароль — ПРИВАТНЫЙ КЛЮЧ ключа служебной
+// учётки: сервер его не хранит вовсе (выводит SPKI из предъявленного и сверяет с
+// сохранённым публичным), поэтому этот хоп — единственное место в системе, где
+// приватный ключ транзитит. Срок жизни ключа не ограничен и ротации нет: снятый с
+// провода, он предъявляется напрямую, без окна TTL — то есть ущерб не ограничен
+// ничем, в отличие от короткоживущего bearer'а на соседней ноге, которая гейт
+// получила давно.
+//
+// Пустой адрес ⇒ слушатель не поднимается, гейтить нечего. В dev — no-op
+// (тот же порядок, что у прочих HTTP-рёбер: default-off, стенд байт-идентичен).
+func requireRegistryTokenTLS(productionMode bool, addr string, mtlsCfg config.MTLSConfig) error {
+	if !productionMode || strings.TrimSpace(addr) == "" {
+		return nil
+	}
+	if !mtlsCfg.RegistryTokenServerMTLS.Enable {
+		return fmt.Errorf("production mode requires TLS on the docker-token listener %s "+
+			"(set KACHO_IAM_REGISTRYTOKEN_SERVER_MTLS_ENABLE=true with its cert/key): the "+
+			"HTTP Basic password on this hop is the service-account key's private key, which "+
+			"this server never stores and which never expires; refusing to start with it in the clear",
+			addr)
+	}
+	return nil
 }
