@@ -24,6 +24,7 @@ package user
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -41,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // InviteUserInput — параметры use-case'а (resolved из gRPC request).
@@ -199,6 +201,25 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 			return nil, status.Error(codes.FailedPrecondition,
 				"project_id belongs to different account")
 		}
+
+		// The role must be assignable on the scope this invitation binds it to —
+		// the same question AccessBinding.Create asks, asked here because this flow
+		// is the OTHER writer of the same table and used to insert without asking.
+		//
+		// The account boundary is what it protects: a custom role belongs to the
+		// account that defined it. Binding a foreign account's role does not hand
+		// the inviter anything of that account's (the scope is their own project),
+		// but it PINS the role in the other account for ever — the reference is
+		// restrict-on-delete, so its owner is refused deletion while the listing
+		// that would explain the refusal filters that binding out, because it lives
+		// in a scope they hold no authority over.
+		//
+		// The database refuses this too (migration 0072), for every writer. This
+		// gate is what makes the refusal say WHY, in the platform's contract tone,
+		// instead of surfacing a constraint violation.
+		if rerr := uc.assertRoleAssignableOnProject(ctx, in.RoleID, in.ProjectID, in.AccountID); rerr != nil {
+			return nil, rerr
+		}
 	}
 
 	// 4. Pre-allocate user-id (на случай INSERT в async path; при idempotent
@@ -228,6 +249,56 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 }
 
 // doInvite — async-часть. Возвращает marshalled User для Operation.response.
+// assertRoleAssignableOnProject refuses an invitation whose role may not be bound on
+// the invited project.
+//
+// It asks the same predicate AccessBinding.Create asks: a system role goes anywhere;
+// a custom role of THIS account goes on its own account and on projects nested in it;
+// a project role goes on its own project; nothing else. The account boundary is never
+// crossed.
+//
+// A role that is not visible from this scope collapses to the absent-role text —
+// byte-identical to a genuine miss — so a foreign account's role cannot be told apart
+// from one that does not exist (the same hide-existence contract RoleService.Get
+// keeps). Otherwise the refusal names the role and its tier, because the caller can
+// act on that.
+func (uc *InviteUserUseCase) assertRoleAssignableOnProject(
+	ctx context.Context, roleID domain.RoleID, projectID domain.ProjectID, accountID domain.AccountID,
+) error {
+	rd, err := uc.repo.Reader(ctx)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+
+	roles := rd.Roles()
+	if roles == nil {
+		// Fail closed: an unwired catalog must refuse, never skip the question.
+		return status.Error(codes.Unavailable, "role catalog unavailable")
+	}
+	role, err := roles.Get(ctx, roleID)
+	if err != nil {
+		if stderrors.Is(err, iamerr.ErrNotFound) {
+			return status.Errorf(codes.FailedPrecondition, "Role %s not found", roleID)
+		}
+		return shared.MapRepoErr(err)
+	}
+	if domain.IsRoleAssignableInAccount(role, "project", string(projectID), string(accountID)) {
+		return nil
+	}
+	// Not assignable. Visible from this scope means: a system catalog role, or a role
+	// of this account's own tree. Anything else must not be distinguishable from
+	// absent.
+	if !role.IsSystem && string(role.AccountID) != string(accountID) && role.ProjectID == "" {
+		return status.Errorf(codes.FailedPrecondition, "Role %s not found", roleID)
+	}
+	if role.ProjectID != "" && string(role.ProjectID) != string(projectID) {
+		return status.Errorf(codes.FailedPrecondition, "Role %s not found", roleID)
+	}
+	return status.Errorf(codes.FailedPrecondition,
+		"role %s is not assignable on project:%s", roleID, projectID)
+}
+
 func (uc *InviteUserUseCase) doInvite(
 	ctx context.Context, opID string, candidateID, invitedBy domain.UserID, in InviteUserInput,
 ) (*anypb.Any, error) {
