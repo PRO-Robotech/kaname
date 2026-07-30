@@ -369,7 +369,17 @@ def robust_revoke_binding(name, acb_var):
     binding object), the v_list-only object inherits v_get from the leaked {get,list} grant
     → its detail Get returns 200 instead of 404 (the invariant violated). The cross-subject preclean
     cannot clean it (admin gets 403 on listBySubject for another user), so the revoke itself must
-    commit. Retry the DELETE while 403 until 200 (committed) or 404 (already gone)."""
+    commit. Retry the DELETE while 403, then require it to have committed.
+
+    ИСХОД ОДИН — 200 С OPERATION, и «already-gone 404» из утверждения убран. Он описывал
+    состояние, которого эта полоса достичь не может: роль и выдача создаются в ЭТОМ кейсе
+    под уникальным `runId`, создание проверено строгим `200 + iop…`, операция создания
+    дожата `poll_op` БЕЗ терпимости к ALREADY_EXISTS, и удаляет её только этот шаг. Значит
+    404 здесь означает ровно одно из двух: выдачи не было (сорванная фикстура — отказ, а
+    не «уже нет») либо её снёс кто-то посторонний (дефект). Принимать 404 значит зеленеть
+    на том, что док этой же функции объявляет обязательным: «revoke itself must commit».
+    Устойчивый 403 остаётся отказом по-прежнему — он и означает «выдача осталась
+    активной»."""
     return Step(
         name=name, method="DELETE", path="/iam/v1/accessBindings/{{" + acb_var + "}}",
         auth="jwtAccountAdminA",
@@ -386,7 +396,11 @@ def robust_revoke_binding(name, acb_var):
             # the leaked {get,list} grant that flips the v_list-only detail Get to 200).
             f"if (pm.response.code === 403 && _rc < {POLL_CAP}) {{ pm.environment.set('_rv{acb_var}Count', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) {{ /* inter-poll delay ~500ms (Koren #1) */ }} pm.execution.setNextRequest(pm.info.requestName); return; }}",
             f"pm.environment.unset('_rv{acb_var}Count'); pm.environment.unset('_rv{acb_var}Started');",
-            "pm.test('by-label binding revoke committed (200 or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([200, 404]));",
+            "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
+            "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
+            "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
+            "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
+            "});",
         ],
     )
 
