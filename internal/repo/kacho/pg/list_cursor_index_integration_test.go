@@ -51,7 +51,7 @@ func cursorOrderedTables(t *testing.T) []string {
 	found := map[string]bool{}
 	scanned, literals := 0, 0
 	for _, path := range entries {
-		raw, rerr := os.ReadFile(path) //nolint:gosec // test-local path from a glob of this package
+		raw, rerr := os.ReadFile(path)
 		require.NoError(t, rerr)
 		scanned++
 		for _, lit := range literalRe.FindAllStringSubmatch(string(raw), -1) {
