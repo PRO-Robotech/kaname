@@ -490,7 +490,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// the creator's per-object v_get materializes before the consumer's create-Operation
 		// reports done — a create→immediate-GET resolves ALLOW without racing the async
 		// reconcile-outbox drain. nil-safe + non-fatal (the drain + sweep are the backstop).
-		WithObjectReconciler(rsabReconciler, logger)
+		WithObjectReconciler(rsabReconciler, logger).
+		// The containment pointer (object→project) is the ONE tuple this use-case owns
+		// outright: the reconciler never derives it, so nothing else can remove it
+		// promptly. Applying it directly here — in BOTH directions, after the commit —
+		// is what keeps a withdrawal from leaving the account-administrator tier with
+		// standing access to a resource that already answers 404, since that tier
+		// reaches objects THROUGH the pointer rather than through any per-object grant.
+		// nil-safe + non-fatal: the durable outbox drain remains the backstop.
+		WithTupleApplier(clients.NewHierarchyTupleApplier(relationStore), logger)
 	regGate := authzguard.NewRelationWriteGate(relationStore).
 		WithProductionMode(cfg.AuthN.Mode.IsProduction())
 	// Session-revocation writer. Pool-scoped adapter over

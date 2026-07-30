@@ -339,14 +339,24 @@ type Reconciler struct {
 	syncFGA SyncFGAWriter
 }
 
-// SyncFGAWriter — the narrow direct-write port the reconciler uses for the create-path
-// read-after-write closer. Satisfied by an adapter over
+// SyncFGAWriter — the narrow direct-apply port the reconciler uses to close the
+// read-after-write gap in BOTH directions. Satisfied by an adapter over
 // clients.RelationStore (*clients.OpenFGAHTTPClient). Defined here so the reconcile
 // use-case depends only on a local port (Clean Architecture — no clients import).
-// WriteTuples must be idempotent (already_exists ⇒ applied) so the async drain of the
-// SAME fga_outbox rows is a safe no-op.
+//
+// Both methods must be idempotent at the SET level so the async drain of the SAME
+// fga_outbox rows is a safe no-op: WriteTuples treats already_exists as applied,
+// DeleteTuples treats already-absent as applied (its postcondition is "none of these
+// tuples is in the store").
+//
+// BOTH DIRECTIONS OR NEITHER. Carrying only the additions makes the permissive direction
+// take effect in the caller's request while the restrictive one waits out the queue —
+// backwards for a mechanism whose job is to stop saying yes. A revoke that has been
+// derived, committed and enqueued but not applied is a standing grant on state the
+// product already reports as gone.
 type SyncFGAWriter interface {
 	WriteTuples(ctx context.Context, tuples []SyncFGATuple) error
+	DeleteTuples(ctx context.Context, tuples []SyncFGATuple) error
 }
 
 // SyncFGATuple — one FGA tuple for the direct sync write. Mirrors domain.MembershipTuple
@@ -393,6 +403,13 @@ type syncFGACollector struct {
 	// deferral a binding revoked BEFORE its sibling binding writes the identical
 	// tuple would strip a still-valid cross-binding tuple.
 	pendingDeletes []pendingDelete
+	// revoked — the tuples flushDeletes actually enqueued for removal, i.e. the set
+	// AFTER both subtractions (re-written in this pass, still claimed by another
+	// active binding). It is applied directly to the store after the writer-tx
+	// commits, the mirror image of `tuples`. Disjoint from `seen` by construction —
+	// flushDeletes drops every candidate this pass (re)wrote — so applying the two
+	// directions in one post-commit step cannot strip a live grant.
+	revoked []SyncFGATuple
 }
 
 // pendingDelete — one binding's deferred tuple-delete request (the eager-revoke
@@ -505,19 +522,39 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
 			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
 		}
+		// Record the SAME set for the post-commit direct apply. The durable enqueue
+		// above stays the at-least-once backstop; this only decides whether the caller
+		// waits for it.
+		for _, t := range revoke {
+			c.revoked = append(c.revoked, SyncFGATuple{User: t.User, Relation: t.Relation, Object: t.Object})
+		}
 	}
 	return nil
 }
 
-// applyAfterCommit synchronously writes the collected tuples to OpenFGA after the
-// writer-tx committed. Idempotent (WriteTuples treats
-// already_exists as applied), so the later async drain of the SAME fga_outbox rows is a
-// no-op. Best-effort: an error is logged, NOT returned — the durable fga_outbox + async
-// drainer are the at-least-once backstop, so a transient OpenFGA blip degrades to the
-// pre-fix async path rather than failing the create. The happy path completes the write
-// before the caller returns, giving the create-path read-after-write guarantee.
+// applyAfterCommit synchronously applies BOTH directions the pass produced — the tuples
+// it granted and the tuples it revoked — to OpenFGA after the writer-tx committed.
+// Idempotent at the set level (already_exists ⇒ applied; already-absent ⇒ applied), so
+// the later async drain of the SAME fga_outbox rows is a no-op. Best-effort: an error is
+// logged, NOT returned — the durable fga_outbox + async drainer are the at-least-once
+// backstop, so a transient OpenFGA blip degrades to the pre-fix async path rather than
+// failing a pass whose tx already committed.
+//
+// REVOKES GO FIRST. The two sets are disjoint (flushDeletes drops every candidate this
+// pass re-wrote), so the order cannot change the outcome — but a large grant batch must
+// never stand between a derived revoke and the store. The restrictive direction is the
+// one whose delay is a security consequence.
 func (r *Reconciler) applyAfterCommit(ctx context.Context, c *syncFGACollector) {
-	if r.syncFGA == nil || c == nil || len(c.tuples) == 0 {
+	if r.syncFGA == nil || c == nil {
+		return
+	}
+	if len(c.revoked) > 0 {
+		if err := r.syncFGA.DeleteTuples(ctx, c.revoked); err != nil {
+			r.logger.WarnContext(ctx, "reconcile: synchronous FGA revoke failed; async drain will backstop",
+				"tuple_count", len(c.revoked), "error", err)
+		}
+	}
+	if len(c.tuples) == 0 {
 		return
 	}
 	if err := r.syncFGA.WriteTuples(ctx, c.tuples); err != nil {

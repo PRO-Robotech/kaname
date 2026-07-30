@@ -99,6 +99,25 @@ type accountResolver interface {
 //
 // nil-safe + non-fatal: an unwired reconciler (or a reconcile error) never fails Register
 // — the reconcile-outbox drain + periodic sweep are the backstop.
+// hierarchyTupleApplier — the OPTIONAL direct-store applier for the tuple this use-case
+// itself owns: the object→project containment pointer (and the public wildcard grant).
+// The reconciler materialises the per-object verbs; nothing but this use-case writes the
+// pointer, so nothing but this use-case can take it away promptly.
+//
+// WHY IT MATTERS MORE THAN ITS SIZE SUGGESTS. The account administrator reaches every
+// object of the account THROUGH that pointer, not through a per-object grant. A
+// withdrawal that strips the verbs and leaves the pointer queued therefore still answers
+// ALLOW to the whole administrative tier on a resource the product already reports as
+// gone — the removal that looks complete while a class of subject keeps its access.
+//
+// Both methods must be idempotent at the SET level (already-present ⇒ applied,
+// already-absent ⇒ applied), because the durable fga_outbox row for the SAME tuple is
+// drained afterwards and must be a no-op. nil ⇒ queue-only (the pre-existing behaviour).
+type hierarchyTupleApplier interface {
+	WriteTuples(ctx context.Context, tuples []service.RelationTuple) error
+	DeleteTuples(ctx context.Context, tuples []service.RelationTuple) error
+}
+
 type objectReconciler interface {
 	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
 }
@@ -150,6 +169,7 @@ type RegisterResourceUseCase struct {
 	reconcile reconcileEventEmitter // optional, nil-safe
 	accounts  accountResolver       // optional, nil-safe
 	objRecon  objectReconciler      // sync post-commit — optional, nil-safe
+	tuples    hierarchyTupleApplier // sync post-commit containment pointer — optional, nil-safe
 	logger    *slog.Logger
 }
 
@@ -178,6 +198,19 @@ func (uc *RegisterResourceUseCase) WithAccountResolver(a accountResolver) *Regis
 func (uc *RegisterResourceUseCase) WithObjectReconciler(r objectReconciler, logger *slog.Logger) *RegisterResourceUseCase {
 	uc.objRecon = r
 	uc.logger = logger
+	return uc
+}
+
+// WithTupleApplier wires the OPTIONAL direct-store applier for the containment pointer
+// (and the public wildcard grant) this use-case owns. nil-safe: without it both
+// directions travel the durable queue alone, which is the pre-existing behaviour. The
+// logger surfaces a non-fatal apply error — a fast revoke that has quietly stopped
+// working must not look like nothing at all.
+func (uc *RegisterResourceUseCase) WithTupleApplier(a hierarchyTupleApplier, logger *slog.Logger) *RegisterResourceUseCase {
+	uc.tuples = a
+	if logger != nil {
+		uc.logger = logger
+	}
 	return uc
 }
 
@@ -305,12 +338,29 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// standing over-grant, so the tuple-delete and the reconcile event are enqueued
 	// unconditionally (fail-closed). The producer-cost saving is taken only on the grant
 	// path, where a no-op is provably a redelivery of work already done.
-	_, err = uc.emit(ctx, t, service.ResourceMirrorRow{
+	if _, err = uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:    objType,
 		ObjectID:      objID,
 		SourceVersion: sourceVersion(in),
-	}, false)
-	return err
+	}, false); err != nil {
+		return err
+	}
+	// SYMMETRY WITH Register. Registration drives its materialization in-process right
+	// after the commit; withdrawal used to hand its materialization entirely to the
+	// reconcile queue. The result was a product fast at granting and slow at revoking:
+	// the object's per-object verbs appeared inside the create request and were still
+	// answered ALLOW long after the resource itself had begun answering 404 (measured on
+	// the stand: twelve seconds, bounded only by queue depth, not by anything the caller
+	// could observe or wait for).
+	//
+	// The forward entry point is correct here even though it is named for the additive
+	// fast path: its delete-stale guard routes an object that ALREADY has materialized
+	// members to the FULL pass, and the mirror row was removed in the tx above, so that
+	// pass derives an empty desired set and strips the object's tuples — which is exactly
+	// the withdrawal. The co-committed reconcile event stays the at-least-once backstop,
+	// so a failure here degrades to the previous latency rather than losing the revoke.
+	uc.syncReconcile(ctx, objType, objID)
+	return nil
 }
 
 // tupleInput — the minimal transport-agnostic shape both RPCs share. Satisfied
@@ -420,7 +470,42 @@ func (uc *RegisterResourceUseCase) emitGrant(ctx context.Context, t tupleIntent,
 	if err := tx.Commit(ctx); err != nil {
 		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
+	uc.applyTuplesAfterCommit(ctx, tuples, write)
 	return true, nil
+}
+
+// applyTuplesAfterCommit applies the tuple this use-case owns DIRECTLY to the store,
+// AFTER the writer-tx committed — never inside it, since a rollback must not leave the
+// store holding a relationship no row justifies.
+//
+// It is an accelerator over a durable queue, not a replacement for it: the fga_outbox row
+// was enqueued in the same tx and the drainer re-applies the identical tuple as a no-op.
+// A failure here therefore costs latency, never the change itself — which is why it is
+// logged rather than returned. It IS logged, though: a fast path that has quietly stopped
+// working is indistinguishable from one that was never there.
+//
+// APPLYING A REMOVAL AHEAD OF ITS QUEUE CANNOT STRAND THE TUPLE. The withdrawal may run
+// while the registration's own outbox row is still unsent; the drainer would then write
+// the tuple back before removing it again. That ordering is guaranteed, not hoped for —
+// fga_outbox is claimed head-first per tuple key, so the earlier write is always applied
+// before the later delete, and the final state is the removed one. The only difference
+// the early apply makes is which moments answer ALLOW, and those are strictly fewer than
+// before it.
+func (uc *RegisterResourceUseCase) applyTuplesAfterCommit(ctx context.Context, tuples []service.RelationTuple, write bool) {
+	if uc.tuples == nil || len(tuples) == 0 {
+		return
+	}
+	var err error
+	if write {
+		err = uc.tuples.WriteTuples(ctx, tuples)
+	} else {
+		err = uc.tuples.DeleteTuples(ctx, tuples)
+	}
+	if err != nil && uc.logger != nil {
+		uc.logger.WarnContext(ctx,
+			"register resource: post-commit tuple apply failed (drain will backstop)",
+			slog.Bool("write", write), slog.Int("tuple_count", len(tuples)), slog.Any("err", err))
+	}
 }
 
 // emit runs the owner-tuple fga_outbox emit AND the resource_mirror UPSERT/DELETE
@@ -512,6 +597,12 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// contract as Begin). The row/tuple did not durably land; the caller's
 		// drainer re-delivers.
 		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+	}
+	// The register direction applies only what was actually enqueued: a redelivery the
+	// monotonic guard rejected (changed == false) enqueued nothing, so there is nothing
+	// to accelerate. The revoke direction always enqueues, and always applies.
+	if changed || !write {
+		uc.applyTuplesAfterCommit(ctx, tuples, write)
 	}
 	return changed, nil
 }

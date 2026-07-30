@@ -1559,4 +1559,42 @@ func (w *syncFGAWriter) writePacked(ctx context.Context, groups []objectTupleGro
 	return flush()
 }
 
+// DeleteTuples removes the pass's revoked tuple-set from OpenFGA, PER OBJECT, right
+// after the reconcile writer-tx committed — the mirror image of WriteTuples and the
+// second half of the same read-after-write closer.
+//
+// WHY IT EXISTS. Both directions of a pass are enqueued into fga_outbox in the writer-tx,
+// but only the additions used to be applied here; the removals waited for the drainer. A
+// grant therefore took effect in the caller's request while the matching revoke took as
+// long as the queue was deep — the permissive direction fast, the restrictive one slow.
+//
+// PER-OBJECT, like the write path, and for the same reason in reverse: a grant is the set
+// {v_*, tier} on one object, so removing it partially would leave a caller who can no
+// longer read the object still able to update it. Splitting per object keeps one
+// rejected object from stopping the removal of its siblings.
+//
+// IDEMPOTENT BY SET: clients.RelationStore.DeleteTuples has the postcondition "none of
+// these tuples is in the store", absorbing the tuple a racing drainer already removed. So
+// the later async drain of the SAME fga_outbox rows is a no-op, exactly as on the write
+// side.
+//
+// BEST-EFFORT, NEVER SILENT: a failure leaves the durable enqueue as the at-least-once
+// backstop, so the revoke degrades to the pre-fix async latency rather than being lost —
+// but it is logged per object, because "the fast revoke stopped working" must not look
+// like nothing at all (a control whose failures are invisible is a control that can be
+// dead for a long time).
+func (w *syncFGAWriter) DeleteTuples(ctx context.Context, tuples []reconcile.SyncFGATuple) error {
+	if len(tuples) == 0 {
+		return nil
+	}
+	for _, g := range groupTuplesByObject(tuples) {
+		if err := w.relations.DeleteTuples(ctx, g.tuples); err != nil && w.logger != nil {
+			w.logger.WarnContext(ctx,
+				"reconcile sync FGA revoke failed for object — the durable outbox drain remains the backstop",
+				"object", g.object, "tuple_count", len(g.tuples), "error", err)
+		}
+	}
+	return nil
+}
+
 var _ reconcile.SyncFGAWriter = (*syncFGAWriter)(nil)
