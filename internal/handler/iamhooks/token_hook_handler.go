@@ -83,7 +83,10 @@ func NewTokenHookHandler(
 // there is no end user in the exchange (RFC 6749 §4.4, RFC 7523 §2.1).
 const (
 	grantTypeClientCredentials = "client_credentials"
-	grantTypeJWTBearer         = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+	// #nosec G101 -- это идентификатор типа гранта из RFC 7523 §2.1, а не секрет: значение
+	// фиксировано стандартом и обязано совпадать байт-в-байт с тем, что присылает провайдер.
+	// Правило срабатывает на подстроку "bearer" в имени константы.
+	grantTypeJWTBearer = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 )
 
 // hydraTokenHookRequest — payload от Hydra (subset per Hydra v2 hook contract).

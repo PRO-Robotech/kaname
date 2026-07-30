@@ -80,6 +80,8 @@ func NewHydraAdminClientWithCA(baseURL, bearerToken, caFile string) (*HydraAdmin
 		return c, nil
 	}
 
+	// #nosec G304 -- путь к корневому сертификату задаёт оператор в настройках процесса;
+	// на вход запроса он не приходит. Пустой путь отсечён выше, нечитаемый — отказ старта.
 	pemBytes, err := os.ReadFile(caFile)
 	if err != nil {
 		return nil, fmt.Errorf(
