@@ -206,6 +206,21 @@ func TestAccountOwnerIsShownTheAccountHeIsAdmittedToDelete(t *testing.T) {
 		"control: the edge must refuse a non-owner")
 	require.False(t, w.serviceShowsAccount(t, outsider, acc),
 		"the in-service read gate must refuse a non-owner too")
+
+	// THE BOUNDARY THE TIERS ARE WRITTEN WITH, asserted in-service because supplying an
+	// account's structural facts is exactly what could blur it: the DELEGATED account
+	// administrator cascades WITHIN the account and never onto the account object itself —
+	// tearing down the tenancy stays with its owner and with the cloud. The account's verbs
+	// read `owner` and the cluster tier, never the `admin` tier, and the facts supplied here
+	// must not change that.
+	delegate := agId("usr", "agreedeleg1")
+	w.seedUser(t, delegate, acc)
+	w.harness.Write(t, "user:"+delegate, "admin", "account:"+acc)
+	require.False(t, w.allowed(t, "user:"+delegate, "v_get", "account:"+acc),
+		"control: the edge must not let the delegated administrator reach the account object")
+	require.False(t, w.serviceShowsAccount(t, delegate, acc),
+		"and iam's own read gate must not either — a delegated manager of a tenancy is not "+
+			"thereby able to read it as its owner can")
 }
 
 // TestDelegatedAccountAdminGetsOneAnswerFromEdgeAndService — level 3 over TWO
