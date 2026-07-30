@@ -98,6 +98,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accountId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('rdAccId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('rdAccId') === -1) _pv.push('rdAccId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -177,6 +182,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -627,9 +640,19 @@
                   "  if (v !== undefined && v !== null) pm.environment.set('sagaAccId', String(v));",
                   "} catch (e) {}",
                   "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('sagaAccId') === -1) _pv.push('sagaAccId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.defaultProjectId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('sagaDefProjId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('sagaDefProjId') === -1) _pv.push('sagaDefProjId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}",
                   "pm.test('metadata carries accountId (acc-prefix)', () => pm.expect(pm.environment.get('sagaAccId')||'').to.match(/^acc[a-z0-9]/));",
                   "pm.test('metadata carries defaultProjectId (prj-prefix)', () => pm.expect(pm.environment.get('sagaDefProjId')||'').to.match(/^prj[a-z0-9]/));"
@@ -711,6 +734,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -1005,6 +1036,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accountId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('rstAccId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('rstAccId') === -1) _pv.push('rstAccId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1084,6 +1120,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -1382,6 +1426,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.projectId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('rdPrjId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('rdPrjId') === -1) _pv.push('rdPrjId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1461,6 +1510,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -1735,6 +1792,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -1891,6 +1956,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.projectId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('dupPrjA', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('dupPrjA') === -1) _pv.push('dupPrjA');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1970,6 +2040,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2250,6 +2328,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.projectId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('dupPrjB', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('dupPrjB') === -1) _pv.push('dupPrjB');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -2329,6 +2412,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2545,6 +2636,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2699,6 +2798,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]

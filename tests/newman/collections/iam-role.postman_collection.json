@@ -98,6 +98,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('crudRoleId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('crudRoleId') === -1) _pv.push('crudRoleId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1619,6 +1624,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2040,6 +2053,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2322,6 +2343,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('a16RoleId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('a16RoleId') === -1) _pv.push('a16RoleId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -2401,6 +2427,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2474,6 +2508,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('a16AcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('a16AcbId') === -1) _pv.push('a16AcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -2553,6 +2592,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -2866,6 +2913,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -3187,6 +3242,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('lsopRoleId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('lsopRoleId') === -1) _pv.push('lsopRoleId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -3398,6 +3458,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('lsopTokRoleId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('lsopTokRoleId') === -1) _pv.push('lsopTokRoleId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -3477,6 +3542,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -3747,6 +3820,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -3831,6 +3912,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('verbStarRoleId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('verbStarRoleId') === -1) _pv.push('verbStarRoleId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -3910,6 +3996,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -4411,6 +4505,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -5038,6 +5140,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.projectId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('projectId212', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('projectId212') === -1) _pv.push('projectId212');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -5117,6 +5224,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -5249,6 +5364,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('prjRoleId212', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('prjRoleId212') === -1) _pv.push('prjRoleId212');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -5328,6 +5448,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -5637,6 +5765,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.roleId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('t33RoleId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('t33RoleId') === -1) _pv.push('t33RoleId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -5716,6 +5849,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -5946,6 +6087,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
@@ -6257,6 +6406,14 @@
                   "pm.environment.unset('_pollStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "if (j.done && j.error) {",
+                  "  try {",
+                  "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+                  "  } catch (e) {}",
+                  "  pm.environment.unset('_provisionalIds');",
+                  "}",
+                  "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
                   "else pm.environment.unset('lastOpError');",
                   "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]

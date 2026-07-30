@@ -780,6 +780,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_adminDel_abId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_adminDel_abId') === -1) _pv.push('_adminDel_abId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1148,6 +1153,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_strangerDel_abId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_strangerDel_abId') === -1) _pv.push('_strangerDel_abId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1644,6 +1654,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_abDeleteChk_abId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_abDeleteChk_abId') === -1) _pv.push('_abDeleteChk_abId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }

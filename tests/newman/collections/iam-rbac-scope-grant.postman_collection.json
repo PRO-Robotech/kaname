@@ -89,6 +89,11 @@
                   "  if (v !== undefined && v !== null) pm.environment.set('_sgRoleA', String(v));",
                   "} catch (e) {}",
                   "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_sgRoleA') === -1) _pv.push('_sgRoleA');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_op__sgRoleA', String(v));",
@@ -227,6 +232,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_sgBindAOpAcb', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_sgBindAOpAcb') === -1) _pv.push('_sgBindAOpAcb');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -833,6 +843,11 @@
                   "  if (v !== undefined && v !== null) pm.environment.set('_sgRoleGC', String(v));",
                   "} catch (e) {}",
                   "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_sgRoleGC') === -1) _pv.push('_sgRoleGC');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_op__sgRoleGC', String(v));",
@@ -971,6 +986,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_sgBindGCOpAcb', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('_sgBindGCOpAcb') === -1) _pv.push('_sgBindGCOpAcb');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }

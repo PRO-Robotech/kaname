@@ -1006,6 +1006,11 @@
                   "  const j = pm.response.json();",
                   "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('createdInternalUserId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('createdInternalUserId') === -1) _pv.push('createdInternalUserId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }

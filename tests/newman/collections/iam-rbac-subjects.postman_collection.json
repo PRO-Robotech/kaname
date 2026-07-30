@@ -93,6 +93,11 @@
                   "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e30UserId', String(v));",
                   "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e30UserId') === -1) _pv.push('e30UserId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
                   "pm.test('minted e30UserId has usr prefix', () => pm.expect(pm.environment.get('e30UserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
                 ]
               }
@@ -231,6 +236,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.groupId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e30GroupId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e30GroupId') === -1) _pv.push('e30GroupId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -373,6 +383,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e30AcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e30AcbId') === -1) _pv.push('e30AcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -954,6 +969,11 @@
                   "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e34NewUserId', String(v));",
                   "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e34NewUserId') === -1) _pv.push('e34NewUserId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
                   "pm.test('minted e34NewUserId has usr prefix', () => pm.expect(pm.environment.get('e34NewUserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
                 ]
               }
@@ -1097,6 +1117,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e34NewAcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e34NewAcbId') === -1) _pv.push('e34NewAcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1458,6 +1483,11 @@
                   "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e34LegUserId', String(v));",
                   "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e34LegUserId') === -1) _pv.push('e34LegUserId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
                   "pm.test('minted e34LegUserId has usr prefix', () => pm.expect(pm.environment.get('e34LegUserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
                 ]
               }
@@ -1601,6 +1631,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e34LegAcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e34LegAcbId') === -1) _pv.push('e34LegAcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1966,6 +2001,11 @@
                   "  const v = ((j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e33UserId', String(v));",
                   "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e33UserId') === -1) _pv.push('e33UserId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
                   "pm.test('minted e33UserId has usr prefix', () => pm.expect(pm.environment.get('e33UserId') || '', 'minted user id').to.match(/^usr[a-z0-9]+$/));"
                 ]
               }
@@ -2104,6 +2144,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e33AcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e33AcbId') === -1) _pv.push('e33AcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -2576,6 +2621,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.groupId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e31GroupId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e31GroupId') === -1) _pv.push('e31GroupId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -2997,6 +3047,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('e31AcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('e31AcbId') === -1) _pv.push('e31AcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -3593,6 +3648,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.groupId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('gmGrantGroupId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('gmGrantGroupId') === -1) _pv.push('gmGrantGroupId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -3881,6 +3941,11 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.metadata && j.metadata.accessBindingId);",
                   "  if (v !== undefined && v !== null) pm.environment.set('gmGrantAcbId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('gmGrantAcbId') === -1) _pv.push('gmGrantAcbId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }

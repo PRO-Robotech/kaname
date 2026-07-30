@@ -383,6 +383,29 @@ def save_from_response(jsonpath: str, env_var: str) -> List[str]:
     save a resource id once and read it many steps later, across requests that do not
     return it; the stale-poll class is specific to ids consumed immediately."""
     reset = [f"pm.environment.unset('{env_var}');"] if _is_operation_id_var(env_var) else []
+    # ЗАХВАТ ИЗ МЕТАДАННЫХ ОПЕРАЦИИ — ПРОВИЗОРНЫЙ, И ЭТО ОТМЕЧАЕТСЯ ЗДЕСЬ.
+    #
+    # `metadata.<res>Id` доступен СРАЗУ, до `done`, и другого источника id до завершения
+    # операции нет. Но он ПРЕДВЫДЕЛЕН и присутствует даже у операции, которая завершится
+    # ОШИБКОЙ. Тогда в переменной остаётся id ресурса, которого в базе нет, — «фантом»:
+    # он выглядит настоящим, поэтому кейс не падает здесь, а уезжает дальше и производит
+    # сотни производных отказов вокруг несуществующего объекта (замер 2026-07-30: одна
+    # неудача `Account.Create` дала 550 упавших утверждений в одной коллекции и увела
+    # разбор в ложную сторону).
+    #
+    # Сам захват отменить нельзя, поэтому имя переменной РЕГИСТРИРУЕТСЯ как провизорное;
+    # снимает его тот, кто первым узнаёт исход, — шаг опроса операции (см.
+    # poll_operation_until_done). Регистрация, а не немедленная очистка: на этом шаге
+    # исход ещё неизвестен.
+    provisional = []
+    if ".metadata" in jsonpath and not _is_operation_id_var(env_var):
+        provisional = [
+            "try {",
+            "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+            f"  if (_pv.indexOf('{env_var}') === -1) _pv.push('{env_var}');",
+            "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+            "} catch (e) {}",
+        ]
     return [
         *reset,
         "try {",
@@ -390,6 +413,7 @@ def save_from_response(jsonpath: str, env_var: str) -> List[str]:
         f"  const v = ({jsonpath});",
         f"  if (v !== undefined && v !== null) pm.environment.set('{env_var}', String(v));",
         "} catch (e) {}",
+        *provisional,
     ]
 
 
@@ -690,6 +714,20 @@ def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True
             "pm.environment.unset('_pollStarted');",
             "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
             "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+            # ФАНТОМ СНИМАЕТСЯ ЗДЕСЬ — это первый момент, когда исход операции известен.
+            # Идентификаторы, захваченные из `metadata` ДО завершения, помечены как
+            # провизорные (см. save_from_response). Операция закончилась ошибкой ⇒ ресурса
+            # с таким id не существует ⇒ переменная снимается, и последующие шаги падают
+            # на ПУСТОМ id — там, где предусловия действительно нет, — вместо того чтобы
+            # правдоподобно работать с несуществующим объектом и плодить производные отказы.
+            "if (j.done && j.error) {",
+            "  try {",
+            "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+            "    _pv.forEach(function (k) { pm.environment.unset(k); });",
+            "  } catch (e) {}",
+            "  pm.environment.unset('_provisionalIds');",
+            "}",
+            "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
             "else pm.environment.unset('lastOpError');",
             "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
         ],
