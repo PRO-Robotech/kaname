@@ -87,6 +87,26 @@ type Relations interface {
 	// composition root to keep a second value around for it is exactly how the two
 	// surfaces drifted apart.
 	ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) (principals []string, storeTruncated bool, err error)
+	// ReadTuplesStrong — сильное чтение существующих кортежей объекта.
+	//
+	// ОНО ЗДЕСЬ ПОТОМУ, ЧТО ЕГО ОТСУТСТВИЕ НИКОМУ НЕ БЫЛО ВИДНО. Синхронный писатель
+	// прав не требует эту возможность типом параметра: он ПРОБУЕТ привести переданное
+	// значение к набору с этим методом и, если не выходит, тихо остаётся без
+	// идемпотентного пути «прочитать, что уже есть, дописать недостающее». Компилятор
+	// такую потерю не ловит, обзор диффа — тоже.
+	//
+	// `clients.RelationQueries` объявляет только обычное `ReadTuples`, поэтому набор
+	// методов обёртки сильного чтения не содержал, а в бою писателю отдаётся именно
+	// обёртка. Следствие наблюдалось на боевой посадке: при попытке записать набор прав
+	// объекта, часть которого уже существует (а при доставке «хотя бы один раз» это
+	// ОБЫЧНЫЙ исход, не исключительный), ВЕСЬ набор объекта уезжал в очередь — та росла
+	// быстрее, чем разбиралась, и права появлялись с задержкой в десятки секунд.
+	//
+	// Так что комментарий выше — про «ПОЛНУЮ поверхность» — становится правдой только
+	// вместе с этой строкой. Разница между «обёртка подставима везде» и «почти везде»
+	// как раз и стоила той очереди.
+	ReadTuplesStrong(ctx context.Context, subjectFilter, relationFilter, objectFilter string,
+		pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error)
 }
 
 // FactSource — the structural facts iam can prove from its own committed rows.
