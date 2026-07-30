@@ -68,8 +68,6 @@ type countingRelations struct {
 	withFacts atomic.Int64
 }
 
-func (c *countingRelations) questions() int64 { return c.plain.Load() + c.withFacts.Load() }
-
 func (c *countingRelations) Check(ctx context.Context, subject, relation, object string) (bool, error) {
 	c.plain.Add(1)
 	return c.Relations.Check(ctx, subject, relation, object)

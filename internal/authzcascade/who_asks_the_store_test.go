@@ -72,8 +72,6 @@ var askingSites = map[string]lane{
 	"internal/handler/iamhooks/http_server.go:readinessHandler":                                    laneNotTheStore,
 	"internal/authzcascade/own_gates.go:Check":                                                     laneWrapper,
 	"internal/authzcascade/own_gates.go:CheckWithContext":                                          laneWrapper,
-	"internal/authzcascade/own_gates.go:CheckStored":                                               laneWrapper,
-	"internal/authzcascade/own_gates.go:askOnce":                                                   laneWrapper,
 	"internal/authzcascade/own_gates.go:secondChance":                                              laneWrapper,
 	"internal/authzguard/read_authz.go:AllowsVerb":                                                 laneOwnGate,
 	"internal/authzguard/scope.go:RequireScopeRelation":                                            laneOwnGate,
@@ -104,7 +102,6 @@ var questionMethods = map[string]bool{
 	"CheckConsistent":            true,
 	"CheckWithContextConsistent": true,
 	"CheckWithContextualTuples":  true,
-	"CheckStored":                true,
 }
 
 // TestEveryAskingSiteIsAccountedFor — the inventory.

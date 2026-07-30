@@ -48,7 +48,10 @@
 //   - seed.VerifyGate keeps the raw transport BY REQUIREMENT: its job is to report
 //     whether materialization was DELIVERED. A second chance derived from committed
 //     rows would make it answer yes about a queue that has delivered nothing — the
-//     gate would still run, still pass, and mean nothing.
+//     gate would still run, still pass, and mean nothing. There is deliberately no
+//     "ask without the second chance" method here for it to use: a method whose only
+//     caller is hypothetical is a claim the code does not keep, and the root already
+//     holds the transport for its own reasons.
 //   - The cluster-singleton probes (system-viewer floor, fga-proxy gate,
 //     cluster-admin short-circuit, force-logout, WhoAmI flags) are unaffected either
 //     way: `cluster` is not a derivable type, so Derivable() answers no and no read
@@ -132,8 +135,14 @@ func (c *Client) SecondChanceReachable() bool {
 
 // Check — clients.RelationStore / authzguard.RelationChecker.
 func (c *Client) Check(ctx context.Context, subject, relation, object string) (bool, error) {
-	if facts, known := c.memoFacts(ctx, object); known {
-		return c.askOnce(ctx, subject, relation, object, nil, facts)
+	// Facts already read for this object (a page prefetch, page_memo.go) ride along with
+	// the FIRST question instead of being used to re-ask a denied one. Not a shortcut past
+	// the ordinary resolve: a contextual tuple can only ADD a resolution path, so one
+	// question carrying true facts has exactly the answer the ask-then-re-ask pair has.
+	if facts, known := c.memoFacts(ctx, object); known && len(facts) > 0 {
+		return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, nil, facts)
+	} else if known {
+		return c.Relations.Check(ctx, subject, relation, object) // read, nothing to add
 	}
 	allowed, err := c.Relations.Check(ctx, subject, relation, object)
 	if allowed || err != nil {
@@ -146,48 +155,16 @@ func (c *Client) Check(ctx context.Context, subject, relation, object string) (b
 func (c *Client) CheckWithContext(
 	ctx context.Context, subject, relation, object string, condCtx map[string]any,
 ) (bool, error) {
-	if facts, known := c.memoFacts(ctx, object); known {
-		return c.askOnce(ctx, subject, relation, object, condCtx, facts)
+	if facts, known := c.memoFacts(ctx, object); known && len(facts) > 0 {
+		return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
+	} else if known {
+		return c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
 	}
 	allowed, err := c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
 	if allowed || err != nil {
 		return allowed, err
 	}
 	return c.secondChance(ctx, subject, relation, object, condCtx)
-}
-
-// askOnce asks the question ONCE, carrying facts that are already known for this object.
-//
-// This is not a shortcut past the ordinary resolve: a contextual tuple can only ADD a
-// resolution path, so one question carrying true facts has exactly the answer the
-// ask-then-re-ask pair has. It exists because on a page the facts were read for every row
-// up front (page_memo.go), so paying a second relation question per row would double the
-// dominant cost of the filter for nothing.
-func (c *Client) askOnce(
-	ctx context.Context, subject, relation, object string,
-	condCtx map[string]any, facts []authztypes.TupleKey,
-) (bool, error) {
-	if len(facts) == 0 {
-		// Read, and there is nothing to add — the plain question is the whole answer.
-		if condCtx == nil {
-			return c.Relations.Check(ctx, subject, relation, object)
-		}
-		return c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
-	}
-	return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
-}
-
-// CheckStored — the question WITHOUT the second chance: does the STORE, on its own
-// delivered tuples, allow this?
-//
-// It exists for the one caller whose subject is delivery itself (seed.VerifyGate). A
-// gate that reports whether materialization arrived must not be answered from the rows
-// materialization was supposed to be derived from; it would then pass on a queue that
-// has delivered nothing. Naming it here, rather than handing that caller the bare
-// transport, keeps the composition root free of a second relation value to choose
-// between.
-func (c *Client) CheckStored(ctx context.Context, subject, relation, object string) (bool, error) {
-	return c.Relations.Check(ctx, subject, relation, object)
 }
 
 // secondChance re-asks a denied question with the structural facts of its object.
@@ -203,11 +180,11 @@ func (c *Client) secondChance(
 	if c.facts == nil {
 		return false, nil
 	}
-	objectType, objectID, ok := splitFGAObject(object)
-	if !ok || !c.facts.Derivable(objectType) {
+	ref, ok := parseObjectRef(object)
+	if !ok || !c.facts.Derivable(ref.Type) {
 		return false, nil // no read for an object iam does not own
 	}
-	facts, err := c.facts.StructuralFacts(ctx, objectType, objectID)
+	facts, err := c.facts.StructuralFacts(ctx, ref.Type, ref.ID)
 	if err != nil {
 		return false, err
 	}
@@ -215,21 +192,6 @@ func (c *Client) secondChance(
 		return false, nil
 	}
 	return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
-}
-
-// splitFGAObject splits "<type>:<id>" on the FIRST colon. Object ids may themselves
-// contain colons (registry_repository:<reg>/<repo>:<tag>), so the remainder is the id
-// verbatim.
-func splitFGAObject(object string) (objectType, objectID string, ok bool) {
-	for i := 0; i < len(object); i++ {
-		if object[i] == ':' {
-			if i == 0 || i == len(object)-1 {
-				return "", "", false
-			}
-			return object[:i], object[i+1:], true
-		}
-	}
-	return "", "", false
 }
 
 // Compile-time guards: the wrapper must be substitutable for the transport at every

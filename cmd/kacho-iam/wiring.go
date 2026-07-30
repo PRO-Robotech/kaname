@@ -161,6 +161,18 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 			"(structural-fact resolver not wired into the relation store)")
 		os.Exit(1)
 	}
+	// The page read is guarded too, and refusing to start over it is deliberate. Without it
+	// the gates stay CORRECT and every page filter goes back to one transaction per row —
+	// measured at 200 transactions for a page of 100, and page size is part of the contract
+	// up to 1000 while narrowing it to fit a budget is forbidden. That is a broken contract
+	// at scale, not a slow path, and it is invisible from the outside until a large page
+	// arrives. A control whose absence nobody can notice is not a control.
+	if !structuralFacts.BatchReachable() {
+		logger.Error("refusing to start: the structural page read is not wired, so every list " +
+			"filter would resolve one object at a time and a contract-sized page would not " +
+			"fit its request budget")
+		os.Exit(1)
+	}
 
 	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
 	// explicit-model 2026 P4). Shared by AccessBinding.Create, the Role.Update
