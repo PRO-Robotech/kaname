@@ -135,7 +135,6 @@ func (s *Snapshot) FactsByIDs(
 		return nil, nil // not a type this repository can speak about
 	}
 	return s.scan(ctx,
-		//nolint:gosec // table comes from the closed accountScopedTables map above, never from input.
 		fmt.Sprintf(`SELECT id, COALESCE(account_id, '') FROM kacho_iam.%s WHERE id = ANY($1)`, table), ids,
 		func(id, accountID string) []domain.StructuralTuple {
 			return oneFact(domain.AccountScopedStructuralFact(accountID, objectType, id))
