@@ -602,3 +602,56 @@ func (r *fakeOpsRepo) Cancel(_ context.Context, id string) error {
 func (w *fakeWriter) EmitReconcileEvent(context.Context, string, string, string) error {
 	return nil
 }
+
+// Аккаунт — корень тенантности и собственная область ЧЕЛОВЕКА, поэтому владелец
+// структурно пользователь: `accounts.owner_user_id` ссылается на `users(id)`.
+//
+// Владелец выводится из вызывающего, а accessor, которым он выводился,
+// (`authzguard.PrincipalUserID`) по своему назначению — АУДИТНЫЙ: его godoc прямо
+// говорит «for user / service-account / system principals», потому что он отвечает на
+// вопрос «кто совершил действие», а не «кто может владеть». Для машинного вызывающего
+// он отдавал `sva…`, и это уезжало в колонку, ссылающуюся на `users`.
+//
+// Что из этого выходило на боевой посадке (замер 2026-07-30): запрос ПРИНИМАЛСЯ — 200,
+// операция заведена, идентификатор аккаунта ПРЕДВЫДЕЛЕН и отдан клиенту, — а падало всё
+// на ФИКСАЦИИ транзакции, потому что внешний ключ DEFERRABLE INITIALLY DEFERRED
+// проверяется на COMMIT. Сообщение при этом приходило общее, не называющее ни поля, ни
+// причины: «referenced resource not found or still in use».
+//
+// Это отказ, обязанный быть СИНХРОННЫМ и называть предмет: невыполнимое предусловие
+// отвергается первым стейтментом, тон сообщения — часть контракта. Заодно исчезает
+// предвыделенный идентификатор, а с ним и фантомный класс на этом пути.
+//
+// ЭТО НЕ РЕШЕНИЕ О ПРАВАХ и не повтор in-service authz: машина по-прежнему вправе
+// ДЕЙСТВОВАТЬ внутри аккаунта по выданной привязке (см.
+// machine_principal_reaches_usecase_test.go про Delete). Здесь — структурное
+// предусловие: владеть аккаунтом машина не может, потому что владение есть
+// ответственность.
+func TestCreateAccount_NonUserPrincipal_RejectedSynchronously(t *testing.T) {
+	// Только служебная учётка: это принципал, который РЕАЛЬНО доходил до этого места и
+	// принимался. `system`-принципал сюда не доходит вовсе — его раньше отсекает
+	// анти-анонимная стража (`RequireAuthenticated`), и он получает отказ прав; это
+	// поведение существовало до правки и здесь не утверждается, чтобы тест не заявлял
+	// того, чего не проверяет.
+	for name, p := range map[string]operations.Principal{
+		"service_account": {Type: "service_account", ID: "sva0000000000000bot1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opsRepo := newFakeOpsRepo()
+			uc := NewCreateAccountUseCase(newFakeRepo(), opsRepo)
+
+			op, err := uc.Execute(operations.WithPrincipal(context.Background(), p),
+				domain.Account{Name: "acct-machine-owner"})
+
+			require.Error(t, err, "машинный принципал не может владеть аккаунтом — отказ обязан быть здесь, синхронно")
+			require.Nil(t, op, "операция не должна заводиться: тогда не возникает и предвыделенного идентификатора")
+
+			st, ok := status.FromError(err)
+			require.True(t, ok, "ошибка обязана быть gRPC-статусом")
+			assert.Equal(t, codes.InvalidArgument, st.Code(),
+				"невыполнимое предусловие — INVALID_ARGUMENT первым стейтментом, а не отложенный отказ на COMMIT")
+			assert.Contains(t, st.Message(), "ownerUserId",
+				"сообщение обязано называть ПОЛЕ, иначе читатель не знает, что не так")
+		})
+	}
+}

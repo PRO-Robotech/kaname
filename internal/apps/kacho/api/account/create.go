@@ -176,6 +176,37 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	// Derive owner° from the authenticated caller (never a body field —
 	// anti-spoofing). The verified principal becomes the account owner and the
 	// subject of the owner AccessBinding co-committed by the saga.
+	// ВЛАДЕТЬ АККАУНТОМ МОЖЕТ ТОЛЬКО ПОЛЬЗОВАТЕЛЬ — и это структурное предусловие,
+	// а не решение о правах.
+	//
+	// Аккаунт есть корень тенантности и собственная область человека; владелец —
+	// структурный источник прав на нём (создание и удаление якорятся на владельце).
+	// Поэтому `accounts.owner_user_id` ссылается на `users(id)`. Служебная учётка —
+	// ресурс ВНУТРИ тенантности: она вправе ДЕЙСТВОВАТЬ в аккаунте по выданной
+	// привязке (см. machine_principal_reaches_usecase_test.go про Delete), но владеть
+	// им не может — владение это ответственность.
+	//
+	// Проверять надо РОД принципала, а не только непустоту его идентификатора.
+	// `authzguard.PrincipalUserID` — accessor АУДИТНЫЙ: его godoc прямо перечисляет
+	// «user / service-account / system», потому что он отвечает на вопрос «кто
+	// совершил действие», а не «кто может владеть». Здесь он использовался для вывода
+	// ВЛАДЕЛЬЦА, и для машинного вызывающего отдавал `sva…` — идентификатор, которого
+	// в `users` нет.
+	//
+	// Чем это оборачивалось (замер боевой посадки 2026-07-30): запрос ПРИНИМАЛСЯ,
+	// операция заводилась, идентификатор аккаунта предвыделялся и уходил клиенту, а
+	// падало всё на ФИКСАЦИИ — внешний ключ DEFERRABLE INITIALLY DEFERRED проверяется
+	// на COMMIT — и приходило общее сообщение, не называющее ни поля, ни причины.
+	// Клиент при этом уносил предвыделенный идентификатор несуществующего аккаунта и
+	// продолжал работать с фантомом.
+	//
+	// Отказ обязан быть здесь: синхронно, первым стейтментом, с именем поля.
+	principal := operations.PrincipalFromContext(ctx)
+	if principal.Type != "user" {
+		return nil, shared.InvalidArg("ownerUserId",
+			"Illegal argument ownerUserId (an Account is owned by a user; "+
+				"principal type is "+principal.Type+")")
+	}
 	principalID := authzguard.PrincipalUserID(ctx)
 	if principalID == "" {
 		return nil, shared.InvalidArg("ownerUserId", "Illegal argument ownerUserId (derived from caller)")
