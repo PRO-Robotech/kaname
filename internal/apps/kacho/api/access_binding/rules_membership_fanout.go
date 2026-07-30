@@ -61,6 +61,8 @@ func (f *RoleMembershipFanout) CountActiveBindings(ctx context.Context, roleID d
 // binding diff is idempotent (a re-run converges). The list is read once
 // (pool-scoped); a binding revoked mid-fan-out is a no-op in ReconcileBinding
 // (LoadBinding sees !Active). Bounded by the sync count-check upstream.
+//
+// A failing binding does NOT abort the rest — see the loop below.
 func (f *RoleMembershipFanout) ReconcileActiveBindings(ctx context.Context, roleID domain.RoleID) error {
 	rd, err := f.repo.Reader(ctx)
 	if err != nil {
@@ -71,10 +73,17 @@ func (f *RoleMembershipFanout) ReconcileActiveBindings(ctx context.Context, role
 	if err != nil {
 		return fmt.Errorf("fanout: list active bindings of role %s: %w", roleID, err)
 	}
+	// Every binding is attempted, and the FIRST failure is what the caller hears.
+	// Returning at the first failure made the outcome depend on the ORDER of the
+	// list: the bindings before the failing one were re-materialized against the new
+	// rules and the ones after it kept the old, so which subjects saw the change was
+	// decided by created_at. The pass is idempotent, so carrying on costs nothing and
+	// leaves the residue for the sweep to close.
+	var firstErr error
 	for i := range bindings {
-		if rerr := f.reconciler.ReconcileBinding(ctx, bindings[i].ID); rerr != nil {
-			return fmt.Errorf("fanout: reconcile binding %s of role %s: %w", bindings[i].ID, roleID, rerr)
+		if rerr := f.reconciler.ReconcileBinding(ctx, bindings[i].ID); rerr != nil && firstErr == nil {
+			firstErr = fmt.Errorf("fanout: reconcile binding %s of role %s: %w", bindings[i].ID, roleID, rerr)
 		}
 	}
-	return nil
+	return firstErr
 }
