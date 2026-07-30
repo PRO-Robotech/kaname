@@ -43,7 +43,7 @@ def _collection(tmp, name, items):
     return p
 
 
-def _report(tmp, name, positions, total, assertions_failed=0, unanswered=()):
+def _report(tmp, name, positions, total, assertions_failed=0, unanswered=(), failures=()):
     """Synthesise a newman JSON report where only `positions` executed.
 
     `unanswered` — positions that newman ATTEMPTED but that never produced a
@@ -63,11 +63,14 @@ def _report(tmp, name, positions, total, assertions_failed=0, unanswered=()):
             ex["requestError"] = {"code": "ENOTFOUND", "syscall": "getaddrinfo",
                                   "hostname": "api.kacho.local"}
         execs.append(ex)
+    fails = [{"error": {"test": f"assertion on {n}", "message": "boom"},
+              "source": {"name": n}, "parent": {"name": "F"}} for n in failures]
     (d / f"{name}.json").write_text(json.dumps({
         "run": {"executions": execs,
-                "stats": {"assertions": {"total": len(execs), "failed": assertions_failed},
+                "stats": {"assertions": {"total": len(execs) + len(fails),
+                                         "failed": assertions_failed or len(fails)},
                           "requests": {"total": len(execs), "failed": len(unanswered)}},
-                "failures": []},
+                "failures": fails},
     }))
 
 
@@ -289,6 +292,76 @@ def test_report_for_a_different_collection_is_red(tmp_path):
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout + r.stderr
     assert "report/collection mismatch" in r.stdout
+
+
+def test_guard_that_asserted_and_failed_is_not_filed_as_a_silent_skip(tmp_path):
+    """THE FOURTH STATE — a step whose script ASSERTED but whose request never ran.
+
+    Measured on the production-posture run of 2026-07-30: newman's JSON reporter does
+    NOT put an execution record in `run.executions` for an item that skips its own
+    request from the pre-request script. Its assertions still count in `run.stats` and
+    still appear in `run.failures` — so walking the array alone UNDERCOUNTS. In
+    `iam-user.json` the array accounted for 121 failed assertions where the summary
+    said 137; sixteen belonged to items with NO execution entry at all, across four
+    iam collections.
+
+    For this gate the consequence is worse than a wrong number. The very items that
+    vanish are the guarded ones, and a guard is exactly what this gate accepts as an
+    explanation. So a guard that fired, asserted and FAILED was filed as
+    "explained-skip — nothing was lost", which is the opposite of what happened.
+
+    The verdict must come from the summary and the failure list, not from the array.
+    """
+    items = [_item("create-rejected"),
+             _item("poll", prereq=[
+                 "if (!pm.environment.get('opId')) {",
+                 "  pm.test('operation id was captured', () => pm.expect.fail('opId is empty'));",
+                 "  pm.execution.skipRequest();",
+                 "}",
+             ]),
+             _item("after")]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [0, 2], 3, failures=["poll"])
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "explained-skip" not in r.stdout, "a failed assertion was filed as a legal skip"
+    assert "ASSERTED" in r.stdout
+    assert "poll" in r.stdout
+
+
+def test_a_guard_that_skipped_quietly_is_still_explained(tmp_path):
+    """The other direction — the gate must stay usable.
+
+    Same shape, same guard, same missing execution; the only difference is that the
+    report names no failure for it. That is the sanctioned conditional poll: a create
+    refused on purpose has nothing to poll. It must remain GREEN, or every negative
+    case in the tree reddens and the gate is switched off within a day.
+    """
+    items = [_item("create-rejected"),
+             _item("poll", prereq=[
+                 "if (!pm.environment.get('opId')) { pm.execution.skipRequest(); }",
+             ]),
+             _item("after")]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [0, 2], 3, failures=[])
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 explained-skip" in r.stdout
+    assert "ASSERTED" not in r.stdout
+
+
+def test_the_gate_reconciles_its_own_count_with_the_summary(tmp_path):
+    """The gate must state the volume it read and where the number came from.
+
+    "Zero findings" has to be distinguishable from "zero read" — and the array this
+    gate walks is known not to be complete, so the line it prints says which side the
+    numbers come from.
+    """
+    _collection(tmp_path, "c", [_item(f"i{i}") for i in range(3)])
+    _report(tmp_path, "c", [0, 1, 2], 3)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "summary" in r.stdout, "the reconciliation against run.stats is not reported"
 
 
 def test_missing_report_is_left_to_the_assertion_gate(tmp_path):

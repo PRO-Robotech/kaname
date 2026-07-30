@@ -152,6 +152,21 @@ def _iter_leaves(items):
             yield from _iter_leaves(it["item"])
 
 
+def _iter_leaf_parents(items, parent=""):
+    """The enclosing folder name of each leaf, in the SAME order as `_iter_leaves`.
+
+    newman's failure records identify a step by the pair (`parent.name`,
+    `source.name`) — folder and item — because item names repeat across folders.
+    Positional matching needs the same pair, so the folder is tracked separately
+    rather than changing what `_iter_leaves` yields.
+    """
+    for it in items:
+        if "request" in it:
+            yield parent
+        if "item" in it:
+            yield from _iter_leaf_parents(it["item"], it.get("name", ""))
+
+
 def _scripts(item, listen=None):
     """Concatenated script source of an item, optionally only for one event type
     ('prerequest' | 'test')."""
@@ -231,6 +246,7 @@ def check_collection(col_path, out_dir):
     with open(col_path, encoding="utf-8") as fh:
         col = json.load(fh)
     leaves = list(_iter_leaves(col.get("item", [])))
+    parents = list(_iter_leaf_parents(col.get("item", [])))
     total = len(leaves)
 
     # (1a) static ban — setNextRequest(null) ends the run
@@ -273,6 +289,8 @@ def check_collection(col_path, out_dir):
     with open(report, encoding="utf-8") as fh:
         run = json.load(fh).get("run", {})
     executions = run.get("executions", []) or []
+    stats = run.get("stats", {}) or {}
+    failures = run.get("failures", []) or []
 
     executed = set()
     lengths = set()
@@ -305,22 +323,83 @@ def check_collection(col_path, out_dir):
             f"report cursors say {sorted(lengths)} — stale or mismatched report"
         )
 
+    # ── THE FOURTH STATE: asserted, but never executed ───────────────────────
+    #
+    # `run.executions` is NOT the complete record of what ran, and this gate walked
+    # only that array. Measured on the production-posture run of 2026-07-30: an item
+    # that skips its own request from the pre-request script gets NO execution record
+    # at all, while its assertions still count in `run.stats` and still appear in
+    # `run.failures`. In `iam-user.json` the array accounted for 121 failed assertions
+    # against a summary of 137; the missing sixteen belonged to items with zero
+    # execution entries. Four iam collections carried the same shape.
+    #
+    # For THIS gate the wrong number is the smaller half of the problem. The items
+    # that disappear are precisely the guarded ones — and a guard is what this gate
+    # accepts as the explanation "nothing was lost here". So a guard that fired,
+    # asserted and FAILED was being filed as a legal silent skip: the gate reported
+    # the opposite of what happened, in the one place it was least able to notice.
+    #
+    # Hence the failure list is consulted as evidence of execution. A step named there
+    # RAN — whatever the array says — and it is a finding, not a skip.
+    asserted_names = set()
+    for f in failures:
+        src = ((f.get("source") or {}).get("name") or "").strip()
+        par = ((f.get("parent") or {}).get("name") or "").strip()
+        if src:
+            asserted_names.add((par, src))
+            asserted_names.add(("", src))
+    asserted = set()
+    if asserted_names:
+        for i, (it, par) in enumerate(zip(leaves, parents)):
+            nm = (it.get("name") or "").strip()
+            if (par, nm) in asserted_names or ("", nm) in asserted_names:
+                asserted.add(i)
+
     reasons = _explained_skippable(leaves)
     # An unanswered request is NOT explained by a skip guard: the guard says "this
     # request did not run", the transport error says "it ran and got nothing back".
     # Folding the second into the first is how the class hid in the first place.
+    # An ASSERTED-but-unexecuted step is not explained by one either — its script ran.
+    asserted_gap = sorted(i for i in range(total)
+                          if i not in executed and i not in unanswered and i in asserted)
     unexplained = [i for i in range(total)
-                   if i not in executed and i not in reasons and i not in unanswered]
+                   if i not in executed and i not in reasons and i not in unanswered
+                   and i not in asserted]
     skipped_ok = [i for i in range(total)
-                  if i not in executed and i in reasons and i not in unanswered]
+                  if i not in executed and i in reasons and i not in unanswered
+                  and i not in asserted]
 
     pct = (100.0 * len(executed) / total) if total else 100.0
+    # Where the numbers come from is part of the report: the left-hand ones are walked
+    # from the executions array (which is incomplete by construction), the right-hand
+    # ones are the run summary, which is authoritative. Printing both makes "zero
+    # findings" distinguishable from "zero read", and makes a future divergence visible
+    # instead of silently halving a count.
+    s_assert = (stats.get("assertions") or {})
+    walked_assertions = sum(len(ex.get("assertions") or []) for ex in executions)
     line = (
         f"{name}: executed {len(executed)}/{total} ({pct:.0f}%)"
         f"{f', {len(skipped_ok)} explained-skip' if skipped_ok else ''}"
+        f"{f', {len(asserted_gap)} ASSERTED-NOT-EXECUTED' if asserted_gap else ''}"
         f"{f', {len(unanswered)} UNANSWERED' if unanswered else ''}"
         f"{f', {len(unexplained)} UNEXPLAINED' if unexplained else ''}"
+        f"  [summary: {s_assert.get('total', 0)} assertions,"
+        f" {s_assert.get('failed', 0)} failed, {len(failures)} listed;"
+        f" array walked {walked_assertions}]"
     )
+
+    if asserted_gap:
+        problems.append(
+            f"  {len(asserted_gap)} step(s) ASSERTED but have no execution record — their "
+            f"script ran and the run summary counts their assertions, while the executions "
+            f"array does not contain them. A skip guard cannot explain a step that asserted: "
+            f"read the verdict from run.stats / run.failures, and fix the step so its check "
+            f"either runs or is not written:"
+        )
+        for i in asserted_gap[:_MAX_REPORTED]:
+            problems.append(f"    [{i}] {leaves[i].get('name','?')}")
+        if len(asserted_gap) > _MAX_REPORTED:
+            problems.append(f"    ... and {len(asserted_gap) - _MAX_REPORTED} more")
 
     if unanswered:
         problems.append(
