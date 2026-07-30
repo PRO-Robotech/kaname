@@ -348,7 +348,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); });"
+                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); }); pm.environment.unset('_alreadyExists_chUserOp'); if ((j.error && j.error.code) === 6) { pm.environment.set('_alreadyExists_chUserOp', '1'); }"
                 ]
               }
             }
@@ -527,7 +527,18 @@
                   "const _dc = parseInt(pm.environment.get('_chUserRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chUserRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUserRevOpDelCount'); pm.environment.unset('_chUserRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "    pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "  });",
+                  "} else {",
+                  "  pm.test('404 допустим ТОЛЬКО как фантом-id полосы ALREADY_EXISTS', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(404);",
+                  "    pm.expect(pm.environment.get('_alreadyExists_chUserOp'),",
+                  "      'DELETE ответил 404, а создание выдачи прошло без ALREADY_EXISTS: id был настоящим, значит строку снёс кто-то посторонний и отзыв этим шагом не выполнен').to.eql('1');",
+                  "  });",
+                  "}",
                   "pm.environment.unset('chUserRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chUserRevOp', j.id);"
                 ]
@@ -1266,7 +1277,10 @@
                   "const _dc = parseInt(pm.environment.get('_chgEquivRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgEquivRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgEquivRevOpDelCount'); pm.environment.unset('_chgEquivRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "  pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "});",
                   "pm.environment.unset('chgEquivRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chgEquivRevOp', j.id);"
                 ]
@@ -2835,7 +2849,10 @@
                   "const _dc = parseInt(pm.environment.get('_chgNmRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgNmRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgNmRevOpDelCount'); pm.environment.unset('_chgNmRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "  pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "});",
                   "pm.environment.unset('chgNmRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chgNmRevOp', j.id);"
                 ]
@@ -3514,7 +3531,10 @@
                   "const _dc = parseInt(pm.environment.get('_chgRvRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chgRvRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgRvRevOpDelCount'); pm.environment.unset('_chgRvRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "  pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "});",
                   "pm.environment.unset('chgRvRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chgRvRevOp', j.id);"
                 ]
@@ -3991,7 +4011,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); });"
+                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); }); pm.environment.unset('_alreadyExists_chSaOp'); if ((j.error && j.error.code) === 6) { pm.environment.set('_alreadyExists_chSaOp', '1'); }"
                 ]
               }
             }
@@ -4170,7 +4190,18 @@
                   "const _dc = parseInt(pm.environment.get('_chSaRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chSaRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaRevOpDelCount'); pm.environment.unset('_chSaRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "    pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "  });",
+                  "} else {",
+                  "  pm.test('404 допустим ТОЛЬКО как фантом-id полосы ALREADY_EXISTS', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(404);",
+                  "    pm.expect(pm.environment.get('_alreadyExists_chSaOp'),",
+                  "      'DELETE ответил 404, а создание выдачи прошло без ALREADY_EXISTS: id был настоящим, значит строку снёс кто-то посторонний и отзыв этим шагом не выполнен').to.eql('1');",
+                  "  });",
+                  "}",
                   "pm.environment.unset('chSaRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chSaRevOp', j.id);"
                 ]
@@ -4647,7 +4678,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); });"
+                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); }); pm.environment.unset('_alreadyExists_chSaIsoOp'); if ((j.error && j.error.code) === 6) { pm.environment.set('_alreadyExists_chSaIsoOp', '1'); }"
                 ]
               }
             }
@@ -4821,7 +4852,18 @@
                   "const _dc = parseInt(pm.environment.get('_chSaIsoRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chSaIsoRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaIsoRevOpDelCount'); pm.environment.unset('_chSaIsoRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "    pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "  });",
+                  "} else {",
+                  "  pm.test('404 допустим ТОЛЬКО как фантом-id полосы ALREADY_EXISTS', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(404);",
+                  "    pm.expect(pm.environment.get('_alreadyExists_chSaIsoOp'),",
+                  "      'DELETE ответил 404, а создание выдачи прошло без ALREADY_EXISTS: id был настоящим, значит строку снёс кто-то посторонний и отзыв этим шагом не выполнен').to.eql('1');",
+                  "  });",
+                  "}",
                   "pm.environment.unset('chSaIsoRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chSaIsoRevOp', j.id);"
                 ]
@@ -5298,7 +5340,7 @@
                   "pm.environment.unset('_pollStarted');",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); });"
+                  "pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => { const c = j.error && j.error.code; pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); }); pm.environment.unset('_alreadyExists_chUsrIsoOp'); if ((j.error && j.error.code) === 6) { pm.environment.set('_alreadyExists_chUsrIsoOp', '1'); }"
                 ]
               }
             }
@@ -5472,7 +5514,18 @@
                   "const _dc = parseInt(pm.environment.get('_chUsrIsoRevOpDelCount') || '0', 10);",
                   "if (pm.response.code === 403 && _dc < 300) { pm.environment.set('_chUsrIsoRevOpDelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUsrIsoRevOpDelCount'); pm.environment.unset('_chUsrIsoRevOpDelStarted');",
-                  "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                  "    pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+                  "  });",
+                  "} else {",
+                  "  pm.test('404 допустим ТОЛЬКО как фантом-id полосы ALREADY_EXISTS', () => {",
+                  "    pm.expect(pm.response.code, JSON.stringify(j)).to.eql(404);",
+                  "    pm.expect(pm.environment.get('_alreadyExists_chUsrIsoOp'),",
+                  "      'DELETE ответил 404, а создание выдачи прошло без ALREADY_EXISTS: id был настоящим, значит строку снёс кто-то посторонний и отзыв этим шагом не выполнен').to.eql('1');",
+                  "  });",
+                  "}",
                   "pm.environment.unset('chUsrIsoRevOp');",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('chUsrIsoRevOp', j.id);"
                 ]

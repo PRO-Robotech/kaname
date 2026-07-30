@@ -121,9 +121,19 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exis
         capture = (f"if (j.response && j.response.id && !pm.environment.get('{out_id_var}')) "
                    f"{{ pm.environment.set('{out_id_var}', j.response.id); }}")
     if allow_already_exists:
+        # ПОЛОСА ALREADY_EXISTS ЗАПИСЫВАЕТСЯ ФАКТОМ, а не остаётся догадкой. Здесь
+        # операция вправе закончиться ошибкой 6: выдачу с тем же 5-кортежем мог создать
+        # ПАРАЛЛЕЛЬНЫЙ прогон между предочисткой и этим созданием. Но `metadata` несёт
+        # ПРЕДВЫДЕЛЕННЫЙ id ДАЖЕ на такой операции, поэтому захваченный вызывающим
+        # `acb_var` в этой полосе — фантом: строки под ним нет, и её удаление ответит
+        # 404. Флаг делает это проверяемым предусловием для шага отзыва вместо
+        # безусловной терпимости к 404 (см. revoke_await).
         err_test = ("pm.test('grant done (no hard error; ALREADY_EXISTS tolerated)', () => {"
                     " const c = j.error && j.error.code;"
-                    " pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); });")
+                    " pm.expect([undefined, null, 0, 6], JSON.stringify(j.error)).to.include(c); });"
+                    f" pm.environment.unset('_alreadyExists_{op_var}');"
+                    " if ((j.error && j.error.code) === 6)"
+                    f" {{ pm.environment.set('_alreadyExists_{op_var}', '1'); }}")
     else:
         err_test = "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
     return Step(
@@ -361,7 +371,50 @@ def check_until_deny(name, fga_subject, relation, obj, claim):
     )
 
 
-def revoke_await(name_prefix, acb_var, rev_op_var):
+def _revoke_committed():
+    """ФОРМА 1 — отзыв СОСТОЯЛСЯ: 200 + Operation-конверт iam."""
+    return [
+        "pm.test('revoke COMMITTED (200 + iam Operation)', () => {",
+        "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+        "  pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/);",
+        "});",
+    ]
+
+
+def _revoke_phantom(grant_op_var):
+    """ФОРМА 2 — удалять было НЕЧЕГО, и это ДОКАЗАНО, а не предположено.
+
+    404 законен ровно в одной полосе: создание выдачи закончилось ALREADY_EXISTS (её
+    успел создать параллельный прогон), а `metadata` отдала ПРЕДВЫДЕЛЕННЫЙ id, которого
+    в базе нет. `poll_op(allow_already_exists=True)` записывает эту полосу флагом,
+    поэтому здесь она ТРЕБУЕТСЯ, а не допускается: 404 при успешном создании означает,
+    что выдачу снёс кто-то посторонний, — и это обязано валить кейс, потому что тогда
+    отзыв, который кейс объявляет своим предметом, не выполнен ничем."""
+    return [
+        "pm.test('404 допустим ТОЛЬКО как фантом-id полосы ALREADY_EXISTS', () => {",
+        "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(404);",
+        f"  pm.expect(pm.environment.get('_alreadyExists_{grant_op_var}'),",
+        "    'DELETE ответил 404, а создание выдачи прошло без ALREADY_EXISTS: id был "
+        "настоящим, значит строку снёс кто-то посторонний и отзыв этим шагом не "
+        "выполнен').to.eql('1');",
+        "});",
+    ]
+
+
+def revoke_outcome(grant_op_var=None):
+    """Развилка двух форм. Без `grant_op_var` полоса фантома невозможна → только форма 1."""
+    if grant_op_var is None:
+        return _revoke_committed()
+    return [
+        "if (pm.response.code === 200) {",
+        *["  " + line for line in _revoke_committed()],
+        "} else {",
+        *["  " + line for line in _revoke_phantom(grant_op_var)],
+        "}",
+    ]
+
+
+def revoke_await(name_prefix, acb_var, rev_op_var, grant_op_var=None):
     """Revoke the binding DETERMINISTICALLY via the cluster-admin principal, then poll the revoke
     Operation to done.
 
@@ -387,7 +440,7 @@ def revoke_await(name_prefix, acb_var, rev_op_var):
                 f"const _dc = parseInt(pm.environment.get('_{rev_op_var}DelCount') || '0', 10);",
                 f"if (pm.response.code === 403 && _dc < {POLL_CAP}) {{ pm.environment.set('_{rev_op_var}DelCount', String(_dc + 1)); const _ipd5 = Date.now(); while (Date.now() - _ipd5 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }}",
                 f"pm.environment.unset('_{rev_op_var}DelCount'); pm.environment.unset('_{rev_op_var}DelStarted');",
-                "pm.test('revoke committed (200 Operation or already-gone 404)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                *revoke_outcome(grant_op_var),
                 f"pm.environment.unset('{rev_op_var}');",
                 f"if (pm.response.code === 200 && j && j.id) pm.environment.set('{rev_op_var}', j.id);",
             ],
@@ -412,7 +465,7 @@ def revoke_await(name_prefix, acb_var, rev_op_var):
     ]
 
 
-def revoke_then_gone(name_prefix, acb_var, fga_subject, claim, rev_op_var):
+def revoke_then_gone(name_prefix, acb_var, fga_subject, claim, rev_op_var, grant_op_var=None):
     """Revoke the binding (awaiting the revoke Operation), then assert the subject's access is
     GONE via an FGA Check-poll-until-deny on the `v_get` verb relation the ROLE_VIEW@ACCOUNT
     binding emitted (`account:<id>#v_get@<subject>` — the exact relation the account Get
@@ -420,7 +473,7 @@ def revoke_then_gone(name_prefix, acb_var, fga_subject, claim, rev_op_var):
     the access-removed assertion AND a clean-slate teardown (the binding is removed so a
     later case reading as the same principal starts clean)."""
     return [
-        *revoke_await(name_prefix, acb_var, rev_op_var),
+        *revoke_await(name_prefix, acb_var, rev_op_var, grant_op_var),
         check_until_deny(f"{name_prefix}-gone", fga_subject, "v_get", "account:{{accountAId}}", claim),
     ]
 
@@ -503,7 +556,7 @@ CASES.append(Case(
         poll_op("chUserOp", allow_already_exists=True),
         read_account_appears("read-acct-user", "jwtInvitee", "user-direct"),
         read_projects_visible("read-prj-user", "jwtInvitee", "user-direct"),
-        *revoke_then_gone("teardown-user", "chUserAcb", "user:{{userINVId}}", "user-direct", "chUserRevOp"),
+        *revoke_then_gone("teardown-user", "chUserAcb", "user:{{userINVId}}", "user-direct", "chUserRevOp", grant_op_var="chUserOp"),
     ],
 ))
 
@@ -624,7 +677,7 @@ CASES.append(Case(
         poll_op("chSaOp", allow_already_exists=True),
         read_account_appears("read-acct-sa", "jwtSAA", "SA-token"),
         read_projects_visible("read-prj-sa", "jwtSAA", "SA-token"),
-        *revoke_then_gone("teardown-sa", "chSaAcb", "service_account:{{svaAId}}", "SA-token", "chSaRevOp"),
+        *revoke_then_gone("teardown-sa", "chSaAcb", "service_account:{{svaAId}}", "SA-token", "chSaRevOp", grant_op_var="chSaOp"),
     ],
 ))
 
@@ -646,7 +699,7 @@ CASES.append(Case(
         poll_op("chSaIsoOp", allow_already_exists=True),
         read_account_appears("sa-reads", "jwtSAA", "SA principal"),
         deny_account_singleshot("user-not-inherits", "jwtPureNoBindings", "user does not inherit SA grant"),
-        *revoke_then_gone("teardown-sa-iso", "chSaIsoAcb", "service_account:{{svaAId}}", "SA-isolation-case", "chSaIsoRevOp"),
+        *revoke_then_gone("teardown-sa-iso", "chSaIsoAcb", "service_account:{{svaAId}}", "SA-isolation-case", "chSaIsoRevOp", grant_op_var="chSaIsoOp"),
     ],
 ))
 
@@ -668,6 +721,6 @@ CASES.append(Case(
         poll_op("chUsrIsoOp", allow_already_exists=True),
         read_account_appears("user-reads", "jwtInvitee", "user principal"),
         deny_account_singleshot("sa-not-inherits", "jwtSANoGrant", "SA does not inherit user grant"),
-        *revoke_then_gone("teardown-usr-iso", "chUsrIsoAcb", "user:{{userINVId}}", "reverse-isolation-case", "chUsrIsoRevOp"),
+        *revoke_then_gone("teardown-usr-iso", "chUsrIsoAcb", "user:{{userINVId}}", "reverse-isolation-case", "chUsrIsoRevOp", grant_op_var="chUsrIsoOp"),
     ],
 ))
