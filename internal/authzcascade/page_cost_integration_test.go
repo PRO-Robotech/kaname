@@ -352,6 +352,15 @@ func TestPageCost(t *testing.T) {
 		objDeny.elapsed.Round(time.Millisecond))
 	t.Logf("SUMMARY per-object shape, rejected: %d transactions and %d statements for the same page",
 		objDeny.perObjTx, objDeny.statements)
+	// The cost this file must NOT hide: the question COUNT is unchanged, but a question
+	// carrying facts is more work for the relation store than a plain one, because the facts
+	// are merged into the tuple set for the duration of it. So the page is not free — it is
+	// cheaper than either alternative, which is a different claim, and the number belongs in
+	// the log rather than in an argument.
+	t.Logf("SUMMARY per-question cost: plain %.3fms, carrying facts %.3fms — same count, "+
+		"more work each; the alternative shapes pay this AND a transaction per row",
+		float64(baseDeny.elapsed.Microseconds())/float64(baseDeny.questions())/1000,
+		float64(pageDeny.elapsed.Microseconds())/float64(pageDeny.questions())/1000)
 }
 
 // TestPageReadDoesNotGrowWithThePage — the claim the contract needs, asserted rather than
