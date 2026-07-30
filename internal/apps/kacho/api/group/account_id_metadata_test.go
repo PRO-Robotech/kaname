@@ -172,8 +172,8 @@ func (r *fakeGrpRdr) Get(_ context.Context, id domain.GroupID) (domain.Group, er
 func (r *fakeGrpRdr) List(context.Context, group.ListFilter) ([]domain.Group, string, error) {
 	return nil, "", nil
 }
-func (r *fakeGrpRdr) ListMembers(context.Context, domain.GroupID) ([]domain.GroupMember, error) {
-	return nil, nil
+func (r *fakeGrpRdr) ListMembers(context.Context, domain.GroupID, group.MemberPage) ([]domain.GroupMember, string, error) {
+	return nil, "", nil
 }
 func (r *fakeGrpRdr) IsMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) (bool, error) {
 	return false, nil

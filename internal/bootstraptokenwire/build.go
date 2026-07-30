@@ -33,6 +33,10 @@ type BuildConfig struct {
 	// HydraTokenURL — the Hydra public token endpoint for the client_credentials
 	// exchange.
 	HydraTokenURL string
+	// HydraTokenCAFile — the anchor that hop is verified against when the profile
+	// pins one. Empty ⇒ the default transport (a plaintext in-cluster address needs
+	// no anchor); production refuses to claim https without one.
+	HydraTokenCAFile string
 	// AssertionAudience — the `aud` of the client_assertion (the Hydra token
 	// endpoint URL Hydra recognises).
 	AssertionAudience string
@@ -66,11 +70,19 @@ func (a hydraExchange) Exchange(ctx context.Context, in bootstraptoken.ExchangeI
 }
 
 // Build assembles the bootstrap-token mint handler. Composition root only.
-func Build(pool *pgxpool.Pool, cfg BuildConfig) *bootstraptoken.Handler {
+//
+// Returns an error when the anchor pinned for the provider's token endpoint cannot
+// be used: this hop carries the minted bearer in the response body, so falling back
+// to the system roots would leave it unverified while reading as configured.
+func Build(pool *pgxpool.Pool, cfg BuildConfig) (*bootstraptoken.Handler, error) {
 	store := kachopg.NewBootstrapStore(pool)
 	txb := kachopg.NewPoolTxBeginner(pool)
 	hydraAdmin := cfg.HydraAdmin
-	exchanger := hydraExchange{client: clients.NewHydraTokenClient(cfg.HydraTokenURL)}
+	tokenClient, err := clients.NewHydraTokenClientWithCA(cfg.HydraTokenURL, cfg.HydraTokenCAFile)
+	if err != nil {
+		return nil, err
+	}
+	exchanger := hydraExchange{client: tokenClient}
 
 	uc := bootstraptoken.NewMintUseCase(store, txb, hydraAdmin, exchanger, bootstraptoken.Config{
 		SigningKeyPEM:     cfg.SigningKeyPEM,
@@ -78,5 +90,5 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) *bootstraptoken.Handler {
 		GatewayAudience:   cfg.GatewayAudience,
 	}).WithLogger(cfg.Logger)
 
-	return bootstraptoken.NewHandler(uc)
+	return bootstraptoken.NewHandler(uc), nil
 }

@@ -810,8 +810,8 @@ func (g *fakeGroupRdr) Get(_ context.Context, id domain.GroupID) (domain.Group, 
 func (g *fakeGroupRdr) List(_ context.Context, _ group.ListFilter) ([]domain.Group, string, error) {
 	return nil, "", nil
 }
-func (g *fakeGroupRdr) ListMembers(_ context.Context, _ domain.GroupID) ([]domain.GroupMember, error) {
-	return nil, nil
+func (g *fakeGroupRdr) ListMembers(_ context.Context, _ domain.GroupID, _ group.MemberPage) ([]domain.GroupMember, string, error) {
+	return nil, "", nil
 }
 func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) (bool, error) {
 	g.repo.mu.Lock()

@@ -174,6 +174,13 @@ func runServe(cfg config.Config) error {
 	// committed-реальности ресурса. Boot-sweep + периодический фон; non-fatal.
 	startLROReconciler(ctx, pool, kachoRepo, lroRec, logger)
 
+	// Durable backstop for one-shot credentials staged in FINISHED operation
+	// responses. The reconciler above cannot cover them: its claim is done=false and
+	// these rows are done=true by the time the credential is staged.
+	if err := startSecretBackstop(ctx, pool, cfg, logger); err != nil {
+		return fmt.Errorf("secret backstop: %w", err)
+	}
+
 	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, openfgaClient, metricsReg, cfg, logger)
 
 	// gRPC servers. PrincipalExtract-interceptor читает
@@ -546,12 +553,25 @@ func runServe(cfg config.Config) error {
 			}
 			return fmt.Errorf("registry token http listener: %w", err)
 		}
-		registryTokenMux := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
+		registryTokenMux, err := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
 			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
 			Service:           cfg.APIServer.RegistryToken.TokenService(),
 			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
+			HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
 			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 		})
+		if err != nil {
+			_ = listener.Close()
+			_ = internalListener.Close()
+			if hooksListener != nil {
+				_ = hooksListener.Close()
+			}
+			if metricsListener != nil {
+				_ = metricsListener.Close()
+			}
+			_ = registryTokenListener.Close()
+			return fmt.Errorf("registry token shim: %w", err)
+		}
 		registryTokenHTTPServer = &http.Server{
 			Handler:           registryTokenMux,
 			ReadHeaderTimeout: 10 * time.Second,
@@ -560,6 +580,12 @@ func runServe(cfg config.Config) error {
 			IdleTimeout:       90 * time.Second,
 		}
 	}
+
+	// jwksUpstreamTimeout — per-call ceiling on the mirror's upstream fetch, named
+	// here because the client is now assembled at this root and the handler must be
+	// given the SAME value it was built with (architecture.md: every outbound call
+	// carries its own deadline, and two places holding two numbers is how they drift).
+	const jwksUpstreamTimeout = 5 * time.Second
 
 	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (default :9097) — a SEPARATE
 	// cluster-internal port serving GET /.well-known/jwks.json as a short-TTL
@@ -599,8 +625,33 @@ func runServe(cfg config.Config) error {
 		if jwksProxyTLSConfig != nil {
 			jwksProxyListener = tls.NewListener(jwksProxyListener, jwksProxyTLSConfig)
 		}
+		// The upstream client is assembled HERE, not inside the mirror, because the
+		// anchor of the hop is deployment configuration and an unusable one must
+		// refuse the start rather than degrade a mirror the whole data-plane depends
+		// on. Empty anchor ⇒ the plain default transport, which is what the provider's
+		// plaintext in-cluster listener needs; production refuses to claim https
+		// without pinning one (config.validateProductionProviderPublicHops).
+		jwksUpstreamClient, jwksErr := clients.ProviderHopHTTPClient(
+			jwksUpstreamTimeout, cfg.AuthN.ResolveHydraJWKSCAFile(), clients.JWKSHopCASetting)
+		if jwksErr != nil {
+			_ = listener.Close()
+			_ = internalListener.Close()
+			if hooksListener != nil {
+				_ = hooksListener.Close()
+			}
+			if metricsListener != nil {
+				_ = metricsListener.Close()
+			}
+			if registryTokenListener != nil {
+				_ = registryTokenListener.Close()
+			}
+			_ = jwksProxyListener.Close()
+			return fmt.Errorf("jwks-proxy upstream: %w", jwksErr)
+		}
 		jwksProxyHandler := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
 			UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
+			Client:      jwksUpstreamClient,
+			Timeout:     jwksUpstreamTimeout,
 			Logger:      logger.With(slog.String("component", "jwks_proxy")),
 		})
 		jwksProxyHTTPServer = &http.Server{

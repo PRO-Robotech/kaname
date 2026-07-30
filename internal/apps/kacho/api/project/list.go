@@ -30,6 +30,7 @@ package project
 
 import (
 	"context"
+	stderrors "errors"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
@@ -39,7 +40,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	accountrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
 )
 
@@ -80,16 +81,22 @@ func (u *ListProjectsUseCase) Execute(ctx context.Context, f project.ListFilter)
 		return nil, "", shared.MapRepoErr(err)
 	}
 
-	// Resolve owner-visible accounts (intra-account ownership; unchanged).
-	accts, _, err := rd.Accounts().List(ctx, accountListFilter())
+	// Resolve intra-account ownership for the accounts ON THIS PAGE.
+	//
+	// It used to LIST accounts — one page of them, cluster-wide, oldest first — and
+	// keep the ones this principal owns. Two things were wrong with that. It read the
+	// whole population to answer a question about at most a page's worth of accounts;
+	// and because that read is itself a page, an owner whose account was not among the
+	// oldest thousand in the cluster was silently not recognised as an owner at all,
+	// so their own projects vanished from their own listing while the rows, the
+	// account and the ownership all existed.
+	//
+	// Asking about the accounts the page actually names is exact and bounded: at most
+	// one lookup per DISTINCT account on the page, and no answer depends on how many
+	// accounts the cluster holds.
+	owned, err := u.ownedAccountsOnPage(ctx, rd, principal, out)
 	if err != nil {
-		return nil, "", shared.MapRepoErr(err)
-	}
-	owned := make(map[domain.AccountID]bool, len(accts))
-	for _, a := range accts {
-		if string(a.OwnerUserID) == principal.ID {
-			owned[a.ID] = true
-		}
+		return nil, "", err
 	}
 
 	// Resolve FGA-granted visibility for the projects ON THIS PAGE (AccessBinding
@@ -160,8 +167,39 @@ func principalSubject(p operations.Principal) string {
 	}
 }
 
-// accountListFilter — minimal ListFilter без pagination (для inline-load
-// всех accounts при post-filter Projects.List).
-func accountListFilter() accountrepo.ListFilter {
-	return accountrepo.ListFilter{PageSize: 1000}
+// ownedAccountsOnPage reports which of the accounts named by the page this
+// principal owns, by asking about those accounts and nothing else.
+//
+// An account that cannot be read is treated as NOT owned rather than as an error:
+// the row is then judged by the grant branch alone, which is the fail-closed
+// direction. A transport failure of the grant branch still aborts the request — that
+// one is the authority.
+func (u *ListProjectsUseCase) ownedAccountsOnPage(
+	ctx context.Context, rd kachorepo.Reader, principal operations.Principal, page []domain.Project,
+) (map[domain.AccountID]bool, error) {
+	owned := make(map[domain.AccountID]bool, len(page))
+	if principal.ID == "" {
+		return owned, nil
+	}
+	seen := make(map[domain.AccountID]struct{}, len(page))
+	for _, p := range page {
+		if p.AccountID == "" {
+			continue
+		}
+		if _, dup := seen[p.AccountID]; dup {
+			continue
+		}
+		seen[p.AccountID] = struct{}{}
+		acct, err := rd.Accounts().Get(ctx, p.AccountID)
+		if err != nil {
+			if stderrors.Is(err, iamerr.ErrNotFound) {
+				continue // dangling parent: the grant branch decides
+			}
+			return nil, shared.MapRepoErr(err)
+		}
+		if string(acct.OwnerUserID) == principal.ID {
+			owned[acct.ID] = true
+		}
+	}
+	return owned, nil
 }

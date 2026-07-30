@@ -167,9 +167,20 @@ type AuthNConfig struct {
 	// when it is served over TLS. Empty ⇒ the default transport (system roots),
 	// which an internal-CA certificate never chains to. Set ⇒ the bundle becomes
 	// the ONLY anchor, and one that cannot be read refuses the start.
-	HydraAdminCAFile        string        `mapstructure:"hydra-admin-ca-file"`
-	HydraTokenURL           string        `mapstructure:"hydra-token-url"`
+	HydraAdminCAFile string `mapstructure:"hydra-admin-ca-file"`
+	HydraTokenURL    string `mapstructure:"hydra-token-url"`
+	// HydraTokenCAFile / HydraJWKSCAFile — the same anchor discipline for the two
+	// hops to the provider's PUBLIC listener: the token exchange (a signed client
+	// assertion out, the minted bearer back) and the JWKS upstream (the keyset the
+	// data-plane verifies every token against). Empty ⇒ the default transport,
+	// which is what a plaintext in-cluster address needs and all it needs. Set ⇒
+	// the bundle becomes the ONLY anchor, and one that cannot be read refuses the
+	// start rather than falling back to the system roots — that fallback is the
+	// state nobody can see, because the operator configured verification against
+	// the internal CA and the process is not doing it.
+	HydraTokenCAFile        string        `mapstructure:"hydra-token-ca-file"`
 	HydraJWKSURL            string        `mapstructure:"hydra-jwks-url"`
+	HydraJWKSCAFile         string        `mapstructure:"hydra-jwks-ca-file"`
 	HookSharedSecret        string        `mapstructure:"hook-shared-secret"`
 	HookSharedSecretEnv     string        `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex    string        `mapstructure:"jwks-encryption-key-hex"`

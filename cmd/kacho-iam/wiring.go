@@ -568,14 +568,21 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM) — the SAME accessor Config.Validate
 	// uses to decide whether the mint is enabled, so the boot-guard and the
 	// runtime can never disagree about it. Empty → mint disabled (fail-closed).
-	bootstrapTokenH := bootstraptokenwire.Build(pool, bootstraptokenwire.BuildConfig{
+	bootstrapTokenH, bootstrapErr := bootstraptokenwire.Build(pool, bootstraptokenwire.BuildConfig{
 		SigningKeyPEM:     cfg.AuthN.BootstrapMint.ResolveSigningKeyPEM(),
 		HydraAdmin:        mustProviderAdminClient(cfg),
 		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
+		HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
 		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 		GatewayAudience:   bootstrapAudience,
 		Logger:            logger,
 	})
+	// Same reasoning as mustProviderAdminClient: an anchor that is named but
+	// unreadable is only discoverable by opening the file, and carrying on against
+	// the system root store is the state nobody can see.
+	if bootstrapErr != nil {
+		log.Fatalf("bootstrap-token mint: %v", bootstrapErr)
+	}
 
 	// ── InternalClusterService ────────────────────────────────────────────
 	clusterReader := kachopg.NewClusterReader(pool)
@@ -715,7 +722,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	issueUC.WithAuditEmitter(auditEmitter)
 	// Grace-окно перед затиранием одноразового private_key_pem: поллящий клиент
 	// (docker-login / CI / UI) должен успеть прочитать ключ из op.response до его
-	// вычистки. Без окна затирание выигрывало гонку и клиент получал "<redacted>".
+	// вычистки. Без окна затирание выигрывало гонку и клиент получал пустое поле.
 	issueUC.WithRedactGrace(cfg.AuthN.SAKeyRedactGrace)
 	// Lifetime discipline for the machine credential. A service-account key is
 	// what a machine authenticates with, and machine principals are exempt from

@@ -72,14 +72,27 @@ func NewOpsResponseRedactor(pool *pgxpool.Pool, schema string) *OpsResponseRedac
 // (defensive — the redact races with worker.MarkError; a failed op never
 // stored the secret).
 func (r *OpsResponseRedactor) RedactResponseField(ctx context.Context, opID string, fieldPath []string) error {
+	_, err := r.RedactResponseFields(ctx, opID, fieldPath)
+	return err
+}
+
+// RedactResponseFields does the same and REPORTS whether anything was actually
+// cleared.
+//
+// The boolean is not a convenience: it is what tells "the credential was still
+// there" apart from "there was nothing to do". The durable backstop
+// (SweepStrandedSecrets) counts on it — a backstop that cannot say whether it had
+// to act is indistinguishable from one that has never been needed, which is the
+// state the in-process clean-up was already in.
+func (r *OpsResponseRedactor) RedactResponseFields(ctx context.Context, opID string, fieldPath []string) (bool, error) {
 	if len(fieldPath) == 0 {
-		return errors.New("ops redact: empty field path")
+		return false, errors.New("ops redact: empty field path")
 	}
 
 	table := pgx.Identifier{r.schema, "operations"}.Sanitize()
 	if r.pool == nil {
 		// Guarded by tests; production wiring always passes a real pool.
-		return errors.New("ops redact: nil pool")
+		return false, errors.New("ops redact: nil pool")
 	}
 
 	// 1. SELECT current response. response_type / response_data are nullable
@@ -95,13 +108,13 @@ func (r *OpsResponseRedactor) RedactResponseField(ctx context.Context, opID stri
 	if err != nil {
 		// pgx.ErrNoRows or any other error → defensive return.
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("ops redact SELECT: %w", err)
+		return false, fmt.Errorf("ops redact SELECT: %w", err)
 	}
 	if respType == nil || *respType == "" || len(respData) == 0 {
 		// Not yet finalised with a success response (or final error path).
-		return nil
+		return false, nil
 	}
 	respTypeStr := *respType
 
@@ -116,11 +129,11 @@ func (r *OpsResponseRedactor) RedactResponseField(ctx context.Context, opID stri
 	}
 	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(fullName))
 	if err != nil {
-		return fmt.Errorf("ops redact: unknown response type %q: %w", respTypeStr, err)
+		return false, fmt.Errorf("ops redact: unknown response type %q: %w", respTypeStr, err)
 	}
 	msg := mt.New().Interface()
 	if err := proto.Unmarshal(respData, msg); err != nil {
-		return fmt.Errorf("ops redact: unmarshal %s: %w", respTypeStr, err)
+		return false, fmt.Errorf("ops redact: unmarshal %s: %w", respTypeStr, err)
 	}
 
 	// 3. Clear each named field reflectively.
@@ -147,18 +160,18 @@ func (r *OpsResponseRedactor) RedactResponseField(ctx context.Context, opID stri
 	}
 	if !cleared {
 		// Nothing to write back.
-		return nil
+		return false, nil
 	}
 
 	// 4. Re-marshal + UPDATE.
 	newData, err := proto.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("ops redact: re-marshal: %w", err)
+		return false, fmt.Errorf("ops redact: re-marshal: %w", err)
 	}
 	updateSQL := fmt.Sprintf(
 		`UPDATE %s SET response_data = $2 WHERE id = $1`, table)
 	if _, err := r.pool.Exec(ctx, updateSQL, opID, newData); err != nil {
-		return fmt.Errorf("ops redact UPDATE: %w", err)
+		return false, fmt.Errorf("ops redact UPDATE: %w", err)
 	}
-	return nil
+	return true, nil
 }

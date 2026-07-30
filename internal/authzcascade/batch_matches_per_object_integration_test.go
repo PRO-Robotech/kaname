@@ -117,20 +117,27 @@ func newEqWorld(t *testing.T) *eqWorld {
 	      VALUES ($1, $2, $3, 'true')`, cond, w.project, lowerName(cond))
 
 	// Bindings on all three scope tiers: the project-scoped one is the two-level chain.
+	//
+	// The ROLE differs by tier because the platform's assignability rule does: an
+	// account-tier custom role may be bound on its own account and on a project nested
+	// in it, but the cluster scope admits SYSTEM roles only. The fixture used the
+	// account role on all three, which is a shape the service refuses at its own gate
+	// and the database now refuses outright — so it described a world that cannot
+	// exist, which makes anything measured on it about that world rather than ours.
 	projBinding := costID("acb", "eqprj1")
 	accBinding := costID("acb", "eqacc1")
 	cluBinding := costID("acb", "eqclu1")
-	for i, b := range []struct{ id, scopeType, scopeID string }{
-		{projBinding, "project", w.project},
-		{accBinding, "account", w.account},
-		{cluBinding, "cluster", "cluster_kacho_root"},
+	for i, b := range []struct{ id, scopeType, scopeID, role string }{
+		{projBinding, "project", w.project, accountRole},
+		{accBinding, "account", w.account, accountRole},
+		{cluBinding, "cluster", "cluster_kacho_root", systemRole},
 	} {
 		grantee := costID("usr", fmt.Sprintf("eqgte%d", i))
 		exec(`INSERT INTO kacho_iam.users (id, external_id, email, account_id)
 		      VALUES ($1, $1, $1 || '@example.test', $2)`, grantee, w.account)
 		exec(`INSERT INTO kacho_iam.access_bindings
 		        (id, subject_type, subject_id, role_id, resource_type, resource_id)
-		      VALUES ($1, 'user', $2, $3, $4, $5)`, b.id, grantee, accountRole, b.scopeType, b.scopeID)
+		      VALUES ($1, 'user', $2, $3, $4, $5)`, b.id, grantee, b.role, b.scopeType, b.scopeID)
 	}
 
 	w.byType = map[string][]string{

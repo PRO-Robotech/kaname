@@ -13,7 +13,15 @@ import (
 type ReaderIface interface {
 	Get(ctx context.Context, id domain.GroupID) (domain.Group, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Group, string, error)
-	ListMembers(ctx context.Context, groupID domain.GroupID) ([]domain.GroupMember, error)
+	// ListMembers — one PAGE of the membership, plus the continuation token.
+	//
+	// Paged rather than whole because the request message publishes page_size and
+	// page_token and the response publishes next_page_token: a membership returned
+	// in one message makes those three fields a promise the service does not keep,
+	// and a large enough group makes the reply exceed the transport's message limit
+	// with no way out — the caller cannot page past a listing that never emits a
+	// token.
+	ListMembers(ctx context.Context, groupID domain.GroupID, page MemberPage) ([]domain.GroupMember, string, error)
 	// IsMember — single-row EXISTS lookup against group_members for the
 	// (groupID, memberType, memberID) triple. Used by
 	// ListAccessBindingsBySubject to authorise group-subject queries: the
@@ -36,6 +44,13 @@ type WriterIface interface {
 	AddMember(ctx context.Context, m domain.GroupMember) error
 	// RemoveMember — DELETE. Идемпотентен (повторное удаление участника).
 	RemoveMember(ctx context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) error
+}
+
+// MemberPage — the page bounds of ListMembers. PageSize is already validated and
+// defaulted by the use-case, so the adapter takes it as given.
+type MemberPage struct {
+	PageSize  int64
+	PageToken string
 }
 
 type ListFilter struct {

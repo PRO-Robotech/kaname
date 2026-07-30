@@ -18,6 +18,7 @@ package account
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -94,12 +95,53 @@ func TestAccountDelete_VBC17_OwnerTuplesRevoked(t *testing.T) {
 // ── focused fake repo for the Delete cleanup path ───────────────────────────
 
 type delFakeRepo struct {
-	acct          domain.Account
-	ownerBinding  domain.AccessBinding
-	ownerLedger   []access_binding.RelationTuple
+	acct         domain.Account
+	ownerBinding domain.AccessBinding
+	ownerLedger  []access_binding.RelationTuple
+	// extra — bindings anchored on the account beyond the owner one. Deleting a
+	// binding removes it from this set, which is what the real writer-tx does
+	// (a row deleted in the transaction is invisible to the next read in it).
+	extra         []domain.AccessBinding
+	extraLedger   map[domain.AccessBindingID][]access_binding.RelationTuple
+	deleted       map[domain.AccessBindingID]bool
 	fgaDel        []service.RelationTuple
 	acctDelCnt    int
 	bindingDelCnt int
+}
+
+// seedExtraBindings adds n further account-scoped bindings, each with one tuple in
+// its ledger, so a page-limited revoke can be caught leaving some behind.
+func (f *delFakeRepo) seedExtraBindings(n int) {
+	if f.extraLedger == nil {
+		f.extraLedger = map[domain.AccessBindingID][]access_binding.RelationTuple{}
+	}
+	for i := 0; i < n; i++ {
+		id := domain.AccessBindingID(fmt.Sprintf("acb%017d", i))
+		f.extra = append(f.extra, domain.AccessBinding{
+			ID: id, SubjectType: domain.SubjectTypeUser,
+			SubjectID: domain.SubjectID(delTestOwner), RoleID: domain.OwnerRoleID,
+			ResourceType: "account", ResourceID: delTestAcct, Scope: domain.ScopeAccount,
+			CreatedAt: time.Now().UTC(),
+		})
+		f.extraLedger[id] = []access_binding.RelationTuple{
+			{User: "user:" + delTestOwner, Relation: "viewer", Object: "account:" + delTestAcct + "#" + string(id)},
+		}
+	}
+}
+
+// liveBindings — the bindings still present, owner first (the real query orders by
+// created_at, and the owner binding is co-committed with the account).
+func (f *delFakeRepo) liveBindings() []domain.AccessBinding {
+	out := make([]domain.AccessBinding, 0, 1+len(f.extra))
+	if f.ownerBinding.ID != "" && !f.deleted[f.ownerBinding.ID] {
+		out = append(out, f.ownerBinding)
+	}
+	for _, b := range f.extra {
+		if !f.deleted[b.ID] {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 func newDelFakeRepo() *delFakeRepo {
@@ -186,17 +228,24 @@ type delABReader struct{ repo *delFakeRepo }
 func (r delABReader) List(_ context.Context, _ access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
-func (r delABReader) ListByScope(_ context.Context, rt domain.ResourceType, rid string, _ access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
-	if rt == "account" && rid == delTestAcct && r.repo.ownerBinding.ID != "" {
-		return []domain.AccessBinding{r.repo.ownerBinding}, "", nil
+func (r delABReader) ListByScope(_ context.Context, rt domain.ResourceType, rid string, f access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
+	if rt != "account" || rid != delTestAcct {
+		return nil, "", nil
 	}
-	return nil, "", nil
+	live := r.repo.liveBindings()
+	size := int(f.PageSize)
+	if size <= 0 || size > len(live) {
+		return live, "", nil
+	}
+	// A truncated read hands back a continuation token — the signal the caller used
+	// to discard.
+	return live[:size], "next", nil
 }
 func (r delABReader) SelectEmittedTuples(_ context.Context, id domain.AccessBindingID) ([]access_binding.RelationTuple, error) {
 	if id == r.repo.ownerBinding.ID {
 		return r.repo.ownerLedger, nil
 	}
-	return nil, nil
+	return r.repo.extraLedger[id], nil
 }
 func (delABReader) Get(context.Context, domain.AccessBindingID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, stderrors.New("not stubbed")
@@ -290,11 +339,64 @@ type delABWriter struct {
 	repo *delFakeRepo
 }
 
-func (w delABWriter) Delete(_ context.Context, _ domain.AccessBindingID) error {
+func (w delABWriter) Delete(_ context.Context, id domain.AccessBindingID) error {
 	w.repo.bindingDelCnt++
+	if w.repo.deleted == nil {
+		w.repo.deleted = map[domain.AccessBindingID]bool{}
+	}
+	w.repo.deleted[id] = true
 	return nil
 }
 func (w delABWriter) EmitRelationDelete(context.Context, []access_binding.RelationTuple) error {
 	return nil
 }
 func (w delABWriter) EmitAuditEvent(context.Context, access_binding.AuditEvent) error { return nil }
+
+// TestAccountDelete_RevokesEveryBinding_NotJustTheFirstPage — deleting an account
+// revokes ALL the bindings anchored on it, and says so.
+//
+// The revoke read ONE page and discarded the continuation token, then deleted
+// exactly what it had read. Everything past that page kept its row AND its emitted
+// tuples, while the operation reported complete success — no error, no counter, no
+// line. Nothing downstream repairs it: access_bindings carry no foreign key to
+// accounts, so no cascade reaches them, and the periodic reconcile keeps
+// re-materializing the survivors for ever because their rows are still active.
+//
+// The page is also not the "handful" the discarded token was assumed to represent:
+// the query filters by scope only, so every revoked and expired binding ever
+// recorded on the account occupies it, oldest first.
+func TestAccountDelete_RevokesEveryBinding_NotJustTheFirstPage(t *testing.T) {
+	repo := newDelFakeRepo()
+	repo.seedOwnerBinding()
+	const beyond = 7
+	repo.seedExtraBindings(accountBindingRevokePageSize + beyond) // one full page and then some
+
+	uc := NewDeleteAccountUseCase(repo, newFakeOpsRepo())
+	ctx := operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: "user", ID: delTestOwner})
+
+	_, err := uc.Execute(ctx, domain.AccountID(delTestAcct))
+	require.NoError(t, err)
+	wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, operations.Wait(wctx))
+
+	wantBindings := 1 + accountBindingRevokePageSize + beyond
+	assert.Equal(t, wantBindings, repo.bindingDeletes(),
+		"every binding anchored on the account must be revoked, not one page of them")
+	assert.Empty(t, repo.liveBindings(), "no binding of a deleted account may survive")
+
+	// And their tuples must be revoked too: a surviving tuple is standing access on
+	// an account that no longer exists, which the periodic reconcile keeps renewing.
+	deleted := repo.fgaDeleted()
+	assert.GreaterOrEqual(t, len(deleted), wantBindings,
+		"each revoked binding contributes at least its own ledger tuple")
+	last := repo.extra[len(repo.extra)-1].ID
+	var lastRevoked bool
+	for _, tp := range deleted {
+		if tp.Object == "account:"+delTestAcct+"#"+string(last) {
+			lastRevoked = true
+		}
+	}
+	assert.True(t, lastRevoked, "the binding furthest from the first page must be revoked as well")
+}

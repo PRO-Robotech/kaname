@@ -355,15 +355,34 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 	// Membership fan-out: after the rules change + selector-sync committed,
 	// re-materialize the role.rules ARM_LABELS membership of every ACTIVE binding of
 	// the role (each in its OWN writer-tx, idempotent). A removed rule's per-object
-	// members are eager-revoked by rule_fp (no residual); new/edited rules'
-	// matched objects are materialized. Runs in the Operation worker so the Operation
-	// reports done only once membership has converged. Bounded by the sync count-check
-	// above. nil-safe + fatal-to-Operation (a fan-out error fails the Operation so the
-	// caller learns the membership did not converge; the sweep also re-converges).
+	// members are eager-revoked by rule_fp (no residual); new/edited rules' matched
+	// objects are materialized. Bounded by the sync count-check above; nil-safe.
+	//
+	// OFF THE done-PATH (ban #9), like the label pass above and for the same reason.
+	// It used to run inline and a failure returned from the worker-fn, so the
+	// operation carried an ERROR for a change that had ALREADY COMMITTED — the role
+	// row, the selector projection and the audit row are durable before this line is
+	// reached. What the caller does with that error is the damage: it concludes the
+	// rules were not applied and retries with the resource version it captured before
+	// the first attempt, which its own committed update has already moved, so the
+	// retry is refused as a concurrent modification naming a competitor that never
+	// existed. Meanwhile the privileges ARE changed.
+	//
+	// The trigger is not exotic: the pass takes an exclusive advisory lock per
+	// binding, the same key the sweep, the revoke and the expiry take, and no lock
+	// timeout is set — a wait long enough to hit the statement timeout is an error.
+	// Above a few hundred bindings the operation's own deadline is the ceiling.
+	//
+	// Detaching changes WHEN membership converges, never WHETHER: the co-committed
+	// reconcile event and the 30s periodic sweep remain the at-least-once backstop.
 	if u.membership != nil && slices.Contains(changed, "rules") {
-		if ferr := u.membership.ReconcileActiveBindings(ctx, updated.ID); ferr != nil {
-			return nil, shared.MapRepoErr(ferr)
-		}
+		id := updated.ID
+		shared.GoPostCommit(ctx, u.logger, "role rules membership fan-out", func(ctx context.Context) {
+			if ferr := u.membership.ReconcileActiveBindings(ctx, id); ferr != nil && u.logger != nil {
+				u.logger.Error("role update: rules membership fan-out failed (reconcile event + sweep will retry)",
+					"role_id", string(id), "err", ferr)
+			}
+		})
 	}
 	return marshalRole(updated)
 }

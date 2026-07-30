@@ -68,7 +68,8 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
-	// иначе клиент проигрывает гонку и получает "<redacted>". Override —
+	// иначе клиент проигрывает гонку и получает ПУСТОЕ поле (затирание очищает
+	// поле, а не подставляет метку — метки нет). Override —
 	// KACHO_IAM_SAKEY_REDACT_GRACE (или KACHO_IAM_AUTHN__SAKEY_REDACT_GRACE).
 	v.SetDefault("authn.sakey-redact-grace", 120*time.Second)
 	// User-токен: одноразовый private_key_pem отдаётся только в op.response; клиент

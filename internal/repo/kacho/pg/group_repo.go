@@ -133,29 +133,60 @@ func (r *groupReader) IsMember(ctx context.Context, groupID domain.GroupID, memb
 	return ok, nil
 }
 
-// ListMembers — SELECT FROM group_members WHERE group_id = $1.
-// Без pagination (members обычно ≤ ~hundreds).
-func (r *groupReader) ListMembers(ctx context.Context, groupID domain.GroupID) ([]domain.GroupMember, error) {
-	rows, err := r.tx.Query(ctx,
-		`SELECT group_id, member_type, member_id, added_at FROM group_members WHERE group_id = $1 ORDER BY added_at ASC`,
-		string(groupID),
-	)
+// ListMembers — one page of group_members, ordered by the cursor (added_at,
+// member_id) the continuation token encodes.
+//
+// member_id is the tie-break rather than the (member_type, member_id) pair the
+// primary key carries: an id already names its own kind by prefix (usr / sva / grp),
+// so it is unique within a group on its own, and a single-column tie-break is what
+// the shared token encoding takes.
+func (r *groupReader) ListMembers(ctx context.Context, groupID domain.GroupID, page group.MemberPage) ([]domain.GroupMember, string, error) {
+	limit, err := effectivePageSize(int32(min(page.PageSize, maxListPageSize+1))) //nolint:gosec // clamped to the checked range for the guard itself
 	if err != nil {
-		return nil, mapErr(err, "", string(groupID))
+		return nil, "", err
+	}
+
+	args := []any{string(groupID)}
+	cursor := ""
+	if page.PageToken != "" {
+		ts, id, terr := decodePageToken(page.PageToken)
+		if terr != nil {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page_token")
+		}
+		cursor = " AND (added_at, member_id) > ($2, $3)"
+		args = append(args, ts, id)
+	}
+	args = append(args, limit+1)
+
+	q := fmt.Sprintf(`SELECT group_id, member_type, member_id, added_at
+		 FROM group_members
+		 WHERE group_id = $1%s
+		 ORDER BY added_at ASC, member_id ASC
+		 LIMIT $%d`, cursor, len(args))
+
+	rows, err := r.tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, "", mapErr(err, "", string(groupID))
 	}
 	defer rows.Close()
 	var out []domain.GroupMember
 	for rows.Next() {
 		var m domain.GroupMember
 		if err := rows.Scan((*string)(&m.GroupID), (*string)(&m.MemberType), (*string)(&m.MemberID), &m.AddedAt); err != nil {
-			return nil, mapErr(err, "", "")
+			return nil, "", mapErr(err, "", "")
 		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, mapErr(err, "", "")
+		return nil, "", mapErr(err, "", "")
 	}
-	return out, nil
+	var next string
+	if int64(len(out)) > limit {
+		last := out[limit-1]
+		next = encodePageToken(last.AddedAt, string(last.MemberID))
+		out = out[:limit]
+	}
+	return out, next, nil
 }
 
 type groupWriter struct {

@@ -47,13 +47,36 @@ type HydraTokenClient struct {
 	HTTPClient *http.Client
 }
 
-// NewHydraTokenClient — constructor (default timeout 10s).
+// NewHydraTokenClient — constructor without a pinned trust anchor (default
+// timeout 10s). Kept for the call sites that address the provider's public
+// listener over plaintext http in-cluster; production must use
+// NewHydraTokenClientWithCA once that listener is served over TLS.
 func NewHydraTokenClient(tokenURL string) *HydraTokenClient {
 	return &HydraTokenClient{
 		TokenURL:   tokenURL,
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		HTTPClient: &http.Client{Timeout: tokenHopTimeout},
 	}
 }
+
+// NewHydraTokenClientWithCA builds the client and, when an anchor is configured,
+// verifies the provider against THAT bundle and nothing else.
+//
+// This hop carries a signed client assertion out and the minted bearer back in the
+// response body, so an unverified peer on it is not a degraded hop — it is a
+// credential handed to whoever answered. The anchor semantics (empty ⇒ default
+// transport; set ⇒ the only pool; unusable ⇒ refuse) live in one place,
+// ProviderHopHTTPClient, shared with every other hop to the provider.
+func NewHydraTokenClientWithCA(tokenURL, caFile string) (*HydraTokenClient, error) {
+	httpClient, err := ProviderHopHTTPClient(tokenHopTimeout, caFile, tokenHopCASetting)
+	if err != nil {
+		return nil, err
+	}
+	return &HydraTokenClient{TokenURL: tokenURL, HTTPClient: httpClient}, nil
+}
+
+// tokenHopTimeout — per-call ceiling on the exchange. Named so both constructors
+// cannot drift apart (architecture.md: every outbound call carries its own).
+const tokenHopTimeout = 10 * time.Second
 
 // ClientCredentialsRequest — inputs for the private_key_jwt exchange.
 type ClientCredentialsRequest struct {

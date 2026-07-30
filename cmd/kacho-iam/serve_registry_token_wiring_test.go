@@ -65,6 +65,9 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 		"cfg.APIServer.RegistryToken.TokenIssuer()",
 		"cfg.APIServer.RegistryToken.TokenService()",
 		"cfg.AuthN.ResolveHydraTokenURL()",
+		// The anchor of the hop travels with its address: a root that passes one
+		// without the other is how https ends up verified against the system roots.
+		"cfg.AuthN.ResolveHydraTokenCAFile()",
 		"cfg.AuthN.ResolveHydraTokenEndpoint()",
 		"registryTokenHTTPServer.Serve(registryTokenListener)",
 		"registryTokenHTTPServer.Shutdown(",
@@ -88,12 +91,15 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	}
 	tok := cfg.APIServer.RegistryToken
 
-	mux := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
+	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
 		Realm:             tok.TokenIssuer(),
 		Service:           tok.TokenService(),
 		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
 		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 	})
+	if err != nil {
+		t.Fatalf("registrytokenwire.Build: %v", err)
+	}
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/iam/token", nil))

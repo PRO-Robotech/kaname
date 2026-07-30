@@ -69,6 +69,7 @@ func (c Config) Validate() error {
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
 		errs = multierr.Append(errs, c.validateProductionTrustedForwarders())
 		errs = multierr.Append(errs, c.validateProductionProviderAdminHop())
+		errs = multierr.Append(errs, c.validateProductionProviderPublicHops())
 
 		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
 		// IAM data (user/SA records, session-revocation + token rows, the
@@ -234,6 +235,113 @@ func (c Config) validateProductionProviderAdminHop() error {
 			declared)
 	}
 	return nil
+}
+
+// providerPublicHop — one of iam's hops to the identity provider's PUBLIC
+// listener, as the boot guard sees it: what an operator declared, what anchor was
+// pinned with it, and the names to put in a refusal so a stand can be fixed
+// without reading this file.
+type providerPublicHop struct {
+	setting     string
+	env         string
+	declared    string
+	caSetting   string
+	caEnv       string
+	caFile      string
+	whatItISFor string
+}
+
+// validateProductionProviderPublicHops holds the two hops to the provider's
+// PUBLIC listener to the same discipline the ADMIN hop already has: the address
+// is DECLARED, never worked out from a neighbour's, and TLS is never claimed
+// without something to verify the peer against.
+//
+// DECLARED, NOT DERIVED. Both addresses fall back to a derivation from the issuer
+// — `<issuer>/.well-known/jwks.json` and `<issuer>/oauth2/token`. A derivation is
+// never empty, so the facade reads as configured on a profile that declared
+// neither, while addressing the PUBLIC ingress hostname: in-cluster that name
+// usually does not resolve at all (the JWKS mirror then fail-closes 502 and every
+// docker pull gets a 401, with no line at start-up naming why), and where it does
+// resolve it is not the process the operator meant. This is the platform rule that
+// the address of a dependency an access decision rests on is never derived.
+//
+// WHAT EACH HOP CARRIES, because the two are not interchangeable:
+//   - the JWKS upstream is the ONLY thing that decides which signatures the
+//     data-plane accepts. iam re-serves the fetched keyset verbatim on its
+//     cluster-internal mirror, so whatever answers this address chooses the
+//     platform's verification keys.
+//   - the token endpoint carries a signed client assertion out and the minted
+//     bearer back in the response body.
+//
+// TRANSPORT IS NOT ASSERTED HERE, and that is a boundary, not an oversight. The
+// provider serves its public listener in plain http on every profile, and the
+// per-listener TLS override this version does NOT support was measured false on
+// 2026-07-30 — see the note in
+// deploy/helm/umbrella/templates/hydra-admin-certificate.yaml. Moving the public
+// listener moves the ingress, the JWKS mirror and the token endpoint together; it
+// is its own change with its own acceptance. Requiring https here would only add a
+// second reason for the same stand not to boot, and the fix for it would not be
+// this guard's.
+//
+// WHAT IS ASSERTED IS THE HALF THAT CAN BE GOT WRONG SILENTLY: the moment a
+// profile writes https, an anchor must be pinned with it. Without one the process
+// verifies against the SYSTEM roots, which an internal-CA certificate never chains
+// to — so the address reads as hardened while every fetch fails on an unknown
+// authority, and the JWKS mirror answers 502 to the whole data-plane.
+//
+// Only the explicit sources count as declared — the YAML setting and its ENV
+// override — because those are the two an operator actually writes. dev keeps the
+// derivation and tolerates anything: an in-process fixture has no provider.
+func (c Config) validateProductionProviderPublicHops() error {
+	hops := []providerPublicHop{
+		{
+			setting:   "authn.hydra-jwks-url",
+			env:       "KACHO_IAM_HYDRA_JWKS_URL",
+			declared:  c.AuthN.DeclaredHydraJWKSURL(),
+			caSetting: "authn.hydra-jwks-ca-file",
+			caEnv:     "KACHO_IAM_HYDRA_JWKS_CA_FILE",
+			caFile:    c.AuthN.ResolveHydraJWKSCAFile(),
+			whatItISFor: "the keyset this process mirrors on its cluster-internal listener is the " +
+				"data-plane's only anchor for deciding whether a token was signed by the provider",
+		},
+		{
+			setting:   "authn.hydra-token-url",
+			env:       "KACHO_IAM_HYDRA_TOKEN_URL",
+			declared:  c.AuthN.DeclaredHydraTokenURL(),
+			caSetting: "authn.hydra-token-ca-file",
+			caEnv:     "KACHO_IAM_HYDRA_TOKEN_CA_FILE",
+			caFile:    c.AuthN.ResolveHydraTokenCAFile(),
+			whatItISFor: "the exchange posts a signed client assertion to this address and reads the " +
+				"minted bearer back out of the response body",
+		},
+	}
+	var errs error
+	for _, h := range hops {
+		if h.declared == "" {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"production mode: %s is not declared (env override %s) — it then falls back to a "+
+					"name DERIVED from the issuer, which is the public ingress host and does not "+
+					"resolve inside the cluster; the derivation is never empty, so the facade reads "+
+					"as configured while addressing a host nobody chose. %s. Name the cluster-internal "+
+					"Service explicitly", h.setting, h.env, h.whatItISFor))
+			continue
+		}
+		u, err := url.Parse(h.declared)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"production mode: %s is not an absolute http(s) URL (got %q)", h.setting, h.declared))
+			continue
+		}
+		if u.Scheme == "https" && h.caFile == "" {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"production mode: %s is https (%q) but %s is empty (env %s) — the provider's "+
+					"in-cluster certificate is issued by the internal CA and this process trusts the "+
+					"system roots, so every call on the hop fails with an unknown authority while the "+
+					"address reads as hardened; pin the bundle together with the address",
+				h.setting, h.declared, h.caSetting, h.caEnv))
+		}
+	}
+	return errs
 }
 
 // validateMode ensures Mode is a known ENUM value.

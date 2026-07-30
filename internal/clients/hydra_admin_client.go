@@ -21,19 +21,10 @@
 package clients
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
-
-// adminHopCASetting — the setting naming this hop's trust anchor. Held as a
-// constant so the refusal and the config field cannot drift apart: an operator
-// reading the refusal must be able to act on it without reading this file.
-const adminHopCASetting = "authn.hydra-admin-ca-file (env KACHO_IAM_HYDRA_ADMIN_CA_FILE)"
 
 // HydraAdminClient — HTTP-клиент к Hydra admin API.
 type HydraAdminClient struct {
@@ -76,29 +67,10 @@ func NewHydraAdminClient(baseURL, bearerToken string) *HydraAdminClient {
 // rotates.
 func NewHydraAdminClientWithCA(baseURL, bearerToken, caFile string) (*HydraAdminClient, error) {
 	c := NewHydraAdminClient(baseURL, bearerToken)
-	if strings.TrimSpace(caFile) == "" {
-		return c, nil
-	}
-
-	// #nosec G304 -- путь к корневому сертификату задаёт оператор в настройках процесса;
-	// на вход запроса он не приходит. Пустой путь отсечён выше, нечитаемый — отказ старта.
-	pemBytes, err := os.ReadFile(caFile)
+	httpClient, err := ProviderHopHTTPClient(c.HTTPClient.Timeout, caFile, adminHopCASetting)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"%s=%q cannot be read (%w) — refusing: continuing on the system root store "+
-				"would leave the provider-admin hop unverified against the internal CA "+
-				"while reading as configured", adminHopCASetting, caFile, err)
+		return nil, err
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		return nil, fmt.Errorf(
-			"%s=%q holds no PEM certificate — refusing: the resulting trust store would "+
-				"be EMPTY, so every handshake on the provider-admin hop would fail "+
-				"permanently", adminHopCASetting, caFile)
-	}
-
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
-	c.HTTPClient.Transport = tr
+	c.HTTPClient = httpClient
 	return c, nil
 }
