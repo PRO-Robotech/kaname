@@ -115,7 +115,8 @@ type IssueSAKeyUseCase struct {
 	trustGrants TrustGrantAdmin
 	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
 	// skipped (test / legacy wiring). Production main.go wires the pg
-	// adapter so the secret is replaced with `"<redacted>"` after the
+	// adapter so the secret is CLEARED (the field is reset to empty — there is no
+	// placeholder) after the
 	// caller's first poll of Operation.Get.
 	redactor OpsResponseRedactor
 	// audit — durable audit_outbox emitter. nil → no audit row
@@ -380,7 +381,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 		// for done=true, holds the grace window (so the polling client can
 		// retrieve the one-shot key), then performs the single UPDATE.
 		// Concurrency safety: the UPDATE is single-statement atomic; idempotent
-		// — re-running with the same `<redacted>` value is a no-op.
+		// — re-running on an already-cleared field writes nothing.
 		if derr == nil && u.redactor != nil && len(in.TrustedSubjects) == 0 {
 			// G118 (gosec) is suppressed intentionally: the goroutine must outlive
 			// the request-scoped ctx because the gRPC client has already received
@@ -406,12 +407,12 @@ const redactCtxMargin = 10 * time.Second
 
 // scheduleSecretRedact дожидается, пока операция станет Done (worker вызывает
 // MarkDone сразу после `fn`), выдерживает grace-окно, затем одним UPDATE заменяет
-// `response.private_key_pem` на `"<redacted>"`. Legacy-поле `response.client_secret`
+// `response.private_key_pem` ОЧИЩАЕТ (поле сбрасывается в пустое). Legacy-поле `response.client_secret`
 // затирается тем же образом для wire-compat, хотя новые ключи оставляют его пустым.
 //
 // Grace-окно (redactGrace) даёт поллящему клиенту время прочитать и сохранить
 // одноразовый ключ ДО затирания — без него клиент гарантированно проигрывает гонку
-// и получает "<redacted>". По истечении окна секрет всё равно вычищается из LRO.
+// и получает пустое поле. По истечении окна секрет всё равно вычищается из LRO.
 func (u *IssueSAKeyUseCase) scheduleSecretRedact(callerCtx context.Context, opID string) {
 	// recover-guard: эта goroutine детачена от запроса и переживает его, поэтому
 	// неперехваченная паника (в opsRepo.Get / RedactResponseField) убила бы весь
@@ -496,7 +497,7 @@ func (u *IssueSAKeyUseCase) awaitOpDone(ctx context.Context, opID string) bool {
 
 // redactSecretFields затирает одноразовый private_key_pem (и legacy client_secret
 // для wire-compat) в proto-marshalled response операции одним UPDATE на строку;
-// idempotent — повтор с тем же `<redacted>` no-op. Провал затирания оставляет
+// idempotent — повтор на уже-очищенном поле ничего не пишет. Провал затирания оставляет
 // plaintext ключ в operations.response_data, re-fetchable через Operation.Get —
 // логируем на Error, чтобы застрявший секрет был обнаружим, никогда не глушим.
 func (u *IssueSAKeyUseCase) redactSecretFields(ctx context.Context, opID string) {

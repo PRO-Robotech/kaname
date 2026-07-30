@@ -722,7 +722,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	issueUC.WithAuditEmitter(auditEmitter)
 	// Grace-окно перед затиранием одноразового private_key_pem: поллящий клиент
 	// (docker-login / CI / UI) должен успеть прочитать ключ из op.response до его
-	// вычистки. Без окна затирание выигрывало гонку и клиент получал "<redacted>".
+	// вычистки. Без окна затирание выигрывало гонку и клиент получал пустое поле.
 	issueUC.WithRedactGrace(cfg.AuthN.SAKeyRedactGrace)
 	// Lifetime discipline for the machine credential. A service-account key is
 	// what a machine authenticates with, and machine principals are exempt from

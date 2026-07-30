@@ -96,7 +96,7 @@ type IssueUserTokenUseCase struct {
 	opsRepo operations.Repo
 	// redactor для post-MarkDone private_key_pem-редакции. nil → редакция
 	// пропускается (тест/legacy wiring). Прод main.go проводит pg-adapter, так что
-	// секрет заменяется на `"<redacted>"` после первого polling'а клиента.
+	// секрет ОЧИЩАЕТСЯ (поле сбрасывается в пустое) после первого polling'а клиента.
 	redactor OpsResponseRedactor
 	// audit — durable audit_outbox emitter. nil → без audit-строки.
 	audit auditEmitter
@@ -275,7 +275,8 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 const redactCtxMargin = 10 * time.Second
 
 // scheduleSecretRedact дожидается Done, выдерживает grace-окно, затем одним UPDATE
-// заменяет `response.private_key_pem` на `"<redacted>"`. Grace-окно даёт поллящему
+// ОЧИЩАЕТ `response.private_key_pem` (поле сбрасывается в пустое; метки-заменителя
+// нет). Grace-окно даёт поллящему
 // клиенту время прочитать одноразовый ключ ДО затирания.
 func (u *IssueUserTokenUseCase) scheduleSecretRedact(callerCtx context.Context, opID string) {
 	// recover-guard: goroutine детачена от запроса, неперехваченная паника убила бы

@@ -174,6 +174,13 @@ func runServe(cfg config.Config) error {
 	// committed-реальности ресурса. Boot-sweep + периодический фон; non-fatal.
 	startLROReconciler(ctx, pool, kachoRepo, lroRec, logger)
 
+	// Durable backstop for one-shot credentials staged in FINISHED operation
+	// responses. The reconciler above cannot cover them: its claim is done=false and
+	// these rows are done=true by the time the credential is staged.
+	if err := startSecretBackstop(ctx, pool, cfg, logger); err != nil {
+		return fmt.Errorf("secret backstop: %w", err)
+	}
+
 	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, openfgaClient, metricsReg, cfg, logger)
 
 	// gRPC servers. PrincipalExtract-interceptor читает
