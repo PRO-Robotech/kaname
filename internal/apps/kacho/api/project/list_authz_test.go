@@ -11,17 +11,20 @@ package project
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	repoaccount "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
@@ -37,6 +40,10 @@ import (
 type listFakeRepo struct {
 	accounts map[string]domain.Account
 	projects map[string]domain.Project
+	// acctGets — how many account lookups one listing costs. The number is part of
+	// the contract being asserted: it must be bounded by the PAGE, never by the
+	// population of the cluster.
+	acctGets int
 }
 
 func newListFakeRepo() *listFakeRepo {
@@ -69,10 +76,11 @@ func (r *listFakeReader) Rollback(context.Context) error               { return 
 type listFakeAcctReader struct{ p *listFakeRepo }
 
 func (a *listFakeAcctReader) Get(ctx context.Context, id domain.AccountID) (domain.Account, error) {
+	a.p.acctGets++
 	if acc, ok := a.p.accounts[string(id)]; ok {
 		return acc, nil
 	}
-	return domain.Account{}, stderrors.New("not found")
+	return domain.Account{}, iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
 }
 func (a *listFakeAcctReader) ExistsByName(context.Context, domain.AccountName) (bool, error) {
 	return false, nil
@@ -80,6 +88,10 @@ func (a *listFakeAcctReader) ExistsByName(context.Context, domain.AccountName) (
 func (a *listFakeAcctReader) CountAccountsByOwner(context.Context, domain.UserID) (int, error) {
 	return 0, nil
 }
+
+// List returns a PAGE, capped like the real repository is: the platform maximum is
+// 1000 and the listing is ordered oldest-first. A fake that returned everything would
+// hide exactly the defect that page cap causes.
 func (a *listFakeAcctReader) List(ctx context.Context, f repoaccount.ListFilter) ([]domain.Account, string, error) {
 	out := make([]domain.Account, 0, len(a.p.accounts))
 	keys := make([]string, 0, len(a.p.accounts))
@@ -90,7 +102,12 @@ func (a *listFakeAcctReader) List(ctx context.Context, f repoaccount.ListFilter)
 	for _, k := range keys {
 		out = append(out, a.p.accounts[k])
 	}
-	return out, "", nil
+	const platformMaxPage = 1000
+	next := ""
+	if len(out) > platformMaxPage {
+		out, next = out[:platformMaxPage], "next"
+	}
+	return out, next, nil
 }
 
 type listFakeProjReader struct{ p *listFakeRepo }
@@ -293,4 +310,57 @@ func TestListProjects_RBACv2_OwnerPlusGrants(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"prj-alice-1", "prj-bob-1"}, ids,
 		"alice sees her own project + bob's granted project; bob-2 stays hidden")
+}
+
+// ── ownership is resolved for the page, not for the cluster ─────────────────
+
+// An owner whose account is not among the oldest thousand in the cluster still sees
+// their own projects.
+//
+// Ownership used to be resolved by LISTING accounts — one page of them, cluster-wide,
+// oldest first — and keeping the ones this principal owns. That page is capped at the
+// platform maximum, so past a thousand accounts an owner simply was not recognised as
+// one: their own projects disappeared from their own listing while the rows, the
+// account and the ownership all existed. Nothing said so; the response was a
+// successful, empty list.
+func TestListProjects_OwnerBeyondTheAccountPage_StillSeesTheirProjects(t *testing.T) {
+	repo := newListFakeRepo()
+	// A thousand older accounts fill the account page.
+	for i := 0; i < 1000; i++ {
+		seedAccount(repo, fmt.Sprintf("acc-%04d", i), "usr-someone-else")
+	}
+	// The caller's own account sorts after all of them.
+	seedAccount(repo, "acc-zzzz-mine", "usr-late")
+	seedProject(repo, "prj-mine", "acc-zzzz-mine")
+
+	// The grant branch denies everything: ownership is the only thing that can make
+	// this row visible, which is what the assertion is about.
+	fga := &relationQueriesStub{allowedIDs: nil}
+	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+	out, _, err := uc.Execute(ctxAs("usr-late"), repoproject.ListFilter{PageSize: 100})
+	require.NoError(t, err)
+	require.Len(t, out, 1, "the owner of the account must see the project in it")
+	assert.Equal(t, domain.ProjectID("prj-mine"), out[0].ID)
+
+	// And the cost is bounded by the page: one lookup per DISTINCT account named by
+	// the page, not one per account in the cluster.
+	assert.Equal(t, 1, repo.acctGets,
+		"a listing must ask about the accounts its page names and nothing else")
+}
+
+// A page naming the same account many times pays for it once.
+func TestListProjects_OwnershipLookupsAreDeduplicatedPerPage(t *testing.T) {
+	repo := newListFakeRepo()
+	seedAccount(repo, "acc-one", "usr-owner")
+	for i := 0; i < 25; i++ {
+		seedProject(repo, fmt.Sprintf("prj-%02d", i), "acc-one")
+	}
+	fga := &relationQueriesStub{allowedIDs: nil}
+	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+	out, _, err := uc.Execute(ctxAs("usr-owner"), repoproject.ListFilter{PageSize: 100})
+	require.NoError(t, err)
+	require.Len(t, out, 25)
+	assert.Equal(t, 1, repo.acctGets, "25 rows of one account cost one account lookup")
 }
