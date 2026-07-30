@@ -94,6 +94,33 @@ func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
 	return h
 }
 
+// maxTraceIDLen — предел длины корреляционного идентификатора В ЛОГЕ.
+//
+// Контракт объявляет `(length) = "<=64"`, но объявление здесь ничего не энфорсит:
+// protovalidate в этом дереве не подключён, поэтому длина приходит какой угодно.
+// Доверять объявленному пределу и писать значение в лог как есть — значит отдать
+// вызывающему право на объём наших логов. Обрезка живёт в коде, рядом с записью.
+const maxTraceIDLen = 64
+
+// traceAttr — корреляционный идентификатор вызывающего как атрибут записи лога.
+//
+// Поле `trace_id` объявлено на проверках доступа как «Correlation id for downstream
+// logs / traces», и до этой правки его не читал никто: вызывающий присылал
+// идентификатор и не находил его ни в одной записи. Атрибут добавляется на путях,
+// где запись вообще делается (недоступность бэкенда, внутренняя ошибка). На успешном
+// пути записи нет и не будет: authz-Check стоит на КАЖДОМ RPC платформы, и лог на
+// каждый успешный Check утопил бы ту самую корреляцию, ради которой поле существует.
+//
+// Пустой идентификатор даёт пустой атрибут (slog его печатает как пустую строку) —
+// это дешевле ветвления на каждом вызове и не искажает запись. Лок:
+// trace_id_test.go.
+func traceAttr(traceID string) slog.Attr {
+	if len(traceID) > maxTraceIDLen {
+		traceID = traceID[:maxTraceIDLen]
+	}
+	return slog.String("trace_id", traceID)
+}
+
 // Check — see iamv1.AuthorizeServiceServer.
 func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (*iamv1.AuthorizeCheckResponse, error) {
 	if req.GetSubject() == "" {
@@ -129,10 +156,12 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		if stderrors.Is(err, iamerr.ErrUnavailable) {
-			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "Check", "err", err.Error())
+			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "Check",
+				"err", err.Error(), traceAttr(req.GetTraceId()))
 			return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 		}
-		slog.ErrorContext(ctx, "authorize internal error", "op", "Check", "err", err.Error())
+		slog.ErrorContext(ctx, "authorize internal error", "op", "Check",
+			"err", err.Error(), traceAttr(req.GetTraceId()))
 		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
 	return &iamv1.AuthorizeCheckResponse{
@@ -177,10 +206,12 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 		// retryable Unavailable with the fixed redacted text, never the raw FGA
 		// transport error (endpoint/store id leak).
 		if stderrors.Is(err, iamerr.ErrUnavailable) {
-			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "BatchCheck", "err", err.Error())
+			slog.ErrorContext(ctx, "authorize backend unavailable", "op", "BatchCheck",
+				"err", err.Error(), traceAttr(req.GetTraceId()))
 			return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 		}
-		slog.ErrorContext(ctx, "authorize internal error", "op", "BatchCheck", "err", err.Error())
+		slog.ErrorContext(ctx, "authorize internal error", "op", "BatchCheck",
+			"err", err.Error(), traceAttr(req.GetTraceId()))
 		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
 	out := &iamv1.BatchAuthorizeCheckResponse{
