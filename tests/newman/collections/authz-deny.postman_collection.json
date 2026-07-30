@@ -19199,13 +19199,13 @@
                   "const pc = parseInt(pm.environment.get('_w12WarmPoll') || '0', 10);",
                   "if (pm.response.code !== 200 && pc < 50) {",
                   "  pm.environment.set('_w12WarmPoll', String(pc + 1));",
-                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay; budget = POLL_CAP x 500ms (testing.md). READ THE CONSTANT: it is 50, so ~25s — this line said 'cap 30 ~= 15s' while nothing set 30, and a known-failing record then justified itself with that 15s. */",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
                   "pm.environment.unset('_w12WarmPoll');",
                   "pm.environment.unset('_w12WarmStarted');",
-                  "pm.test('INV sees account-A (200) — cache warm within ~6s of grant', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));"
+                  "pm.test('INV sees account-A (200) — grant visible inside the bounded poll (POLL_CAP x 500ms)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));"
                 ]
               }
             }

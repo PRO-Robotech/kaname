@@ -138,9 +138,17 @@ PRE_GLOBAL = [
 # request-name-scoped flag) so a value left over from a prior case can never shorten
 # the next case's loop.
 #
-# 50 round-trips at ~100-200 ms each gives ~6-10 s wall-clock — generous enough for
-# the async Delete Operation to finish AND for the FGA owner-tuple removal to
-# propagate before the get-after-delete assertion runs.
+# The budget is POLL_CAP x the inter-poll delay, and the delay is a real 500 ms
+# busy-wait in every loop that uses this cap (newman fires setNextRequest before any
+# setTimeout, so a busy-wait is the only way to actually space polls out). So 50 polls
+# is ~25 s of wall-clock, not the "~6-10 s" this paragraph claimed before the delay
+# existed — generous enough for the async Delete Operation to finish AND for the FGA
+# owner-tuple removal to propagate before the get-after-delete assertion runs.
+#
+# The number matters beyond arithmetic: a known-failing record in docs/RESULTS.md
+# justified itself as covering "a ~15 s budget", a figure that came from a stale comment
+# in cases/authz-deny.py and never from this constant. A record resting on a window that
+# is not the one being executed cannot be refuted by measuring.
 #
 # The cap is 50 (not lower) because the flat owner/creator access on a
 # freshly-created iam_access_binding OBJECT converges at ~4 s under full-pipeline CI
