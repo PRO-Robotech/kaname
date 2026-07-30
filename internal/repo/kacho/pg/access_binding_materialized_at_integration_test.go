@@ -66,9 +66,12 @@ func TestAB_MA_MaterializedAtFromMemberLedger(t *testing.T) {
 		RoleID: role.ID, ResourceType: "account", ResourceID: string(acc.ID),
 		GrantedByUserID: owner,
 	})
+	// The cluster scope admits SYSTEM roles only — an account-tier custom role is not
+	// assignable there, so binding `role` here described a state the product refuses.
+	// This case is about a binding with no member ledger; the role's tier is incidental.
 	bare := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
-		RoleID: role.ID, ResourceType: "cluster", ResourceID: "cluster_kacho_root",
+		RoleID: systemRoleID("viewer"), ResourceType: "cluster", ResourceID: "cluster_kacho_root",
 		GrantedByUserID: owner,
 	})
 

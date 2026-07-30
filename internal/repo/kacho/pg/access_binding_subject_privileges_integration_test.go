@@ -264,9 +264,14 @@ func TestAB_SP_RevokedExcluded_AndAccountIsolation(t *testing.T) {
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: roleActive.ID, ResourceType: "account", ResourceID: string(acc.ID), GrantedByUserID: owner,
 	})
+	// The scope said "project" and carried an ACCOUNT id — a resource id that names no
+	// project at all. Nothing checked it before, so the row went in and the case
+	// measured a binding anchored to nothing. It now names a real project of the same
+	// account, which is what the case meant: a revoked grant inside the tenant.
+	prj := seedProject(t, ctx, repo, acc.ID, "prj-spr")
 	revoked := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
-		RoleID: roleRevoked.ID, ResourceType: "project", ResourceID: string(acc.ID), GrantedByUserID: owner,
+		RoleID: roleRevoked.ID, ResourceType: "project", ResourceID: string(prj.ID), GrantedByUserID: owner,
 	})
 	// Binding for a DIFFERENT subject (stranger) — must not appear.
 	_ = insertAB(t, ctx, repo, domain.AccessBinding{
