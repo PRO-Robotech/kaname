@@ -102,8 +102,14 @@ func TestAccessBindingLabels_T33MAT01_LabelGrantMaterializesMatchingSet(t *testi
 	// Two binding-objects in the granting account: acb1{stage:prod}, acb2{stage:dev}.
 	s1 := mustSeedUser(t, ctx, pool, "ablmat-s1")
 	s2 := mustSeedUser(t, ctx, pool, "ablmat-s2")
-	acb1 := insertThinBindingScope(t, ctx, fx.repo, s1, fx.role, "account", string(fx.accID), domain.ScopeAccount)
-	acb2 := insertThinBindingScope(t, ctx, fx.repo, s2, fx.role, "account", string(fx.accID), domain.ScopeAccount)
+	// The role must be assignable on the scope it is bound to: the gamma fixture's
+	// role is PROJECT-tier, and the platform admits a project-tier role on its own
+	// project only. These cases are about labels on binding OBJECTS, so the tier is
+	// incidental — an account-tier role of the same account carries them just as well
+	// and describes a state the product can actually be in.
+	accRole := domain.RoleID(seedNativeRole(t, ctx, pool, fx.accID, "ablmat_accrole"))
+	acb1 := insertThinBindingScope(t, ctx, fx.repo, s1, accRole, "account", string(fx.accID), domain.ScopeAccount)
+	acb2 := insertThinBindingScope(t, ctx, fx.repo, s2, accRole, "account", string(fx.accID), domain.ScopeAccount)
 	setABLabels(t, ctx, pool, string(acb1), map[string]string{"stage": "prod"})
 	setABLabels(t, ctx, pool, string(acb2), map[string]string{"stage": "dev"})
 
@@ -161,7 +167,10 @@ func TestAccessBindingLabels_T33REVOKE01_LabelRemovedEagerFallout(t *testing.T) 
 	rec, _ := newReconciler(pool)
 
 	s1 := mustSeedUser(t, ctx, pool, "ablrev-s1")
-	acb1 := insertThinBindingScope(t, ctx, fx.repo, s1, fx.role, "account", string(fx.accID), domain.ScopeAccount)
+	// Account-tier role: the gamma fixture's role is project-tier and is not
+	// assignable on the account (see T33MAT01).
+	accRole := domain.RoleID(seedNativeRole(t, ctx, pool, fx.accID, "ablrev_accrole"))
+	acb1 := insertThinBindingScope(t, ctx, fx.repo, s1, accRole, "account", string(fx.accID), domain.ScopeAccount)
 	setABLabels(t, ctx, pool, string(acb1), map[string]string{"stage": "prod"})
 
 	rule := domain.Rule{
@@ -202,7 +211,9 @@ func TestAccessBindingLabels_T33CONC01_ConcurrentUpdateLabels(t *testing.T) {
 	rec, _ := newReconciler(pool)
 
 	sc := mustSeedUser(t, ctx, pool, "ablconc-sc")
-	acbC := insertThinBindingScope(t, ctx, fx.repo, sc, fx.role, "account", string(fx.accID), domain.ScopeAccount)
+	// Account-tier role, for the same reason as T33MAT01.
+	accRole := domain.RoleID(seedNativeRole(t, ctx, pool, fx.accID, "ablconc_accrole"))
+	acbC := insertThinBindingScope(t, ctx, fx.repo, sc, accRole, "account", string(fx.accID), domain.ScopeAccount)
 
 	rule := domain.Rule{
 		Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"get", "list"},

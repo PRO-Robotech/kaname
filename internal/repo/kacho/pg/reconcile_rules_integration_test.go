@@ -412,12 +412,19 @@ func insertThinBindingScope(t *testing.T, ctx context.Context, repo *kachopg.Rep
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	// Release the connection on EVERY path. A failing require below ends the test
+	// goroutine with the writer still checked out, and the caller's deferred
+	// pool.Close() then waits for it for ever: the package dies on its 10-minute
+	// budget and prints NO failure message at all — the assertion that fired is
+	// erased, and so is every other failure in the package. Rollback after a
+	// successful Commit is a no-op.
+	defer func() { _ = w.Rollback(ctx) }()
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: bid, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(subject),
 		RoleID: roleID, ResourceType: domain.ResourceType(resType), ResourceID: resID,
 		Scope: scope, Status: domain.AccessBindingStatusActive,
 	})
-	require.NoError(t, err)
+	require.NoError(t, err, "seed binding %s (role %s on %s:%s)", bid, roleID, resType, resID)
 	require.NoError(t, w.Commit(ctx))
 	return bid
 }
