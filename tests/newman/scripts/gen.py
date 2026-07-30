@@ -124,6 +124,45 @@ PRE_GLOBAL = [
 ]
 
 
+# POST_GLOBAL — снятие ФАНТОМНОГО идентификатора, на уровне КОЛЛЕКЦИИ.
+#
+# Идентификатор ресурса берётся из `metadata` сразу после мутации: до завершения
+# операции другого источника нет. Но он ПРЕДВЫДЕЛЕН и приходит даже у операции, которая
+# закончится ошибкой, — тогда в переменной остаётся ресурс, которого в базе не существует.
+# Он выглядит настоящим, поэтому кейс не падает на месте, а продолжает работу с ним и
+# плодит производные отказы вокруг пустоты (замер боевой посадки 2026-07-30: одна
+# неудача создания аккаунта — 550 упавших утверждений в одной коллекции, и разбор увело
+# в ложную сторону).
+#
+# ПОЧЕМУ НА УРОВНЕ КОЛЛЕКЦИИ, А НЕ В ОБЩЕМ ПОЛЛЕРЕ. Поллеров в дереве два рода: общий
+# helper и рукописные, вшитые в кейсы. Правка общего закрывала первый род и оставляла
+# второй — перепись по сгенерированным коллекциям показала 236 опросов операции в 90
+# папках, и подавляющая часть промахов приходилась именно на рукописные. Скрипт уровня
+# коллекции исполняется ПОСЛЕ КАЖДОГО ответа, поэтому покрывает оба рода разом и не
+# может быть забыт автором нового кейса — это и есть починка класса, а не экземпляра.
+#
+# НИ ОДНОГО УТВЕРЖДЕНИЯ ЗДЕСЬ НЕТ. `pm.test` в скрипте уровня коллекции добавил бы по
+# утверждению на КАЖДЫЙ запрос и раздул бы счётчики вердикта. Здесь только побочный
+# эффект над окружением.
+POST_GLOBAL = [
+    "try {",
+    "  const _ct = (pm.response && pm.response.headers && pm.response.headers.get('Content-Type')) || '';",
+    "  if (_ct.indexOf('json') !== -1) {",
+    "    const _j = pm.response.json();",
+    # Только конверт Operation: `done` вместе с `id`. Иначе обычный ресурс с полем
+    # `done` мог бы случайно снять регистрацию.
+    "    if (_j && _j.done === true && typeof _j.id === 'string' && _j.id !== '') {",
+    "      if (_j.error) {",
+    "        const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+    "        _pv.forEach(function (k) { pm.environment.unset(k); });",
+    "      }",
+    "      pm.environment.unset('_provisionalIds');",
+    "    }",
+    "  }",
+    "} catch (e) { /* не JSON, не Operation — регистрация остаётся как есть */ }",
+]
+
+
 # ---------------------------------------------------------------------------
 # Polling caps (single source of truth)
 # ---------------------------------------------------------------------------
@@ -713,21 +752,15 @@ def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True
             "pm.environment.unset('_pollCount');",
             "pm.environment.unset('_pollStarted');",
             "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+            # СНЯТИЕ ФАНТОМА ЗДЕСЬ НЕ ДУБЛИРУЕТСЯ. Оно живёт на уровне коллекции
+            # (POST_GLOBAL) — там оно покрывает и рукописные поллеры, которых в дереве
+            # большинство. Копия в этом helper'е закрывала только его собственные шаги и,
+            # вклинившись между `if (j.error) …` и его `else`, ПЕРЕПРИВЯЗАЛА этот `else`
+            # к соседнему условию: `lastOpError` снимался ровно тогда, когда ошибка ЕСТЬ.
+            # Потребителей у переменной в этой суите нет (0 чтений), поэтому вреда не
+            # случилось — но ветка означала обратное написанному, а это ловушка для
+            # следующего читателя. Условие и его `else` снова стоят рядом.
             "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-            # ФАНТОМ СНИМАЕТСЯ ЗДЕСЬ — это первый момент, когда исход операции известен.
-            # Идентификаторы, захваченные из `metadata` ДО завершения, помечены как
-            # провизорные (см. save_from_response). Операция закончилась ошибкой ⇒ ресурса
-            # с таким id не существует ⇒ переменная снимается, и последующие шаги падают
-            # на ПУСТОМ id — там, где предусловия действительно нет, — вместо того чтобы
-            # правдоподобно работать с несуществующим объектом и плодить производные отказы.
-            "if (j.done && j.error) {",
-            "  try {",
-            "    const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-            "    _pv.forEach(function (k) { pm.environment.unset(k); });",
-            "  } catch (e) {}",
-            "  pm.environment.unset('_provisionalIds');",
-            "}",
-            "if (j.done && !j.error) pm.environment.unset('_provisionalIds');",
             "else pm.environment.unset('lastOpError');",
             "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
         ],
@@ -1374,11 +1407,157 @@ def build_collection(resource: str, cases: List[Case]) -> Dict:
         },
         "event": [
             {"listen": "prerequest", "script": {"type": "text/javascript", "exec": PRE_GLOBAL}},
+            {"listen": "test", "script": {"type": "text/javascript", "exec": POST_GLOBAL}},
         ],
         "item": [case_to_postman(c) for c in cases],
         "variable": [],
     }
 
+
+
+# ---------------------------------------------------------------------------
+# Страж класса: провизорный идентификатор обязан сниматься тем, кто первым узнал
+# исход операции
+# ---------------------------------------------------------------------------
+#
+# ЧТО ЗАПРЕЩАЕТСЯ. `metadata.<res>Id` доступен СРАЗУ, до `done`, и другого источника
+# идентификатора до завершения операции нет — поэтому захват отменить нельзя. Но этот
+# идентификатор ПРЕДВЫДЕЛЕН и приходит даже у операции, которая закончится ОШИБКОЙ.
+# Тогда в переменной остаётся идентификатор ресурса, которого в базе нет. Он выглядит
+# настоящим, поэтому кейс не падает на месте, а уезжает дальше и производит сотни
+# производных отказов вокруг несуществующего объекта.
+#
+# ГДЕ ЕДИНСТВЕННОЕ МЕСТО СНЯТИЯ. Шаг опроса операции — первый момент, когда исход
+# известен. Значит требование адресуется ему, а не автору кейса.
+#
+# ПОЧЕМУ СТРАЖ ЧИТАЕТ СГЕНЕРИРОВАННОЕ, А НЕ ИСХОДНИК. Поллеров в дереве два рода:
+# общий (`poll_operation_until_done`) и рукописные, вшитые прямо в кейс. Проверка по
+# исходникам видела бы только первый род — а промах жил ровно во втором. Исполняемая
+# коллекция уравнивает оба.
+#
+# ПРЕДПОСЫЛКА СТРАЖА И ЕЁ ПРОВЕРКА. Страж опирается на два факта о дереве: (1) захват
+# из метаданных РЕГИСТРИРУЕТ имя переменной в `_provisionalIds` (см.
+# `save_from_response`) — если регистрация исчезнет, стражу нечего будет требовать и он
+# обязан это заметить; (2) «ноль находок» обязано быть отличимо от «ноль прочитанного»,
+# поэтому перепись осмотренного возвращается вместе с находками и вызывающий её печатает.
+
+_JS_LINE_COMMENT = re.compile(r"//.*$", re.M)
+_JS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+
+
+def _executable_js(lines: List[str]) -> str:
+    """Скрипт без комментариев.
+
+    Гейт по сырому тексту находит искомое слово в комментарии, ОБЪЯСНЯЮЩЕМ эту же
+    защиту, и остаётся зелёным при снятой защите (testing.md, «гейт читает исполняемую
+    часть, а не текст»). Строковые литералы здесь не вырезаются намеренно: имя
+    переменной окружения — это и есть литерал, и он часть исполняемого смысла.
+    """
+    return _JS_LINE_COMMENT.sub(" ", _JS_BLOCK_COMMENT.sub(" ", "\n".join(lines)))
+
+
+def _test_code(item: Dict) -> str:
+    return "\n".join(_executable_js(ev.get("script", {}).get("exec", []))
+                     for ev in item.get("event", []) or []
+                     if ev.get("listen") == "test")
+
+
+def _leaf_steps(node: Dict) -> List[Dict]:
+    out: List[Dict] = []
+    for it in node.get("item", []) or []:
+        if "item" in it:
+            out.extend(_leaf_steps(it))
+        else:
+            out.append(it)
+    return out
+
+
+def _url_raw(item: Dict) -> str:
+    u = (item.get("request") or {}).get("url")
+    return u.get("raw", "") if isinstance(u, dict) else (u or "")
+
+
+def _drops_provisional(code: str) -> bool:
+    """Скрипт снимает провизорные идентификаторы, когда операция кончилась ошибкой.
+
+    Две законные формы: снятие общего реестра (`_provisionalIds` + `unset`) и адресное
+    снятие именованной переменной внутри ветки `j.error`.
+    """
+    if "_provisionalIds" in code and "unset" in code:
+        return True
+    return re.search(r"j\.error\s*\)\s*\{?\s*pm\.environment\.unset\(", code) is not None
+
+
+def audit_phantom_drop(collections_dir: Path) -> Dict:
+    """Перепись + находки класса «фантомный идентификатор переживает ошибку операции».
+
+    Возвращает словарь с переписью (сколько прочитано) и списком находок — папка кейса,
+    которая РЕГИСТРИРУЕТ провизорный идентификатор, но чей опрос операции не снимает его
+    на ошибке. Ничего не печатает: решение и печать — за вызывающим.
+    """
+    findings: List[str] = []
+    census = {"collections": 0, "steps": 0, "folders": 0, "registering_folders": 0, "pollers": 0}
+    collection_level_drop = 0
+    for path in sorted(collections_dir.glob("*.json")):
+        col = json.loads(path.read_text())
+        census["collections"] += 1
+        # Снятие может стоять на уровне КОЛЛЕКЦИИ — тогда оно исполняется после каждого
+        # ответа и покрывает поллеры обоих родов разом.
+        col_code = _test_code(col)
+        col_covers = _drops_provisional(col_code)
+        if col_covers:
+            collection_level_drop += 1
+        for folder in col.get("item", []) or []:
+            if "item" not in folder:
+                continue
+            census["folders"] += 1
+            steps = _leaf_steps(folder)
+            census["steps"] += len(steps)
+            codes = [(s, _test_code(s)) for s in steps]
+            registers = any("_provisionalIds" in c and "push" in c for _, c in codes)
+            if not registers:
+                continue
+            census["registering_folders"] += 1
+            pollers = [(s, c) for s, c in codes
+                       if "setNextRequest(pm.info.requestName)" in c and "/operations/" in _url_raw(s)]
+            census["pollers"] += len(pollers)
+            if col_covers:
+                continue
+            missing = [s["name"] for s, c in pollers if not _drops_provisional(c)]
+            for name in missing:
+                findings.append(f"{path.name} :: {name}")
+    census["collection_level_drop"] = collection_level_drop
+    return {"census": census, "findings": findings}
+
+
+def assert_phantom_drop(collections_dir: Path, out=sys.stderr) -> int:
+    """Печатает перепись и находки; 0 — чисто, 1 — есть находки либо ПРЕДПОСЫЛКА ЛОЖНА."""
+    res = audit_phantom_drop(collections_dir)
+    c, f = res["census"], res["findings"]
+    print(f"[phantom-drop] осмотрено: коллекций {c['collections']}, папок {c['folders']}, "
+          f"шагов {c['steps']}; регистрируют провизорный id — папок {c['registering_folders']}, "
+          f"их поллеров {c['pollers']}; снятие на уровне коллекции — {c['collection_level_drop']}",
+          file=out)
+    if c["collections"] == 0 or c["steps"] == 0:
+        print("[phantom-drop] FAIL — нечего было читать: ноль находок здесь означает "
+              "ноль прочитанного, а не чистоту.", file=out)
+        return 1
+    if c["registering_folders"] == 0:
+        print("[phantom-drop] FAIL — ПРЕДПОСЫЛКА СТРАЖА ЛОЖНА: ни один захват из метаданных "
+              "не регистрирует переменную в `_provisionalIds`. Либо регистрация снята "
+              "(тогда фантом снова некому снимать), либо изменилось её имя. Пока это так, "
+              "страж не проверяет ничего.", file=out)
+        return 1
+    if f:
+        print(f"[phantom-drop] FAIL — {len(f)} опрос(ов) операции не снимают провизорный "
+              f"идентификатор на ошибке:", file=out)
+        for name in f[:40]:
+            print(f"    {name}", file=out)
+        if len(f) > 40:
+            print(f"    … ещё {len(f) - 40}", file=out)
+        return 1
+    print("[phantom-drop] OK", file=out)
+    return 0
 
 
 def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
@@ -1520,6 +1699,12 @@ def main(argv: List[str]) -> int:
         out = OUT_DIR / f"{res}.postman_collection.json"
         out.write_text(json.dumps(col, indent=2, ensure_ascii=False))
         print(f"[{res}] {len(cases)} cases → {out.relative_to(ROOT)}")
+    # Страж класса исполняется ЗДЕСЬ, а не в отдельном тесте, который никто не зовёт:
+    # генерация предшествует КАЖДОМУ прогону (deploy/scripts/newman-parallel.sh), значит
+    # это единственное место, мимо которого нельзя пройти. Отказ роняет генерацию —
+    # коллекция с непокрытым классом не должна попадать в прогон.
+    if assert_phantom_drop(OUT_DIR) != 0:
+        rc = 1
     return rc
 
 
