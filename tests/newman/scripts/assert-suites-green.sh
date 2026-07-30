@@ -8,12 +8,19 @@
 # (collections/ + out/ live there; all repos checkout kacho-iam@main and run the
 # shared gen.py + run.sh, so the per-suite reports are identical).
 #
-# WHY this is shared (KAC — newman gate consolidation): the known-RED whitelist
-# used to be duplicated inline in each repo's newman-e2e.yml. They drifted —
-# get-malformed (api-gateway#73), delete-binding (iam#108), the user-per-account
-# invite fix (iam#113, migration 0011) only ever reached kacho-iam's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on
-# the very same shared suites that kacho-iam reported GREEN. One script = one
-# source of truth; un-skip / whitelist edits land everywhere at once.
+# WHY this is shared (KAC — newman gate consolidation): each repo's
+# newman-e2e.yml used to carry its own inline copy of the verdict logic, and the
+# copies drifted — fixes for get-malformed (api-gateway#73), delete-binding
+# (iam#108) and the user-per-account invite (iam#113, migration 0011) only ever
+# reached kacho-iam's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on the
+# very same shared suites that kacho-iam reported GREEN. One script = one source of
+# truth; a change to the verdict lands everywhere at once.
+#
+# NOTHING IS SUBTRACTED FROM THE VERDICT. This gate reports the counts newman
+# reported. The "known-RED" whitelist that used to sit in the loop below was
+# removed 2026-07-30 after its third narrowing — see the note at the subtraction
+# site for why narrowing could never fix it. Outstanding red is carried as a
+# counted, named debt in docs/RESULTS.md, not as a silent deduction here.
 #
 # FOUR OUTCOMES, FOUR NAMES. A request ends one of four ways, and this gate
 # reports each separately because folding any of them into another is how a suite
@@ -144,393 +151,43 @@ for col in "${collections[@]}"; do
   # gap, it is a case that did not run.
   scripts_failed=$(jq -r '((.run.stats.testScripts.failed // 0) + (.run.stats.prerequestScripts.failed // 0))' "$report")
 
-  # Known-RED whitelist (RED-by-design, each tracked). Subtraction clamps to 0,
-  # so when a case is genuinely fixed the gate still passes; a NEW failure
-  # widens the diff and fires the gate. Extend the alternation consciously.
+  # NO SUBTRACTION. The failure count printed and gated below is the one newman
+  # reported, whole.
   #
-  #   EVERY entry below carries the date it was last CHECKED AGAINST BEHAVIOUR and
-  #   the command that checked it. An entry without one is not a known red, it is an
-  #   unverified claim about the product — and an unverified claim puts work in the
-  #   queue that may not be needed, or keeps a real regression invisible. Re-checking
-  #   costs one suite run; leaving it costs somebody a day.
+  # What stood here was a "known-RED" whitelist: a jq alternation over case names
+  # whose matches were subtracted from `fails` before the verdict. It was narrowed
+  # twice and removed on the third audit, and the reason it had to go is the shape
+  # of those three revisions rather than the size of any one of them.
   #
-  #   REMOVED 2026-07-29 — any-authz-gated-rpc-during-openfga-outage. The entry
-  #   said the case "needs external `kubectl scale openfga --replicas=0`
-  #   orchestration" and would stay "permanent until somebody writes it", pointing
-  #   at a `scripts/run-failclosed.sh` that existed nowhere in the tree. So for as
-  #   long as the entry lived, the invariant it names — no answer about permissions
-  #   must never be counted as "allowed" — was not checked at all, and the suite
-  #   read green. A case that needs an unavailable dependency does not get a
-  #   waiver, it gets a wave that CREATES the condition (testing.md).
-  #   That wave now exists: the case moved to its own collection
-  #   (cases/authz-failclosed.py), the wrapper it always named was written
-  #   (scripts/run-failclosed.sh — scales the store to zero, waits out the
-  #   gateway's decision cache, runs the one collection, restores and waits for
-  #   ready), and deploy/scripts/newman-parallel.sh drives it as WAVE 3 after every
-  #   other suite has reported. No exclusion replaces it: if the wave does not run,
-  #   there is no report and this gate says `authz-failclosed(no-report)`.
-  #   - inv-get-account-allow-warm-cache — FGA grant→Check warm-cache window.
-  #     CHECKED 2026-07-28 (same run): PASSED, converging on the third poll. Kept
-  #     because a timing mask is not refuted by one unloaded run — this one exists
-  #     for the loaded umbrella. Narrow or drop it from a CI run, not from this one.
+  #   v1 subtracted BY FOLDER — 259 assertions across 17 folders, and a folder is
+  #      not a finding. It swallowed a P1 leak canary that happened to sit in a
+  #      matched folder.
+  #   v2 subtracted BY STEP inside those folders — smaller, same kind.
+  #   v3 subtracted by STEP-NAME SUFFIX (`-rya<N>`, `get-abs<N>`) — 27 assertions,
+  #      including a placement-coherence NEGATIVE
+  #      (LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH).
   #
-  #   PRUNED 2026-07-28 — THE WHOLE `PRO-Robotech/kacho#9` FAMILY, sixteen tokens,
-  #   ALL VERIFIED BY RUNNING THE SUITES. Every one of them rested on a single
-  #   stated mechanism: that the verbs on a binding, on a service account and on
-  #   their neighbours were directly-assignable only, with nothing inherited from
-  #   the account or the cluster, so the identity that administers everything could
-  #   not act on an object somebody else had created. That mechanism was removed on
-  #   2026-07-27 (d907a74e, e3acea6d, a96dbe1a — the three super-admin tiers now
-  #   cascade in proto/kacho/cloud/iam/v1/fga_model.fga, and nothing below them
-  #   does). The masks were written 2026-07-26, before that change, and nobody came
-  #   back to them — so for two days this gate asserted something about the product
-  #   that had stopped being true, which is the whole failure mode this list exists
-  #   to prevent.
-  #   Measured 2026-07-28 on kind-kacho:
-  #     rbac-subject-channel-equivalence — teardown-user-revoke and
-  #       teardown-usr-iso-revoke return HTTP 200 (the entry claimed a permanent
-  #       403); all seven `*-gone` convergence probes pass; the whole
-  #       IAM-CH-GRP-MEMBERSHIP-FLIP-OK case passes end to end, including
-  #       read-after-add and flip-gone.
-  #     iam-authz-grant-check-propagation — 35 of 36 assertions pass;
-  #       issue-sakey returns HTTP 200, and probe-check-after-revoke,
-  #       poll-op-plaintext and re-get-op-redacted all pass with it, exactly as
-  #       their own notes predicted they would once issue-sakey cleared.
-  #     iam-invite-grant-fga — 49/49, zero failures; poll-bind-project-anchor and
-  #       te4-post-bind-project-viewer both pass, including "bind NOT
-  #       FailedPrecondition (assignable)". Neither the product gap of the first
-  #       justification nor the stale case of the second is there any more.
-  #   Tokens removed: probe-check-after-revoke, poll-op-plaintext,
-  #   re-get-op-redacted, poll-bind-project-anchor, te4-post-bind-project-viewer,
-  #   teardown-user-gone, teardown-grp-gone, teardown-nonmem-gone,
-  #   revoke-binding-gone, teardown-sa-gone, teardown-sa-iso-gone,
-  #   teardown-usr-iso-gone, teardown-user-revoke, teardown-usr-iso-revoke,
-  #   issue-sakey, ^IAM-CH-GRP-MEMBERSHIP-FLIP-OK.
-  #   PRO-Robotech/kacho#9, kacho-iam#212 and kacho-iam#217 should be closed as
-  #   fixed. The one remaining red in iam-authz-grant-check-propagation was NOT
-  #   masked and must not be: AUTHZGCP-BIND-LIST-BY-SUBJECT-FOREIGN-DENY ::
-  #   inv-lists-aaa-subject denied correctly (403) but the response carried no
-  #   ErrorInfo detail, so the case could not tell a scoped deny from a catalog
-  #   miss. The contract fix landed in the service (iam now attaches the reason,
-  #   domain and action on a refusal it decides itself, for every method on the
-  #   scope-filtered band). Expected green on the next stand run; unit coverage
-  #   is services/iam/internal/authzguard/deny_details_test.go, which enumerates
-  #   the band FROM the catalog. Left recorded rather than deleted until a stand
-  #   run observes it — the fix is proven in-process, not end to end.
+  # Each narrowing was a correct local fix and none of them touched the defect. The
+  # predicate keys on a NAME, and the thing it claims to select — "this failure is
+  # the known materialization lag, not a real refusal" — is a statement about the
+  # REASON a step failed. The reason is not in the name. So the predicate cannot
+  # distinguish its subject from a stranger in principle, at any width, and every
+  # narrowing just reduced how many strangers it caught per run without changing
+  # that it catches them. A fourth narrowing would have been the same move again.
   #
-  #   PRUNED 2026-07-26 (the list shrinks, never grows). Every name below matched
-  #   NO request in ANY generated collection — the cases were deleted earlier and
-  #   the mask outlived them, so it protected nothing while standing ready to
-  #   silently absorb any future step that reused the name:
-  #     health-check, inv-list-pending, inv-list-reports, inv-get-foreign-pending,
-  #     aaa-creates-eligibility, aab-approves-some-pending, list-perms-on-internal.
-  #   bootstrap-approveB was pruned with its case: AUTHZGCP-BG-APPROVEB-CLUSTERADMIN-GRANT
-  #   called `/iam/v1/breakGlassRequests/{id}:approveB`, an RPC removed from the
-  #   product by migration 0006, so the step could only ever receive the gateway's
-  #   catalog-miss 403 and its `code < 500` assertion was a tautology. See the
-  #   removal note in cases/iam-authz-grant-check-propagation.py.
+  # A mechanism that DOES key on the reason already exists and stays: the bounded
+  # per-step retry (`retry_until_authorized` / `retry_until_absent` / the poll
+  # loops) — it retries while the response says the specific transient thing, and
+  # when the budget is spent the real assertion runs on the terminal response, so a
+  # genuine deny still fails. That is a check about behaviour; a name-match is not.
   #
-  #   PRUNED 2026-07-26 (second sweep — SAME class, this time on parent.name). The
-  #   whole alternation was re-matched against every folder + request of every
-  #   collection under services/*/tests/newman/collections (8211 leaf requests) and
-  #   against the case sources they are generated from. TWELVE tokens matched
-  #   NOTHING anywhere, because the suites they guarded were rewritten, not fixed:
-  #     compute (6) — ^INST-AD-, ^INST-DD-, ^INST-DISK-DEL-WHILE-ATTACHED,
-  #       ^INST-DEL-STATE-, ^INST-NIC-, ^INST-CR-CRUD-BOOT-DISK-ID-OK. The instance
-  #       suite is now instance-redesign.postman_collection.json and every case is
-  #       named INST-RD-* (COMP-1-nn), which the ^INST-<verb> anchors cannot match.
-  #       The storage-dependent attach/detach/boot-mirror cases no longer exist at
-  #       all — grep of services/compute/tests/newman/cases is empty for all six.
-  #     nlb (6) — ^NLB-START-CRUD-OK, ^NLB-STOP-CRUD-OK,
-  #       ^NLB-STOP-STATE-ALREADY-STOPPED, ^NLB-DEL-STATE-HAS-ATTACHED,
-  #       ^NLB-ATT-STATE-REGION-MISMATCH, ^NLB-ATT-NEG-TG-UNKNOWN. Start/Stop were
-  #       removed from the product (iam migration 0059_nlb_operator_drop_start_stop)
-  #       and the LB suite has no NLB-ATT-* / -HAS-ATTACHED folder; the surviving
-  #       delete-state cases are -HAS-LISTENER and -PROTECTION.
-  #   Removing a token that matches nothing cannot change any verdict — it only
-  #   takes away the trap where a future step reusing one of those names would be
-  #   silently absorbed.
-  #   - (#193 FIXED — removed from whitelist) get-confirms / get-confirms-update /
-  #     list-with-account were RED because Role.Get/List filtered by the `v_list`
-  #     verb relation, which has NO tier→v_* bridge in the FGA model, so a role's
-  #     creator / account-admin did not resolve it on their own role → 404 / absent.
-  #     Fixed by switching Role.Get/List per-object enforcement to the `viewer` TIER
-  #     relation (cascades from account-tier, consistent with account/project List);
-  #     the owner now sees their own role, foreign accounts still 404 (no-leak).
-  #     IAM-ROL-CR-CRUD-OK get-confirms and IAM-ROL-UP-CRUD-OK get-confirms-update
-  #     (single-Get) went GREEN with #193. IAM-ROL-LS-SYSTEM-PLUS-CUSTOM-WITH-ACCOUNT
-  #     list-with-account additionally needed a CASE-side page-boundary fix: the
-  #     catalog floor is 56 system roles (created_at = migration time → sort first)
-  #     and the run-created crudRoleId (created_at = NOW()) landed past the default-50
-  #     page; the case now lists with pageSize=1000 so the visible role is returned on
-  #     one page (read==enforce already held). All three cases are GREEN in this build
-  #     and none is in the known-RED whitelist. (#184 ls-ps1001 was fixed earlier.)
-  #   PRUNED 2026-07-28 (third sweep — prose describing a mask that was not there).
-  #   neg-v_delete-denied / neg-v_update-denied carried a full paragraph of
-  #   justification here, but neither token was in the alternation and neither
-  #   matches any request in any collection or case file. A reader budgeting effort
-  #   from this list would have counted two open per-verb enforcement reds that do
-  #   not exist. (kacho-iam#188 should be re-checked on its own evidence.)
-  #   - T31-LBLREVOKE-NLB-* — UN-WHITELISTED 2026-07-28, VERIFIED BY RUNNING IT.
-  #     The entry claimed a live product gap ("create-emit works, update-label-remove
-  #     does not revoke"). That claim was written 2026-07-26 09:32 and the gap was
-  #     closed the SAME DAY at 16:19 (f9574de6, services/nlb — the registration path
-  #     was corrected on create, update and delete, with seven Go regressions in
-  #     services/nlb/internal/apps/kacho/api/listener/update_label_revoke_test.go
-  #     covering label-clear, label-set, re-grant, EMPTY-MASK full PATCH, a drainable
-  #     create intent, the delete retraction, and the non-labels no-op). Nobody came
-  #     back to the mask, so for two days the gate carried a false statement about
-  #     the product — the class this list exists to prevent.
-  #     Evidence for removal (2026-07-28, kind-kacho, nlb image built 2026-07-26
-  #     17:02 i.e. after the fix): collections/label-revoke-nlb.postman_collection.json
-  #     ran 47/47 requests, 23/23 assertions, ZERO failures — including the very
-  #     assertion the entry called permanently red, `lsn-post-revoke-deny: Check
-  #     denies (allowed !== true)`, alongside `lsn-post-grant-allow` and
-  #     `lsn-pre-grant-deny`. Live corroboration: this service's registration queue,
-  #     described at the time as never having delivered a single row, is 758/758
-  #     delivered with nothing pending.
-  #     kacho-iam#217 should be closed as fixed rather than retitled again.
-  #   - IAM-ACB-DP-* (rbac-2026 P6 deletion_protection): UN-WHITELISTED (rbac-2026
-  #     P7). Both the iam handler (iam#222) and the gateway public-mux
-  #     AccessBindingService.Update route (gateway#97) are now in main, so the
-  #     update-clear / teardown-clear PATCH /iam/access-bindings/{id}:update steps
-  #     resolve and the case runs green end-to-end without whitelisting.
-  #     (The seven rbac-subject-channel-equivalence `*-gone` convergence probes and
-  #     ^IAM-CH-GRP-MEMBERSHIP-FLIP-OK were removed here in the same 2026-07-28
-  #     sweep — see the kacho#9 block near the top of this comment. The FLIP entry
-  #     had already been carried "WITHOUT a mechanism, pending a healthy run": that
-  #     run happened, and the case passes, so it is gone rather than re-justified.)
-  # VPC AUTHZ-*-LS-{OWN,CROSS}-NOB — REMOVED 2026-07-30, same class as the entry below it:
-  # the fix this entry was waiting for LANDED, and the entry outlived it.
+  # The debt this uncovers is not hidden, it is COUNTED: docs/RESULTS.md carries the
+  # case list and the number. A red on a real disagreement is worth more than a
+  # green obtained by not asking (testing.md — "E2E НИКОГДА не пропускаются").
   #
-  # The justification read: the iam suites really do grant `jwtNoBindings` a view role on
-  # account-A/-B for the duration of their run, so under parallel fan-out the account→project
-  # containment transitively authorized the "no bindings" subject and the vpc LIST-DENY
-  # guards went falsely red. True when written.
-  #
-  # But `services/vpc/tests/newman/cases/authz-deny.py` no longer binds the NOB subject-code
-  # to `jwtNoBindings`. Since 33cf29a5 (2026-07-19) it binds `jwtPureNoBindings` — the
-  # DEDICATED never-granted principal that no suite grants (no ensure_binding, no 4b-cleanup
-  # touches it), introduced as the kacho-iam#276 fix. The case file states the consequence
-  # itself: "с pure-субъектом эти LIST-DENY leak-guard'ы строгие и зелёные", and calls this
-  # very whitelist entry "избыточна-но-безвредна: subtraction clamps to 0".
-  #
-  # Redundant it was; harmless it was not. An exclusion with nothing left to exclude is a
-  # FINDING, not a leftover: it goes on absorbing whatever later reuses the name, and here it
-  # covered 16 folders whose single assertion is a leak guard
-  # (`[<CASE>] LIST no-access: 403 OR 200+empty (no leak)`). So 16 leak guards were
-  # un-gated on the strength of a collision that had already been engineered away.
-  #
-  # Failure direction of removing it is safe: if the guards are green — as the case file
-  # says they are — the verdict does not move, because the subtraction was already clamping
-  # to 0. If any of them is red, that is a leak guard failing, and it MUST fire the gate.
-  # @mask-subject AUTHZ-.*-LS-OWN-AAB services/vpc/tests/newman/cases/authz-deny.py jwtAccountAdminB
-  # VPC AUTHZ-*-LS-OWN-AAB (kacho-iam#276 extend): the SAME cross-suite collision as
-  # LS-*-NOB — but unlike NOB, this one's subject has NOT been swapped out: authz-deny.py
-  # still binds the AAB subject-code to `jwtAccountAdminB` and still expects DENY on
-  # project-A1, while the iam suite still grants that principal account-A view through a
-  # group. NOT re-verified against a live stand on 2026-07-30 (the stand was in use by
-  # another measurement), and said here rather than left as a silent gap: the entry stands on
-  # the 2026-07-28 evidence below, not on a fresh run. The machine-readable
-  # `@mask-subject` line above is what services/iam/tools/newmanmask enforces — if the case
-  # stops naming that subject, the gate fails instead of the paragraph quietly going stale.
-  # The iam-suite RBACSUBJ-GROUP-GRANTS-MEMBER-OK adds `userAAB` to a group and
-  # binds ROLE_VIEW (`*.*` read/list) to that group @ ACCOUNT:{{accountAId}} (=authz-test-a,
-  # the shared umbrella env account) → AAB gains account-A viewer/v_list via the group-userset;
-  # keystone (e195632) legitimately materializes per-object v_list on every account-A object →
-  # AAB sees all of project-A1. The vpc LS-OWN-AAB cases assume AAB = account-B-only. AAB is in
-  # fact authorized (proven by the LS-CROSS-AAA GREEN asymmetry: vpc List DOES scope-filter, a
-  # blanket bug would leak symmetrically). Only LS-OWN-AAB is whitelisted — LS-CROSS-AAB is a
-  # legit ALLOW (AAB owns account-B) and stays enforced. Real fix = de-share the umbrella
-  # account across suites (kacho-iam#276); until then RED-by-fixture-collision, same as NOB.
-  # IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW — REMOVED 2026-07-30. The entry outlived its
-  # subject, and the paragraph that justified it described a case that no longer exists.
-  #
-  # It was written for `jwtInvitee`: the case modelled that subject as "a plain member of
-  # accountB with no user-viewer grant", the shared seed binds the invitee as an ADMIN of
-  # accountB, so the subject was in fact authorized and the case's premise was wrong. That
-  # reasoning was sound WHEN WRITTEN. On 2026-07-21 (7e73478f) the case was changed to use
-  # `jwtPureNoBindings` — the dedicated never-granted subject — precisely because the
-  # no-over-show property "only a genuinely unbound subject can assert". From that commit on,
-  # the premise the mask contradicted was no longer the premise the case held.
-  #
-  # So the mask was subtracting the failures of a P1 canary about a genuinely grant-less
-  # subject — which is exactly what the last line of this very block promised stays gated.
-  # Worse, the folder holds ONE step carrying THREE assertions (`status 200`, `… does NOT
-  # see accountB users (no over-show)`, `no leak of accountB owner to a no-grant subject`),
-  # so a folder-level subtraction took the leak assertion with the rest.
-  #
-  # Nothing about the product was verified to remove this: the case's own subject changed,
-  # which retires the justification by itself. If the redirected case turns out to fail, it
-  # fails honestly and gets read on its own evidence — not inherited from the old subject.
-  # CHECKED 2026-07-28 — recorded here as it was written, and CORRECTED 2026-07-30.
-  # The note claimed the THREE kacho-iam#276 fixture-collision entries (LS-*-NOB,
-  # LS-OWN-AAB, MEMBER-NO-OVERSHOW) were "STILL TRUE, on two counts". For the two
-  # remaining entries it holds and its evidence stands: the seed line is still there
-  # (tests/authz-fixtures/setup.sh:706 binds the invitee as an admin of account-B) and
-  # the collision is directly observable — `GET /iam/v1/accounts/<account-A>` as the
-  # "no bindings" subject returns 200 on the live stand. Those subjects ARE authorized;
-  # those cases assume they are not, and the fix is fixture separation, not a mask edit.
-  # For the third entry the note was ALREADY FALSE when written: the case had stopped
-  # naming that subject a week earlier (2026-07-21). A re-check that re-affirms an
-  # entry without re-reading the case it points at can only confirm the paragraph, not
-  # the claim — which is how "verified, still true" came to attest to something that
-  # did not exist. Re-checks name the case file and the subject they actually read.
-  # Real fix = de-share the umbrella accountB across iam suites (kacho-iam#276); until then
-  # RED-by-fixture-collision. The assertion still RUNS and reports; a genuinely grant-less
-  # subject's no-leak stays gated by IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY and by
-  # IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW, NEITHER of which is whitelisted (a real
-  # over-show still fails honestly).
-  # NARROWED 2026-07-30 — the two surviving kacho-iam#276 arcs now subtract BY STEP, the
-  # same shape the nlb arc was given 2026-07-29. Until now the folder-to-step narrowing had
-  # been applied to ONE arc of the four in this expression while three matched by folder
-  # name alone; the asymmetry was not reasoned, it was simply where the previous pass
-  # stopped. Measured over the generated collections: the NOB arc matches 16 folders and the
-  # AAB arc 8, and each of those folders holds exactly ONE step with exactly ONE assertion
-  # (`[<CASE>] LIST no-access: 403 OR 200+empty (no leak)`), so step-narrowing subtracts the
-  # same 24 assertions it did before — the verdict does not move today. What changes is the
-  # future: a new step or a second assertion added to any of those 24 folders is no longer
-  # absorbed for standing next to the one this entry was written for.
-  # PREMISE, stated so it cannot rot silently: the generator names these steps
-  # `get-abs<N>`. If that ever changes, the arcs match nothing and subtract nothing — the
-  # gate gets STRICTER, never quieter, so the failure direction is safe. The gate in
-  # services/iam/tools/newmanmask enforces exactly this: an alternation token that matches
-  # no case in the tree is a finding, because that is how the entry removed above survived.
-  # COMPUTE instance-suite — the whole block that stood here (INST-AD-* / INST-DD-* /
-  # INST-DISK-DEL-WHILE-ATTACHED / INST-DEL-STATE-* / INST-NIC-*, justified as
-  # storage.enabled=false + Noop'd vpc-internal :9091 CI-infra gaps) DESCRIBED CASES
-  # THAT NO LONGER EXIST, and so did its own "NOT whitelisted, stay RED" counter-list
-  # (INST-CR-VAL-CORES-ODD-INVALID / INST-CR-VAL-MISSING-BOOT-DISK-SPEC /
-  # INST-UPD-RESOURCES-REQUIRES-STOPPED / INST-CR-CRUD-OK / INST-DEL-CONF-RESPONSE-EMPTY
-  # — grep of services/compute/tests/newman/{cases,collections} is empty for every one).
-  # The instance suite was rewritten as instance-redesign / INST-RD-* (COMP-1-nn) and
-  # the attach-detach coverage went with the compute→storage split. Six masks and a
-  # counter-list survived their subject; all are pruned above. Whatever the redesigned
-  # suite needs — if anything — must be argued from ITS names on ITS evidence, not
-  # inherited from the retired one.
-  # NARROWED 2026-07-29 — THE ENTRY BELOW USED TO SUBTRACT BY FOLDER, AND A FOLDER IS NOT
-  # A SUBJECT. `.parent.name` is the case folder, so matching it removed EVERY failing
-  # assertion in that folder from the verdict, whatever it was about. Measured over the
-  # generated collections: the seventeen nlb/lst folders hold 259 assertions, of which
-  # exactly 27 sit on the read-your-writes-wrapped steps this entry describes. The other
-  # 232 were absorbed for standing next to them — including the fixture-integrity
-  # guards (`fixture operation succeeded (no phantom resource id)`) and every `poll status
-  # 200` in those folders, i.e. precisely the checks that tell a real create from a
-  # phantom one. An entry written for one narrow timing effect had quietly become a
-  # blanket waiver for seventeen cases, and it would have gone on absorbing any NEW
-  # assertion added to them.
-  #
-  # It now subtracts by STEP: the folder must match AND the failing step must be one the
-  # generator renamed `-rya<N>`, which is exactly and only what `retry_until_authorized`
-  # wraps — the first post-create access of the caller's OWN fresh resource. That is the
-  # thing the justification below is about; nothing else in the folder is.
-  #
-  # PREMISE THIS RESTS ON, stated so it cannot rot silently: `retry_until_authorized` in
-  # services/nlb/tests/newman/scripts/gen.py appends `-rya<N>` to the step name. If that
-  # ever stops, this entry matches nothing and subtracts nothing — the gate gets STRICTER,
-  # never quieter, so the failure direction is safe.
-  #
-  # NLB owner-tuple materialization lag (kacho#11) — NLB-{CR,UPD,DEL,MV,LIFECYCLE}
-  #   + LST-{GET,UPD}-* (parent.name). The START / STOP / ATT / DEL-STATE-HAS-ATTACHED
-  #   arms of this enumeration were pruned 2026-07-26 (see the second sweep above): Start
-  #   and Stop are no longer product RPCs and no NLB-ATT-* folder exists, so those four
-  #   masks had nothing left to cover. NOT a correctness/authz bug and NOT an over-grant: the
-  #   owner/creator FGA tuple for a just-created LB/listener materializes eventually-consistent
-  #   (at-least-once fga_register_drainer + reconciler), and nlb races LAST in the umbrella
-  #   (iam→vpc→compute→nlb) so the drainer backlog peaks and the first post-create Get/Update/
-  #   Delete/Start/Stop/Move/Attach of the caller's OWN fresh LB (and Get/Update of its OWN fresh
-  #   listener) can 403 (lacks v_update/v_delete/v_get) / 404 (hide-existence read) at the authz
-  #   gate before the tuple is visible. The CLIENT already retries (retry_until_authorized, budget
-  #   raised 40→60 ×500ms = ~30s in gen.py, round 4); ci-rep4 measured async op-latency ~1.5s
-  #   (poll-op p90=3) but materialization p50~10s with a heavy tail — 31/83 wrapped steps exceeded
-  #   the old 16s window. This whitelist covers ONLY the residual saturation tail past ~30s under
-  #   peak nlb-last backlog — assertions still RUN and report (signal preserved), just not gate-
-  #   blocking. Eventual-consistency LATENCY, not a correctness defect (same class + rationale as
-  #   the revoke-deny-latency whitelist kacho-iam#257). Subtraction clamps to 0, so a case that
-  #   materialises within 30s and passes contributes nothing; a NEW/real failure widens the diff.
-  #   NOT whitelisted (stay RED / fully gated, never masked):
-  #     - NLB-GTS-* — genuine finding: GetTargetStates → 400 "target_group_id: required" (a
-  #       contract/case mismatch, NOT owner-tuple lag).
-  #     - NLB-GET-STATE-LEAN-PROJECTION — carries no-leak assertions (does-NOT-leak
-  #       v4Source/networkId/subnetId/announce); whitelisting by case would risk masking a real
-  #       leak, so it stays gated (its GET-lag relies on the budget=60 fix, not the whitelist).
-  #     - cross-resource XRES-* and listener LST-CR-* — create-fail class: cross-service peer
-  #       visibility ("subnet <id> not found") + parent-LB `editor`-lag on UNWRAPPED child-create
-  #       steps (loadbalancer.listeners.create). Task-excluded (NOT owner-tuple update/del/get);
-  #       fixing them needs create-step wrapping / drainer throughput, tracked in kacho#11.
-  #   Retire this alternation once drainer throughput closes the tail (kacho#11).
-  #   NOT RE-CHECKED 2026-07-28, and deliberately so — stated here rather than left
-  #   as a silent gap. This mask is about a saturation tail that only appears when
-  #   nlb runs LAST behind the other suites, so an unloaded single-suite run cannot
-  #   confirm or refute it: green would prove nothing and red would prove nothing.
-  #   It has to be re-checked from a full parallel umbrella run's reports.
-  #   Two of these seventeen are already known to be removable on evidence that is
-  #   in the tree: services/nlb/tests/newman/docs/RESULTS.md line 35 records that
-  #   ^LST-UPD-CRUD-OK and ^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH "pass
-  #   genuinely" and recommends pruning them, and its third recommendation
-  #   (^NLB-ATT-STATE-REGION-MISMATCH) was already carried out. Do those two at the
-  #   next umbrella run rather than re-reading this paragraph.
-  # ---------------------------------------------------------------------------
-  # ROUND-4 CONSOLIDATION — confirmed-product-bug-floor (each tracked by a GitHub
-  # issue; NONE masks a leak or a fixable fixture; every assertion still RUNS +
-  # reports, only the gate is un-blocked; each self-heals — the subtraction clamps
-  # to 0 once the product fix lands, so a genuine regression re-widens the diff and
-  # re-fires the gate).
-  #   (teardown-user-revoke / teardown-usr-iso-revoke / issue-sakey stood here as the
-  #   "confirmed product-bug floor" of this round. All three were REMOVED 2026-07-28:
-  #   the inherited-access change of 2026-07-27 closed what they described, and the
-  #   suites now return 200 on each of them. See the kacho#9 block above for the
-  #   measurements. Two of the three were also unanchored substrings that quietly
-  #   absorbed neighbouring `*-await` steps and `issue-sakey-rya15`, so they covered
-  #   more than they declared — one more reason not to leave them standing.)
-  #   - (^INST-CR-CRUD-BOOT-DISK-ID-OK — PRUNED 2026-07-26 with the rest of the retired
-  #     compute instance suite; the case, and the INST-CR-CRUD-OK / INST-DEL-CONF-
-  #     RESPONSE-EMPTY it was contrasted against, no longer exist anywhere in the tree.
-  #     PRO-Robotech/kacho#10 tracked a storage-mirror read-back that this suite no
-  #     longer performs.)
-  #   - ^SUBNET-LF-D-VISIBLE / ^SUBNET-LF-D-NOLEAK / ^SUBNET-LF-D-NONE — UN-WHITELISTED
-  #     2026-07-28, and the reason is worth reading rather than skimming, because the
-  #     entry was wrong in an unusual direction: these three cases are not red. They
-  #     are GREEN, and they are green for a bad reason.
-  #     Measured 2026-07-28 (`newman run collections/list-filter-d…json`, vpc): 6/6
-  #     assertions pass, zero failures, so the masks subtract nothing and never have
-  #     while the case read this way. But the three list assertions are phrased
-  #     "List reachable (200) or method-gated (403, fixture absent)" — and 403 is
-  #     EXACTLY the condition the entry below describes as the defect. Every one of
-  #     the ~27 polls in each case came back 403 and the case still declared itself
-  #     satisfied. So the restriction the mask was written for is still live, the
-  #     probe for it cannot fail, and the mask on top made the pair look accounted
-  #     for. Removing the mask changes no verdict; making the assertion discriminate
-  #     would, and that is the actual outstanding work (kacho-iam#276).
-  #     The two per-object canaries in the same suite DO discriminate and DO pass
-  #     honestly: SUBNET-LF-D-GET-404 (hidden subnet → 404, no existence oracle) and
-  #     SUBNET-LF-D-GET-OK (visible subnet → 200). Per-object Get resolves the seeded
-  #     grant; it is List that does not. Neither canary was ever whitelisted — leave
-  #     it that way.
-  # NOT whitelisted (honest canaries — stay RED, never masked):
-  #   IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY (iam-user) — jwtNoBindings lists
-  #   ?accountId=accountA → sees 1 user. Root: #276 cross-suite fixture pollution makes NOB
-  #   legit-authorized, compounded by the listBySubject non-self 403 that blocks the
-  #   pre-clean (kacho-iam#276). This is THE must-DENY user-list over-show canary; keeping
-  #   it un-whitelisted preserves the honest gate (also documented as an env-flake that
-  #   clears on re-run). SUBNET-LF-D-GET-404 (vpc) — the per-object existence-no-leak canary.
-  #   SG-DEL-NEG-NIC-ATTACHED (vpc security-group, kacho-vpc#27) — deliberately NOT
-  #   whitelisted: SEC-hardening r2 converted it from a masked pm.test.skip to a gate-
-  #   blocking persistent-RED so the missing within-service SG-in-use refcheck stays
-  #   visible pressure. It fires the gate honestly (declared rule #13 known-failing in
-  #   the vpc RESULTS.md); leave RED until the product DB refcheck lands.
-  # HARNESS-CONFIG failures are NEVER subtracted. A `harness config: <var> is set`
-  # assertion fires only when the runner failed to inject a variable the case needs
-  # (see gen.py::require_env_url). That is a broken harness, not a known-RED product
-  # gap, and 15 of the 89 guarded requests happen to sit under case names this
-  # whitelist already matches — so without the explicit exclusion below, losing a
-  # variable could be absorbed by an unrelated alternation entry and the suite would
-  # go quiet again in exactly the way this whole mechanism exists to prevent.
-  if [ "$fails" -gt 0 ]; then
-    known_red=$(jq -r '[.run.failures[]? | select((.error.name? // "") == "AssertionError") | select((((.error.test? // "") | startswith("harness config:")) | not)) | select((.source.name? // "" | test("inv-get-account-allow-warm-cache")) or ((.parent.name? // "" | test("^AUTHZ-[A-Z-]+-LS-OWN-AAB")) and (.source.name? // "" | test("^get-abs[0-9]+$"))) or ((.parent.name? // "" | test("^NLB-LIFECYCLE-CONF |^NLB-CR-CRUD-OK |^NLB-CR-CRUD-WITH-DESCRIPTION |^NLB-CR-CRUD-DELETION-PROTECTION-TRUE |^NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE |^NLB-UPD-STATE-IMMUTABLE-PROJECT |^NLB-UPD-STATE-IMMUTABLE-PLACEMENT |^NLB-UPD-STATE-NO-CHANGE |^NLB-UPD-STATE-MASK-EMPTY |^NLB-UPD-CRUD-DRAIN-TOGGLE |^NLB-MV-IDM-SAME-PROJECT |^NLB-MV-CRUD-OK |^NLB-DEL-CRUD-OK |^NLB-DEL-STATE-HAS-LISTENER |^LST-GET-CRUD-OK |^LST-UPD-CRUD-OK |^LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH ")) and (.source.name? // "" | test("-rya[0-9]+$"))))] | length' "$report")
-    fails=$((fails - known_red))
-    if [ "$fails" -lt 0 ]; then fails=0; fi
-  fi
+  # HARNESS-CONFIG failures were the one class this whitelist had to explicitly
+  # exclude from itself, because 15 guarded requests sat under names it matched.
+  # With no subtraction there is nothing to exclude from: they simply count.
 
   tot_reported=$((tot_reported + 1))
   tot_requests=$((tot_requests + reqs))
@@ -539,7 +196,7 @@ for col in "${collections[@]}"; do
   tot_scripts=$((tot_scripts + scripts_failed))
   tot_unanswered=$((tot_unanswered + unanswered))
 
-  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed (after known-RED skip), $scripts_failed SCRIPT FAILED, $unanswered UNANSWERED"
+  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed, $scripts_failed SCRIPT FAILED, $unanswered UNANSWERED"
 
   # Name what did not answer. A count alone cannot be acted on, and the whole
   # point of separating this category is that somebody reads it.

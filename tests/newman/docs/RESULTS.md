@@ -1,8 +1,67 @@
 # Newman regression — results & known-failing disposition
 
-The suite is gated by `scripts/assert-suites-green.sh`: the gate subtracts a small,
-explicitly-enumerated known-RED set from each suite's failure count; everything else
-must be 0. The known-RED set is kept tiny and each entry has a documented reason.
+The suite is gated by `scripts/assert-suites-green.sh`. **The gate subtracts nothing.**
+It reports the counts newman reported — assertions failed, script crashes, unanswered
+requests, reports with no assertions — and any of them above zero fires it. Outstanding
+red is carried here, as a number and a case list, never as a deduction in the gate.
+
+## Known-RED subtraction removed (2026-07-30)
+
+The gate used to deduct a "known-RED" set from each suite's failure count before
+deciding. It was narrowed twice and then removed, and what settled it was the shape of
+the three revisions rather than the size of any one:
+
+| revision | selected by | absorbed |
+|---|---|---|
+| v1 | folder name | 259 assertions in 17 folders — including a P1 leak canary that merely sat in a matched folder |
+| v2 | step name inside those folders | fewer, same kind |
+| v3 | step-name **suffix** (`-rya<N>`, `get-abs<N>`) | 27 assertions — including a placement-coherence **negative**, `LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH` |
+
+Each narrowing was a correct local fix, and none of them touched the defect. The
+predicate keys on a **name**, while the thing it claimed to select — "this failure is the
+known materialization lag, not a real refusal" — is a statement about the **reason** a
+step failed, and the reason is not in the name. So it cannot tell its subject from a
+stranger at any width; narrowing only reduced how many strangers it caught per run. A
+fourth narrowing would have been the same move a third time.
+
+Injection check on a real report (`out/authz-deny.json`, run 2026-07-26): newman
+reported `assertions.failed=3`; the gate printed **2**. The one it removed was
+`AUTHZ-REVOKE-ENFORCED-A-INV :: inv-get-account-allow-warm-cache`.
+
+**The mechanism that keys on the reason stays.** `retry_until_authorized` /
+`retry_until_absent` / the operation-poll loops retry while the *response* says the
+specific transient thing, and when the budget is spent the real assertion runs on the
+terminal response — so a genuine deny still fails. That is a check about behaviour. A
+name-match is not, and is not a substitute for one.
+
+### The debt this uncovers — 19 name-patterns the deduction was absorbing
+
+Neither family needs a *new* retry: both already sit behind one. What the deduction was
+absorbing is the residue **past** those budgets, which is exactly the part that has to be
+visible.
+
+**iam (`authz-deny`)**
+- `inv-get-account-allow-warm-cache` — grant→Check warm-cache window. Already polls with a
+  real 500 ms inter-poll delay and a `POLL_CAP`-bounded budget (~15 s). Subject genuinely
+  is materialization lag; it now fails honestly when it does not converge inside it.
+- `AUTHZ-*-LS-OWN-AAB` / `get-abs<N>` — **not** lag. Root cause on record is cross-suite
+  fixture pollution (kacho-iam#276): a subject that must have no bindings is granted by a
+  neighbouring suite. That is a fixture-isolation defect, and a deduction was the wrong
+  place for it.
+
+**nlb — 17 folders, matched on their `-rya<N>` (already retry-wrapped) steps**
+`NLB-LIFECYCLE-CONF`, `NLB-CR-CRUD-OK`, `NLB-CR-CRUD-WITH-DESCRIPTION`,
+`NLB-CR-CRUD-DELETION-PROTECTION-TRUE`, `NLB-UPD-STATE-IMMUTABLE-VIP-SOURCE`,
+`NLB-UPD-STATE-IMMUTABLE-PROJECT`, `NLB-UPD-STATE-IMMUTABLE-PLACEMENT`,
+`NLB-UPD-STATE-NO-CHANGE`, `NLB-UPD-STATE-MASK-EMPTY`, `NLB-UPD-CRUD-DRAIN-TOGGLE`,
+`NLB-MV-IDM-SAME-PROJECT`, `NLB-MV-CRUD-OK`, `NLB-DEL-CRUD-OK`,
+`NLB-DEL-STATE-HAS-LISTENER`, `LST-GET-CRUD-OK`, `LST-UPD-CRUD-OK`,
+`LST-UPD-STATE-DEFAULT-TG-REGION-MISMATCH`.
+
+Budgets are deliberately **not** inflated to bury this: raising a retry budget to outlast a
+slow path converts a visible red into a slow green and, past the runner's own timeout,
+into a cancelled run. If these do not converge inside their present budget, the finding is
+about the materialization path, not about the budget.
 
 ## Test-side fixes (round — 2026-07-26; base `adf1cb2`) — the suite starts checking itself
 
