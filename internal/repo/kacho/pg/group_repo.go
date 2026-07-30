@@ -141,7 +141,7 @@ func (r *groupReader) IsMember(ctx context.Context, groupID domain.GroupID, memb
 // so it is unique within a group on its own, and a single-column tie-break is what
 // the shared token encoding takes.
 func (r *groupReader) ListMembers(ctx context.Context, groupID domain.GroupID, page group.MemberPage) ([]domain.GroupMember, string, error) {
-	limit, err := effectivePageSize(int32(min(page.PageSize, maxListPageSize+1))) //nolint:gosec // clamped to the checked range for the guard itself
+	limit, err := effectivePageSize(int32(min(page.PageSize, maxListPageSize+1))) // #nosec G115 -- значение зажато проверенным диапазоном (не больше предела страницы плюс один), поэтому сужение типа переполнить нельзя
 	if err != nil {
 		return nil, "", err
 	}
