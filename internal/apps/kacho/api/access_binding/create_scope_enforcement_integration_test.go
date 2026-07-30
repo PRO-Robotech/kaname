@@ -254,13 +254,26 @@ func TestCreate_ForwardOnly_LegacyMisScopedSurvives(t *testing.T) {
 	bcustom := seedAccountCustomRole(t, ctx, pool, accB, "ce21_foreign") // mis-scoped on accA
 
 	// Insert the LEGACY mis-scoped binding directly (the pre-1.5 permissive path).
+	//
+	// The assignability rule is now enforced by the database for every writer, so this
+	// row can no longer be written the ordinary way — which is the point of the test:
+	// the rule is FORWARD-ONLY and a row that predates it must survive. Seeding it
+	// therefore means seeding it the way it arrived, before the rule existed, so the
+	// one trigger that would refuse it is turned off for this statement alone. The
+	// other triggers on the table stay on — the scope column is derived by one of them.
 	legacyID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx,
+		`ALTER TABLE kacho_iam.access_bindings DISABLE TRIGGER access_bindings_role_assignable_trg`)
+	require.NoError(t, err, "suspend the assignability trigger to seed a pre-rule row")
+	_, err = pool.Exec(ctx, `
 		INSERT INTO kacho_iam.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, granted_by_user_id)
 		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5)`,
 		string(legacyID), string(member), string(bcustom), string(accA), string(ownerA))
 	require.NoError(t, err, "seed pre-1.5 mis-scoped binding directly")
+	_, rerr := pool.Exec(ctx,
+		`ALTER TABLE kacho_iam.access_bindings ENABLE TRIGGER access_bindings_role_assignable_trg`)
+	require.NoError(t, rerr, "restore the assignability trigger — the rest of the case runs under it")
 
 	// (a) read-time: ListByScope still shows the legacy binding.
 	rd, err := repo.Reader(ctx)
