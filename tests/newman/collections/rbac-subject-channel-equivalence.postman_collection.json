@@ -38,14 +38,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userINVId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=user&subjectId={{userINVId}}"
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -73,13 +73,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('chUserDupAcb');",
-                  "if (pm.response.code === 200) {",
-                  "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
-                  "  if (dup && dup.id) pm.environment.set('chUserDupAcb', dup.id);",
-                  "}",
+                  "const arr = (pm.response.json() || {}).accessBindings || [];",
+                  "const want = pm.environment.get('userINVId');",
+                  "const dup = arr.find(b => b.subjectId === want && b.subjectType === 'user' && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
+                  "if (dup && dup.id) pm.environment.set('chUserDupAcb', dup.id);",
                   "if (!pm.environment.get('chUserDupAcb')) { pm.execution.setNextRequest('IAM-CH-USER-EQUIV-OK :: grant-user'); }"
                 ]
               }
@@ -3682,14 +3681,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=service_account&subjectId={{svaAId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=service_account&subjectId={{svaAId}}"
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -3717,13 +3716,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('chSaDupAcb');",
-                  "if (pm.response.code === 200) {",
-                  "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
-                  "  if (dup && dup.id) pm.environment.set('chSaDupAcb', dup.id);",
-                  "}",
+                  "const arr = (pm.response.json() || {}).accessBindings || [];",
+                  "const want = pm.environment.get('svaAId');",
+                  "const dup = arr.find(b => b.subjectId === want && b.subjectType === 'service_account' && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
+                  "if (dup && dup.id) pm.environment.set('chSaDupAcb', dup.id);",
                   "if (!pm.environment.get('chSaDupAcb')) { pm.execution.setNextRequest('IAM-CH-SA-EQUIV-OK :: grant-sa'); }"
                 ]
               }
@@ -4339,14 +4337,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=service_account&subjectId={{svaAId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=service_account&subjectId={{svaAId}}"
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -4374,13 +4372,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('chSaIsoDupAcb');",
-                  "if (pm.response.code === 200) {",
-                  "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
-                  "  if (dup && dup.id) pm.environment.set('chSaIsoDupAcb', dup.id);",
-                  "}",
+                  "const arr = (pm.response.json() || {}).accessBindings || [];",
+                  "const want = pm.environment.get('svaAId');",
+                  "const dup = arr.find(b => b.subjectId === want && b.subjectType === 'service_account' && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
+                  "if (dup && dup.id) pm.environment.set('chSaIsoDupAcb', dup.id);",
                   "if (!pm.environment.get('chSaIsoDupAcb')) { pm.execution.setNextRequest('IAM-CH-SA-USER-ISOLATION-DENY :: grant-sa'); }"
                 ]
               }
@@ -4991,14 +4988,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userINVId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings:listBySubject?subjectType=user&subjectId={{userINVId}}"
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
               ]
             }
           },
@@ -5026,13 +5023,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('chUsrIsoDupAcb');",
-                  "if (pm.response.code === 200) {",
-                  "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "  const dup = arr.find(b => b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
-                  "  if (dup && dup.id) pm.environment.set('chUsrIsoDupAcb', dup.id);",
-                  "}",
+                  "const arr = (pm.response.json() || {}).accessBindings || [];",
+                  "const want = pm.environment.get('userINVId');",
+                  "const dup = arr.find(b => b.subjectId === want && b.subjectType === 'user' && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
+                  "if (dup && dup.id) pm.environment.set('chUsrIsoDupAcb', dup.id);",
                   "if (!pm.environment.get('chUsrIsoDupAcb')) { pm.execution.setNextRequest('IAM-CH-USER-SA-ISOLATION-DENY :: grant-user'); }"
                 ]
               }

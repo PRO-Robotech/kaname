@@ -45,9 +45,14 @@ TIMING DISCIPLINE (grant→FGA propagation window):
 SELF-CONTAINED / RE-RUNNABLE: user-direct and SA bindings reuse a STABLE subject
 (userINVId / svaAId) + the stable ROLE_VIEW + accountAId → the active-grant 5-tuple can
 survive a prior run (DB persists) and trip strict-create (ALREADY_EXISTS); each such case
-PRE-CLEANS any stale active binding (listBySubject → delete → await) before the fresh
-create, and revokes its own binding at the end (which doubles as the access-gone
-assertion). Group subjects are created fresh per run (unique id) → no pre-clean needed.
+PRE-CLEANS any stale active binding before the fresh create (list by ACCOUNT SCOPE →
+filter to the subject → delete → await), and revokes its own binding at the end (which
+doubles as the access-gone assertion). Group subjects are created fresh per run (unique
+id) → no pre-clean needed.
+
+Discovery deliberately uses `:listByScope` on the account, NOT `:listBySubject`: the
+latter is a strict self-list by contract (no administrative override), so for the
+admin caller it refused every time and the pre-clean never ran at all.
 
 Fixture deps (crud-fixture/setup.sh + authz-fixtures): jwtAccountAdminA (owner/grant-authority
 on accountAId), accountAId, projectA1Id (an account-A project), userINVId/jwtInvitee
@@ -108,8 +113,8 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exis
 
     Self-re-invoking poll with a request-name-scoped counter (per-case reset
     discipline). allow_already_exists tolerates Operation.error ALREADY_EXISTS (6) — a
-    stale active grant the best-effort pre-clean could not remove (listBySubject 403 for
-    non-self) still means the grant is ACTIVE, so the downstream read still converges.
+    grant a CONCURRENT suite issued between this pre-clean and this create is still
+    ACTIVE, so the downstream read converges either way.
     """
     capture = ""
     if out_id_var:
@@ -154,20 +159,37 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
     grant → ALREADY_EXISTS (active-grant partial UNIQUE)."""
     dup_var = f"{tag}DupAcb"
     del_op_var = f"{tag}DelOp"
+    # `{{var}}` подставляется краем в ПОЛЯХ ЗАПРОСА, но не в test-script'е, поэтому
+    # в скрипте субъект читается из окружения по ИМЕНИ переменной.
+    subject_ref = (f"pm.environment.get('{subject_id_tmpl[2:-2]}')"
+                   if subject_id_tmpl.startswith("{{") and subject_id_tmpl.endswith("}}")
+                   else repr(subject_id_tmpl))
     return [
         Step(
             name=f"{tag}-preclean-list",
             method="GET",
-            path=f"/iam/v1/accessBindings:listBySubject?subjectType={subject_type}&subjectId={subject_id_tmpl}",
+            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                # РАЗВЕДКА ИДЁТ АВТОРИЗОВАННЫМ ЧТЕНИЕМ, И ИСХОД У НЕГО ОДИН — 200.
+                #
+                # Прежде здесь стоял `:listBySubject` для ЧУЖОГО субъекта. Это не
+                # «известный продуктовый предел», как утверждал прежний текст, и не
+                # kacho-iam#276 (тот про другое). Это ОБЪЯВЛЕННЫЙ контракт метода:
+                # строгий список только про себя, административного обхода нет. Значит
+                # для админа исход был ровно один — отказ, — предочистка не выполнялась
+                # НИКОГДА, а `oneOf([200, 403])` это скрывало, принимая недостижимый
+                # успех. Рабочая замена уже была в дереве (набор by-label visibility):
+                # перечисление по ОБЛАСТИ аккаунта + фильтр по субъекту.
+                *assert_status(200),
                 f"pm.environment.unset('{dup_var}');",
-                "if (pm.response.code === 200) {",
-                "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
-                f"  if (dup && dup.id) pm.environment.set('{dup_var}', dup.id);",
-                "}",
+                "const arr = (pm.response.json() || {}).accessBindings || [];",
+                # Имя переменной, а не подстановка: `{{…}}` раскрывается в полях
+                # запроса, но НЕ внутри test-script'а — сравнение с литералом
+                # «{{userINVId}}» не совпало бы никогда.
+                f"const want = {subject_ref};",
+                f"const dup = arr.find(b => b.subjectId === want && b.subjectType === '{subject_type}' && b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
+                f"if (dup && dup.id) pm.environment.set('{dup_var}', dup.id);",
                 f"if (!pm.environment.get('{dup_var}')) {{ pm.execution.setNextRequest('{grant_step_name}'); }}",
             ],
         ),

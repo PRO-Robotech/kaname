@@ -83,17 +83,33 @@ CASES.append(Case(
         Step(
             name="pre-clean-list",
             method="GET",
-            path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{userINVId}}",
+            path="/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                # РАЗВЕДКА ИДЁТ АВТОРИЗОВАННЫМ ЧТЕНИЕМ, И ИСХОД У НЕГО ОДИН — 200.
+                #
+                # Прежде здесь стоял `:listBySubject` для ЧУЖОГО субъекта. Это не
+                # «известный продуктовый предел», как утверждал прежний текст, и не
+                # kacho-iam#276 (тот про другое — про материализацию дочерних туплов у
+                # не-владельца с глобальной ролью просмотра). Это ОБЪЯВЛЕННЫЙ контракт
+                # метода: строгий список только про себя, административного обхода нет —
+                # так сказано в самом proto, и так это и реализовано (сверка личности
+                # вызывающего с названным субъектом). Значит для админа исход был ровно
+                # один — отказ, — предочистка не выполнялась НИКОГДА, а утверждение
+                # `oneOf([200, 403])` это скрывало, принимая и недостижимый успех.
+                #
+                # Рабочая замена уже была в дереве, в соседнем наборе: перечисление по
+                # ОБЛАСТИ аккаунта (владелец аккаунта видит выдачи ВСЕХ субъектов), а
+                # нужный субъект выбирается фильтром. Его шапка прямо говорит, что
+                # `listBySubject` «корректно отдаёт 403 и давал ЛОЖНУЮ чистоту слота».
+                # Здесь та же замена — и предочистка наконец работает.
+                *assert_status(200),
                 "pm.environment.unset('rdAuthzDupAcbId');",
-                "if (pm.response.code === 200) {",
-                "  const arr = (pm.response.json() || {}).accessBindings || [];",
-                f"  const dup = arr.find(b => b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account'",
+                "const arr = (pm.response.json() || {}).accessBindings || [];",
+                f"const dup = arr.find(b => b.subjectId === pm.environment.get('userINVId')",
+                f"       && b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account'",
                 "       && b.scopeId === pm.environment.get('accountAId'));",
-                "  if (dup && dup.id) pm.environment.set('rdAuthzDupAcbId', dup.id);",
-                "}",
+                "if (dup && dup.id) pm.environment.set('rdAuthzDupAcbId', dup.id);",
                 "if (!pm.environment.get('rdAuthzDupAcbId')) { pm.execution.setNextRequest('grant-view'); }",
             ],
         ),
@@ -177,8 +193,11 @@ CASES.append(Case(
             test_script=[
                 "const j = pm.response.json();",
                 "pm.test('grant Operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                # Свежий grant: либо без error, либо AlreadyExists (6) если прежний active
-                # grant не удалось снести pre-clean'ом (listBySubject 403 для non-self).
+                # Свежий grant: либо без error, либо AlreadyExists (6), если ПАРАЛЛЕЛЬНАЯ
+                # суита выдала тот же 5-tuple между предочисткой и этим созданием.
+                # (Прежняя причина — «предочистка не смогла снести, listBySubject 403 для
+                # чужого субъекта» — больше не действует: разведка идёт авторизованным
+                # перечислением по области аккаунта и реально сносит остаток.)
                 # ОБА доказывают, что v_get-грант существует → GET ниже даст 200. Жесткий
                 # fail — реальная ошибка гранта (НЕ 6).
                 "pm.test('grant materialized (done w/o hard error)', () => {",

@@ -3214,10 +3214,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const c = parseInt(pm.environment.get('_visVlCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                  "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('visVlDup', arr[0].id);",
                   "  pm.environment.set('_visVlCount', String(c + 1));",
@@ -5235,10 +5234,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const c = parseInt(pm.environment.get('_setSvaSetCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                  "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setSvaSetDup', arr[0].id);",
                   "  pm.environment.set('_setSvaSetCount', String(c + 1));",
@@ -8153,10 +8151,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const c = parseInt(pm.environment.get('_setRolSetCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                  "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setRolSetDup', arr[0].id);",
                   "  pm.environment.set('_setRolSetCount', String(c + 1));",
@@ -11071,10 +11068,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const c = parseInt(pm.environment.get('_setGrpSetCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                  "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setGrpSetDup', arr[0].id);",
                   "  pm.environment.set('_setGrpSetCount', String(c + 1));",
@@ -13037,10 +13033,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const c = parseInt(pm.environment.get('_setSvaVlCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                  "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setSvaVlDup', arr[0].id);",
                   "  pm.environment.set('_setSvaVlCount', String(c + 1));",
@@ -14103,10 +14098,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const c = parseInt(pm.environment.get('_setGrpVlCount') || '0', 10);",
-                  "let arr = [];",
-                  "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                  "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setGrpVlDup', arr[0].id);",
                   "  pm.environment.set('_setGrpVlCount', String(c + 1));",

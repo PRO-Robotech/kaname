@@ -172,10 +172,22 @@ def preclean_account_loop(tag, next_step):
                 f"if (pm.environment.get('_{tag}Started') !== pm.info.requestName) {{ pm.environment.set('_{tag}Count', '0'); pm.environment.set('_{tag}Started', pm.info.requestName); }}",
             ],
             test_script=[
-                "pm.test('pre-clean list: 200, либо 403 — известный продуктовый предел (kacho-iam#276: администратор не вправе перечислять выдачи ДРУГОГО субъекта). При 403 предочистка НЕ происходит, и strict-create ниже честно упрётся в AlreadyExists — это не замаскировано', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                # ЭТО ЧТЕНИЕ УЖЕ АВТОРИЗОВАННОЕ, И ИСХОД У НЕГО ОДИН — 200: владелец
+                # аккаунта перечисляет выдачи В ОБЛАСТИ СВОЕГО аккаунта. Текст ниже
+                # остался копией от прежнего `:listBySubject` (чужой субъект, отказ
+                # by design) и врал дважды: он допускал отказ там, где отказ означал бы
+                # потерю владельцем прав на свой аккаунт, и объявлял «известным
+                # продуктовым пределом» со ссылкой на посторонний тикет то, что этот
+                # набор уже обошёл сменой метода.
+                #
+                # Цена лжи была не косметической: `arr` на отказе оставался пустым, и
+                # утверждение «остаточных выдач нет» — то самое, ради которого шаг
+                # существует, — проходило ВАКУУМНО, объявляя чистый слот там, где о
+                # слоте не узнали ничего. Ровно этот механизм однажды уже пропустил
+                # остаточную выдачу в проверку набора видимости.
+                *assert_status(200),
                 f"const c = parseInt(pm.environment.get('_{tag}Count') || '0', 10);",
-                "let arr = [];",
-                "if (pm.response.code === 200) { arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId')); }",
+                "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                 f"if (arr.length > 0 && c < {PRECLEAN_LIST_CAP}) {{",
                 f"  pm.environment.set('{dup}', arr[0].id);",
                 f"  pm.environment.set('_{tag}Count', String(c + 1));",
