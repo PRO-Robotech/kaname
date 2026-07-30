@@ -102,10 +102,13 @@ func TestRegistryTokenListener_TLSRefusesCleartextClient(t *testing.T) {
 	addr := ln.Addr().String()
 	ln = tls.NewListener(ln, tlsCfg)
 
-	mux := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
+	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
 		Realm:   "https://api.kacho.local/iam/token",
 		Service: "registry.kacho.local",
 	})
+	if err != nil {
+		t.Fatalf("build registry-token mux: %v", err)
+	}
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
