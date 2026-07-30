@@ -22,14 +22,13 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
-// fakeOpsRepoW16 — minimal operations.Repo for the authz-guard regression
-// tests. Only Get / Cancel are exercised; the rest are no-op stubs.
+// fakeOpsRepoW16 — minimal operations.Repo WITHOUT the ownership-scoped port.
+// Он намеренно не реализует operations.OwnedOperationRepo: на нём проверяется,
+// что хендлер при такой провязке отказывает (fail-closed), а не сваливается на
+// несуженный доступ. Полнофункциональный фейк с предикатом владения —
+// ownedOpsRepo в operation_ownership_in_sql_test.go.
 type fakeOpsRepoW16 struct {
 	store map[string]*operations.Operation
-}
-
-func newFakeRepoW16(op *operations.Operation) *fakeOpsRepoW16 {
-	return &fakeOpsRepoW16{store: map[string]*operations.Operation{op.ID: op}}
 }
 
 func (r *fakeOpsRepoW16) Create(_ context.Context, op operations.Operation) error {
@@ -70,7 +69,7 @@ func sampleOp() *operations.Operation {
 }
 
 func TestW1_6_09_OperationGet_AnonymousReturnsNotFound(t *testing.T) {
-	h := NewOperationHandler(newFakeRepoW16(sampleOp()))
+	h := NewOperationHandler(newOwnedOpsRepo(sampleOp()))
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "system", ID: "anonymous"})
 
@@ -81,7 +80,7 @@ func TestW1_6_09_OperationGet_AnonymousReturnsNotFound(t *testing.T) {
 }
 
 func TestW1_6_09_OperationGet_OtherPrincipalReturnsNotFound(t *testing.T) {
-	h := NewOperationHandler(newFakeRepoW16(sampleOp()))
+	h := NewOperationHandler(newOwnedOpsRepo(sampleOp()))
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_bob"})
 
@@ -92,7 +91,7 @@ func TestW1_6_09_OperationGet_OtherPrincipalReturnsNotFound(t *testing.T) {
 }
 
 func TestW1_6_09_OperationGet_SelfPrincipalReturnsOK(t *testing.T) {
-	h := NewOperationHandler(newFakeRepoW16(sampleOp()))
+	h := NewOperationHandler(newOwnedOpsRepo(sampleOp()))
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_alice"})
 
@@ -106,7 +105,7 @@ func TestW1_6_09_OperationGet_SelfPrincipalReturnsOK(t *testing.T) {
 }
 
 func TestW1_6_09_OperationCancel_AnonymousReturnsNotFound(t *testing.T) {
-	h := NewOperationHandler(newFakeRepoW16(sampleOp()))
+	h := NewOperationHandler(newOwnedOpsRepo(sampleOp()))
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "system", ID: "anonymous"})
 
@@ -117,7 +116,7 @@ func TestW1_6_09_OperationCancel_AnonymousReturnsNotFound(t *testing.T) {
 }
 
 func TestW1_6_09_OperationCancel_OtherPrincipalReturnsNotFound(t *testing.T) {
-	h := NewOperationHandler(newFakeRepoW16(sampleOp()))
+	h := NewOperationHandler(newOwnedOpsRepo(sampleOp()))
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_bob"})
 

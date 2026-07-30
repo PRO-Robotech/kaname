@@ -19,18 +19,28 @@ import (
 
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 )
 
 // OperationHandler реализует operationpb.OperationServiceServer — единый
-// envelope для всех IAM long-running operations (parity с kacho-vpc).
+// envelope для всех IAM long-running operations (parity с остальными шестью
+// сервисами).
+//
+// Get/Cancel энфорсят владельца операции ownership-scoped портом
+// (GetOwned/CancelOwned): предикат владения живёт ВНУТРИ того же оператора, что
+// читает/мутирует строку. Форма «прочитал → сравнил → выполнил» здесь
+// недопустима по двум причинам: (а) внутрисервисный инвариант выражается
+// конструкцией базы, не программной проверкой; (б) такая проверка открыта при
+// отказе чтения — неудачное чтение это «не знаю», а не «разрешено», и
+// продолжать по «не знаю» на мутирующем пути нельзя. Чужой/несуществующий id
+// отдаёт одинаковый NotFound (no-leak).
 type OperationHandler struct {
 	operationpb.UnimplementedOperationServiceServer
 	repo operations.Repo
 }
 
-// NewOperationHandler создает OperationHandler.
+// NewOperationHandler создает OperationHandler. В проде repo — pgRepo, который
+// реализует operations.OwnedOperationRepo; если не реализует (ошибка wiring'а) —
+// ownership-вызовы возвращают INTERNAL (fail-closed, не silent-bypass).
 func NewOperationHandler(repo operations.Repo) *OperationHandler {
 	return &OperationHandler{repo: repo}
 }
@@ -39,7 +49,22 @@ func (h *OperationHandler) Get(ctx context.Context, req *operationpb.GetOperatio
 	if req.OperationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "operation_id required")
 	}
-	op, err := h.repo.Get(ctx, req.OperationId)
+	owned, ok := operations.AsOwned(h.repo)
+	if !ok {
+		return nil, status.Error(codes.Internal, "operation get failed")
+	}
+	// Owner-ключ резолвится ИСКЛЮЧИТЕЛЬНО из доверенного ctx-principal'а
+	// (anti-spoof). Безымянный вызывающий владельцем не является:
+	// PrincipalFromContext на ctx без принципала отдаёт системный fallback
+	// {system, bootstrap}, который совпадает с ownership-предикатом на КАЖДОЙ
+	// операции, записанной системным путём; OwnerFromContext вместо этого
+	// сообщает об отсутствии ключа, и мы отдаём тот же no-leak NotFound, что и
+	// на чужой операции.
+	owner, hasOwner := operations.OwnerFromContext(ctx)
+	if !hasOwner {
+		return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
+	}
+	op, err := owned.GetOwned(ctx, req.OperationId, owner)
 	if err != nil {
 		if errors.Is(err, operations.ErrNotFound) {
 			return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
@@ -48,19 +73,6 @@ func (h *OperationHandler) Get(ctx context.Context, req *operationpb.GetOperatio
 		// raw err — категорически нельзя пропускать наружу).
 		return nil, status.Error(codes.Internal, "operation get failed")
 	}
-	// Hide other principals' operations: anti-info-leak returns NotFound
-	// rather than PermissionDenied. Anonymous principals are rejected FIRST;
-	// then IsSelf is checked for known principals. The inverted order is
-	// load-bearing — a naive `!IsAnonymous(ctx) && !IsSelf(...)` guard
-	// short-circuits to `false` for anonymous callers, letting anyone GET
-	// any operation by id (including JIT/AB/SA mutations whose response
-	// carries the principal-owner).
-	if authzguard.IsAnonymous(ctx) {
-		return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
-	}
-	if !authzguard.IsSelf(ctx, op.Principal.ID) {
-		return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
-	}
 	return operationToProto(op), nil
 }
 
@@ -68,18 +80,18 @@ func (h *OperationHandler) Cancel(ctx context.Context, req *operationpb.CancelOp
 	if req.OperationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "operation_id required")
 	}
-	// Prevent cancel of someone else's operation. Anonymous → NotFound first
-	// (anti-info-leak); then IsSelf for known principals. Same inversion
-	// rationale as Get.
-	if existing, err := h.repo.Get(ctx, req.OperationId); err == nil {
-		if authzguard.IsAnonymous(ctx) {
-			return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
-		}
-		if !authzguard.IsSelf(ctx, existing.Principal.ID) {
-			return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
-		}
+	owned, ok := operations.AsOwned(h.repo)
+	if !ok {
+		return nil, status.Error(codes.Internal, "operation cancel failed")
 	}
-	if err := h.repo.Cancel(ctx, req.OperationId); err != nil {
+	owner, hasOwner := operations.OwnerFromContext(ctx)
+	if !hasOwner {
+		return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
+	}
+	// Атомарный CancelOwned несёт предикат владения и CAS-on-done в одном
+	// UPDATE … RETURNING — отдельный reload-Get после отмены не нужен.
+	op, err := owned.CancelOwned(ctx, req.OperationId, owner)
+	if err != nil {
 		if errors.Is(err, operations.ErrNotFound) {
 			return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
 		}
@@ -87,13 +99,6 @@ func (h *OperationHandler) Cancel(ctx context.Context, req *operationpb.CancelOp
 			return nil, status.Errorf(codes.FailedPrecondition, "operation %s already completed", req.OperationId)
 		}
 		return nil, status.Error(codes.Internal, "operation cancel failed")
-	}
-	op, err := h.repo.Get(ctx, req.OperationId)
-	if err != nil {
-		if errors.Is(err, operations.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "operation %s not found", req.OperationId)
-		}
-		return nil, status.Error(codes.Internal, "operation reload after cancel failed")
 	}
 	return operationToProto(op), nil
 }
