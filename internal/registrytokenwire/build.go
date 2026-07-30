@@ -37,6 +37,11 @@ type BuildConfig struct {
 	// D-7). The data-plane resolves this client_id's token to the FGA wildcard
 	// `user:*`. Empty (the default) leaves anonymous pull DISABLED — no-Basic-creds
 	// then fails closed to a 401 challenge (secure-by-default; anon is opt-in).
+	// HydraTokenCAFile — the anchor the hop to the provider's token endpoint is
+	// verified against, when the profile pins one. Empty ⇒ the default transport,
+	// which is what a plaintext in-cluster address needs; the production boot guard
+	// is what forbids claiming https without an anchor.
+	HydraTokenCAFile       string
 	AnonymousClientID      string
 	AnonymousKeyID         string
 	AnonymousPrivateKeyPEM string
@@ -53,12 +58,21 @@ type BuildConfig struct {
 // data-plane's verification keys are Hydra's, served via the separate
 // cluster-internal jwks-proxy mirror (internal/handler/jwksproxyhttp) — not by this
 // `/iam/token` shim.
-func Build(pool *pgxpool.Pool, cfg BuildConfig) http.Handler {
+func Build(pool *pgxpool.Pool, cfg BuildConfig) (http.Handler, error) {
 	saRepo := kachopg.NewSAOAuthClientRepo(pool)
 
 	validator := registrytokenuc.NewSAKeyValidator(NewSAClientLookup(saRepo))
 	signer := registrytokenuc.ES256AssertionSigner{}
-	exchanger := NewHydraExchange(clients.NewHydraTokenClient(cfg.HydraTokenURL))
+	// The hop to the provider's token endpoint carries a signed client assertion
+	// out and the minted bearer back. When the profile pins an anchor, that bundle
+	// becomes the only trust for the hop; an anchor that cannot be used is an ERROR
+	// here rather than a silent fall-back to the system roots, and the caller
+	// refuses to start on it.
+	tokenClient, err := clients.NewHydraTokenClientWithCA(cfg.HydraTokenURL, cfg.HydraTokenCAFile)
+	if err != nil {
+		return nil, err
+	}
+	exchanger := NewHydraExchange(tokenClient)
 
 	useCase := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		AssertionAudience: cfg.AssertionAudience,
@@ -78,5 +92,5 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) http.Handler {
 		DefaultService: cfg.Service,
 	}, useCase)
 
-	return registrytokenhttp.NewMux(tokenHandler)
+	return registrytokenhttp.NewMux(tokenHandler), nil
 }

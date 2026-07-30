@@ -172,13 +172,55 @@ func (c AuthNConfig) ResolveHydraTokenEndpoint() string {
 // external token endpoint (back-compat). The `iss` of the resulting token remains
 // the external Hydra issuer; only the network target differs.
 func (c AuthNConfig) ResolveHydraTokenURL() string {
-	if v := strings.TrimSpace(c.HydraTokenURL); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_TOKEN_URL")); v != "" {
+	if v := c.DeclaredHydraTokenURL(); v != "" {
 		return v
 	}
 	return c.ResolveHydraTokenEndpoint()
+}
+
+// DeclaredHydraTokenURL / DeclaredHydraJWKSURL return the address an operator
+// actually WROTE — the YAML setting or its ENV override — and the empty string
+// when neither is set.
+//
+// They exist for the same reason DeclaredHydraAdminURL does: the Resolve* form
+// never returns empty, so "declared" and "guessed" are indistinguishable at the
+// call sites, and the guessed value is the PUBLIC ingress hostname. The
+// production boot guard (validateProductionProviderPublicHops) reads THESE, not
+// the resolved values.
+func (c AuthNConfig) DeclaredHydraTokenURL() string {
+	if v := strings.TrimSpace(c.HydraTokenURL); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_TOKEN_URL"))
+}
+
+func (c AuthNConfig) DeclaredHydraJWKSURL() string {
+	if v := strings.TrimSpace(c.HydraJWKSURL); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_JWKS_URL"))
+}
+
+// ResolveHydraTokenCAFile / ResolveHydraJWKSCAFile — path to the PEM bundle each
+// hop to the provider's PUBLIC listener is verified against. Explicit setting,
+// then ENV; empty when neither is set.
+//
+// Deliberately NOT derived from any other path (not even from the admin hop's
+// anchor, which happens to be the same bundle today): an anchor that is always
+// non-empty would make the hop read as verified on a profile that never
+// configured one — the same defect as a derived address.
+func (c AuthNConfig) ResolveHydraTokenCAFile() string {
+	if v := strings.TrimSpace(c.HydraTokenCAFile); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_TOKEN_CA_FILE"))
+}
+
+func (c AuthNConfig) ResolveHydraJWKSCAFile() string {
+	if v := strings.TrimSpace(c.HydraJWKSCAFile); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_JWKS_CA_FILE"))
 }
 
 // ResolveHydraJWKSURL — the upstream Hydra PUBLIC JWKS URL the cluster-internal
@@ -191,10 +233,7 @@ func (c AuthNConfig) ResolveHydraTokenURL() string {
 // kids (iam has no keyset of its own — it mints nothing). Only the network target
 // differs — the `iss` of a verified token stays the external Hydra issuer.
 func (c AuthNConfig) ResolveHydraJWKSURL() string {
-	if v := strings.TrimSpace(c.HydraJWKSURL); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("KACHO_IAM_HYDRA_JWKS_URL")); v != "" {
+	if v := c.DeclaredHydraJWKSURL(); v != "" {
 		return v
 	}
 	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/.well-known/jwks.json"
