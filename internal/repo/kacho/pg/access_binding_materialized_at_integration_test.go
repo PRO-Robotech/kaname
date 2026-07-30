@@ -71,7 +71,7 @@ func TestAB_MA_MaterializedAtFromMemberLedger(t *testing.T) {
 	// This case is about a binding with no member ledger; the role's tier is incidental.
 	bare := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
-		RoleID: systemRoleID("viewer"), ResourceType: "cluster", ResourceID: "cluster_kacho_root",
+		RoleID: systemRoleID("view"), ResourceType: "cluster", ResourceID: "cluster_kacho_root",
 		GrantedByUserID: owner,
 	})
 
