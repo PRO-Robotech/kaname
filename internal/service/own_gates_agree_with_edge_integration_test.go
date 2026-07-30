@@ -268,6 +268,23 @@ func TestDelegatedAccountAdminGetsOneAnswerFromEdgeAndService(t *testing.T) {
 	// the administrator".
 	require.True(t, w.serviceShowsBinding(t, grantee, binding),
 		"the binding's own subject keeps seeing it through the self floor")
+
+	// THE CLOUD ADMINISTRATOR, on the page filter, and this is the case the whole cascade
+	// was chosen for: the emergency where the pipeline is behind is exactly when he is
+	// needed. It is asserted separately because the page filter is the one in-service path
+	// with NO cluster-admin gate of its own — it reaches him only through the account's
+	// cluster pointer, which is a structural fact and not a grant. Without that fact
+	// supplied he holds every verb at the edge and sees an empty list inside.
+	cloudAdmin := agId("usr", "agreecloud2")
+	w.seedUser(t, cloudAdmin, acc)
+	w.harness.Write(t, "user:"+cloudAdmin, "system_admin", ciClusterObject)
+	require.True(t, w.allowed(t, "user:"+cloudAdmin, "v_get", "iam_access_binding:"+binding),
+		"control: the edge admits the cloud administrator to any binding")
+	require.True(t, w.serviceShowsBinding(t, cloudAdmin, binding),
+		"and iam's own gates must admit him too")
+	require.Contains(t, w.pageShows(t, "user:"+cloudAdmin, []string{binding}), binding,
+		"and he must SEE it on a page — the filter has no cluster-admin gate of its own, "+
+			"so this can only resolve through the account's structural cluster pointer")
 }
 
 // TestOwnGatesDisagreeWhenTheSecondChanceIsAbsent — the injection, in the other
@@ -311,4 +328,16 @@ func TestOwnGatesDisagreeWhenTheSecondChanceIsAbsent(t *testing.T) {
 		"WITHOUT the second chance iam's own gates refuse the delegated administrator")
 	require.NotContains(t, w.pageShows(t, "user:"+accAdmin, []string{binding}), binding,
 		"WITHOUT the second chance the page filter hides the binding from him")
+
+	// And the cloud administrator, whose page assertion in the test above would otherwise
+	// have no proof that it can fail: the page filter has no cluster-admin gate of its own,
+	// so without the account's structural cluster pointer he is admitted at the edge and
+	// shown an empty list inside — the emergency lockout, in list form.
+	cloudAdmin := agId("usr", "agreecloud3")
+	w.seedUser(t, cloudAdmin, acc)
+	w.harness.Write(t, "user:"+cloudAdmin, "system_admin", ciClusterObject)
+	require.True(t, w.allowed(t, "user:"+cloudAdmin, "v_get", "iam_access_binding:"+binding),
+		"the edge admits the cloud administrator regardless of this wiring")
+	require.NotContains(t, w.pageShows(t, "user:"+cloudAdmin, []string{binding}), binding,
+		"WITHOUT the second chance the page filter shows the cloud administrator nothing")
 }
