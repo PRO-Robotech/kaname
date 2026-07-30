@@ -104,8 +104,8 @@ func (r *lcgGrpRdr) Get(_ context.Context, id domain.GroupID) (domain.Group, err
 func (r *lcgGrpRdr) List(context.Context, repogroup.ListFilter) ([]domain.Group, string, error) {
 	return nil, "", nil
 }
-func (r *lcgGrpRdr) ListMembers(context.Context, domain.GroupID) ([]domain.GroupMember, error) {
-	return nil, nil
+func (r *lcgGrpRdr) ListMembers(context.Context, domain.GroupID, repogroup.MemberPage) ([]domain.GroupMember, string, error) {
+	return nil, "", nil
 }
 func (r *lcgGrpRdr) IsMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) (bool, error) {
 	return false, nil

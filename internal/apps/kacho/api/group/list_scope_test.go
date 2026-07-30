@@ -88,8 +88,8 @@ func (r *scopeGroupRdr) Get(context.Context, domain.GroupID) (domain.Group, erro
 func (r *scopeGroupRdr) List(context.Context, repogroup.ListFilter) ([]domain.Group, string, error) {
 	return r.parent.groups, "", nil
 }
-func (r *scopeGroupRdr) ListMembers(context.Context, domain.GroupID) ([]domain.GroupMember, error) {
-	return nil, nil
+func (r *scopeGroupRdr) ListMembers(context.Context, domain.GroupID, repogroup.MemberPage) ([]domain.GroupMember, string, error) {
+	return nil, "", nil
 }
 func (r *scopeGroupRdr) IsMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) (bool, error) {
 	return false, nil

@@ -154,19 +154,23 @@ func (h *Handler) RemoveMember(ctx context.Context, req *iamv1.RemoveGroupMember
 }
 
 func (h *Handler) ListMembers(ctx context.Context, req *iamv1.ListGroupMembersRequest) (*iamv1.ListGroupMembersResponse, error) {
-	members, err := h.listMembers.Execute(ctx, domain.GroupID(req.GetGroupId()))
+	res, err := h.listMembers.Execute(ctx, ListMembersInput{
+		GroupID:   domain.GroupID(req.GetGroupId()),
+		PageSize:  req.GetPageSize(),
+		PageToken: req.GetPageToken(),
+	})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*iamv1.GroupMember, 0, len(members))
-	for _, m := range members {
+	out := make([]*iamv1.GroupMember, 0, len(res.Members))
+	for _, m := range res.Members {
 		pb, err := groupMemberToPb(m)
 		if err != nil {
 			return nil, status.Error(codes.Internal, "marshal group member")
 		}
 		out = append(out, pb)
 	}
-	return &iamv1.ListGroupMembersResponse{Members: out}, nil
+	return &iamv1.ListGroupMembersResponse{Members: out, NextPageToken: res.NextPageToken}, nil
 }
 
 func (h *Handler) ListOperations(ctx context.Context, req *iamv1.ListGroupOperationsRequest) (*iamv1.ListGroupOperationsResponse, error) {
