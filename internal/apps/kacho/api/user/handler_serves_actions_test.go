@@ -36,7 +36,7 @@ import (
 // actionsUserID — a well-formed user id. Well-formed on purpose: a malformed one
 // would also be refused, but by the format check rather than by the floor, and
 // then the probe would pass without the floor ever running.
-const actionsUserID = "usr00000000000actns"
+const actionsUserID = "usr000000000000actns"
 
 func TestHandlerServesBlockAndUnblock(t *testing.T) {
 	// Nil use-cases on purpose: the anti-anonymous floor answers before any of

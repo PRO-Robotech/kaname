@@ -68,6 +68,11 @@ type updUserRepo struct {
 	// ТОЛЬКО из writer-tx, поэтому список пуст, если запись не состоялась.
 	stateCalls int
 	audits     []service.AuditEvent
+	// getErr — подменяет ответ читателя по id. Нужен, чтобы синхронная полоса
+	// «строки нет» проверялась ТЕМ ЖЕ сентинелом, который отдаёт боевой
+	// репозиторий: подставив сюда обычную ошибку, проба увидела бы INTERNAL и
+	// зеленела бы на неверном коде.
+	getErr error
 }
 
 func newUpdUserRepo() *updUserRepo {
@@ -133,6 +138,9 @@ type updUserRdr struct{ parent *updUserRepo }
 func (r *updUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, error) {
 	r.parent.mu.Lock()
 	defer r.parent.mu.Unlock()
+	if r.parent.getErr != nil {
+		return domain.User{}, r.parent.getErr
+	}
 	if id != r.parent.user.ID {
 		return domain.User{}, errNotFound
 	}
