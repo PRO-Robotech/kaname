@@ -85,6 +85,25 @@ type WriterIface interface {
 	// (запрет #10 — last-writer-wins, не TOCTOU). 0 rows RETURNING → ErrNotFound.
 	// Identity-поля (external_id и пр.) этим путем не меняются.
 	UpdateLabels(ctx context.Context, id domain.UserID, labels domain.Labels) (domain.User, error)
+
+	// SetInviteStatus — административный запрет участию и его снятие
+	// (`UserService.Block` / `Unblock`). Пишет состояние ОДНОЙ строки членства.
+	//
+	// Аргумент — целевое СОСТОЯНИЕ, не переход: повтор запроса того же состояния
+	// проходит и оставляет строку там, где просили. Направление, делающее систему
+	// безопаснее, не может падать на повторе.
+	//
+	// Инвариант «PENDING не трогать» выражен предикатом самого стейтмента, а не
+	// проверкой-до-записи (запрет #10): приглашение без подтверждённой личности не
+	// несёт внешнего идентификатора, и DB-CHECK users_invite_status_consistency
+	// отверг бы ACTIVE/BLOCKED на такой строке.
+	//
+	// Три исхода различимы, потому что стейтмент возвращает и результат, и признак
+	// существования строки: обновили → строка; строки нет → ErrNotFound;
+	// строка есть, но PENDING → ErrFailedPrecondition. Схлопнуть последние два в
+	// один код нельзя — «нет такого» и «есть, но нельзя» суть разные ответы, и
+	// контракт-тон отсутствия ресурса на существующую строку был бы ложью.
+	SetInviteStatus(ctx context.Context, id domain.UserID, status domain.InviteStatus) (domain.User, error)
 }
 
 type ListFilter struct {

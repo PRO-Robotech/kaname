@@ -12,9 +12,24 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 
 	_ "github.com/PRO-Robotech/kacho/services/iam/internal/dto/toproto"
 )
+
+// pendingRefusal — отказ на строке приглашения, которое ещё никто не подтвердил.
+//
+// Текст совпадает с тем, что уже отдаёт резолв субъекта на этом же состоянии
+// (`internal_iam.userStateReason`): одно состояние — один ответ, каким бы путём
+// его ни спросили. «Заблокирован» здесь было бы неверно и отправило бы
+// администратора снимать запрет, которого нет; приглашение отзывают, а не
+// разблокируют.
+//
+// Тот же текст на обоих направлениях: асимметрия между `:block` и `:unblock` —
+// не экономия, а разное объяснение одной и той же причины отказа.
+func pendingRefusal(id domain.UserID) error {
+	return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s is not active", id)
+}
 
 func marshalUser(u domain.User) (*anypb.Any, error) {
 	var dst *iamv1.User

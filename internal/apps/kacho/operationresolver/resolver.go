@@ -98,6 +98,18 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 
 	case *iamv1.UpdateUserMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
+	case *iamv1.BlockUserMetadata:
+		// Block/Unblock RETAIN the membership row and change its state, so both
+		// resolve like an Update (resource present afterwards → response = the
+		// user), never like a Delete. Without these two cases an ORPHANED block —
+		// the worker died between minting the Operation and committing — falls to
+		// the default arm, is skipped forever, and the Operation stays `done=false`
+		// while being re-claimed on every sweep. The administrator who suspended
+		// someone during an incident would be left polling an answer that never
+		// comes.
+		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
+	case *iamv1.UnblockUserMetadata:
+		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 
 	case *iamv1.CreateServiceAccountMetadata:
 		return resolveExistence(ctx, kindCreate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)

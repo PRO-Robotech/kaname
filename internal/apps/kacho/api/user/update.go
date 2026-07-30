@@ -59,6 +59,19 @@ var userImmutableFields = map[string]string{
 	"email":       "email is immutable after User.Create",
 	"created_at":  "createdAt is immutable after User.Create",
 	"createdAt":   "createdAt is immutable after User.Create",
+
+	// invite_status НЕ является immutable — оно меняется, но ДЕЙСТВИЯМИ
+	// (`UserService.Block` / `Unblock`), а не маской. Поэтому сообщение называет
+	// путь, вместо того чтобы обещать неизменяемость: «immutable after Create»
+	// было бы ложью и отправило бы читателя искать несуществующий обход.
+	//
+	// Запись живёт здесь, а не в списке mutable, потому что общий отказ
+	// «неизвестное поле маски» формально верен и практически бесполезен: тот, кто
+	// ищет, как приостановить участие, узнаёт лишь, что этот путь не тот. Обе
+	// формы имени — маска приходит в proto-форме, но клиенты, транслирующие
+	// JSON-имена буквально, присылают camelCase, и объяснение обязано быть одним.
+	"invite_status": "inviteStatus is not updatable; use UserService.Block / UserService.Unblock",
+	"inviteStatus":  "inviteStatus is not updatable; use UserService.Block / UserService.Unblock",
 }
 
 // ObjectForwardReconciler — narrow post-commit port: re-materialize the per-object

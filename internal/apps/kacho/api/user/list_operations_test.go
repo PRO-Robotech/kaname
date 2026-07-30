@@ -56,7 +56,7 @@ func TestUser_ListOperations_ReturnsRecordedOps(t *testing.T) {
 	repo := &fakeOpsList{ops: []operations.Operation{
 		{ID: "iop00000000000000001", Description: "Delete user x", CreatedAt: time.Unix(1, 0), Principal: opsCaller},
 	}, next: "tok"}
-	h := userapp.NewHandler(nil, nil, nil, nil, nil).
+	h := userapp.NewHandler(nil, nil, nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(repo))
 
 	resp, err := h.ListOperations(opsCallerCtx(),
@@ -81,7 +81,7 @@ func TestUser_ListOperations_ReturnsRecordedOps(t *testing.T) {
 
 func TestUser_ListOperations_MalformedID_InvalidArgument(t *testing.T) {
 	repo := &fakeOpsList{}
-	h := userapp.NewHandler(nil, nil, nil, nil, nil).
+	h := userapp.NewHandler(nil, nil, nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(repo))
 
 	_, err := h.ListOperations(context.Background(),
@@ -98,7 +98,7 @@ func TestUser_ListOperations_WellFormedMissing_EmptyList(t *testing.T) {
 	// Parity with the existing five: no pre-Get, so a well-formed-but-missing
 	// user id yields OK with an empty list, never NotFound (1.2-04).
 	repo := &fakeOpsList{ops: nil, next: ""}
-	h := userapp.NewHandler(nil, nil, nil, nil, nil).
+	h := userapp.NewHandler(nil, nil, nil, nil, nil, nil, nil).
 		WithListOperations(shared.NewListOperationsUseCase(repo))
 
 	resp, err := h.ListOperations(opsCallerCtx(),

@@ -35,6 +35,7 @@ import (
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
@@ -61,6 +62,12 @@ type updUserRepo struct {
 	updated  domain.Labels
 	updCalls int
 	reconcil []string // objectIDs for which a reconcile-event was emitted
+
+	// stateCalls / audits — для проб запрета участию: сколько раз писатель
+	// состояния был вызван и что при этом попало в след. Аудит записывается
+	// ТОЛЬКО из writer-tx, поэтому список пуст, если запись не состоялась.
+	stateCalls int
+	audits     []service.AuditEvent
 }
 
 func newUpdUserRepo() *updUserRepo {
@@ -90,6 +97,19 @@ func (f *updUserRepo) labelsSnapshot() domain.Labels {
 	defer f.mu.Unlock()
 	return f.updated
 }
+
+// auditSnapshot / stateWrites — читаются пробами запрета участию.
+func (f *updUserRepo) auditSnapshot() []service.AuditEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]service.AuditEvent{}, f.audits...)
+}
+func (f *updUserRepo) stateWrites() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stateCalls
+}
+
 func (f *updUserRepo) reconcileSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -173,7 +193,12 @@ func (w *updUserWriter) GroupsW() group.WriterIface                    { return 
 func (w *updUserWriter) RolesW() role.WriterIface                      { return nil }
 func (w *updUserWriter) AccessBindingsW() access_binding.WriterIface   { return nil }
 
-func (w *updUserWriter) EmitAuditEvent(context.Context, service.AuditEvent) error { return nil }
+func (w *updUserWriter) EmitAuditEvent(_ context.Context, e service.AuditEvent) error {
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	w.parent.audits = append(w.parent.audits, e)
+	return nil
+}
 func (w *updUserWriter) EmitFGARelationWrite(context.Context, []service.RelationTuple) error {
 	return nil
 }
@@ -380,7 +405,7 @@ func TestUpdateUser_T33UPD01_FullPatchEmptyMask(t *testing.T) {
 func TestUpdateUserHandler_FlatLabels(t *testing.T) {
 	repo := newUpdUserRepo()
 	uc := NewUpdateUserUseCase(repo, newUpdOpsRepo())
-	h := NewHandler(nil, nil, uc, nil, nil)
+	h := NewHandler(nil, nil, uc, nil, nil, nil, nil)
 
 	op, err := h.Update(ownerCtx(), &iamv1.UpdateUserRequest{
 		UserId:     updUserID,
@@ -397,4 +422,60 @@ func TestUpdateUserHandler_FlatLabels(t *testing.T) {
 
 	assert.Equal(t, domain.Labels{"tier": "gold"}, repo.labelsSnapshot(),
 		"flat request.labels доходят до repo через handler")
+}
+
+// TestUpdateUser_InviteStatusInMask_NamesTheActionsInstead — состояние членства
+// через `Update` недостижимо, и отказ ГОВОРИТ, чем его менять.
+//
+// Общий текст «неизвестное поле маски» здесь недостаточен: он верен формально и
+// бесполезен практически — вызывающий, который ищет, как приостановить участие,
+// узнаёт лишь, что этот путь не тот, и идёт пробовать следующий. Сообщение,
+// называющее действия, закрывает вопрос на первом отказе.
+//
+// «Immutable after User.Create» было бы ЛОЖЬЮ: состояние меняется, просто не
+// маской. Формулировка, обещающая неизменяемость, отправила бы читателя искать
+// несуществующий обходной путь.
+func TestUpdateUser_InviteStatusInMask_NamesTheActionsInstead(t *testing.T) {
+	const want = "inviteStatus is not updatable; use UserService.Block / UserService.Unblock"
+
+	// Обе формы имени: маска приходит в proto-форме (snake_case), но camelCase
+	// встречается у клиентов, транслирующих JSON-имена буквально. Отказ обязан
+	// быть одним и тем же — иначе один и тот же запрос получает два разных
+	// объяснения в зависимости от формы написания.
+	for _, field := range []string{"invite_status", "inviteStatus"} {
+		t.Run(field, func(t *testing.T) {
+			uc := NewUpdateUserUseCase(newUpdUserRepo(), newUpdOpsRepo())
+			op, err := uc.Execute(ownerCtx(), UpdateUserInput{
+				ID:         domain.UserID(updUserID),
+				UpdateMask: []string{field},
+			})
+			require.Error(t, err)
+			assert.Nil(t, op, "отказ синхронный — Operation не порождается")
+			st, ok := status.FromError(err)
+			require.True(t, ok, "ожидался gRPC status, получено %v", err)
+			assert.Equal(t, codes.InvalidArgument, st.Code())
+			assert.Contains(t, st.Message(), want,
+				"отказ обязан называть действия, а не только отвергать поле")
+		})
+	}
+}
+
+// SetInviteStatus моделирует ровно то, что делает боевой стейтмент, включая
+// различение трёх исходов: обновили / строки нет / строка есть, но PENDING.
+// Фейк, который всегда отвечает успехом, сделал бы негативные пробы
+// нефальсифицируемыми.
+func (w *updUserWtr) SetInviteStatus(_ context.Context, id domain.UserID, st domain.InviteStatus) (domain.User, error) {
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	w.parent.stateCalls++
+	if id != w.parent.user.ID {
+		return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+	}
+	if w.parent.user.InviteStatus == domain.InviteStatusPending {
+		return domain.User{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s is not active", id)
+	}
+	out := w.parent.user
+	out.InviteStatus = st
+	w.parent.user = out
+	return out, nil
 }
