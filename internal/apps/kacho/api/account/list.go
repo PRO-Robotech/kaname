@@ -75,6 +75,17 @@ func (u *ListAccountsUseCase) WithRelationStore(relations clients.RelationQuerie
 // Execute — sync read + cursor pagination, filtered to the principal's FGA
 // `viewer`-set. page_size валидируется repo-слоем (default 50, max 1000).
 func (u *ListAccountsUseCase) Execute(ctx context.Context, f account.ListFilter) ([]domain.Account, string, error) {
+	// Формат пагинации — ПЕРВЫМ стейтментом, до решения о том, кто спрашивает.
+	//
+	// Ниже стоит замыкание по личности: анонимный (в том числе непроброшенный)
+	// вызывающий получает пустую страницу и до репозитория не доходит. Пока
+	// формат курсора проверял только репозиторий, один и тот же мусорный
+	// page_token получал разный ответ в зависимости от того, опознан ли
+	// вызывающий, — то есть проверка ввода зависела от прав. Репозиторий
+	// остаётся авторитетным на служимом пути.
+	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+		return nil, "", err
+	}
 	// Anonymous / non-principal → empty (default-deny). Short-circuits BEFORE
 	// any FGA call so an FGA outage never turns an anonymous request into
 	// Unavailable (INV-3).

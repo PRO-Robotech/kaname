@@ -38,3 +38,28 @@ func ValidatePageToken(field, token string) error {
 	}
 	return nil
 }
+
+// MaxListPageSize — верхняя граница page_size, общая с репозиторием
+// (pg.effectivePageSize) и с платформенной validate.PageSize. Значение вне
+// диапазона ОТВЕРГАЕТСЯ, а не зажимается: молчаливое зажатие отдаёт не ту
+// страницу, о которой просили, и вызывающий об этом не узнаёт.
+const MaxListPageSize int32 = 1000
+
+// ValidatePagination — sync-проверка формата пагинации целиком (page_size +
+// page_token) для списочного use-case'а.
+//
+// Зачем в use-case'е, а не только в хендлере. Списочный use-case решает, кто
+// спрашивает, раньше, чем читает страницу: анонимный или неуправомоченный
+// вызывающий получает пустую страницу и до репозитория не доходит. Пока формат
+// проверял только репозиторий, один и тот же мусорный курсор получал разный
+// ответ в зависимости от того, что вызывающему выдано, — то есть проверка ввода
+// зависела от прав. Здесь она от них не зависит.
+//
+// Репозиторий остаётся авторитетным: он повторяет обе проверки на служимом
+// пути.
+func ValidatePagination(pageToken string, pageSize int32) error {
+	if pageSize < 0 || pageSize > MaxListPageSize {
+		return InvalidArg("page_size", "Illegal argument page_size")
+	}
+	return ValidatePageToken("page_token", pageToken)
+}

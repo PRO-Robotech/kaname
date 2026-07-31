@@ -80,6 +80,17 @@ func (u *ListRolesUseCase) WithRelationStore(relations clients.RelationQueries) 
 }
 
 func (u *ListRolesUseCase) Execute(ctx context.Context, f reporole.ListFilter) ([]domain.Role, string, error) {
+	// Формат пагинации — ПЕРВЫМ стейтментом, до решения о том, кто спрашивает.
+	//
+	// Ниже стоит замыкание по личности: анонимный (в том числе непроброшенный)
+	// вызывающий получает пустую страницу и до репозитория не доходит. Пока
+	// формат курсора проверял только репозиторий, один и тот же мусорный
+	// page_token получал разный ответ в зависимости от того, опознан ли
+	// вызывающий, — то есть проверка ввода зависела от прав. Репозиторий
+	// остаётся авторитетным на служимом пути.
+	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+		return nil, "", err
+	}
 	// Anonymous → empty (default-deny) BEFORE any FGA call so an FGA outage never
 	// turns an anonymous request into Unavailable.
 	if authzguard.IsAnonymous(ctx) {
@@ -90,8 +101,13 @@ func (u *ListRolesUseCase) Execute(ctx context.Context, f reporole.ListFilter) (
 	// Unwired FGA port → fail closed BEFORE touching the database: no visibility
 	// is resolvable at all, so the page could only be served unfiltered (a catalog
 	// leak) or discarded. This is NOT the grant-state short-circuit the pagination
-	// convention orders after format validation — page_size/page_token are already
-	// validated by the handler (and re-validated by the repo on the served path).
+	// convention orders after format validation — both page_size and page_token
+	// are validated by the first statement of this use-case above (the repo
+	// re-validates them on the served path).
+	//
+	// Прежняя редакция этого комментария относила обе проверки к хендлеру. Для
+	// page_size это было верно, для page_token — нет: его не проверял никто до
+	// репозитория, а до репозитория анонимный вызывающий не доходил.
 	if u.relationQueries == nil {
 		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
 	}

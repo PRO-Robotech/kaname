@@ -172,6 +172,15 @@ func (s *ConditionsCRUDService) Get(ctx context.Context, id domain.ConditionID) 
 // `project:<project_id>`; an unauthorized caller gets an empty page (no existence
 // leak, never PermissionDenied — mirrors Project/Account List).
 func (s *ConditionsCRUDService) List(ctx context.Context, filter condition.ListFilter) ([]domain.Condition, string, error) {
+	// Формат пагинации — ПЕРВЫМ стейтментом, до всех трёх полос «ничего не
+	// видно» ниже. Пока формат курсора проверял только репозиторий, до которого
+	// эти полосы не доходят, один и тот же мусорный page_token получал разный
+	// ответ в зависимости от того, что вызывающему выдано. Проверка ввода
+	// решением о доступе не является; репозиторий остаётся авторитетным на
+	// служимом пути.
+	if err := shared.ValidatePagination(filter.PageToken, filter.PageSize); err != nil {
+		return nil, "", err
+	}
 	if authzguard.IsAnonymous(ctx) {
 		return nil, "", nil
 	}

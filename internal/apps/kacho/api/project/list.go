@@ -63,6 +63,17 @@ func (u *ListProjectsUseCase) WithRelationStore(relations clients.RelationQuerie
 }
 
 func (u *ListProjectsUseCase) Execute(ctx context.Context, f project.ListFilter) ([]domain.Project, string, error) {
+	// Формат пагинации — ПЕРВЫМ стейтментом, до решения о том, кто спрашивает.
+	//
+	// Ниже стоит замыкание по личности: анонимный (в том числе непроброшенный)
+	// вызывающий получает пустую страницу и до репозитория не доходит. Пока
+	// формат курсора проверял только репозиторий, один и тот же мусорный
+	// page_token получал разный ответ в зависимости от того, опознан ли
+	// вызывающий, — то есть проверка ввода зависела от прав. Репозиторий
+	// остаётся авторитетным на служимом пути.
+	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+		return nil, "", err
+	}
 	// Anonymous short-circuits to empty BEFORE any FGA call (INV-3); an FGA
 	// outage never turns an anonymous request into Unavailable.
 	if authzguard.IsAnonymous(ctx) {
