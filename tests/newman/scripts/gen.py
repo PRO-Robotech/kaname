@@ -148,10 +148,14 @@ _URL_VAR_GUARD = [
     "(function () {",
     "  var _u = '';",
     "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-    "  var _m = /\\{\\{([A-Za-z0-9_]+)\\}\\}/.exec(_u);",
-    "  if (!_m) { return; }",
-    "  var _n = _m[1];",
-    "  if (pm.variables.has(_n)) { return; }",
+    "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+    "  if (!_all) { return; }",
+    "  var _n = null;",
+    "  for (var _i = 0; _i < _all.length; _i++) {",
+    "    var _c = _all[_i].slice(2, -2);",
+    "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+    "  }",
+    "  if (_n === null) { return; }",
     "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
     "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её "
     "захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы "
