@@ -347,49 +347,80 @@ _Reviewed 2026-07-06 (r8b security-hardening audit)._
 
 ---
 
-## 11. Scope-filter visible-set fetch is client-unbounded (`ListObjects` limit 0)
+## 11. A visibility-filtered page costs one relation question per row (up to 2000)
 
-**Convention** (defense-in-depth against resource exhaustion, CWE-770): a request
-should not materialise an unbounded backend result set into memory.
+> **This record previously described the opposite shape and has been rewritten.**
+> Until 2026-07-31 it documented, as current behaviour, a scope filter that
+> enumerated the whole visible set (`ListObjects` with no client-side cap) and
+> post-filtered the page against it, and it named the page-then-`Check` shape as a
+> *deferred* convergence path. The enumeration was removed when that convergence
+> was implemented: the surfaces below read a page from their own database and ask
+> about the ids on that page. What the record called the deferred goal is the
+> shipped code; what it called current behaviour no longer exists. The **batch**
+> part of that goal, however, was never implemented — and that is the open item
+> restated below, with its number.
 
-**Divergence**: every scope-filtered `List` (account/project/user/service_account/
-group/role and the access_binding helpers) calls
-`relationQueries.ListObjects(ctx, subject, relation, <type>, nil, 0)` — `0` =
-no client-side cap — for both the `viewer` and `v_list` relations, then
-post-filters the DB page against the resulting in-memory id set
-(`internal/apps/kacho/api/account/list.go` and siblings).
+**Convention**: a request's cost must be bounded by what the request asks for, and
+`page_size` is part of the contract up to 1000 (`pkg/validate`); narrowing a page
+to fit a budget is forbidden.
 
-**Why (by design, not a defect)**: the fetch is bounded where the data lives —
-OpenFGA enforces a **server-side** `listObjectsMaxResults` (default 1000) and
-`listObjectsDeadline` on `/list-objects`, so a single call returns at most that
-many objects regardless of how broad the grant is; two relations bound the
-per-request set to ~2× that. A **client-side** cap here would be actively wrong:
-the visible-set is intersected with the DB page to decide tenant visibility, so
-truncating it to N would silently drop authorised resources whose ids fall past
-the first N returned — a `List` that omits resources the caller is entitled to
-see (a listauthz **completeness** regression, and a worse failure than the memory
-concern for this low-severity item). Failing *closed* on a large set is equally
-unacceptable: a legitimately broad principal (an account-wide viewer service
-account) would have its `List` return `Unavailable`. Correct visibility therefore
-requires the full viewer∪v_list set, and its size bound is the authz backend's
-responsibility (server-side max-results/deadline), not a client truncation.
+**Divergence**: visibility is resolved with one **direct relation question per
+(object, relation)**, and the questions are individual HTTP round-trips to the
+relation store. `authzfilter.Relations` is `{viewer, v_list}` and `v_list` is asked
+only for the objects `viewer` denied, so a page costs between `page_size` and
+`2 × page_size` round-trips. At the contract ceiling that is **2000 round-trips for
+one `List`**. `authzfilter.DefaultParallelism = 16` bounds how many are in flight,
+which makes the page **125 sequential waves** — it bounds depth, not count.
 
-**Safety**: the practical memory exposure is bounded by the OpenFGA server limits
-above (a deployment concern, tunable at the FGA layer), and the port already
-supports a `maxResults` argument for any future call-site that can tolerate
-truncation — the scope-filter call-sites deliberately pass `0` because they
-cannot. Both relation calls fail closed to `Unavailable` on any FGA error/timeout,
-so an over-large or slow response degrades to a denied request, never to an
-unfiltered/owner-only fallback.
+Affected surfaces — **nine** `List` RPCs over **seven** object types, all through
+the one implementation (`authzfilter.VisibleSet`):
+`account`, `project`, `iam_user`, `iam_service_account`, `iam_group`, `iam_role`,
+and `iam_access_binding` (whose helper serves `List`, `ListByAccount`,
+`ListByScope`).
 
-**Convergence path (deferred)**: if per-request memory must be bounded on the
-IAM side independent of the FGA backend, replace fetch-all-then-filter with a
-DB-page-then-batch-`Check` strategy (Check each id on the page instead of
-listing the whole visible set) — a request-path redesign of the scope filter,
-not a one-line cap. Tracked as a scalability item; no correctness or security
-gap exists today given the server-side FGA bounds.
+**Why the shape is nonetheless right**: the alternative it replaced was worse and
+was a correctness defect, not a cost one. Enumerating "every object of this type
+the subject may see" is bounded SERVER-side by OpenFGA (`listObjectsMaxResults`,
+default 1000) with no continuation token, and that bound applies to the type across
+the whole store rather than to the tenant — so on a long-lived store a tenant's own
+resource fell outside the returned prefix and became **permanently invisible** while
+its row, its grant and its mutations all worked. Asking for a larger `max_results`
+could not widen the answer, because that argument only trims an already-cut
+response. Cost that scales with the page is the price of an answer that is correct
+at any store size; see the package doc of `internal/authzfilter` for the full
+argument.
 
-_Reviewed 2026-07-06 (r8b security-hardening audit)._
+**Open item (a cost, with a number)**: the count is reducible and has not been
+reduced. OpenFGA exposes a batched check endpoint that iam does not use anywhere —
+`services/iam/internal/clients` has no batch-check call — even though iam itself
+*publishes* a batched `AuthorizeService.BatchCheck` (bounded at 100 per the
+contract the sibling services split their pages against), and resolves it with a
+plain per-item loop. So vpc / compute / nlb / storage each batch their pages into
+≤100-id requests, and every one of those batches becomes one-question-per-id again
+at the iam boundary. Converging this is a request-path change with its own
+acceptance, and it is bounded by three conditions that must not be traded away:
+the time budget belongs to the **request** (batches must not run one after another,
+or a legitimate `page_size=1000` returns `UNAVAILABLE` on the *positive* path);
+`page_size` must not be narrowed to fit; and the filter stays **fail-closed** (an
+error resolving any part of a page fails the whole page — a partially-resolved set
+is never returned). Whether the deployed OpenFGA build serves that endpoint is
+**unverified**: `deploy/helm/umbrella/Chart.yaml` requests the openfga chart as a
+floating patch range, and a chart version does not determine the binary version in
+any case — so the endpoint is a hypothesis until it is read off the image, not a
+plan. (The same file's neighbouring dependency carries a comment about a floating
+range resolving differently on different days; this one is still floating.)
+
+**Guards**: the ceiling is asserted as a count (not as seconds, which would measure
+the test machine) by `TestVisibleSet_WorstCasePageCost`; the in-flight bound by
+`TestVisibleSet_MaxPageBoundedFanOut`; and `TestRelationQuestionsStayInsideTheMeasuredPath`
+keeps the number meaningful by refusing a per-row relation question written
+anywhere in the use-case tree outside that one implementation — a tenth surface
+asking its own questions would otherwise be measured by nothing. That gate reports
+how many files it read and how many looped questions it cleared as legitimate
+relation cascades, so "no findings" is distinguishable from "nothing was read".
+
+_Rewritten 2026-07-31 (the shape it described had been replaced; the batch item is
+the part that remains open)._
 
 ---
 
