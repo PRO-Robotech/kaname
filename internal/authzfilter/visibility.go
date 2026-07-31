@@ -60,10 +60,34 @@ import (
 // the objects `viewer` denied.
 var Relations = [...]string{"viewer", "v_list"}
 
-// DefaultParallelism bounds the per-object Check fan-out of VisibleSet. iam is
-// IN-PROCESS with the OpenFGA client (no gRPC hop), so a page-sized fan-out is
-// cheap; the bound exists so one large page cannot saturate the client's
-// connection pool.
+// DefaultParallelism bounds how many per-object Checks VisibleSet keeps in flight.
+//
+// # What a page costs, and what this bound does not do
+//
+// It bounds DEPTH, not COUNT. Every question is an HTTP round-trip to the relation
+// store, which runs in its own pod: iam holds the OpenFGA client in-process, but
+// the store is across the network, so "in-process client" says nothing about the
+// price of asking. A page pays len(Relations) questions for every object the first
+// relation does not resolve, so a contract-sized page (validate.MaxPageSize = 1000)
+// costs up to 2000 round-trips, and this bound turns them into 125 sequential
+// waves rather than removing any of them. At a 10ms answer that is over a second
+// of wall time on ONE List; at 50ms, over six.
+//
+// The 200ms budget on a Check belongs to the CALL, not to the page — nothing caps
+// the page as a whole — so those waves accumulate without any per-call deadline
+// firing. Measured, with the arithmetic spelled out, in
+// TestVisibleSet_WorstCasePageCost; the bound itself is locked by
+// TestVisibleSet_MaxPageBoundedFanOut.
+//
+// # Why the bound is nonetheless right
+//
+// Unbounded is worse, not better: a goroutine per row puts the whole page on the
+// client at once. The bound is what keeps a large page from arriving all at once;
+// it is not an argument that the page is cheap.
+//
+// Making the COUNT smaller is a different change — asking the store about many
+// objects in one request — and it is not done here: see
+// services/iam/docs/architecture/known-divergences.md §11.
 const DefaultParallelism = 16
 
 // ObjectChecker — narrow port: ONE direct per-object relation question.

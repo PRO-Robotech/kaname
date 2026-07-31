@@ -18,17 +18,25 @@ import (
 // TestVisibleSet_MaxPageBoundedFanOut — the iam counterpart of the vpc/compute/nlb
 // list-filter headroom lock.
 //
-// iam does NOT share the sibling services' regression: it never batched, and it
-// already fans out over a BOUNDED worker pool (DefaultParallelism), so no request
-// serialises a page into one round-trip per chunk. This test pins the two
-// properties that keep it that way, because both are exactly what regressed
-// elsewhere:
+// The siblings' regression was serialising a page into one round-trip per chunk.
+// iam cannot regress that way for a reason that is not a virtue: it does not batch
+// at all, so there are no chunks — it asks one question per (object, relation) and
+// fans those out over a BOUNDED worker pool (DefaultParallelism). This test pins
+// the two properties of that fan-out:
 //
 //  1. the fan-out stays bounded (never goroutine-per-id — a 1000-id page must not
-//     put 1000 requests on the OpenFGA client at once; `http.DefaultClient`'s
-//     transport keeps only a couple of idle conns per host, so an unbounded burst
-//     would thrash connections rather than go faster);
+//     put 1000 requests on the OpenFGA client at once; the client pools
+//     clients.fgaMaxIdleConnsPerHost = 256 idle connections per host, sized for a
+//     fan-out of this order, so an unbounded burst would outrun the pool and thrash
+//     connections rather than go faster);
 //  2. a max-size page still resolves in bounded-parallel waves, not sequentially.
+//
+// What this test does NOT establish is what a page COSTS. It measures a MIXED page
+// — a third of it resolves on the first relation — so it observes 1666 questions
+// where the contract permits 2000, and it asserts wall time against a stub rather
+// than against a network. The ceiling is stated as a count in
+// TestVisibleSet_WorstCasePageCost: "bounded" and "cheap" are different claims,
+// and only the first one is tested here.
 func TestVisibleSet_MaxPageBoundedFanOut(t *testing.T) {
 	pageSize := int(validate.MaxPageSize)
 	const perCheckLatency = 2 * time.Millisecond
