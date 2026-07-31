@@ -120,30 +120,85 @@ func TestVisibleSet_WorstCasePageCost(t *testing.T) {
 	}
 }
 
-// relationQuestionEntryPoints — every client method that puts a relation question
-// on the wire to the relation store. Keyed by NAME, deliberately, and both of the
+// entryPointShape — where a listed name is declared, and which of its argument
+// positions are exempt from making the question per-row.
+//
+// The positions have to be per-name rather than global, because the names are not
+// all the same function. The relation client takes (ctx, subject, relation,
+// object, …); the read guard takes (ctx, checker, [relation,] type, id) and reads
+// its subject from the context. A single global "the relation is argument 2" would
+// therefore exempt the guard's TYPE argument and, worse, exempt
+// SubjectIsClusterAdmin's SUBJECT — turning a genuine per-row question into a
+// cleared cascade. Every position that is not named here identifies what the
+// question is ABOUT, which is exactly what must not vary with a loop.
+type entryPointShape struct {
+	// declaredIn — package root, relative to this package, where the name must
+	// still be declared (as a method or as a package-level func).
+	declaredIn string
+	// subjectArg — index of the subject argument; -1 when the subject comes from
+	// the context rather than an argument.
+	subjectArg int
+	// relationArg — index of the single relation argument; -1 when the relation is
+	// fixed by the function itself.
+	relationArg int
+	// relationVariadicFrom — index at which a variadic relation list begins; -1
+	// when there is none. Everything from here on is a relation.
+	relationVariadicFrom int
+}
+
+// relationQuestionEntryPoints — every call that puts a relation question on the
+// wire to the relation store. Keyed by NAME, deliberately, and all three of the
 // ways that can go wrong are asserted below rather than hoped about:
 //
 //   - a name that stops existing leaves a slot that can never fire again, so the
-//     premise test requires each of these to still be declared in the client
-//     package (an exception that has nothing left to except is a finding);
-//   - a name that is added without being listed here would be invisible to the
-//     gate, so every method of the ObjectChecker port must appear in this list,
-//     checked by reflection against the port itself.
-var relationQuestionEntryPoints = []string{
-	"Check",
-	"CheckConsistent",
-	"CheckWithContext",
-	"CheckWithContextConsistent",
-	"CheckWithContextualTuples",
-	"ListObjects",
+//     premise test requires each of these to still be declared in the package it
+//     claims (an exception that has nothing left to except is a finding);
+//   - a name that is added to the PORT without being listed here would be invisible
+//     to the gate, so every method of the ObjectChecker port must appear, checked
+//     by reflection against the port itself;
+//   - a name that is added to the read GUARD without being listed here would be
+//     invisible in exactly the same way, and that is not hypothetical — it is the
+//     idiom this tree already uses. So the guard's exported package-level functions
+//     that reach the store are derived from its source and required to appear, by
+//     TestGuardRelationEntryPointsAreAllListed.
+//
+// Why the guard is listed at all: the question is normally NOT written as a client
+// call at a read surface. It is written `authzguard.AllowsVGet(ctx, u.relations,
+// "account", id)` — five use-cases ask it that way today — and the client call it
+// resolves to sits one package away, lexically outside any loop at the call site.
+// Keying only on client method names made that idiom, and a loop around it,
+// contribute nothing to any counter, including the blind-spot counter.
+var relationQuestionEntryPoints = map[string]entryPointShape{
+	// Relation client: (ctx, subject, relation, object, …).
+	"Check":                      {relationClientRoot, 1, 2, -1},
+	"CheckConsistent":            {relationClientRoot, 1, 2, -1},
+	"CheckWithContext":           {relationClientRoot, 1, 2, -1},
+	"CheckWithContextConsistent": {relationClientRoot, 1, 2, -1},
+	"CheckWithContextualTuples":  {relationClientRoot, 1, 2, -1},
+	"ListObjects":                {relationClientRoot, 1, 2, -1},
+
+	// Read guard: subject always from ctx, so no subject argument.
+	// AllowsVGet(ctx, checker, fgaType, id)                                     — relation fixed ("v_get").
+	"AllowsVGet": {relationGuardRoot, -1, -1, -1},
+	// AllowsVerb(ctx, checker, relation, fgaType, id).
+	"AllowsVerb": {relationGuardRoot, -1, 2, -1},
+	// RequireScopeRelation(ctx, checker, scopeType, scopeID, ownerUserID, relations...).
+	"RequireScopeRelation": {relationGuardRoot, -1, -1, 5},
+	// IsClusterAdmin(ctx, checker) — object fixed; nothing can vary, so a call in a
+	// loop repeats one identical question per row.
+	"IsClusterAdmin": {relationGuardRoot, -1, -1, -1},
+	// SubjectIsClusterAdmin(ctx, checker, subject) — the subject IS argument 2 here,
+	// which is precisely why argument 2 is not globally the relation.
+	"SubjectIsClusterAdmin": {relationGuardRoot, 2, -1, -1},
 }
 
-// useCaseTreeRoot / relationClientRoot — the volume this gate inspects and the
-// package whose method names it keys on, relative to this package's directory.
+// useCaseTreeRoot — the volume this gate inspects; relationClientRoot /
+// relationGuardRoot — the packages whose names it keys on. Relative to this
+// package's directory.
 const (
 	useCaseTreeRoot    = "../apps/kacho/api"
 	relationClientRoot = "../clients"
+	relationGuardRoot  = "../authzguard"
 )
 
 // TestRelationQuestionsStayInsideTheMeasuredPath — the structural gate.
@@ -186,44 +241,83 @@ const (
 // moved directory, a build tag, a parse failure — fails instead of passing
 // quietly.
 //
-// # Scope
+// # Indirection, and the two blind spots that remain
+//
+// The question is rarely written as a client call at a read surface. It is written
+// through a helper — `authzguard.AllowsVGet(...)`, or a wrapper in the surface's
+// own package — and the client call then sits outside the loop, one or two frames
+// down. A scan keyed only on client method names sees none of that: the wrapper
+// call matches no name, so it adds nothing to the findings AND nothing to any
+// counter, blind-spot counters included. That is the worst shape a gate can have,
+// because its silence is indistinguishable from a clean tree.
+//
+// Two mechanisms close it, and neither is a list of exceptions:
+//
+//   - across packages, the guard's exported store-reaching functions are listed as
+//     entry points, and the list is DERIVED from the guard's source and required to
+//     be complete (TestGuardRelationEntryPointsAreAllListed), so a new guard helper
+//     cannot be added silently;
+//   - within a package, a call to a local function whose own body reaches an entry
+//     point is resolved and treated as one, transitively.
+//
+// What is still blind, stated rather than implied:
+//
+//  1. a loop with no iteration variable (`for {}`, `for cond {}`), where the
+//     repetition count is not syntactically visible. COUNTED and printed;
+//  2. a wrapper declared in a THIRD package — neither the caller's own nor one
+//     whose entry points are listed. NOT counted: reaching it needs a type-checked
+//     call graph, which would cost more than this gate is worth. Today the only
+//     such package is the guard, and mechanism one covers it; the honest statement
+//     is that a new intermediary package would need adding to the list, and nothing
+//     here would announce that.
+//
+// # Scope, and the open item that is NOT a scope matter
 //
 // The volume is the use-case tree: that is where the nine visibility-filtered list
-// surfaces live and where a tenth would be written. It is not the whole service —
+// surfaces live and where a tenth would be written.
+//
 // AuthorizeService.BatchCheck resolves its (contract-bounded) batch one question at
-// a time, which is a known open item with its own number and is not silently
-// excepted here: it is simply outside the volume this gate claims, and the volume
-// is stated rather than implied.
+// a time and remains a known open item with its own number. Calling that "outside
+// the volume" would be wrong, and the earlier phrasing here said exactly that:
+// widening the volume to internal/service would NOT report it, because its loop
+// calls `s.check` — an unexported method that is not, and should not be, an entry
+// point. It is blind spot 2 above, one package over, not a question of where this
+// gate looks.
 func TestRelationQuestionsStayInsideTheMeasuredPath(t *testing.T) {
 	// Premise 1: the port's own method set must be covered by the names the gate
 	// scans for. A rename of the per-object question would otherwise make this gate
 	// permanently, invisibly quiet.
-	listed := make(map[string]bool, len(relationQuestionEntryPoints))
-	for _, n := range relationQuestionEntryPoints {
-		listed[n] = true
-	}
 	portType := reflect.TypeOf((*ObjectChecker)(nil)).Elem()
 	require.NotZero(t, portType.NumMethod(), "premise: the port must declare the question it stands for")
 	for i := 0; i < portType.NumMethod(); i++ {
 		name := portType.Method(i).Name
-		require.True(t, listed[name],
+		_, ok := relationQuestionEntryPoints[name]
+		require.True(t, ok,
 			"premise: ObjectChecker.%s is a relation question the gate does not scan for; add it to "+
 				"relationQuestionEntryPoints", name)
 	}
 
-	// Premise 2: every listed name must still be declared in the relation client.
+	// Premise 2: every listed name must still be declared in the package it claims.
 	// A name with nothing behind it can never fire again, and an exception with
-	// nothing left to except is a finding, not a leftover.
-	declared, clientFiles := declaredMethodNames(t, relationClientRoot)
-	require.NotZero(t, clientFiles, "premise: the relation client package must be readable at %s", relationClientRoot)
-	for _, n := range relationQuestionEntryPoints {
-		require.True(t, declared[n],
+	// nothing left to except is a finding, not a leftover. Both a method and a
+	// package-level func count: the client declares methods, the guard declares
+	// plain functions, and keying the premise on methods alone is what previously
+	// made the guard impossible to list.
+	declaredByRoot := map[string]map[string]bool{}
+	filesByRoot := map[string]int{}
+	for _, root := range []string{relationClientRoot, relationGuardRoot} {
+		names, files := declaredFuncNames(t, root)
+		require.NotZero(t, files, "premise: %s must be readable", root)
+		declaredByRoot[root], filesByRoot[root] = names, files
+	}
+	for n, shape := range relationQuestionEntryPoints {
+		require.True(t, declaredByRoot[shape.declaredIn][n],
 			"premise: %q is no longer declared in %s — the gate would keep scanning for a name that "+
-				"cannot appear; re-key it against the methods that exist", n, relationClientRoot)
+				"cannot appear; re-key it against what exists", n, shape.declaredIn)
 	}
 
 	// The scan itself.
-	scan := scanForPerRowRelationQuestions(t, useCaseTreeRoot, listed)
+	scan := scanForPerRowRelationQuestions(t, useCaseTreeRoot, relationQuestionEntryPoints)
 
 	// Premise 3 (volume): the scanner must have read real files.
 	require.NotZero(t, scan.filesParsed, "premise: nothing was read under %s — the gate proves nothing", useCaseTreeRoot)
@@ -243,41 +337,104 @@ func TestRelationQuestionsStayInsideTheMeasuredPath(t *testing.T) {
 			"exercised the distinction the gate exists to make (cascade over relations = legitimate, "+
 			"varying the object = finding); re-point the volume or re-key the entry points", useCaseTreeRoot)
 
-	t.Logf("scanned %d files under %s (relation client: %d files, %d method names); "+
-		"relation questions seen=%d, inside a loop=%d (cleared as relation cascades=%d), "+
-		"not classified because the loop has no iteration variable=%d, findings=%d",
-		scan.filesParsed, useCaseTreeRoot, clientFiles, len(declared),
+	t.Logf("scanned %d files under %s (client: %d files, guard: %d files, %d entry-point names, "+
+		"%d resolved local wrappers); relation questions seen=%d, inside a loop=%d "+
+		"(cleared as relation cascades=%d), blind spot 1 — loop without an iteration variable=%d; "+
+		"findings=%d",
+		scan.filesParsed, useCaseTreeRoot, filesByRoot[relationClientRoot], filesByRoot[relationGuardRoot],
+		len(relationQuestionEntryPoints), scan.localWrappersResolved,
 		scan.callsSeen, scan.callsInLoop, scan.callsInLoop-len(scan.findings),
 		scan.callsInVarlessLoop, len(scan.findings))
 
-	assert.Empty(t, scan.findings,
+	var undeclared []string
+	matched := map[string]bool{}
+	for _, f := range scan.findings {
+		if _, ok := declaredPerRowQuestions[f.key]; ok {
+			matched[f.key] = true
+			continue
+		}
+		undeclared = append(undeclared, f.detail)
+	}
+	assert.Empty(t, undeclared,
 		"a relation question whose OBJECT varies with the loop asks the relation store once per row: "+
 			"its cost is the size of the collection, which in a read surface is a page. That cost is "+
 			"outside VisibleSet, so nothing measures it and nothing bounds how many are in flight. "+
 			"Filter the page through authzfilter.VisibleSet instead")
+
+	// The declarations expire themselves. A declaration whose site is gone is a
+	// false statement about the tree, and the next reader would take it for a
+	// standing exemption covering something.
+	var stale []string
+	for key := range declaredPerRowQuestions {
+		if !matched[key] {
+			stale = append(stale, key)
+		}
+	}
+	sort.Strings(stale)
+	assert.Empty(t, stale,
+		"these sites are declared in declaredPerRowQuestions but the scan no longer finds a per-row "+
+			"relation question there. If it was fixed, delete the declaration — a declaration with "+
+			"nothing left to declare is a finding, not a leftover")
+}
+
+// declaredPerRowQuestions — the per-row relation questions that exist in the tree
+// TODAY, each named with its bound and why it is not yet routed through VisibleSet.
+//
+// This is a list of exceptions, and the sibling pagination gate refuses to have
+// one. The difference is what the two gates are for. That one enforces an order
+// that is a one-line change at every site, so any exception would be a decision not
+// to make the change. This one reports a COST, and removing a cost means asking the
+// relation store about many objects in one request — a design change with its own
+// acceptance, not something a gate can demand inline.
+//
+// The alternative is not "no exceptions". It is what this gate did until now: see
+// neither of these, because both ask through an intermediary, and report a clean
+// tree. A named, self-expiring declaration is strictly better than a blind spot,
+// and it is bounded both ways — an undeclared site fails, and a declaration whose
+// site is gone fails too.
+//
+// Keyed by file + calling name, no line number: a declaration must not expire
+// because the function moved down its own file.
+var declaredPerRowQuestions = map[string]string{
+	"../apps/kacho/api/access_binding/list_by_role.go: requireGrantAuthority": "" +
+		"Per-row scope filter over a LIST page: one relation question per binding " +
+		"whose subject is not the caller. Bounded by page_size, so it is the shape " +
+		"this gate exists to find — surfaced only once the gate could see through " +
+		"the helper. Converging it needs the batched question tracked in " +
+		"known-divergences §11, not a re-order.",
+	"../apps/kacho/api/authorize/handler.go: authorizeCaller": "" +
+		"Per-item caller authority in BatchCheck, bounded by the contract at 100 " +
+		"items (rejected above that). This is the open item the doc comment used to " +
+		"call 'outside the volume' — it is inside it, asked through a method, and " +
+		"converges with the same batched question.",
+}
+
+// perRowFinding — one per-row relation question. `key` is file + calling name,
+// deliberately WITHOUT the line: a declaration below must survive the site moving
+// down its own file, or it would expire on an unrelated edit and teach everyone to
+// re-baseline it.
+type perRowFinding struct {
+	key    string
+	detail string
 }
 
 // scanResult — what the scan saw, so the caller can assert on the VOLUME and on
 // the discrimination, not only on the findings.
 type scanResult struct {
-	findings    []string
+	findings    []perRowFinding
 	filesParsed int
 	callsSeen   int // matched calls anywhere
 	callsInLoop int // matched calls inside a loop that HAS an iteration variable
 	// callsInVarlessLoop — matched calls inside `for {}` / `for cond {}`, where the
 	// repetition count is not syntactically visible and this scan classifies nothing.
-	// Reported, never silently dropped: the size of a blind spot has to be visible.
+	// Blind spot 1. Reported, never silently dropped: the size of a blind spot has
+	// to be visible.
 	callsInVarlessLoop int
+	// localWrappersResolved — package-local functions that were promoted to entry
+	// points because their own body reaches one. Reported so that "no findings" can
+	// be told apart from "the resolution stopped working".
+	localWrappersResolved int
 }
-
-// Argument positions shared by every entry point in relationQuestionEntryPoints:
-// all of them are (ctx, subject, relation, object, …). Only the relation position
-// is exempt from making a call per-row, so it is the one that has to be named —
-// every other position identifies what the question is ABOUT.
-const (
-	subjectArgIndex  = 1
-	relationArgIndex = 2
-)
 
 // scanForPerRowRelationQuestions parses every non-test Go file under root and
 // reports the entry-point calls whose question VARIES WITH THE ITERATION of an
@@ -295,11 +452,16 @@ const (
 //
 // No type information is used: the shape is visible without it, and requiring a
 // full type-check would make the gate expensive enough to be dropped.
-func scanForPerRowRelationQuestions(t *testing.T, root string, listed map[string]bool) scanResult {
+func scanForPerRowRelationQuestions(t *testing.T, root string, entryPoints map[string]entryPointShape) scanResult {
 	t.Helper()
 	fset := token.NewFileSet()
 	var res scanResult
 
+	// Pass 1: parse the volume, grouped by package directory. Grouping is what
+	// makes the local-wrapper resolution below possible — a wrapper and its caller
+	// are routinely in different files of the same package.
+	byDir := map[string][]*ast.File{}
+	var dirs []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -312,89 +474,210 @@ func scanForPerRowRelationQuestions(t *testing.T, root string, listed map[string
 			return fmt.Errorf("parse %s: %w", path, perr)
 		}
 		res.filesParsed++
-
-		// Loop bodies first, as position ranges carrying their iteration variables;
-		// then every matched call is classified against the loops enclosing it.
-		type loopSpan struct {
-			from, to token.Pos
-			vars     map[string]bool
+		dir := filepath.Dir(path)
+		if _, seen := byDir[dir]; !seen {
+			dirs = append(dirs, dir)
 		}
-		var loops []loopSpan
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch s := n.(type) {
-			case *ast.ForStmt:
-				if s.Body != nil {
-					loops = append(loops, loopSpan{s.Body.Pos(), s.Body.End(), identsOfStmt(s.Init)})
-				}
-			case *ast.RangeStmt:
-				if s.Body != nil {
-					vars := identsOfExpr(s.Key)
-					for k := range identsOfExpr(s.Value) {
-						vars[k] = true
-					}
-					loops = append(loops, loopSpan{s.Body.Pos(), s.Body.End(), vars})
-				}
-			}
-			return true
-		})
-
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || !listed[sel.Sel.Name] {
-				return true
-			}
-			res.callsSeen++
-
-			// Union of the iteration variables of every loop enclosing this call.
-			iter := map[string]bool{}
-			enclosed := false
-			for _, l := range loops {
-				if call.Pos() >= l.from && call.Pos() < l.to {
-					enclosed = true
-					for v := range l.vars {
-						iter[v] = true
-					}
-				}
-			}
-			if !enclosed {
-				return true
-			}
-			if len(iter) == 0 {
-				// A loop with no iteration variable: `for {}` / `for cond {}`. Its
-				// repetition count is not visible syntactically, so this scan cannot
-				// say whether the question varies. Counted and reported rather than
-				// dropped — a blind spot nobody can see the size of is the thing this
-				// whole finding was about.
-				res.callsInVarlessLoop++
-				return true
-			}
-			res.callsInLoop++
-
-			why := perRowReason(call, iter)
-			if why == "" {
-				return true // a relation cascade — fixed cost, not this gate's business
-			}
-			pos := fset.Position(call.Pos())
-			res.findings = append(res.findings, fmt.Sprintf("%s:%d: %s %s",
-				filepath.ToSlash(pos.Filename), pos.Line, sel.Sel.Name, why))
-			return true
-		})
+		byDir[dir] = append(byDir[dir], file)
 		return nil
 	})
 	require.NoError(t, err, "the gate must read its whole volume; a walk error is a failure, not zero findings")
+	sort.Strings(dirs)
 
-	sort.Strings(res.findings)
+	for _, dir := range dirs {
+		files := byDir[dir]
+
+		// Pass 2, per package: promote local functions whose own body reaches an
+		// entry point. Transitive, so a wrapper around a wrapper is still resolved.
+		// Their shape is unknown, so nothing about them is exempt: any argument that
+		// varies with a loop makes the question per-row, which is the conservative
+		// reading and the right one.
+		local := newLocalWrappers()
+		for changed := true; changed; {
+			changed = false
+			for _, file := range files {
+				for _, decl := range file.Decls {
+					fn, ok := decl.(*ast.FuncDecl)
+					if !ok || fn.Body == nil {
+						continue
+					}
+					set := local.funcs
+					if fn.Recv != nil {
+						set = local.methods
+					}
+					if set[fn.Name.Name] || !bodyReachesEntryPoint(fn.Body, entryPoints, local) {
+						continue
+					}
+					set[fn.Name.Name] = true
+					changed = true
+				}
+			}
+		}
+		res.localWrappersResolved += local.size()
+
+		for _, file := range files {
+			loops := loopSpansOf(file)
+
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				name, shape, matched := matchEntryPoint(call, entryPoints, local)
+				if !matched {
+					return true
+				}
+				res.callsSeen++
+
+				// Union of the iteration variables of every loop enclosing this call.
+				iter := map[string]bool{}
+				enclosed := false
+				for _, l := range loops {
+					if call.Pos() >= l.from && call.Pos() < l.to {
+						enclosed = true
+						for v := range l.vars {
+							iter[v] = true
+						}
+					}
+				}
+				if !enclosed {
+					return true
+				}
+				if len(iter) == 0 {
+					// Blind spot 1 — a loop with no iteration variable: `for {}` /
+					// `for cond {}`. Its repetition count is not visible syntactically,
+					// so this scan cannot say whether the question varies. Counted and
+					// reported rather than dropped: a blind spot nobody can see the size
+					// of is the thing this whole finding was about.
+					res.callsInVarlessLoop++
+					return true
+				}
+				res.callsInLoop++
+
+				why := perRowReason(call, shape, iter)
+				if why == "" {
+					return true // a relation cascade — fixed cost, not this gate's business
+				}
+				pos := fset.Position(call.Pos())
+				path := filepath.ToSlash(pos.Filename)
+				res.findings = append(res.findings, perRowFinding{
+					key:    path + ": " + name,
+					detail: fmt.Sprintf("%s:%d: %s %s", path, pos.Line, name, why),
+				})
+				return true
+			})
+		}
+	}
+
+	sort.Slice(res.findings, func(i, j int) bool { return res.findings[i].detail < res.findings[j].detail })
 	return res
+}
+
+// localWrappers — package-local functions and methods already resolved to reach a
+// relation question, kept APART because they are called differently and confusing
+// the two is how a name-keyed scan invents findings.
+//
+// A package-level func is called bare: `requireGrantAuthority(...)`. A method is
+// called on a receiver: `h.authorizeCaller(...)`. Matching a method name against
+// any selector at all makes `w.AccessBindingsW().Delete(...)` collide with a local
+// `Delete`, and `rd.Accounts().Get(...)` with a local `Get` — repository calls that
+// ask the relation store nothing. Both were reported as findings by the first
+// version of this resolution, which is why the receiver has to be constrained:
+// a method call is only matched when its receiver is a plain identifier, never a
+// call chain into another object.
+type localWrappers struct {
+	funcs   map[string]bool // declared with no receiver; matched on bare Ident calls
+	methods map[string]bool // declared with a receiver; matched on <ident>.Name calls
+}
+
+func newLocalWrappers() localWrappers {
+	return localWrappers{funcs: map[string]bool{}, methods: map[string]bool{}}
+}
+
+func (l localWrappers) size() int { return len(l.funcs) + len(l.methods) }
+
+// matchEntryPoint recognises a call as a relation question: either a listed name
+// (`c.Check(...)`, `authzguard.AllowsVGet(...)`) or a package-local wrapper already
+// resolved to reach one. A wrapper has no known argument shape, so it is returned
+// with nothing exempt — the conservative reading, and the right one.
+func matchEntryPoint(call *ast.CallExpr, entryPoints map[string]entryPointShape, local localWrappers) (string, entryPointShape, bool) {
+	opaque := entryPointShape{subjectArg: -1, relationArg: -1, relationVariadicFrom: -1}
+	switch fun := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		if shape, ok := entryPoints[fun.Sel.Name]; ok {
+			return fun.Sel.Name, shape, true
+		}
+		// Only `<ident>.Method(...)`: a receiver that is itself a call or a field
+		// path belongs to another object, whatever the method happens to be named.
+		if _, plain := fun.X.(*ast.Ident); plain && local.methods[fun.Sel.Name] {
+			return fun.Sel.Name, opaque, true
+		}
+	case *ast.Ident:
+		if local.funcs[fun.Name] {
+			return fun.Name, opaque, true
+		}
+	}
+	return "", opaque, false
+}
+
+// bodyReachesEntryPoint reports whether a function body calls a listed entry point
+// or an already-resolved local wrapper.
+func bodyReachesEntryPoint(body *ast.BlockStmt, entryPoints map[string]entryPointShape, local localWrappers) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if _, _, matched := matchEntryPoint(call, entryPoints, local); matched {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// loopSpan / loopSpansOf — loop bodies as position ranges carrying their iteration
+// variables, so any call can be classified against the loops enclosing it.
+type loopSpan struct {
+	from, to token.Pos
+	vars     map[string]bool
+}
+
+func loopSpansOf(file *ast.File) []loopSpan {
+	var loops []loopSpan
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.ForStmt:
+			if s.Body != nil {
+				loops = append(loops, loopSpan{s.Body.Pos(), s.Body.End(), identsOfStmt(s.Init)})
+			}
+		case *ast.RangeStmt:
+			if s.Body != nil {
+				vars := identsOfExpr(s.Key)
+				for k := range identsOfExpr(s.Value) {
+					vars[k] = true
+				}
+				loops = append(loops, loopSpan{s.Body.Pos(), s.Body.End(), vars})
+			}
+		}
+		return true
+	})
+	return loops
 }
 
 // perRowReason classifies one matched call that sits inside a loop: "" when the
 // question is loop-invariant except for its relation (a cascade), otherwise the
 // reason it is per-row, phrased so a finding can be acted on without re-deriving it.
-func perRowReason(call *ast.CallExpr, iter map[string]bool) string {
+//
+// The exempt positions come from the call's OWN shape, not from a global
+// convention: argument 2 is the relation for a client Check and for AllowsVerb, but
+// it is the object type for AllowsVGet and the SUBJECT for SubjectIsClusterAdmin.
+func perRowReason(call *ast.CallExpr, shape entryPointShape, iter map[string]bool) string {
 	mentionsIter := func(e ast.Expr) bool {
 		for name := range identsOfExpr(e) {
 			if iter[name] {
@@ -411,10 +694,11 @@ func perRowReason(call *ast.CallExpr, iter map[string]bool) string {
 			continue
 		}
 		anyMention = true
-		switch i {
-		case relationArgIndex:
+		switch {
+		case i == shape.relationArg,
+			shape.relationVariadicFrom >= 0 && i >= shape.relationVariadicFrom:
 			// The cascade case: the loop walks relations about ONE object.
-		case subjectArgIndex:
+		case i == shape.subjectArg:
 			varying = append(varying, "subject")
 		default:
 			varying = append(varying, "object")
@@ -465,14 +749,33 @@ func identsOfStmt(s ast.Stmt) map[string]bool {
 	return out
 }
 
-// declaredMethodNames returns the set of method names declared under root, and how
-// many files it read. Used only to keep the gate's key honest (premise 2).
-func declaredMethodNames(t *testing.T, root string) (map[string]bool, int) {
+// declaredFuncNames returns the set of function names declared under root —
+// METHODS AND PACKAGE-LEVEL FUNCS ALIKE — and how many files it read. Used only to
+// keep the gate's key honest (premise 2).
+//
+// Both kinds count, and that is the point: the relation client declares methods,
+// the read guard declares plain functions, and a premise that accepted only
+// methods is what made the guard impossible to list — the list stayed short, and
+// the idiom the tree actually uses stayed invisible.
+func declaredFuncNames(t *testing.T, root string) (map[string]bool, int) {
+	t.Helper()
+	names, files := map[string]bool{}, 0
+	forEachGoFile(t, root, func(_ string, file *ast.File) {
+		files++
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				names[fn.Name.Name] = true
+			}
+		}
+	})
+	return names, files
+}
+
+// forEachGoFile parses every non-test Go file under root. A walk or parse error is
+// a failure, never zero results.
+func forEachGoFile(t *testing.T, root string, fn func(path string, file *ast.File)) {
 	t.Helper()
 	fset := token.NewFileSet()
-	names := map[string]bool{}
-	files := 0
-
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -484,16 +787,98 @@ func declaredMethodNames(t *testing.T, root string) (map[string]bool, int) {
 		if perr != nil {
 			return fmt.Errorf("parse %s: %w", path, perr)
 		}
-		files++
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil {
-				continue
-			}
-			names[fn.Name.Name] = true
-		}
+		fn(path, file)
 		return nil
 	})
-	require.NoError(t, err)
-	return names, files
+	require.NoError(t, err, "reading %s must succeed; a walk error is a failure, not an empty result", root)
+}
+
+// TestGuardRelationEntryPointsAreAllListed — the completeness premise for the
+// guard, DERIVED rather than trusted.
+//
+// The gate keys on names. A name it does not hold is invisible to it, and that is
+// not a hypothetical failure mode here: the guard is how this tree writes the
+// question, so a new guard helper reaching the store would silently widen the blind
+// spot the gate exists to close. Listing the two that exist today would fix the
+// instance and leave the class.
+//
+// So the required set is computed from the guard's own source — every exported
+// package-level function whose body transitively reaches a relation question — and
+// each member must appear in relationQuestionEntryPoints. Adding a guard helper
+// therefore fails this test until it is listed.
+//
+// Only package-level functions are required. Methods on the guard's own types
+// (RelationWriteGate.Authorize, SystemViewerFloor.allow) are wired as interceptors
+// on the serving path, not called per row from a read surface; requiring them would
+// add names no use-case can call.
+func TestGuardRelationEntryPointsAreAllListed(t *testing.T) {
+	type fnDecl struct {
+		name     string
+		exported bool
+		body     *ast.BlockStmt
+	}
+	var decls []fnDecl
+	files := 0
+	forEachGoFile(t, relationGuardRoot, func(_ string, file *ast.File) {
+		files++
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Recv != nil {
+				continue
+			}
+			decls = append(decls, fnDecl{fn.Name.Name, fn.Name.IsExported(), fn.Body})
+		}
+	})
+	require.NotZero(t, files, "premise: the guard package must be readable at %s", relationGuardRoot)
+	require.NotZero(t, len(decls), "premise: the guard must declare package-level functions")
+
+	// Seed with the CLIENT names only: what makes a guard function store-reaching is
+	// that it ends up asking the client. Seeding with the guard's own listed names
+	// would make the answer depend on the list being checked.
+	clientNames := map[string]entryPointShape{}
+	for n, s := range relationQuestionEntryPoints {
+		if s.declaredIn == relationClientRoot {
+			clientNames[n] = s
+		}
+	}
+	require.NotZero(t, len(clientNames), "premise: at least one client entry point must be listed to seed from")
+
+	// Within the guard package its own functions are called bare, so they resolve as
+	// local funcs; the client call they end at is a selector on the checker.
+	reaching := newLocalWrappers()
+	for changed := true; changed; {
+		changed = false
+		for _, d := range decls {
+			if reaching.funcs[d.name] {
+				continue
+			}
+			if bodyReachesEntryPoint(d.body, clientNames, reaching) {
+				reaching.funcs[d.name] = true
+				changed = true
+			}
+		}
+	}
+
+	var required, missing []string
+	for _, d := range decls {
+		if d.exported && reaching.funcs[d.name] {
+			required = append(required, d.name)
+			if _, listed := relationQuestionEntryPoints[d.name]; !listed {
+				missing = append(missing, d.name)
+			}
+		}
+	}
+	sort.Strings(required)
+	sort.Strings(missing)
+
+	require.NotZero(t, len(required),
+		"premise: no exported guard function was found to reach a relation question at all — the "+
+			"derivation is broken, and its silence would mean nothing")
+	t.Logf("guard package-level functions reaching a relation question: %v", required)
+
+	assert.Empty(t, missing,
+		"these exported guard functions reach the relation store but are not listed in "+
+			"relationQuestionEntryPoints, so a loop around any of them would add nothing to the "+
+			"findings and nothing to any counter: %v. Add them with their own argument shape — "+
+			"the exempt positions are per-function, not global", missing)
 }
