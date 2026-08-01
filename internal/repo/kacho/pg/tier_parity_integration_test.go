@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -79,7 +80,7 @@ func legacyTierMap(perms []string) map[string]string {
 func rulesTierMap(rules domain.Rules) map[string]string {
 	out := map[string]string{}
 	for _, r := range rules {
-		_, tier := domain.ResolveVerbsAndTier(r.Verbs)
+		_, tier := domain.ResolveVerbsAndTier(r.Verbs, authzmap.CommonVerbVocabulary())
 		for _, res := range r.Resources {
 			key := r.Module + "." + res
 			if tierRank[tier] > tierRank[out[key]] {
@@ -190,7 +191,7 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 				continue
 			}
 			wildcardRoles++
-			_, wantTier := domain.ResolveVerbsAndTier(rule.Verbs)
+			_, wantTier := domain.ResolveVerbsAndTier(rule.Verbs, authzmap.CommonVerbVocabulary())
 			require.Containsf(t, []string{"viewer", "editor", "admin"}, wantTier,
 				"#201 emit-fact: wildcard system-role %s must resolve to a tier-tuple relation (got %q) — an unresolved tier is the empty-grant #201 bug",
 				r.name, wantTier)

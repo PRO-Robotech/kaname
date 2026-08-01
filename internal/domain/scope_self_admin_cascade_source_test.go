@@ -44,11 +44,11 @@ func TestScopeSelfAdmin_OnlyAccountWideRolesBecomeCascadeSource(t *testing.T) {
 	// account-scoped, all-in-scope binding: ScopeSelfVerbs over the scope's resource
 	// type, then the tier those verbs resolve to. "" == no scope-self tuple at all.
 	tierOnAccountScope := func(rs domain.Rules) string {
-		verbs := rs.ScopeSelfVerbs("account")
+		verbs := rs.ScopeSelfVerbs("account", domain.ClosedVerbs)
 		if verbs == nil {
 			return ""
 		}
-		_, tier := domain.ResolveVerbsAndTier(verbs)
+		_, tier := domain.ResolveVerbsAndTier(verbs, domain.ClosedVerbs)
 		return tier
 	}
 
@@ -130,9 +130,9 @@ func TestScopeSelfAdmin_ProjectScopeIsNotACascadeSource(t *testing.T) {
 	superuser := domain.Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}
 
 	// At project scope the superuser shape does materialize on the project anchor…
-	verbs := superuser.ScopeSelfVerbs("project")
+	verbs := superuser.ScopeSelfVerbs("project", domain.ClosedVerbs)
 	require.NotNil(t, verbs, "the superuser shape projects onto its project anchor")
-	_, tier := domain.ResolveVerbsAndTier(verbs)
+	_, tier := domain.ResolveVerbsAndTier(verbs, domain.ClosedVerbs)
 	require.Equal(t, "admin", tier)
 
 	// …and that is exactly why the model must not treat `project#admin` as a
@@ -145,12 +145,12 @@ func TestScopeSelfAdmin_ProjectScopeIsNotACascadeSource(t *testing.T) {
 	// project-directed authority can climb to level 3.
 	projectAdmin := domain.Rules{{Module: "iam", Resources: []string{"project"}, Verbs: []string{"*"}}}
 
-	pv := projectAdmin.ScopeSelfVerbs("project")
+	pv := projectAdmin.ScopeSelfVerbs("project", domain.ClosedVerbs)
 	require.NotNil(t, pv, "iam.project.admin must project onto the project anchor")
-	_, pTier := domain.ResolveVerbsAndTier(pv)
+	_, pTier := domain.ResolveVerbsAndTier(pv, domain.ClosedVerbs)
 	require.Equal(t, "admin", pTier, "iam.project.admin is admin-tier on its own project")
 
-	require.Nil(t, projectAdmin.ScopeSelfVerbs("account"),
+	require.Nil(t, projectAdmin.ScopeSelfVerbs("account", domain.ClosedVerbs),
 		"iam.project.admin must project NOTHING onto the account anchor — otherwise a "+
 			"project-directed role would become a level-3 cascade source and hand over the account")
 }

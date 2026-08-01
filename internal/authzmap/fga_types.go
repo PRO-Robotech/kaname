@@ -157,6 +157,25 @@ func VerbRelationsOfType(fgaType string) []string {
 	return out
 }
 
+// VerbsOfType — ГЛАГОЛЫ (без приставки `v_`), объявленные этим типом,
+// отсортированно; nil для неглагольного типа.
+//
+// Та же таблица, что и VerbRelationsOfType, но в форме, на которой говорит домен:
+// домен оперирует глаголами правила, модель — именами отношений. Приведение живёт
+// ЗДЕСЬ, у владельца таблицы, а не размножается по вызывающим.
+func VerbsOfType(fgaType string) []string {
+	set := typeVerbRelations[fgaType]
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for _, r := range set {
+		out = append(out, strings.TrimPrefix(r, VerbRelationPrefix))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // CommonVerbVocabulary — ГЛАГОЛЫ (без приставки `v_`), общие ДЛЯ ВСЕХ глагольных
 // типов, то есть ПЕРЕСЕЧЕНИЕ их наборов, отсортированно.
 //

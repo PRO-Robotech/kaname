@@ -15,6 +15,10 @@ import "strings"
 // ClosedVerbs — the closed per-verb set the FGA model materializes as `v_*`
 // relations. A rule's verb `*` expands to exactly this set (O-3: bounded, never an
 // open `*`-relation). Order is fixed for deterministic emission.
+//
+// DEPRECATED (XC-3 S1Ф2): набор глаголов — атрибут ТИПА, а не платформы. Живые
+// пути эмиссии читают набор своего типа (IsVerbOfType / ResolveVerbsAndTier с
+// параметром); переменная остаётся до снятия последнего потребителя.
 var ClosedVerbs = []string{"get", "list", "create", "update", "delete"}
 
 var closedVerbIndex = func() map[string]struct{} {
@@ -33,17 +37,40 @@ func IsClosedVerb(verb string) bool {
 	return ok
 }
 
+// IsVerbOfType сообщает, объявляет ли ТИП этот глагол, то есть материализуется ли
+// он как отношение `v_<глагол>` НА ЭТОМ типе.
+//
+// Заменяет IsClosedVerb на путях эмиссии. Разница не косметическая: глобальный
+// словарь отвечал одинаково для всех типов, поэтому «у этого типа такого глагола
+// нет» было невыразимо — и правило, называющее соседний глагол, порождало кортеж с
+// отношением, которого у типа не существует. Пустой набор не принадлежит никому
+// (fail-closed): тип, не объявивший ничего, не получает ни одного `v_*`.
+func IsVerbOfType(verb string, typeVerbs []string) bool {
+	want := strings.ToLower(verb)
+	for _, v := range typeVerbs {
+		if strings.ToLower(v) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveVerbsAndTier expands a rule's authored verbs (verb `*` → ClosedVerbs) and
 // derives the per-RULE back-compat tier (strongest verb-class among the rule's
 // verbs), mapped the SAME way the consumer authz-gate resolves an action:
 // get/list → viewer ; create/update (+ domain mutations) → editor ; delete → admin.
 // Per-RULE, never whole-role (B-11). The tier tuple keeps tier-based Check
 // call-sites working; the v_* tuples carry the precise per-verb enforcement.
-func ResolveVerbsAndTier(authored []string) (verbs []string, tier string) {
+// typeVerbs — набор глаголов, объявленный ТИПОМ, на который правило адресовано. Он
+// приходит ПАРАМЕТРОМ от вызывающего, который тип уже знает: владельцем таблицы
+// остаётся authzmap, а домен — без внешних зависимостей (см. объявление файла).
+// Вызывающий, у которого типа нет (правило не резолвится ни в один известный),
+// передаёт словарь, общий для всех ресурсов, — это его решение, не домена.
+func ResolveVerbsAndTier(authored, typeVerbs []string) (verbs []string, tier string) {
 	expanded := authored
 	for _, v := range authored {
 		if v == "*" {
-			expanded = ClosedVerbs
+			expanded = typeVerbs
 			break
 		}
 	}
@@ -86,7 +113,7 @@ func ResolveVerbsAndTier(authored []string) (verbs []string, tier string) {
 // Returns nil when no rule applies to the scope self (a content-only role —
 // e.g. `compute.instance` rules — grants nothing ON the account/project object,
 // only on its content; the scope-self member is then absent, fail-closed).
-func (rs Rules) ScopeSelfVerbs(scopeResource string) []string {
+func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []string {
 	var collected []string
 	matched := false
 	for _, r := range rs {
@@ -117,7 +144,7 @@ func (rs Rules) ScopeSelfVerbs(scopeResource string) []string {
 	if !matched {
 		return nil
 	}
-	verbs, _ := ResolveVerbsAndTier(collected)
+	verbs, _ := ResolveVerbsAndTier(collected, typeVerbs)
 	return verbs
 }
 

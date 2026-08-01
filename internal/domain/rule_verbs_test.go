@@ -115,7 +115,7 @@ func TestRules_ScopeSelfVerbs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.rules.ScopeSelfVerbs(tt.scopeResource)
+			got := tt.rules.ScopeSelfVerbs(tt.scopeResource, ClosedVerbs)
 			if tt.want == nil {
 				assert.Empty(t, got, "expected no scope-self verbs (fail-closed)")
 				return

@@ -34,9 +34,33 @@ func ruleObjectTuples(subject string, verbs []string, objectType, objectID strin
 	if !ok {
 		return nil, false
 	}
-	expanded, tier := domain.ResolveVerbsAndTier(verbs)
+	return ruleObjectTuplesWithTypeVerbs(subject, verbs, fgaType, objectID, typeVerbsOf(fgaType))
+}
+
+// typeVerbsOf — набор глаголов, объявленный ТИПОМ; для неглагольного типа —
+// словарь, ОБЩИЙ для всех ресурсов.
+//
+// Запасной вариант нужен ради яруса, а не ради `v_*`: ярус выводится из
+// РАЗВЁРНУТЫХ глаголов правила, поэтому подстановка `*` на типе без собственного
+// набора обязана по-прежнему давать полный набор — иначе роль-суперпользователь
+// молча понизилась бы с администратора до наблюдателя. Отношения `v_*` при этом не
+// эмитятся всё равно: пустой набор не принадлежит никому (domain.IsVerbOfType).
+func typeVerbsOf(fgaType string) []string {
+	if set := authzmap.VerbsOfType(fgaType); len(set) > 0 {
+		return set
+	}
+	return authzmap.CommonVerbVocabulary()
+}
+
+// ruleObjectTuplesWithTypeVerbs — та же сборка при ЯВНО переданном наборе типа.
+// Набор — параметр, чтобы отрицательные кейсы могли предъявить тип с УРЕЗАННЫМ
+// набором: сегодня такого типа в таблице нет, а свойство обязано охраняться ДО
+// появления первого пользователя.
+func ruleObjectTuplesWithTypeVerbs(subject string, verbs []string, fgaType, objectID string,
+	typeVerbs []string) ([]domain.MembershipTuple, bool) {
+	expanded, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := fmt.Sprintf("%s:%s", fgaType, objectID)
-	emitVerbs := authzmap.TypeHasVerbRelations(fgaType)
+	emitVerbs := len(typeVerbsDeclared(fgaType)) > 0
 
 	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple
@@ -51,7 +75,7 @@ func ruleObjectTuples(subject string, verbs []string, objectType, objectID strin
 	if emitVerbs {
 		hasUpdate := false
 		for _, v := range expanded {
-			if !domain.IsClosedVerb(v) {
+			if !domain.IsVerbOfType(v, typeVerbs) {
 				continue
 			}
 			if v == "update" {
@@ -75,7 +99,13 @@ func ruleObjectTuples(subject string, verbs []string, objectType, objectID strin
 		// as content of an account-owner binding) must NOT gain v_delete on the scope —
 		// only a role that explicitly authored `delete` (owner/admin `*.*`) keeps it (the
 		// loop above already emitted it, so this is purely additive for leaf types).
-		if hasUpdate && !isHierarchyScopeType(fgaType) {
+		//
+		// XC-3 S1Ф2: у литерала теперь ТО ЖЕ условие, что у цикла выше. Он
+		// дописывал отношение СТРОКОЙ, не проходя ни через сверку с набором, ни
+		// через таблицу, — то есть тип, у которого `v_delete` не объявлен, получал
+		// бы его, как только роль назовёт `update`. Пока набор был одинаков у всех
+		// типов, это было безвредно; с набором У ТИПА это висячий кортеж.
+		if hasUpdate && !isHierarchyScopeType(fgaType) && domain.IsVerbOfType("delete", typeVerbs) {
 			add("v_delete")
 		}
 	}
@@ -153,9 +183,16 @@ func scopeSelfTuples(subject, scopeType, scopeID string, verbs []string) ([]doma
 		// cluster (D-9 short-circuit owns it) + any non-hierarchy scope → no member.
 		return nil, false
 	}
-	_, tier := domain.ResolveVerbsAndTier(verbs)
+	return scopeSelfTuplesWithTypeVerbs(subject, scopeType, scopeID, verbs, typeVerbsOf(scopeType))
+}
+
+// scopeSelfTuplesWithTypeVerbs — та же сборка при ЯВНО переданном наборе типа
+// (см. ruleObjectTuplesWithTypeVerbs про то, зачем набор параметром).
+func scopeSelfTuplesWithTypeVerbs(subject, scopeType, scopeID string,
+	verbs, typeVerbs []string) ([]domain.MembershipTuple, bool) {
+	_, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := scopeType + ":" + scopeID
-	emitVerbs := authzmap.TypeHasVerbRelations(scopeType)
+	emitVerbs := len(typeVerbsDeclared(scopeType)) > 0
 
 	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple
@@ -169,7 +206,7 @@ func scopeSelfTuples(subject, scopeType, scopeID string, verbs []string) ([]doma
 	}
 	if emitVerbs {
 		for _, v := range verbs {
-			if !domain.IsClosedVerb(v) {
+			if !domain.IsVerbOfType(v, typeVerbs) {
 				continue
 			}
 			add("v_" + v)
@@ -186,4 +223,12 @@ func scopeSelfTuples(subject, scopeType, scopeID string, verbs []string) ([]doma
 // verify-gate's ledger lookup (review #5) share ONE mapping and cannot drift.
 func fgaObjectType(objectType string) (string, bool) {
 	return authzmap.FGAObjectType(objectType)
+}
+
+// typeVerbsDeclared — набор, ОБЪЯВЛЕННЫЙ типом, без запасного варианта. Именно он
+// решает, эмитить ли `v_*` вообще: тип, ничего не объявивший, не получает ни
+// одного отношения (fail-closed), даже когда подстановка правила развёрнута общим
+// словарём ради вывода яруса.
+func typeVerbsDeclared(fgaType string) []string {
+	return authzmap.VerbsOfType(fgaType)
 }

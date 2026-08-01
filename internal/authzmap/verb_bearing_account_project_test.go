@@ -88,10 +88,10 @@ func TestVerbBearing_AccountProjectVerbToRelation(t *testing.T) {
 			require.Truef(t, authzmap.TypeHasVerbRelations(objType),
 				"%s must be verb-bearing for v_* emission", objType)
 
-			resolved, _ := domain.ResolveVerbsAndTier(tc.verbs)
+			resolved, _ := domain.ResolveVerbsAndTier(tc.verbs, authzmap.VerbsOfType(objType))
 			var got []string
 			for _, v := range resolved {
-				if domain.IsClosedVerb(v) {
+				if domain.IsVerbOfType(v, authzmap.VerbsOfType(objType)) {
 					got = append(got, "v_"+v)
 				}
 			}

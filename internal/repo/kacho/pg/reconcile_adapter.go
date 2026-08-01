@@ -34,6 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -163,7 +164,8 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		// binding's OWN scope resource-type, so the reconciler materializes the tier
 		// (+ verb-bearing v_*) tuple on the scope object itself (the write-authz /
 		// no-access-loss anchor the removed binding-time anchor emit produced).
-		ScopeSelfVerbs: role.Rules.ScopeSelfVerbs(string(b.ResourceType)),
+		ScopeSelfVerbs: role.Rules.ScopeSelfVerbs(string(b.ResourceType),
+			scopeTypeVerbs(string(b.ResourceType))),
 		// Target — the per-object least-privilege selection (F8, IAM-1-21). When
 		// Target.Resources is non-empty the reconciler materializes ONLY the listed
 		// objects (never the whole scope). Read from the persisted access_bindings.target
@@ -1598,3 +1600,20 @@ func (w *syncFGAWriter) DeleteTuples(ctx context.Context, tuples []reconcile.Syn
 }
 
 var _ reconcile.SyncFGAWriter = (*syncFGAWriter)(nil)
+
+// scopeTypeVerbs — набор глаголов, объявленный ТИПОМ якоря привязки
+// (account/project); для якоря без собственного набора (cluster) — словарь, общий
+// для всех ресурсов.
+//
+// Запасной вариант нужен ради ЯРУСА, а не ради `v_*`: ярус выводится из
+// развёрнутых глаголов правила, поэтому подстановка `*` на якоре без набора обязана
+// по-прежнему давать полный набор — иначе роль-суперпользователь молча понизилась
+// бы с администратора до наблюдателя. Отношения `v_*` на таком якоре не эмитятся
+// всё равно (кластер обслуживается плоским коротким замыканием, не пообъектной
+// материализацией).
+func scopeTypeVerbs(scopeType string) []string {
+	if set := authzmap.VerbsOfType(scopeType); len(set) > 0 {
+		return set
+	}
+	return authzmap.CommonVerbVocabulary()
+}

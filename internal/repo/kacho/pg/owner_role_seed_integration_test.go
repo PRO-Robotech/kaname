@@ -21,6 +21,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
@@ -50,7 +51,7 @@ func TestOwnerRole_P6_Seeded(t *testing.T) {
 	// D-8a flat-materializability: owner (`*.*.*` selector all) must yield a
 	// non-empty scope-self verb set on the account itself (verb-bearing self) AND
 	// non-empty materializing selectors (forward per-object on content).
-	assert.NotEmpty(t, role.Rules.ScopeSelfVerbs("account"),
+	assert.NotEmpty(t, role.Rules.ScopeSelfVerbs("account", authzmap.VerbsOfType("account")),
 		"owner rules must grant scope-self verbs on account (verb-bearing self, C-01)")
 	assert.NotEmpty(t, role.Rules.MaterializingSelectors(),
 		"owner rules must carry ARM_ANCHOR materializing selector (forward content, C-01b)")
