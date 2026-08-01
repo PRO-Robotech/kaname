@@ -99,9 +99,17 @@ func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeUserTokenRequest)
 }
 
 // List implements UserTokenService.List.
+//
+// Формат страницы судится по СЫРОМУ запросу: сужение int64→int32 ниже насыщающее,
+// и отрицательный page_size превратился бы в 0 («умолчание») до того, как его
+// кто-либо увидит. Здесь это была единственная проверка формата на всём пути —
+// ниже по потоку страницу не судил никто.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListUserTokensRequest) (*iamv1.ListUserTokensResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
 	}
 	rows, nextToken, err := h.list.Execute(ctx, ListInput{
 		UserID:    domain.UserID(req.GetUserId()),

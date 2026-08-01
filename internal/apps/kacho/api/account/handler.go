@@ -122,7 +122,14 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetAccountRequest) (*iamv1
 }
 
 // List — sync read with pagination.
+//
+// Формат страницы судится по СЫРОМУ запросу первым стейтментом: сужение int64→int32
+// ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
+// того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListAccountsRequest) (*iamv1.ListAccountsResponse, error) {
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	filter := account.ListFilter{
 		PageSize:  safeconv.ClampNonNegInt32(req.GetPageSize()),
 		PageToken: req.GetPageToken(),
