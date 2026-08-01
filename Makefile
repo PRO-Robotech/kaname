@@ -138,3 +138,18 @@ sync-permission-catalog:
 	cp "$(GATEWAY_CATALOG)" "$(IAM_CATALOG_EMBED)"
 	@cmp -s "$(GATEWAY_CATALOG)" "$(IAM_CATALOG_EMBED)" || { echo "копии разошлись после копирования"; exit 1; }
 	@echo "каталог прав синхронизирован из копии шлюза (побайтово)."
+
+# audit-list-filter — CI gate for kacho-iam's listing surface: every method that
+# hands a page to a caller must narrow it, and must declare HOW. What is checked
+# lives in tools/listfiltergate; how this service is laid out lives in
+# services/iam/tools/auditlistfilter.
+#
+# This target is NEW: iam had no gate of this class, and nothing was red because the
+# set of services to analyse was written by hand and iam was in neither the CI loop
+# nor the set of directories anyone remembered to create. That set is now derived
+# from the committed tree by tools/listfiltergate/coverage_test.go, which reports an
+# unanalysed service as a finding.
+#
+# Invoked by CI as `make -C services/iam audit-list-filter`.
+audit-list-filter:
+	@./tools/audit-list-filter.sh
