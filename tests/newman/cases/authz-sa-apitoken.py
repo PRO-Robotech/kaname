@@ -72,7 +72,10 @@ SA-keys → private_key_jwt — NOTE FOR SETUP HARNESS:
     4. Использовать выданный access_token как `jwtSAA`.
   Postman-CLI/newman нативно JWT ES256 не подписывает — нужна
   pre-request script с jsrsasign / отдельный CLI-helper в setup-harness'е.
-  Кейсы остаются known-RED до миграции setup-harness'а на ES256-assertion flow.
+  Миграция оснастки СОСТОЯЛАСЬ: `tests/authz-fixtures/mint_rs256.py` подписывает
+  `client_assertion` (ES256, `client-assertion-type:jwt-bearer`) и обменивает его на
+  токен. Прежнее объявление «кейсы остаются красными до миграции» снято вместе с
+  предметом — освобождений у этих кейсов нет.
 """
 
 CASES = []

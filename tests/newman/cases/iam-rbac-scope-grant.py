@@ -256,8 +256,8 @@ def revoke_binding_steps(bind_op_var, name_suffix):
     iam IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY leak-guards all assert "NOB sees nothing".
     Every run of this suite bound a compute.instance role to NOB on {{accountAId}} and never
     revoked it, so NOB became legitimately authorized and stayed that way — permanently, and
-    for every OTHER suite. (That is the pollution the shared known-RED whitelist attributes to
-    kacho-iam#276; the whitelist is not a licence to keep producing it.)
+    for every OTHER suite. (kacho-iam#276 is that pollution. The runner's shared exemption
+    list, which used to absorb it, was REMOVED whole — producing it is now simply red.)
 
     Same discipline as the binding teardown in iam-rbac-subjects: 403 is a propagation window,
     NOT a terminal state — retry past it, and let a persistent denial fail honestly rather than

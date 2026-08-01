@@ -17,9 +17,10 @@ matching roleId). The propagation intent — admin authority to revoke +
 revoke→Check convergence — is preserved.
 
 The listByScope resolve-steps require the api-gateway :listByScope route; without
-it they get 403 catalog-miss. The anon-op / sakey-redact spot-checks are
-pre-existing known-RED (whitelisted as anon-*-op / poll-op-plaintext /
-re-get-op-redacted in assert-suites-green.sh).
+it they get 403 catalog-miss. The anon-op / sakey-redact spot-checks used to be
+exempted by name in the runner; that list was REMOVED whole (see
+scripts/assert-suites-green.sh, which now states that nothing is subtracted), so
+these steps are gated like every other assertion here.
 
 Verifies that AccessBinding mints (Create/Delete) correctly propagate to OpenFGA
 in the same writer-tx, so a subsequent Check call sees the updated authz state
@@ -127,8 +128,8 @@ def assert_grpc_code_in(*codes_named):
 # Note on the prior /iam/v1/check helper: that path is NOT registered in the
 # api-gateway route catalog (the AuthorizeService REST mapping is
 # /iam/v1/authorize:check), so it always 403s with "catalog: no entry for
-# method" and can never read a real `allowed` value — it is the reason the old
-# probe-check steps are known-RED. This generalized helper uses the working
+# method" and can never read a real `allowed` value — that is why the probe-check
+# steps that used it were REMOVED. This generalized helper uses the working
 # internal-check path instead. The helper has no live call-sites today; the
 # back-compat wrapper below preserves the historical
 # poll_check_allowed(user_key, resource_key, relation) signature for any future
@@ -316,9 +317,11 @@ def resolve_binding_id_step(name, resource_id_tmpl, subject_env_key, out_env_key
     # naive `rows[0]` wrong:
     #   1. The iam-access-binding suite (runs earlier in the umbrella) seeds a
     #      deletion_protection=true binding (IAM-ACB-DP-NEG-DELETE-PROTECTED:
-    #      subject=userNOBId, role=ROLE_VIEW, account:accountA) whose protection-
-    #      clearing teardown is itself known-RED (AccessBindingService.Update not
-    #      yet on the gateway public mux). That protected row persists
+    #      subject=userNOBId, role=ROLE_VIEW, account:accountA). Its protection-
+    #      clearing teardown was once declared red because AccessBindingService.Update
+    #      was not on the gateway public mux; it IS there now
+    #      (PATCH /iam/v1/accessBindings/{id}), and the declaration went with the
+    #      defect. That protected row persists
     #      into THIS suite's listByScope and would be picked as rows[0].
     #   2. Account.Create co-commits an owner-binding (deletion_protection=true)
     #      for the account creator, another protected row on the scope.

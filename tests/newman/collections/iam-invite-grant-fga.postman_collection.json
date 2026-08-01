@@ -1887,8 +1887,8 @@
       ]
     },
     {
-      "name": "INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1 — RC-1 project-anchor: iam.project [get,list] @ project → Check(viewer, project)=True (RED — no project-scoped role via public API)",
-      "description": "class:FGA | class:AUTHZ | class:GRANT-CHAIN | class:RC1 | class:KNOWN-RED | priority:P0",
+      "name": "INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1 — RC-1 project-anchor: iam.project [get,list] @ project → Check(viewer, project)=True",
+      "description": "class:FGA | class:AUTHZ | class:GRANT-CHAIN | class:RC1 | priority:P0",
       "item": [
         {
           "name": "INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1 :: create-sa-proj",

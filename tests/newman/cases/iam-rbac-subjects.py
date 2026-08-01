@@ -63,9 +63,9 @@ so the userset can resolve to concrete principals. Each minted principal is runI
 
 DEPLOY NOTE: the `subjects[]` Create field and the `:expandAccess` / `:listByRole`
 public RPCs are registered (public mux) and the IAM build is live on the stack —
-every case here runs green. None is in the shared known-RED whitelist
-(assert-suites-green.sh), and none should be: this is a black-box conformance suite
-that must stay fully green.
+every case here runs green. The runner's shared exemption list was REMOVED whole, so
+nothing here is excused from the verdict — as it should be: this is a black-box
+conformance suite that must stay fully green.
 
 GROUP-NAME NOTE: the ExpandAccess case creates a REAL group whose name is
 kebab-case (`rbac-e31-grp-{{runId}}`). Group.name is validated by domain

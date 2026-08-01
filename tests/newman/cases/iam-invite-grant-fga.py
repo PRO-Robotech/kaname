@@ -459,19 +459,19 @@ CASES.append(Case(
 # IsRoleAssignable (internal/domain/role_scope.go) makes an ACCOUNT-scoped role
 # assignable only on its OWN account, NEVER on a project (STRICT, no
 # hierarchy-down). But the public CreateRoleRequest (kacho-proto
-# role_service.proto) has NO `project_id` field and the Role.Create handler
-# (internal/apps/kacho/api/role/handler.go) maps only account_id — so a
-# project-scoped custom role CANNOT be authored via the public API.
+# role_service.proto) once had NO `project_id` field, so a project-scoped custom
+# role could not be authored via the public API at all. That is no longer so:
+# CreateRoleRequest carries `project_id` (account XOR project, enforced in the
+# use-case and by a DB CHECK), and the declaration went with the defect.
 #
 # This case attempts the realistic public flow against the DESIRED end-state:
 # create the role, bind it on `project:A1`, expect Check(viewer, project:A1)=True
 # for a clean cross-account-isolated subject. If the role is account-scoped, the
 # bind on `project:A1` returns Operation.error FAILED_PRECONDITION (code 9) "role
 # <id> is not assignable on project:A1" → assert_bind_succeeded fails on the
-# `bind NOT FailedPrecondition` assertion. The case is whitelisted as known-RED in
-# scripts/assert-suites-green.sh by the `bind-project-anchor` step name; it goes
-# GREEN once a project-scoped role can be authored (project_id on CreateRoleRequest
-# + handler).
+# `bind NOT FailedPrecondition` assertion. The exemption this case used to carry was
+# REMOVED together with the runner's subtraction list; the case is gated like every
+# other one here.
 #
 # NOTE the clean subject is essential here too: the OLD suite probed userNOB which
 # carried `viewer@account:A`, so Check(viewer, project:A1) was true-by-cascade
@@ -482,8 +482,8 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1",
-    title="RC-1 project-anchor: iam.project [get,list] @ project → Check(viewer, project)=True (RED — no project-scoped role via public API)",
-    classes=["FGA", "AUTHZ", "GRANT-CHAIN", "RC1", "KNOWN-RED"],
+    title="RC-1 project-anchor: iam.project [get,list] @ project → Check(viewer, project)=True",
+    classes=["FGA", "AUTHZ", "GRANT-CHAIN", "RC1"],
     priority="P0",
     steps=[
         *create_fresh_sa("_igSaProj", "proj"),
@@ -499,10 +499,9 @@ CASES.append(Case(
             [{"module": "iam", "resources": ["project"], "verbs": ["get", "list"]}],
             "proj",
         ),
-        # bind on project:A1 — REQUIRES a project-scoped role (unreachable via
-        # the public API when CreateRoleRequest has no project_id) → Operation.error
-        # FAILED_PRECONDITION until fixed.
-        # The poll step name 'bind-project-anchor' is the known-RED whitelist key.
+        # bind on project:A1 — REQUIRES a project-scoped role. That is reachable via
+        # the public API (CreateRoleRequest.project_id); the step's former exemption
+        # by name was REMOVED with the runner's subtraction list.
         *bind_role("_igRoleProj", "_igBindProjOp", "project", "{{projectA1Id}}",
                    "_igSaProj", "project-anchor"),
         check_step(

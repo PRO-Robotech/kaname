@@ -78,11 +78,12 @@ CASES = []
 # single-node kind cluster the revoke-deny propagation can still exceed even this ~45 s cap under
 # peak load (the `*-gone` probes are each case's LAST step, where the per-case outbox backlog
 # peaks; later cases flake more as the cumulative backlog grows). The revoke-deny `*-gone`
-# convergence probes + the two-transition flip case are whitelisted as known-RED eventual-
-# consistency latency — assertions still RUN and report, just not gate-blocking;
-# delete.go additionally retries the sync FGA removal past a transient OpenFGA failure to narrow
-# the tail. The grant→appears probes (reliable reconciler sync-write) and the steady-state single-
-# shot denies are NOT whitelisted — a real leak still fails honestly.
+# convergence probes + the two-transition flip case used to be exempted by name as
+# eventual-consistency latency; that exemption was REMOVED with the runner's whole
+# subtraction list, so they gate like everything else and the bounded retry above is the
+# only thing absorbing the drain tail. delete.go additionally retries the sync FGA removal
+# past a transient OpenFGA failure to narrow it further. Nothing here is excused — a real
+# leak fails honestly.
 POLL_CAP = 300
 
 # ROLE_VIEW — system viewer bundle (`*.* [read,list,get]`), assignable on ANY scope; on an
@@ -596,8 +597,9 @@ CASES.append(Case(
     steps=[
         # verifies (group membership add/remove flips materialized access)
         # Most drain-sensitive case of the suite (two async transitions on a grant-on-empty-group):
-        # the add→appears / remove→gone probes can flake on the fga_outbox drain tail under heavy
-        # CI load → whitelisted as known-RED in scripts/assert-suites-green.sh.
+        # the add→appears / remove→gone probes can flake on the fga_outbox drain tail under
+        # heavy CI load. The exemption they used to carry was REMOVED with the runner's whole
+        # subtraction list — the bounded retry above is what absorbs the tail now.
         *create_group("create-group", "chgrp-flip-{{runId}}", "chgFlipGrp", "chgFlipGrpOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgFlipGrp}}"}], "chgFlipAcb", "chgFlipBindOp"),
         poll_op("chgFlipBindOp"),
