@@ -898,12 +898,7 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// tuple the cloud administrator, the bootstrap identity and the account
 	// administrator all resolve to nothing on a Condition.
 	condSvc.WithRelationOutbox(kachopg.NewFGAOutboxEmitter())
-	// Модель прав, по которой сужается страница ConditionsService/List. Тот же
-	// relationStore, что у остальных ресурсов iam: List обязан отдавать только
-	// те условия, которые вызывающему видны per-object, а не всю страницу его
-	// проекта (Get/Update/Delete тех же условий гейтятся per-object по
-	// iam_condition — см. api/conditions/list.go).
-	conditionsH := conditionsapp.NewHandler(condSvc).WithVisibilityChecker(ownGates)
+	conditionsH := conditionsapp.NewHandler(condSvc)
 
 	return authzServiceBundle{
 		authorize:         authzH,

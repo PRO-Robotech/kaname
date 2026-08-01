@@ -37,12 +37,11 @@ lint:
 # receive only the rows it may see (per-object `viewer ∪ v_list` over the page just
 # read), not every row of its project.
 #
-# iam carries the largest narrowable List surface on the platform — ten resources
-# declare List, against seven in vpc — and was the ONLY such service outside this
+# iam carries the largest narrowable List surface on the platform — it declares ten
+# `List` methods against vpc's eight — and was the ONLY such service outside this
 # gate: the CI step looped over compute, nlb, registry, storage and vpc. The blind
-# spot sat exactly where the subject is densest, and the first run proved it: three
-# findings, one of them a real gap (ConditionsService/List handed back the whole
-# project page while Get/Update/Delete of the same conditions gate per object).
+# spot sat exactly where the subject is densest, and the first run produced three
+# findings.
 #
 # The check parses the tree, so a resource is recognised by what its declaration IS —
 # a package declaring `List` on the transport type — and never by which file holds
@@ -50,12 +49,15 @@ lint:
 #
 # The run always prints its census (files, packages, resources, checked,
 # whitelisted): "zero findings" must be distinguishable from "zero read", so a tree
-# the gate could not open is a finding, not an OK. The two exclusions live in
-# tools/audit-list-filter.sh next to the reason for each, and an exclusion with
-# nothing left to exclude is a finding too.
+# the gate could not open is a finding, not an OK. The three exclusions live in
+# tools/audit-list-filter.sh next to the reason for each — and the reasons are NOT
+# the same reason, which is the point. An exclusion with nothing left to exclude is
+# a finding too, and the `conditions` one carries a machine-checked expiry
+# (tools/auditlistfilter/exclusion_expiry_test.go).
 #
 # Invoked by CI as `make -C services/iam audit-list-filter`; that it is invoked at
-# all is locked by services/iam/tools/auditlistfilter/ci_wiring_test.go.
+# all is locked by internal/repohygiene/listfiltergatewiring_test.go, which derives
+# the service list from the tree and from the workflow rather than hand-writing it.
 audit-list-filter:
 	@./tools/audit-list-filter.sh
 

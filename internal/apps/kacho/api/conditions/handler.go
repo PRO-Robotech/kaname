@@ -14,14 +14,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/condition"
@@ -32,22 +30,11 @@ import (
 type Handler struct {
 	iamv1.UnimplementedConditionsServiceServer
 	svc *service.ConditionsCRUDService
-	// visibility — порт модели прав, сужающий страницу List до объектов,
-	// видимых вызывающему. nil → List отказывает (см. List): «модель не
-	// сконфигурирована» не есть «видно всё».
-	visibility authzfilter.ObjectChecker
 }
 
 // NewHandler — builder.
 func NewHandler(svc *service.ConditionsCRUDService) *Handler {
 	return &Handler{svc: svc}
-}
-
-// WithVisibilityChecker подключает модель прав, по которой сужается страница
-// List (паритет с account/group/project/role/service_account/user).
-func (h *Handler) WithVisibilityChecker(chk authzfilter.ObjectChecker) *Handler {
-	h.visibility = chk
-	return h
 }
 
 // Get — see iamv1.ConditionsServiceServer.
@@ -77,28 +64,8 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListConditionsRequest) (*
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	// Сужение страницы до объектов, видимых вызывающему. До этого List
-	// спрашивал один вопрос про проект и отдавал всю его страницу, тогда как
-	// Get/Update/Delete тех же условий гейтятся per-object по iam_condition —
-	// см. list.go, там же довод, почему сужение никого не обделяет.
-	//
-	// Порта нет — отказываем: это состояние ПОСАДКИ, а не ответ модели, и
-	// «спросить негде» не может означать «видно всё» (формулировка и существо
-	// взяты у соседей: nlb authzfilter.FilterPage, storage AllowedOnObject).
-	if h.visibility == nil {
-		return nil, status.Error(codes.PermissionDenied,
-			"list conditions: the rights model is not configured for this deployment")
-	}
-	subject := principalSubject(operations.PrincipalFromContext(ctx))
-	visible, verr := filterVisibleConditionIDs(ctx, h.visibility, subject, conditionIDsOf(rows))
-	if verr != nil {
-		return nil, mapErr(iamerr.Wrapf(iamerr.ErrUnavailable, "authorization store unavailable"))
-	}
 	pbs := make([]*iamv1.Condition, 0, len(rows))
 	for _, r := range rows {
-		if !visible[string(r.ID)] {
-			continue
-		}
 		pbs = append(pbs, service.ConditionToProto(r))
 	}
 	return &iamv1.ListConditionsResponse{Conditions: pbs, NextPageToken: next}, nil

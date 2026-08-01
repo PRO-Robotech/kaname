@@ -9,7 +9,7 @@
 //
 // The CI step that drives this class looped over compute, nlb, registry, storage
 // and vpc. iam was absent — while carrying the largest narrowable List surface on
-// the platform (ten resources declare `List`, against seven in vpc). The blind
+// the platform (it declares ten `List` methods against vpc's eight). The blind
 // spot sat exactly where the subject is densest.
 //
 // # This service's shape
