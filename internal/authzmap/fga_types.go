@@ -137,51 +137,121 @@ var dottedByFGAType = func() map[string]string {
 // the CI drift-gate (authzmap/fga_model_drift_test.go) fails the build if this
 // set ever diverges from the model.
 func TypeHasVerbRelations(fgaType string) bool {
-	return verbBearingTypes[fgaType]
+	return len(typeVerbRelations[fgaType]) > 0
 }
 
-// verbBearingTypes — the closed set of FGA object_types that define the full
-// per-verb relation set in fga_model.fga. Enumerated explicitly (not derived by
-// subtraction) so a future objectTypes addition does NOT silently inherit
-// verb-bearing status — the drift-gate forces an explicit decision here.
+// VerbRelationsOfType — имена `v_*`-отношений, которые канонический fga_model.fga
+// определяет У ЭТОГО типа, в детерминированном (отсортированном) порядке; nil для
+// неглагольного типа.
 //
-// rbac-explicit-model-2026 P3 / D-6: `account` and `project` joined this set —
-// they are now verb-bearing (full v_* in the canonical model, P2). They REMAIN
-// tier-carrying hierarchy ancestors (admin/editor/viewer write-authz anchors,
-// D-7); verb-bearing status is additive on top, not a replacement.
-var verbBearingTypes = map[string]bool{
-	"compute_instance":          true,
-	"vpc_network":               true,
-	"vpc_subnet":                true,
-	"vpc_address":               true,
-	"vpc_security_group":        true,
-	"vpc_route_table":           true,
-	"vpc_gateway":               true,
-	"vpc_network_interface":     true,
-	"vpc_address_pool":          true,
-	"nlb_network_load_balancer": true,
-	"nlb_target_group":          true,
-	"nlb_listener":              true,
-	"registry_registry":         true,
-	"registry_repository":       true,
+// Это ЕДИНСТВЕННЫЙ источник набора для эмиссии: набор есть атрибут ТИПА, а не
+// платформенная константа. Возвращается КОПИЯ — вызывающий не вправе испортить
+// источник истины эмиссии.
+func VerbRelationsOfType(fgaType string) []string {
+	set := typeVerbRelations[fgaType]
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, len(set))
+	copy(out, set)
+	return out
+}
+
+// CommonVerbVocabulary — ГЛАГОЛЫ (без приставки `v_`), общие ДЛЯ ВСЕХ глагольных
+// типов, то есть ПЕРЕСЕЧЕНИЕ их наборов, отсортированно.
+//
+// Именно это значение проецируется публичным полем каталога прав. Пока все типы
+// несут один набор, пересечение равно ему. С появлением типа с расширенным набором
+// пересечение сузится — и это верное поведение поля: оно объявлено как набор,
+// общий для всех ресурсов, а не как перечень всех существующих глаголов.
+func CommonVerbVocabulary() []string {
+	var common map[string]bool
+	for _, set := range typeVerbRelations {
+		if len(set) == 0 {
+			continue
+		}
+		in := make(map[string]bool, len(set))
+		for _, r := range set {
+			in[r] = true
+		}
+		if common == nil {
+			common = in
+			continue
+		}
+		for r := range common {
+			if !in[r] {
+				delete(common, r)
+			}
+		}
+	}
+	out := make([]string, 0, len(common))
+	for r := range common {
+		out = append(out, strings.TrimPrefix(r, VerbRelationPrefix))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// VerbRelationPrefix — приставка имени глагольного отношения модели. Она же —
+// форма, в которой глагол попадает в кортеж.
+const VerbRelationPrefix = "v_"
+
+// fullCrudVerbRelations — набор, который на сегодня объявляет КАЖДЫЙ глагольный
+// тип. Это НЕ платформенная константа «набор всех глаголов»: это значение, которое
+// 28 типов пока СОВПАДАЮЩЕ объявляют. Тип вправе объявить другой набор — и гейт
+// сверит его с моделью ПОТИПОВО, а не с этим литералом.
+var fullCrudVerbRelations = []string{"v_create", "v_delete", "v_get", "v_list", "v_update"}
+
+// typeVerbRelations — НАБОР `v_*`-отношений, объявленный КАЖДЫМ типом.
+//
+// Прежняя редакция таблицы была булевой («несёт полный набор либо ни одного»), и
+// это было её СВОЙСТВОМ: набор одного типа не мог отличаться от набора другого,
+// потому что набора у типа не было вовсе — была платформенная константа. Теперь
+// набор объявлен у типа, а его полнота и точное совпадение с канонической моделью —
+// требование ГЕЙТА (fga_model_drift_test.go: TestDrift_TypeVerbSetsMatchModelExactly),
+// а не следствие устройства таблицы. Читателю: НЕ «чините» таблицу обратно в булеву
+// — гейт требует ровно того же свойства, но проверяемо и по каждому типу отдельно.
+//
+// Типы перечислены явно (не выводятся вычитанием), чтобы новая запись objectTypes
+// НЕ унаследовала глагольность молча — гейт дрейфа вынуждает принять решение здесь.
+//
+// rbac-explicit-model-2026 P3 / D-6: `account` и `project` глагольные (канонический
+// fga_model.fga определяет на обоих полный набор `v_*`, P2). Они ОСТАЮТСЯ ярусными
+// предками иерархии (admin/editor/viewer — якоря write-authz, D-7); глагольность
+// добавлена сверху, а не вместо.
+var typeVerbRelations = map[string][]string{
+	"compute_instance":          fullCrudVerbRelations,
+	"vpc_network":               fullCrudVerbRelations,
+	"vpc_subnet":                fullCrudVerbRelations,
+	"vpc_address":               fullCrudVerbRelations,
+	"vpc_security_group":        fullCrudVerbRelations,
+	"vpc_route_table":           fullCrudVerbRelations,
+	"vpc_gateway":               fullCrudVerbRelations,
+	"vpc_network_interface":     fullCrudVerbRelations,
+	"vpc_address_pool":          fullCrudVerbRelations,
+	"nlb_network_load_balancer": fullCrudVerbRelations,
+	"nlb_target_group":          fullCrudVerbRelations,
+	"nlb_listener":              fullCrudVerbRelations,
+	"registry_registry":         fullCrudVerbRelations,
+	"registry_repository":       fullCrudVerbRelations,
 	// storage (kacho-storage) — Volume/Snapshot/Image per-object authz objects.
 	// Verb-bearing so the reconciler materializes per-object v_* for the creator's
 	// project binding — the model type + these Go tables + knownModules("storage")
 	// are ALL required or owner-GET fail-closes 403 (#71). Parity with nlb (project-
 	// only emitter, DIRECT v_*, no `owner` derivation).
-	"storage_volume":      true,
-	"storage_snapshot":    true,
-	"storage_image":       true,
-	"iam_user":            true,
-	"iam_service_account": true,
-	"iam_group":           true,
-	"iam_role":            true,
-	"iam_access_binding":  true,
-	"iam_condition":       true,
+	"storage_volume":      fullCrudVerbRelations,
+	"storage_snapshot":    fullCrudVerbRelations,
+	"storage_image":       fullCrudVerbRelations,
+	"iam_user":            fullCrudVerbRelations,
+	"iam_service_account": fullCrudVerbRelations,
+	"iam_group":           fullCrudVerbRelations,
+	"iam_role":            fullCrudVerbRelations,
+	"iam_access_binding":  fullCrudVerbRelations,
+	"iam_condition":       fullCrudVerbRelations,
 	// rbac-2026 P3 / D-6: account/project are now verb-bearing (additive — they
 	// also keep their tier relations as write-authz anchors, D-7).
-	"account": true,
-	"project": true,
+	"account": fullCrudVerbRelations,
+	"project": fullCrudVerbRelations,
 }
 
 // expandableRelations — the closed set of FGA relation names a caller may pass

@@ -297,6 +297,44 @@ func TestDrift_VerbBearingTypesHaveFullSet(t *testing.T) {
 	}
 }
 
+// D-2b: КАЖДЫЙ каталожный тип объявляет РОВНО тот набор `v_*`, который модель
+// определяет у НЕГО — ни больше, ни меньше.
+//
+// Почему это отдельное утверждение, а не следствие D-2. D-2 требует НАЛИЧИЯ общей
+// пятёрки в МОДЕЛИ и об объявленном типом наборе не спрашивает вовсе; D-3 сверяет
+// лишь БУЛЕВ ответ «несёт или нет». Пока набор был платформенной константой, этого
+// хватало: «четыре из пяти» было невыразимо по устройству таблицы. С набором У ТИПА
+// это выразимо — значит требование полноты обязано стать ПРОВЕРКОЙ, иначе
+// переформулировка таблицы превратила бы замок в решето. Гейт ставится тем же
+// изменением, которое делает дефект выразимым.
+func TestDrift_TypeVerbSetsMatchModelExactly(t *testing.T) {
+	f := parseModel(t)
+	types := catalogObjectTypes(t)
+	require.NotEmpty(t, types, "каталог пуст — предпосылка гейта сломана")
+
+	checked := 0
+	for _, ot := range types {
+		want := []string{}
+		for rel := range f.relations[ot] {
+			if strings.HasPrefix(rel, "v_") {
+				want = append(want, rel)
+			}
+		}
+		sort.Strings(want)
+		got := authzmap.VerbRelationsOfType(ot)
+		if got == nil {
+			got = []string{}
+		}
+		require.ElementsMatchf(t, want, got,
+			"тип %q объявляет набор %v, а модель определяет у него %v. Недостающее отношение — "+
+				"молча не выданный доступ; лишнее — кортеж, который владелец модели отвергает "+
+				"окончательно. Набор объявляется У ТИПА, поэтому «четыре из пяти» выразимо и "+
+				"обязано ловиться здесь.", ot, got, want)
+		checked += len(want)
+	}
+	t.Logf("перепись: сверено типов: %d; сверено имён отношений: %d", len(types), checked)
+}
+
 // D-3: the emission guard (authzmap.TypeHasVerbRelations) must equal the model
 // EXACTLY for every grantable object type — no drift in either direction. This
 // is the gate that catches a future #177-class fail-open: if someone adds a type
