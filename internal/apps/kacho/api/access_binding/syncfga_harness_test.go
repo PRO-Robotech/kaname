@@ -21,21 +21,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
-const (
-	syncFGAServerImage = "openfga/openfga:v1.8.4"
-	syncFGACLIImage    = "openfga/cli:v0.7.13"
-)
+// The server image is no longer named here — the server belongs to fgatest, which
+// pins it. Only the transform is still this package's own.
+const syncFGACLIImage = "openfga/cli:v0.7.13"
 
 // syncFGARequireOrSkip converts a real-FGA-proof skip into a HARD failure when a
 // CI enforcement env var is set (KACHO_IAM_REQUIRE_REAL_FGA or the drift-gate's
@@ -68,52 +66,38 @@ type syncFGAHarness struct {
 	relations *clients.OpenFGAHTTPClient
 }
 
-// startOpenFGAFromModel boots OpenFGA, loads the canonical flat model, and returns a
-// ready harness with a production OpenFGAHTTPClient.
+// startOpenFGAFromModel hands the calling test its OWN store on the shared OpenFGA
+// server, with the canonical flat model loaded, and returns a ready harness whose
+// relations field is the production OpenFGAHTTPClient pinned to that store.
+//
+// It used to boot its own openfga/openfga container per call. The server now comes
+// from services/iam/internal/testsupport/fgatest (one per test binary, lazily), and
+// the isolation a separate container gave is the store — OpenFGA scopes tuples,
+// models, Check, ListObjects and Read by store, and fgatest proves both halves
+// behaviourally in its own package (fgatest_test.go: TestOneServerManyStores).
+//
+// The model is still resolved and transformed HERE rather than through fgatest.New,
+// so the skip posture stays exactly as it was: this package refuses to skip its
+// real-FGA proof when KACHO_IAM_REQUIRE_REAL_FGA / KACHO_IAM_REQUIRE_FGA_MODEL is
+// set, and it keeps the pinned-module fallback for the standalone-CI layout.
+// fgatest's own canonical loader has neither. The transform is paid once per
+// process (syncFGACanonicalModelJSON) instead of once per test.
 func startOpenFGAFromModel(t *testing.T) *syncFGAHarness {
 	t.Helper()
 	if testing.Short() {
 		syncFGARequireOrSkip(t, "skipping real-OpenFGA integration test in -short mode")
 	}
-	ctx := context.Background()
-	modelJSON := syncFGATransformModel(t, syncFGAModelPath(t))
-
-	req := testcontainers.ContainerRequest{
-		Image:        syncFGAServerImage,
-		Cmd:          []string{"run"},
-		ExposedPorts: []string{"8080/tcp"},
-		WaitingFor:   wait.ForHTTP("/healthz").WithPort("8080/tcp").WithStartupTimeout(60 * time.Second),
+	h := fgatest.NewFromModelJSON(t, syncFGACanonicalModelJSON(t))
+	return &syncFGAHarness{
+		// fgatest exposes the endpoint scheme-less (the production client prepends
+		// the scheme itself); this harness's raw post() builds full URLs.
+		base:    "http://" + h.Client.Endpoint,
+		store:   h.Client.StoreID,
+		modelID: h.Client.AuthorizationModel,
+		// The production client the reconciler writes through AND the test Checks
+		// against — the same one, already pinned to this test's store and model.
+		relations: h.Client,
 	}
-	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req, Started: true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
-
-	host, err := ctr.Host(ctx)
-	require.NoError(t, err)
-	port, err := ctr.MappedPort(ctx, "8080")
-	require.NoError(t, err)
-	h := &syncFGAHarness{base: fmt.Sprintf("http://%s:%s", host, port.Port())}
-
-	storeResp := h.post(t, "/stores", map[string]string{"name": "syncfga_raw"})
-	h.store, _ = storeResp["id"].(string)
-	require.NotEmpty(t, h.store, "create store failed: %v", storeResp)
-
-	var modelBody map[string]any
-	require.NoError(t, json.Unmarshal(modelJSON, &modelBody))
-	mResp := h.post(t, fmt.Sprintf("/stores/%s/authorization-models", h.store), modelBody)
-	h.modelID, _ = mResp["authorization_model_id"].(string)
-	require.NotEmpty(t, h.modelID, "write model failed: %v", mResp)
-
-	// The production client the reconciler writes through AND the test Checks against.
-	// Endpoint is host:port (no scheme — the client prefixes http:// itself).
-	h.relations = &clients.OpenFGAHTTPClient{
-		Endpoint:           fmt.Sprintf("%s:%s", host, port.Port()),
-		StoreID:            h.store,
-		AuthorizationModel: h.modelID,
-	}
-	return h
 }
 
 func (h *syncFGAHarness) post(t *testing.T, path string, body any) map[string]any {
@@ -161,24 +145,65 @@ func syncFGAModelPath(t *testing.T) string {
 	return ""
 }
 
+// syncFGACanonicalModel caches the transform for the process. It used to be paid
+// per call, which meant an openfga/cli container per test on top of the server.
+//
+// The two error kinds are kept apart because their postures differ: an unreadable
+// source of truth is a hard failure, a CLI that will not run is the env-gated skip
+// syncFGARequireOrSkip decides on.
+var syncFGACanonicalModel struct {
+	once   sync.Once
+	json   []byte
+	stderr string // the CLI's own words, so the skip says why
+	readEr error  // canonical DSL unreadable → HARD FAILURE
+	cliErr error  // openfga/cli did not run   → syncFGARequireOrSkip
+}
+
+// syncFGACanonicalModelJSON returns the transformed canonical model, transforming
+// it on first use.
+//
+// The verdicts live OUTSIDE the sync.Once deliberately: t.Skip / t.FailNow unwind
+// the goroutine, and sync.Once marks itself done through a defer, so a verdict
+// raised inside Do would leave the cache both "done" and empty — every later caller
+// would get an empty model and fail somewhere unrelated.
+func syncFGACanonicalModelJSON(t *testing.T) []byte {
+	t.Helper()
+	fgaPath := syncFGAModelPath(t)
+	syncFGACanonicalModel.once.Do(func() {
+		syncFGACanonicalModel.json, syncFGACanonicalModel.stderr,
+			syncFGACanonicalModel.readEr, syncFGACanonicalModel.cliErr = syncFGATransformModel(fgaPath)
+	})
+	require.NoError(t, syncFGACanonicalModel.readEr)
+	if syncFGACanonicalModel.cliErr != nil {
+		syncFGARequireOrSkip(t, "openfga/cli transform unavailable (%v): %s — real-FGA proof cannot run",
+			syncFGACanonicalModel.cliErr, syncFGACanonicalModel.stderr)
+	}
+	return syncFGACanonicalModel.json
+}
+
 // syncFGATransformModel shells out to the openfga/cli image to transform the canonical
 // DSL into the JSON the WriteAuthorizationModel API accepts (same transform the deploy
 // bootstrap uses).
-func syncFGATransformModel(t *testing.T, fgaPath string) []byte {
-	t.Helper()
-	dsl, err := os.ReadFile(fgaPath)
-	require.NoError(t, err)
+//
+// It returns errors instead of raising verdicts because it runs inside a sync.Once
+// (see syncFGACanonicalModelJSON); the two kinds come back separately so the caller
+// can keep the postures apart.
+func syncFGATransformModel(fgaPath string) (modelJSON []byte, stderrText string, readEr, cliErr error) {
+	dsl, err := os.ReadFile(fgaPath) // #nosec G304 -- test-only, path from syncFGAModelPath
+	if err != nil {
+		return nil, "", err, nil
+	}
 	dockerHost := os.Getenv("DOCKER_HOST")
 	args := []string{"run", "--rm", "-i", syncFGACLIImage, "model", "transform",
 		string(dsl), "--input-format", "fga", "--output-format", "json"}
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command("docker", args...) // #nosec G204 -- test-only, fixed binary + pinned image
 	if dockerHost != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		syncFGARequireOrSkip(t, "openfga/cli transform unavailable (%v): %s — real-FGA proof cannot run", err, stderr.String())
+		return nil, stderr.String(), nil, err
 	}
-	return stdout.Bytes()
+	return stdout.Bytes(), stderr.String(), nil, nil
 }

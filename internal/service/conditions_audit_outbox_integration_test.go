@@ -29,68 +29,38 @@ package service_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 var condEvtIDRe = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)
 
-// setupCondAuditDB spins up a Postgres 16 testcontainer, runs the IAM migrations
-// and returns a DSN whose search_path defaults to kacho_iam.
+// setupCondAuditDB hands the caller its own migrated database on the package's
+// shared Postgres, with search_path defaulting to kacho_iam.
+//
+// It used to boot a container and replay the whole migration chain per call, which
+// this package paid five times over. The caller still gets a database of its own —
+// see internal/pgtest for why a clone of a migrated template is the isolation a
+// separate container gave.
 func setupCondAuditDB(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
-
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + optionsParam
+	return kachopg.AppendIAMSearchPath(pgtest.NewDB(t))
 }
 
 // allowAllRelations — permissive authzguard.RelationChecker for the audit tests,

@@ -31,7 +31,6 @@ package sa_keys
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -41,48 +40,32 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 var sakeyEvtIDRe = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)
 
-// setupSAKeyTestDB spins up a Postgres 16 testcontainer, runs the IAM
-// migrations and returns a DSN whose search_path defaults to kacho_iam.
+// setupSAKeyTestDB hands the calling test its OWN database, IAM migrations
+// already applied, and returns a DSN whose search_path defaults to kacho_iam.
+//
+// It used to start a fresh Postgres 16 container and replay the migration chain
+// on every call. The database now comes from the one container this test binary
+// owns (wired in testmain_pgtest_test.go), cloned from a template migrated once
+// — see internal/pgtest for why a clone is the same isolation a separate
+// container gave.
 func setupSAKeyTestDB(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	dsn := pgtest.NewDB(t)
 
 	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
 	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {

@@ -13,7 +13,6 @@ package access_binding
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,14 +21,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
 // listObjects calls OpenFGA ListObjects and returns the bare ids (objType prefix
@@ -58,9 +56,10 @@ func (c *fgaClient) listObjects(t *testing.T, user, relation, objType string) []
 }
 
 const (
-	openfgaServerImage = "openfga/openfga:v1.8.4"
-	openfgaCLIImage    = "openfga/cli:v0.7.13"
-	fgaModelRelPath    = "proto/kacho/cloud/iam/v1/fga_model.fga"
+	// The server image is no longer named here — the server belongs to fgatest,
+	// which pins it. Only the transform is still this package's own.
+	openfgaCLIImage = "openfga/cli:v0.7.13"
+	fgaModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
 )
 
 // fgaRequireOrSkip converts a real-FGA-proof skip into a HARD failure when a CI
@@ -109,26 +108,67 @@ func fgaModelPath(t *testing.T) string {
 	return ""
 }
 
+// canonicalModel caches the transform for the process. It used to be paid per
+// call, which meant an openfga/cli container per test on top of the server.
+//
+// The two error kinds are kept apart because their postures differ: an unreadable
+// source of truth is a hard failure, a CLI that will not run is the env-gated
+// skip fgaRequireOrSkip decides on.
+var canonicalModel struct {
+	once   sync.Once
+	json   []byte
+	stderr string // the CLI's own words, so the skip says why
+	readEr error  // canonical DSL unreadable → HARD FAILURE
+	cliErr error  // openfga/cli did not run   → fgaRequireOrSkip
+}
+
+// canonicalModelJSON returns the transformed canonical model, transforming it on
+// first use.
+//
+// The verdicts live OUTSIDE the sync.Once deliberately: t.Skip / t.FailNow unwind
+// the goroutine, and sync.Once marks itself done through a defer, so a verdict
+// raised inside Do would leave the cache both "done" and empty — every later
+// caller would get an empty model and fail somewhere unrelated.
+func canonicalModelJSON(t *testing.T) []byte {
+	t.Helper()
+	fgaPath := fgaModelPath(t)
+	canonicalModel.once.Do(func() {
+		canonicalModel.json, canonicalModel.stderr, canonicalModel.readEr, canonicalModel.cliErr =
+			transformModelToJSON(fgaPath)
+	})
+	require.NoError(t, canonicalModel.readEr)
+	if canonicalModel.cliErr != nil {
+		fgaRequireOrSkip(t, "openfga/cli transform unavailable (%v): %s — real-FGA proof cannot run",
+			canonicalModel.cliErr, canonicalModel.stderr)
+	}
+	return canonicalModel.json
+}
+
 // transformModelToJSON shells out to the openfga/cli image to transform the
 // canonical DSL into the JSON the OpenFGA WriteAuthorizationModel API accepts.
 // This is the SAME transform the deploy bootstrap uses (make openfga-model-json).
-func transformModelToJSON(t *testing.T, fgaPath string) []byte {
-	t.Helper()
-	dsl, err := os.ReadFile(fgaPath)
-	require.NoError(t, err)
+//
+// It returns errors instead of raising verdicts because it runs inside a
+// sync.Once (see canonicalModelJSON); the two kinds come back separately so the
+// caller can keep the postures apart.
+func transformModelToJSON(fgaPath string) (modelJSON []byte, stderrText string, readEr, cliErr error) {
+	dsl, err := os.ReadFile(fgaPath) // #nosec G304 -- test-only, path from fgaModelPath
+	if err != nil {
+		return nil, "", err, nil
+	}
 	dockerHost := os.Getenv("DOCKER_HOST")
 	args := []string{"run", "--rm", "-i", openfgaCLIImage, "model", "transform",
 		string(dsl), "--input-format", "fga", "--output-format", "json"}
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command("docker", args...) // #nosec G204 -- test-only, fixed binary + pinned image
 	if dockerHost != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		fgaRequireOrSkip(t, "openfga/cli transform unavailable (%v): %s — real-FGA proof cannot run", err, stderr.String())
+		return nil, stderr.String(), nil, err
 	}
-	return stdout.Bytes()
+	return stdout.Bytes(), stderr.String(), nil, nil
 }
 
 // fgaClient is a tiny HTTP client for the OpenFGA server REST API.
@@ -193,45 +233,37 @@ func (c *fgaClient) delete(t *testing.T, tuples []abrepo.RelationTuple) {
 	})
 }
 
-// startOpenFGA spins up an OpenFGA server, creates a store, loads the canonical
-// model, and returns a ready client.
+// startOpenFGA hands the calling test its OWN store on the shared OpenFGA server,
+// with the canonical model loaded, and returns a ready client.
+//
+// It used to boot its own openfga/openfga container per call — 25 callers in this
+// package, 25 servers per run, which made this the last per-test container starter
+// in the tree. The server now comes from services/iam/internal/testsupport/fgatest
+// (one per test binary, lazily); the isolation a separate container gave is the
+// store, which is what OpenFGA scopes tuples, models, Check, ListObjects and Read
+// by. That harness proves both halves behaviourally in its own package
+// (fgatest_test.go: TestOneServerManyStores).
+//
+// The model is still resolved and transformed HERE rather than through
+// fgatest.New, so the skip posture below stays exactly as it was: this package
+// refuses to skip its real-FGA proof when KACHO_IAM_REQUIRE_REAL_FGA /
+// KACHO_IAM_REQUIRE_FGA_MODEL is set, and it keeps the pinned-module fallback for
+// the standalone-CI layout. fgatest's own canonical loader has neither, and
+// borrowing it would have dropped both without saying so. The transform is paid
+// once per process (canonicalModelJSON) instead of once per test.
 func startOpenFGA(t *testing.T) *fgaClient {
 	t.Helper()
 	if testing.Short() {
 		fgaRequireOrSkip(t, "skipping real-OpenFGA integration test in -short mode")
 	}
-	ctx := context.Background()
-	modelJSON := transformModelToJSON(t, fgaModelPath(t))
-
-	req := testcontainers.ContainerRequest{
-		Image:        openfgaServerImage,
-		Cmd:          []string{"run"},
-		ExposedPorts: []string{"8080/tcp"},
-		WaitingFor:   wait.ForHTTP("/healthz").WithPort("8080/tcp").WithStartupTimeout(60 * time.Second),
+	h := fgatest.NewFromModelJSON(t, canonicalModelJSON(t))
+	return &fgaClient{
+		// fgatest exposes the endpoint scheme-less (the production client prepends
+		// the scheme itself); this raw harness posts full URLs.
+		base:    "http://" + h.Client.Endpoint,
+		store:   h.Client.StoreID,
+		modelID: h.Client.AuthorizationModel,
 	}
-	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req, Started: true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
-
-	host, err := ctr.Host(ctx)
-	require.NoError(t, err)
-	port, err := ctr.MappedPort(ctx, "8080")
-	require.NoError(t, err)
-	c := &fgaClient{base: fmt.Sprintf("http://%s:%s", host, port.Port())}
-
-	storeResp := c.post(t, "/stores", map[string]string{"name": "kac177test"})
-	c.store, _ = storeResp["id"].(string)
-	require.NotEmpty(t, c.store, "create store failed: %v", storeResp)
-
-	// WriteAuthorizationModel — body is the transformed JSON directly.
-	var modelBody map[string]any
-	require.NoError(t, json.Unmarshal(modelJSON, &modelBody))
-	mResp := c.post(t, fmt.Sprintf("/stores/%s/authorization-models", c.store), modelBody)
-	c.modelID, _ = mResp["authorization_model_id"].(string)
-	require.NotEmpty(t, c.modelID, "write model failed: %v", mResp)
-	return c
 }
 
 // hierarchyTuples wires a standard test topology into FGA:

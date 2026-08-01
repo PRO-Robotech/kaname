@@ -24,7 +24,6 @@ package clients_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -32,22 +31,26 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/observability"
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
-// setupFGAOutboxDB spins up a Postgres testcontainer, runs the kacho-iam
-// migrations onto it, and returns a pgxpool aimed at the fresh DB with
+// setupFGAOutboxDB hands the caller its own migrated database on the package's
+// shared Postgres and returns a pgxpool aimed at it with
 // search_path = kacho_iam,public.
+//
+// It used to boot a container and replay the whole migration chain per call. The
+// caller still gets a database of its own — see internal/pgtest for why a clone of
+// a migrated template is the isolation a separate container gave. The LISTEN/NOTIFY
+// proofs below are unaffected: NOTIFY is per-database, so a notification raised in
+// one test's database is not visible in another's, exactly as before.
 func setupFGAOutboxDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	if testing.Short() {
@@ -55,26 +58,7 @@ func setupFGAOutboxDB(t *testing.T) *pgxpool.Pool {
 	}
 	ctx := context.Background()
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	dsn := pgtest.NewDB(t)
 
 	// Append search_path so unqualified SQL resolves to kacho_iam (parity with
 	// the production binary's DSN — see config.DSN()).

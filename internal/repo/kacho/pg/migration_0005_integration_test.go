@@ -26,7 +26,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -34,42 +33,27 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
-// startPostgresUpTo spins a fresh container, applies migrations up to and
-// including version `to`, and returns a connection pool.
+// startPostgresUpTo hands the caller an EMPTY database on the package's shared
+// Postgres, applies migrations up to and including version `to`, and returns a
+// connection pool.
 //
-// Mirrors `pg.NewTestPostgres` but stops short of the latest migration so
-// callers can seed pre-migration state, then call `applyOneMore(t, db)` to
-// advance to the migration under test.
+// It stops short of the latest migration so callers can seed pre-migration state,
+// then call `applyOneMore(t, db)` to advance to the migration under test. The
+// database therefore has to be EMPTY rather than a clone of the migrated template:
+// the starting point is the whole point. It used to be an empty CONTAINER, which
+// bought that same starting point at the price of a server start per test.
 func startPostgresUpTo(t *testing.T, to int64) (*pgxpool.Pool, *sql.DB, string) {
 	t.Helper()
 	ctx := context.Background()
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "?") {
-		dsn += "&" + optionsParam
-	} else {
-		dsn += "?" + optionsParam
-	}
+	dsn := appendSearchPathOptions(pgtest.NewEmptyDB(t))
 
 	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
