@@ -78,10 +78,10 @@ func ruleObjectTuplesWithTypeVerbs(subject string, verbs []string, fgaType, obje
 			if !domain.IsVerbOfType(v, typeVerbs) {
 				continue
 			}
-			if v == "update" {
+			if domain.NormalizeVerb(v) == "update" {
 				hasUpdate = true
 			}
-			add("v_" + v)
+			add("v_" + domain.NormalizeVerb(v))
 		}
 		// v_update ⟹ v_delete co-materialization (create.go:435 invariant): under the
 		// flat verb-bearing model a CRUD editor DELETES what it edits — an object-scoped
@@ -209,7 +209,7 @@ func scopeSelfTuplesWithTypeVerbs(subject, scopeType, scopeID string,
 			if !domain.IsVerbOfType(v, typeVerbs) {
 				continue
 			}
-			add("v_" + v)
+			add("v_" + domain.NormalizeVerb(v))
 		}
 	}
 	// Back-compat tier tuple — the write-authz / no-access-loss anchor (account/project).

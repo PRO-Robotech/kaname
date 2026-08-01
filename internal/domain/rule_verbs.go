@@ -33,7 +33,7 @@ var closedVerbIndex = func() map[string]struct{} {
 // materializes as a `v_<verb>` relation. A domain verb (start/stop/move/…) is NOT
 // closed — it carries access via the back-compat tier tuple, not a `v_<verb>`.
 func IsClosedVerb(verb string) bool {
-	_, ok := closedVerbIndex[strings.ToLower(verb)]
+	_, ok := closedVerbIndex[NormalizeVerb(verb)]
 	return ok
 }
 
@@ -46,13 +46,32 @@ func IsClosedVerb(verb string) bool {
 // отношением, которого у типа не существует. Пустой набор не принадлежит никому
 // (fail-closed): тип, не объявивший ничего, не получает ни одного `v_*`.
 func IsVerbOfType(verb string, typeVerbs []string) bool {
-	want := strings.ToLower(verb)
+	want := NormalizeVerb(verb)
+	if want == "" {
+		return false
+	}
 	for _, v := range typeVerbs {
-		if strings.ToLower(v) == want {
+		if NormalizeVerb(v) == want {
 			return true
 		}
 	}
 	return false
+}
+
+// NormalizeVerb — ЕДИНСТВЕННАЯ точка приведения имени глагола к канонической форме.
+//
+// Разрыв, который она закрывает, был двусторонним. Проверка принадлежности
+// приводила ВХОД, а индекс словаря строился ДОСЛОВНО — словарная запись с заглавной
+// буквой не нашлась бы никогда. И наоборот: имя отношения собиралось из АВТОРСКОГО
+// написания, поэтому написание, отличающееся регистром, проходило проверку и
+// адресовало отношение, которого в модели нет; владелец модели отвергает такую
+// запись окончательно, а отказ считается постоянным — строка навсегда блокирует
+// свою партицию очереди.
+//
+// Приведение ТОЖДЕСТВЕННО на всех существующих глаголах, поэтому ни одно отношение,
+// ни один кортеж и ни одна запись каталога не меняются.
+func NormalizeVerb(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }
 
 // ResolveVerbsAndTier expands a rule's authored verbs (verb `*` → ClosedVerbs) and
@@ -162,7 +181,7 @@ func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []strin
 // the nlb loadbalancer.operator / target_manager roles would emit editor on
 // listeners/targetGroups where legacy emitted viewer.
 func verbBackCompatTier(verb string) string {
-	switch strings.ToLower(verb) {
+	switch NormalizeVerb(verb) {
 	case "get", "list", "view", "watch", "describe", "read",
 		"gettargetstates", "listoperations":
 		return "viewer"

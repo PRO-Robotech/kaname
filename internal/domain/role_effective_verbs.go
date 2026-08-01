@@ -99,11 +99,13 @@ func (r Role) expandedVerbSet(lookup TypeVerbLookup) (set map[string]bool, wildc
 			if v == "*" {
 				wildcard = true
 				for _, c := range rule.ruleVerbSet(lookup) {
-					set[c] = true
+					set[NormalizeVerb(c)] = true
 				}
 				continue
 			}
-			set[v] = true
+			// Приведение ТОЙ ЖЕ точкой, что и на эмиссии: иначе одно слово в двух
+			// написаниях дало бы в превью две записи, а материализация — одну.
+			set[NormalizeVerb(v)] = true
 		}
 	}
 	return set, wildcard
