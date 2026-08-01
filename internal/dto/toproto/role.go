@@ -10,6 +10,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
 )
@@ -63,9 +64,9 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		Labels:          labelsToStringMap(r.Labels),
 		// redesign-2026 F6: honest effective-verb preview + catalog metadata
 		// (output-only derived; editor's effective set carries `delete*`).
-		AuthoredVerbs:  r.AuthoredVerbs(),
-		EffectiveVerbs: r.EffectiveVerbs(),
-		VerbNotes:      r.VerbNotes(),
+		AuthoredVerbs:  r.AuthoredVerbs(roleTypeVerbLookup),
+		EffectiveVerbs: r.EffectiveVerbs(roleTypeVerbLookup),
+		VerbNotes:      r.VerbNotes(roleTypeVerbLookup),
 		DisplayName:    r.DisplayName(),
 		Purpose:        r.Purpose(),
 		// Permissions intentionally omitted (internal compiled; not on the public
@@ -76,3 +77,27 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 func init() {
 	dto.RegTransfer(dto.Fn2Face(roleObj{}.toPb))
 }
+
+// roleTypeVerbLookup — набор глаголов ТИПА, который адресует правило роли.
+//
+// Тот же источник, из которого читает материализация, поэтому превью и эмиссия не
+// могут разойтись: пока превью держало собственный список, роль могла обещать не то,
+// что исполняется, и сверяющего у этого списка не было ни одного во всём дереве.
+//
+// Правило, не резолвящееся ни в один известный тип (в том числе `*`-форма), берёт
+// словарь, общий для всех ресурсов: иначе такая роль показала бы пустой набор и
+// выглядела бы ничего не дающей.
+var roleTypeVerbLookup = domain.WithCommonFallback(
+	func(module, resource string) ([]string, bool) {
+		fgaType, ok := authzmap.ObjectType(module, resource)
+		if !ok {
+			return nil, false
+		}
+		verbs := authzmap.VerbsOfType(fgaType)
+		if len(verbs) == 0 {
+			return nil, false
+		}
+		return verbs, true
+	},
+	authzmap.CommonVerbVocabulary(),
+)

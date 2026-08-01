@@ -61,9 +61,9 @@ func TestRole_IAM_1_15_EffectiveVerbs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := Role{Rules: Rules{{Module: "compute", Resources: []string{"instance"}, Verbs: tc.verbs}}}
-			assert.Equal(t, tc.wantAuthored, r.AuthoredVerbs(), "authoredVerbs")
-			assert.Equal(t, tc.wantEffective, r.EffectiveVerbs(), "effectiveVerbs")
-			notes := r.VerbNotes()
+			assert.Equal(t, tc.wantAuthored, r.AuthoredVerbs(lookupFive), "authoredVerbs")
+			assert.Equal(t, tc.wantEffective, r.EffectiveVerbs(lookupFive), "effectiveVerbs")
+			notes := r.VerbNotes(lookupFive)
 			if tc.wantDeleteNote {
 				assert.Equal(t, editorDeleteNote, notes["delete*"], "delete* note verbatim")
 			} else {
@@ -79,6 +79,6 @@ func TestRole_IAM_1_15_AuthoredVerbs_MultiRule(t *testing.T) {
 		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get", "list"}},
 		{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"create", "update"}},
 	}}
-	assert.Equal(t, []string{"get", "list", "create", "update"}, r.AuthoredVerbs())
-	assert.Equal(t, []string{"get", "list", "create", "update", "delete*"}, r.EffectiveVerbs())
+	assert.Equal(t, []string{"get", "list", "create", "update"}, r.AuthoredVerbs(lookupFive))
+	assert.Equal(t, []string{"get", "list", "create", "update", "delete*"}, r.EffectiveVerbs(lookupFive))
 }
