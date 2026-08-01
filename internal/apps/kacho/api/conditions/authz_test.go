@@ -148,7 +148,10 @@ func TestListAuthz_EmptyFolder_NonAdmin_NoEnumeration(t *testing.T) {
 		sampleCond("cnd000000000000tenaA", "prj_a"),
 		sampleCond("cnd000000000000tenaB", "prj_b"),
 	)
-	h := NewHandler(newSvc(repo, nil)) // no relations → not a cluster-admin
+	// no relations → not a cluster-admin. Порт видимости подан: его ОТСУТСТВИЕ —
+	// отдельный контракт («модель не сконфигурирована» → отказ), и проверяется
+	// он своим случаем, а не побочно здесь.
+	h := NewHandler(newSvc(repo, nil)).WithVisibilityChecker(&visibilityStub{})
 
 	resp, err := h.List(userCtx("usr_scanner"), &iamv1.ListConditionsRequest{ProjectId: ""})
 
@@ -158,13 +161,20 @@ func TestListAuthz_EmptyFolder_NonAdmin_NoEnumeration(t *testing.T) {
 }
 
 // A viewer on the requested folder lists that folder's conditions only.
+//
+// Обе полосы теперь ОБЯЗАТЕЛЬНЫ и проверяются вместе: проектная (свой проект, а
+// не чужой) и объектная (внутри проекта — только выданные условия). До сужения
+// эта проба проходила при одной лишь проектной, поэтому за «видит своё»
+// пряталось «видит всё своего проекта».
 func TestListAuthz_ScopedFolder_ViewerGranted(t *testing.T) {
 	repo := repoWith(
 		sampleCond("cnd000000000000scpA1", "prj_a"),
 		sampleCond("cnd000000000000scpB1", "prj_b"),
 	)
 	checker := allowRel("viewer", "project:prj_a")
-	h := NewHandler(newSvc(repo, checker))
+	h := NewHandler(newSvc(repo, checker)).WithVisibilityChecker(&visibilityStub{
+		visible: map[string]bool{"iam_condition:cnd000000000000scpA1": true},
+	})
 
 	resp, err := h.List(userCtx("usr_a"), &iamv1.ListConditionsRequest{ProjectId: "prj_a"})
 
@@ -173,15 +183,53 @@ func TestListAuthz_ScopedFolder_ViewerGranted(t *testing.T) {
 	assert.Equal(t, "prj_a", resp.GetConditions()[0].GetProjectId())
 }
 
+// Проектной области НЕДОСТАТОЧНО: участник проекта без per-object гранта не
+// видит условие своего проекта.
+//
+// Это и есть починенный дефект, и он утверждается положительно, а не подразумевается:
+// раньше тот же вход отдавал строку. `iam_condition.viewer` — DIRECT userset (каскад
+// от проекта идёт только через super_admin), поэтому доступ рядового читателя даёт
+// материализация привязки в per-object tuple — ровно как у девяти остальных
+// ресурсов iam.
+func TestListAuthz_ScopedFolder_ProjectViewerWithoutObjectGrant_SeesNothing(t *testing.T) {
+	repo := repoWith(sampleCond("cnd000000000000scpA1", "prj_a"))
+	checker := allowRel("viewer", "project:prj_a")
+	h := NewHandler(newSvc(repo, checker)).WithVisibilityChecker(&visibilityStub{})
+
+	resp, err := h.List(userCtx("usr_a"), &iamv1.ListConditionsRequest{ProjectId: "prj_a"})
+
+	require.NoError(t, err)
+	assert.Empty(t, resp.GetConditions(),
+		"проектная область отвечает «вправе листать проект», а не «вправе видеть эти объекты»")
+}
+
 // A caller with no grant on the requested folder gets an empty page (no leak).
 func TestListAuthz_ScopedFolder_Unauthorized_Empty(t *testing.T) {
 	repo := repoWith(sampleCond("cnd000000000000scpC1", "prj_a"))
-	h := NewHandler(newSvc(repo, nil))
+	h := NewHandler(newSvc(repo, nil)).WithVisibilityChecker(&visibilityStub{})
 
 	resp, err := h.List(userCtx("usr_x"), &iamv1.ListConditionsRequest{ProjectId: "prj_a"})
 
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetConditions())
+}
+
+// Порт видимости не подан — List ОТКАЗЫВАЕТ, а не отдаёт страницу.
+//
+// «Спросить негде» есть состояние посадки, а не ответ модели. Привяжи мы отказ к
+// наличию порта — посадка без него отдавала бы все условия проекта кому угодно,
+// и держалось бы это лишь на страже старта, то есть до первой конфигурации,
+// которая его не включила (формулировка соседей: nlb authzfilter, storage
+// AllowedOnObject, vpc nicinternal).
+func TestListAuthz_NoVisibilityPort_Refuses(t *testing.T) {
+	repo := repoWith(sampleCond("cnd000000000000scpA1", "prj_a"))
+	checker := allowRel("viewer", "project:prj_a")
+	h := NewHandler(newSvc(repo, checker)) // порт НЕ подан
+
+	_, err := h.List(userCtx("usr_a"), &iamv1.ListConditionsRequest{ProjectId: "prj_a"})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
 // ── Create / Update / Delete ─────────────────────────────────────────────────
