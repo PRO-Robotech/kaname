@@ -39,16 +39,22 @@ import (
 //     `vpc.network.admin` across his account, and with a cascade that subject would
 //     own every resource of every project in it.
 //   - read/write tiers below `admin` must NOT, so `edit` / `view` stay harmless.
+//
+// anchorTypeVerbs — набор глаголов ТИПА якоря (account/project) на этой стадии.
+// Объявлен литералом НАМЕРЕННО: платформенного словаря больше нет, набор есть
+// атрибут типа, а внешний тестовый пакет домена таблицу звать не вправе.
+var anchorTypeVerbs = []string{"get", "list", "create", "update", "delete"}
+
 func TestScopeSelfAdmin_OnlyAccountWideRolesBecomeCascadeSource(t *testing.T) {
 	// tierOnAccountScope reproduces the projection the reconciler performs for an
 	// account-scoped, all-in-scope binding: ScopeSelfVerbs over the scope's resource
 	// type, then the tier those verbs resolve to. "" == no scope-self tuple at all.
 	tierOnAccountScope := func(rs domain.Rules) string {
-		verbs := rs.ScopeSelfVerbs("account", domain.ClosedVerbs)
+		verbs := rs.ScopeSelfVerbs("account", anchorTypeVerbs)
 		if verbs == nil {
 			return ""
 		}
-		_, tier := domain.ResolveVerbsAndTier(verbs, domain.ClosedVerbs)
+		_, tier := domain.ResolveVerbsAndTier(verbs, anchorTypeVerbs)
 		return tier
 	}
 
@@ -130,9 +136,9 @@ func TestScopeSelfAdmin_ProjectScopeIsNotACascadeSource(t *testing.T) {
 	superuser := domain.Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}
 
 	// At project scope the superuser shape does materialize on the project anchor…
-	verbs := superuser.ScopeSelfVerbs("project", domain.ClosedVerbs)
+	verbs := superuser.ScopeSelfVerbs("project", anchorTypeVerbs)
 	require.NotNil(t, verbs, "the superuser shape projects onto its project anchor")
-	_, tier := domain.ResolveVerbsAndTier(verbs, domain.ClosedVerbs)
+	_, tier := domain.ResolveVerbsAndTier(verbs, anchorTypeVerbs)
 	require.Equal(t, "admin", tier)
 
 	// …and that is exactly why the model must not treat `project#admin` as a
@@ -145,12 +151,12 @@ func TestScopeSelfAdmin_ProjectScopeIsNotACascadeSource(t *testing.T) {
 	// project-directed authority can climb to level 3.
 	projectAdmin := domain.Rules{{Module: "iam", Resources: []string{"project"}, Verbs: []string{"*"}}}
 
-	pv := projectAdmin.ScopeSelfVerbs("project", domain.ClosedVerbs)
+	pv := projectAdmin.ScopeSelfVerbs("project", anchorTypeVerbs)
 	require.NotNil(t, pv, "iam.project.admin must project onto the project anchor")
-	_, pTier := domain.ResolveVerbsAndTier(pv, domain.ClosedVerbs)
+	_, pTier := domain.ResolveVerbsAndTier(pv, anchorTypeVerbs)
 	require.Equal(t, "admin", pTier, "iam.project.admin is admin-tier on its own project")
 
-	require.Nil(t, projectAdmin.ScopeSelfVerbs("account", domain.ClosedVerbs),
+	require.Nil(t, projectAdmin.ScopeSelfVerbs("account", anchorTypeVerbs),
 		"iam.project.admin must project NOTHING onto the account anchor — otherwise a "+
 			"project-directed role would become a level-3 cascade source and hand over the account")
 }

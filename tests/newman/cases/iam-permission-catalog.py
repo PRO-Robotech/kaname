@@ -12,7 +12,7 @@ authenticated principal may read it, anonymous is fail-closed.
 
 Source of truth (the catalog projects EXACTLY this — never more):
   kacho-iam authzmap.objectTypes (module.resource keys) + TypeHasVerbRelations
-  + domain.ClosedVerbs + a curated hasListEndpoint table. No DB, no migration.
+  + authzmap.CommonVerbVocabulary() + a curated hasListEndpoint table. No DB, no migration.
 
 Covered scenarios:
   - authenticated GET → 200, modules[]/resources[]/closedVerbs/wildcardPolicy

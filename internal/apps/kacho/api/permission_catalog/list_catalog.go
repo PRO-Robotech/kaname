@@ -8,7 +8,7 @@
 // the grantable-token taxonomy (modules → resources + per-type editor flags),
 // the closed verb set, and the wildcard policy. It is a PROJECTION FROM CODE —
 // authzmap.Catalog() (the closed objectTypes table) + authzmap.TypeHasVerbRelations
-// + domain.ClosedVerbs + a curated hasListEndpoint table — there is NO database,
+// + authzmap.CommonVerbVocabulary() + a curated hasListEndpoint table — there is NO database,
 // NO migration, NO repo/pg layer. The catalog is immutable at runtime; it
 // extends only with a new backend release that adds a (module,resource) pair to
 // objectTypes (lockstep with fga_model.fga), which then appears automatically
@@ -33,7 +33,9 @@ import (
 type Catalog struct {
 	// Modules — ordered grantable modules, each with its grantable resources.
 	Modules []Module
-	// ClosedVerbs — mirror of domain.ClosedVerbs (fixed order).
+	// ClosedVerbs — набор, ОБЩИЙ для всех ресурсов, в каноническом порядке.
+	// Имя поля сохраняет форму провода (`closed_verbs`); его смысл — пересечение
+	// наборов типов, а не платформенный словарь, которого больше нет.
 	ClosedVerbs []string
 	// Wildcard — platform-wide wildcard policy flags.
 	Wildcard WildcardPolicy
@@ -119,10 +121,22 @@ func (u *ListPermissionCatalogUseCase) Execute(ctx context.Context) (Catalog, er
 		modules[i].Resources = append(modules[i].Resources, res)
 	}
 
-	// closedVerbs — copy domain.ClosedVerbs (fixed order); never alias the
-	// package-level slice so callers cannot mutate the source of truth.
-	closedVerbs := make([]string, len(domain.ClosedVerbs))
-	copy(closedVerbs, domain.ClosedVerbs)
+	// closedVerbs — набор, ОБЩИЙ для всех ресурсов: ПЕРЕСЕЧЕНИЕ наборов всех типов.
+	//
+	// Прежде поле копировало глобальный словарь глаголов. Пока набор был одинаков у
+	// всех типов, значения совпадали; с набором У ТИПА совпадение перестаёт быть
+	// определением, и поле обязано сказать, что именно оно показывает. Показывает
+	// оно общее — то, что даёт ЛЮБОЙ ресурс. С появлением типа с расширенным набором
+	// пересечение сузится, и это верно: обещать глагол, которого часть ресурсов не
+	// несёт, поле не вправе. Словарь ПО РЕСУРСУ вводит отдельная под-фаза.
+	//
+	// Порядок — КАНОНИЧЕСКИЙ, той же точкой, что у превью роли: он часть контракта
+	// поля, его читают существующие клиенты. Пересечение приходит отсортированным по
+	// алфавиту, поэтому без этого приведения смена источника молча переставила бы
+	// значения местами.
+	//
+	// CommonVerbVocabulary уже возвращает свежую копию — источник истины не алиасится.
+	closedVerbs := domain.OrderVerbsForDisplay(authzmap.CommonVerbVocabulary())
 
 	return Catalog{
 		Modules:     modules,

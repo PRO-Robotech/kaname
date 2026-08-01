@@ -23,12 +23,17 @@ import (
 // тождественно на всех существующих глаголах ⇒ ни одно отношение, ни один кортеж и
 // ни одна запись каталога не меняются. Перечислением, не образцом.
 func TestNormalizeVerb_IsIdentityOnPlatformVerbs(t *testing.T) {
-	require.NotEmpty(t, ClosedVerbs, "перечислять нечего — предпосылка сломана")
-	for _, v := range ClosedVerbs {
+	// Перечисление по ДЕРЕВУ живёт в пакете таблицы
+	// (authzmap: TestNormalizeVerb_IsIdentityOnEveryDeclaredVerb) — там оно
+	// охватывает наборы всех типов. Здесь — быстрый доменный дубль на той пятёрке,
+	// которую типы объявляют сегодня; домен таблицу звать не вправе.
+	verbs := []string{"get", "list", "create", "update", "delete"}
+	require.NotEmpty(t, verbs, "перечислять нечего — предпосылка сломана")
+	for _, v := range verbs {
 		require.Equalf(t, v, NormalizeVerb(v),
 			"приведение изменило существующий глагол %q — правка перестала быть безопасной", v)
 	}
-	t.Logf("перепись: глаголов проверено на тождественность: %d", len(ClosedVerbs))
+	t.Logf("перепись: глаголов проверено на тождественность: %d", len(verbs))
 }
 
 // TestNormalizeVerb_FoldsSpellingDifferences — парный положительный: приведение

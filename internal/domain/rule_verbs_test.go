@@ -19,9 +19,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// fullClosedVerbs is the closed CRUD verb-set a `*` verb expands to.
-func fullClosedVerbs() []string {
-	out := append([]string(nil), ClosedVerbs...)
+// scopeTypeVerbs — набор глаголов ТИПА якоря (account/project) на этой стадии.
+// Объявлен здесь литералом НАМЕРЕННО: тест домена не вправе звать таблицу, а
+// платформенного словаря больше не существует — набор есть атрибут типа.
+var scopeTypeVerbs = []string{"get", "list", "create", "update", "delete"}
+
+// fullAnchorVerbs — набор типа якоря, отсортированно (ожидаемое разворота `*`).
+func fullAnchorVerbs() []string {
+	out := append([]string(nil), scopeTypeVerbs...)
 	sort.Strings(out)
 	return out
 }
@@ -40,13 +45,13 @@ func TestRules_ScopeSelfVerbs(t *testing.T) {
 			name:          "full-wildcard *.* on account → full closed verb-set",
 			rules:         Rules{{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}}},
 			scopeResource: "account",
-			want:          fullClosedVerbs(),
+			want:          fullAnchorVerbs(),
 		},
 		{
 			name:          "full-wildcard *.* on project → full closed verb-set",
 			rules:         Rules{{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}}},
 			scopeResource: "project",
-			want:          fullClosedVerbs(),
+			want:          fullAnchorVerbs(),
 		},
 		{
 			// (b) direct iam.account rule on an account-scoped binding → its authored
@@ -101,7 +106,7 @@ func TestRules_ScopeSelfVerbs(t *testing.T) {
 				{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}},
 			},
 			scopeResource: "account",
-			want:          fullClosedVerbs(),
+			want:          fullAnchorVerbs(),
 		},
 		{
 			// (g) empty scopeResource (cluster — no per-resource iam rule) with a
@@ -115,7 +120,7 @@ func TestRules_ScopeSelfVerbs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.rules.ScopeSelfVerbs(tt.scopeResource, ClosedVerbs)
+			got := tt.rules.ScopeSelfVerbs(tt.scopeResource, scopeTypeVerbs)
 			if tt.want == nil {
 				assert.Empty(t, got, "expected no scope-self verbs (fail-closed)")
 				return

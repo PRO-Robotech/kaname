@@ -12,35 +12,10 @@ package domain
 
 import "strings"
 
-// ClosedVerbs — the closed per-verb set the FGA model materializes as `v_*`
-// relations. A rule's verb `*` expands to exactly this set (O-3: bounded, never an
-// open `*`-relation). Order is fixed for deterministic emission.
-//
-// DEPRECATED (XC-3 S1Ф2): набор глаголов — атрибут ТИПА, а не платформы. Живые
-// пути эмиссии читают набор своего типа (IsVerbOfType / ResolveVerbsAndTier с
-// параметром); переменная остаётся до снятия последнего потребителя.
-var ClosedVerbs = []string{"get", "list", "create", "update", "delete"}
-
-var closedVerbIndex = func() map[string]struct{} {
-	m := make(map[string]struct{}, len(ClosedVerbs))
-	for _, v := range ClosedVerbs {
-		m[v] = struct{}{}
-	}
-	return m
-}()
-
-// IsClosedVerb reports whether verb is in the closed CRUD set the FGA model
-// materializes as a `v_<verb>` relation. A domain verb (start/stop/move/…) is NOT
-// closed — it carries access via the back-compat tier tuple, not a `v_<verb>`.
-func IsClosedVerb(verb string) bool {
-	_, ok := closedVerbIndex[NormalizeVerb(verb)]
-	return ok
-}
-
 // IsVerbOfType сообщает, объявляет ли ТИП этот глагол, то есть материализуется ли
 // он как отношение `v_<глагол>` НА ЭТОМ типе.
 //
-// Заменяет IsClosedVerb на путях эмиссии. Разница не косметическая: глобальный
+// Заменила снятый глобальный словарь глаголов на путях эмиссии. Разница не косметическая: глобальный
 // словарь отвечал одинаково для всех типов, поэтому «у этого типа такого глагола
 // нет» было невыразимо — и правило, называющее соседний глагол, порождало кортеж с
 // отношением, которого у типа не существует. Пустой набор не принадлежит никому
@@ -74,7 +49,7 @@ func NormalizeVerb(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }
 
-// ResolveVerbsAndTier expands a rule's authored verbs (verb `*` → ClosedVerbs) and
+// ResolveVerbsAndTier expands a rule's authored verbs (verb `*` → набор ТИПА) and
 // derives the per-RULE back-compat tier (strongest verb-class among the rule's
 // verbs), mapped the SAME way the consumer authz-gate resolves an action:
 // get/list → viewer ; create/update (+ domain mutations) → editor ; delete → admin.

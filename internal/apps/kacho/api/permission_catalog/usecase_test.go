@@ -4,7 +4,7 @@
 // usecase_test.go — Permission Catalog unit/handler tests.
 //
 // No Postgres: the catalog is a PROJECTION FROM CODE (authzmap.Catalog +
-// authzmap.TypeHasVerbRelations + domain.ClosedVerbs + a curated
+// authzmap.TypeHasVerbRelations + authzmap.CommonVerbVocabulary() + a curated
 // hasListEndpoint table). Tests exercise the thin handler end-to-end (handler
 // → use-case → proto) so the on-the-wire proto shape is asserted, and the
 // anonymous fail-closed guard is covered through the public RPC entry.
@@ -13,7 +13,7 @@
 //
 //	anonymous → fail-closed (PermissionDenied/Unauthenticated)
 //	catalog (module,resource) set == authzmap.Catalog() exactly (2-way) +
-//	    closedVerbs == domain.ClosedVerbs (set+order)
+//	    closedVerbs == набор, общий для всех ресурсов, в каноническом порядке
 //	hasVerbRelations == authzmap.TypeHasVerbRelations per type
 //	geo.* / compute.diskType absent; no `geo` module
 //	wildcardPolicy flags (verb-* grantable in custom; module/resource-* system-only)
@@ -138,17 +138,41 @@ func TestListPermissionCatalog_SetEqualsObjectTypes(t *testing.T) {
 	}
 }
 
-// TestListPermissionCatalog_ClosedVerbsEqualDomainClosedVerbs — closedVerbs
-// == domain.ClosedVerbs (set + order).
-func TestListPermissionCatalog_ClosedVerbsEqualDomainClosedVerbs(t *testing.T) {
+// TestListPermissionCatalog_ClosedVerbsAreTheCommonSetInCanonicalOrder — публичное
+// поле: СОСТАВ есть набор, общий для всех ресурсов; ПОРЯДОК — канонический и
+// зафиксированный.
+//
+// Ожидаемое записано ЛИТЕРАЛОМ намеренно. Сверка поля с его собственным источником
+// зеленела бы при любом порядке и при любой его смене — форма проверки без
+// содержания. Порядок здесь часть контракта: его читают существующие клиенты и
+// чёрноящичный кейс, поэтому он пинится наблюдаемым значением, а не выражением.
+func TestListPermissionCatalog_ClosedVerbsAreTheCommonSetInCanonicalOrder(t *testing.T) {
 	resp := callCatalog(t)
 	got := resp.GetClosedVerbs()
-	if len(got) != len(domain.ClosedVerbs) {
-		t.Fatalf("closedVerbs len=%d, domain.ClosedVerbs len=%d", len(got), len(domain.ClosedVerbs))
+
+	want := []string{"get", "list", "create", "update", "delete"}
+	if len(got) != len(want) {
+		t.Fatalf("closedVerbs=%v, want %v", got, want)
 	}
-	for i, v := range domain.ClosedVerbs {
+	for i, v := range want {
 		if got[i] != v {
-			t.Errorf("closedVerbs[%d]=%q, want %q (order is fixed)", i, got[i], v)
+			t.Errorf("closedVerbs[%d]=%q, want %q (порядок — часть контракта поля)", i, got[i], v)
+		}
+	}
+
+	// СОСТАВ обязан совпадать с пересечением наборов типов: порядок пинится выше,
+	// состав — здесь, чтобы литерал не разошёлся с моделью незамеченным.
+	common := authzmap.CommonVerbVocabulary()
+	if len(common) != len(want) {
+		t.Fatalf("общий словарь %v разошёлся по составу с ожидаемым %v", common, want)
+	}
+	inWant := map[string]bool{}
+	for _, v := range want {
+		inWant[v] = true
+	}
+	for _, v := range common {
+		if !inWant[v] {
+			t.Errorf("общий словарь несёт %q, которого нет в ожидаемом составе %v", v, want)
 		}
 	}
 }

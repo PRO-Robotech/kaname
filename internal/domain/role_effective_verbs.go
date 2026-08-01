@@ -133,6 +133,22 @@ func orderVerbs(set map[string]bool) []string {
 	return append(out, extra...)
 }
 
+// OrderVerbsForDisplay возвращает глаголы в КАНОНИЧЕСКОМ порядке показа: сперва
+// старшинство (get/list/create/update/delete), затем всё остальное — стабильно, по
+// алфавиту.
+//
+// Точка порядка ОДНА на всё превью и на публичное поле каталога. Порядок этих
+// поверхностей — часть контракта: его читают существующие клиенты. Пока он жил
+// внутри превью, поле каталога брало порядок из своего источника — и смена
+// источника на пересечение наборов молча переставила бы значения по алфавиту.
+func OrderVerbsForDisplay(verbs []string) []string {
+	set := make(map[string]bool, len(verbs))
+	for _, v := range verbs {
+		set[NormalizeVerb(v)] = true
+	}
+	return orderVerbs(set)
+}
+
 // AuthoredVerbs is the deduped, canonically-ordered union of the role's rule verbs
 // (`*` expands to the verb set of the addressed type). Empty for a label-only /
 // rules-less role.
