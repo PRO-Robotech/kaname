@@ -5,9 +5,15 @@ package role
 
 // rules_catalog.go — the grantable-token gate for an authored role's rules[].
 //
-// `domain.Rule.Validate` closes the MODULE segment (domain.IsKnownModule) and the
-// VERB segment (domain.ClosedVerbs), but the RESOURCE segment only against a token
-// grammar. That left one silent-failure class open:
+// `domain.Rule.Validate` closes the MODULE segment (domain.IsKnownModule). Ни
+// сегмент РЕСУРСА, ни сегмент ГЛАГОЛА словарём НЕ закрыты: оба проверяются лишь
+// грамматикой токена (плюс мощность и одиночность подстановки — `validateVerbs`).
+// Прежняя редакция этого абзаца утверждала, что сегмент глагола закрыт словарём
+// домена, и тем самым ОТВЕЧАЛА читателю на вопрос, идти ли проверять. Словаря там
+// не было; он вводится отдельной под-фазой (XC-3 S2), и до тех пор глагол вне
+// набора своего типа просто не материализуется — молча, без сигнала автору роли.
+//
+// Из двух незакрытых сегментов гейт ниже закрывает РЕСУРС. Класс тихого отказа:
 //
 //	Role.Create(rules=[{module:"compute", resources:["instances"], verbs:["get"]}])
 //	  → 200 (grammar-valid token, known module)

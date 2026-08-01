@@ -24,9 +24,10 @@ import (
 // emit semantics (access_binding.emitNamesRule): the tier + closed per-verb v_*
 // relations are derived from the RULE'S VERBS (domain.ResolveVerbsAndTier), NOT
 // from the role's compiled permissions (ARM_LABELS rules are excluded from
-// CompileRules). v_<verb> tuples are emitted ONLY when (a) the FGA type
-// carries v_* relations (TypeHasVerbRelations) AND (b) the verb is in the closed
-// CRUD set; otherwise access is carried by the back-compat tier tuple. ok=false
+// CompileRules). v_<verb> tuples are emitted ONLY when (a) ТИП объявляет
+// непустой набор `v_*` AND (b) глагол входит в набор ИМЕННО ЭТОГО типа
+// (domain.IsVerbOfType) — не в платформенный словарь: набор есть атрибут типа.
+// Иначе доступ несёт ярусный кортеж. ok=false
 // when the (objectType) has no FGA object type (a typo'd type never grants —
 // fail-closed). The subject is the binding's subject (already FGA-formatted).
 func ruleObjectTuples(subject string, verbs []string, objectType, objectID string) ([]domain.MembershipTuple, bool) {
@@ -110,7 +111,13 @@ func ruleObjectTuplesWithTypeVerbs(subject string, verbs []string, fgaType, obje
 		}
 	}
 	// Back-compat tier tuple — carries domain-verb access + keeps tier-based Check
-	// call-sites working. Always emitted (parity with B emitNamesRule).
+	// call-sites working.
+	//
+	// Условие у него есть, и прежняя редакция комментария его умалчивала: ярусный
+	// кортеж эмитится, только если тип ВООБЩЕ резолвится (иначе вызывающий получил
+	// ok=false выше и ни одного кортежа). Внутри же этой ветки — да, безусловно: он
+	// не зависит от набора глаголов типа и остаётся носителем доступа для доменного
+	// глагола, у которого отношения `v_*` нет по построению.
 	add(tier)
 	return out, true
 }
