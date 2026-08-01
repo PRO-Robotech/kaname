@@ -224,6 +224,14 @@ func mapErr(err error) error {
 	if stderrors.Is(err, iamerr.ErrInvalidArg) {
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
 	}
+	// Недоступное хранилище прав — повторяемый отказ соседа, а не наша поломка.
+	// Ветви здесь не было, поэтому оба отправителя этого sentinel'а (проверка
+	// проектной области и сужение страницы) доезжали до вызывающего как INTERNAL,
+	// то есть как «повторять бессмысленно». Общий shared.MapRepoErr эту ветвь
+	// несёт — расходился именно локальный.
+	if stderrors.Is(err, iamerr.ErrUnavailable) {
+		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+	}
 	if strings.HasPrefix(err.Error(), "Illegal argument") {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
