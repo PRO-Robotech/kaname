@@ -72,10 +72,17 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
-// closedVerbRelations — the per-verb relation set the emitter materializes
-// (mirror of access_binding.closedVerbs, intentionally duplicated here so the
-// gate has no dependency on the emitter package and fails independently).
-var closedVerbRelations = []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
+// XC-3 S1Ф2: прежде здесь лежал литеральный список `v_*`, продублированный ради
+// независимости гейта от эмиттера. Он выражал платформенное допущение «набор
+// глаголов одинаков у всех типов», поэтому не мог выразить тип с иным набором и
+// краснел бы на законном расширении. Список СНЯТ: глагольные отношения опознаются
+// по приставке и берутся ИЗ МОДЕЛИ потипово (modelFacts.verbRelationsOfType).
+//
+// Заявленная независимость при этом СОХРАНЕНА, и формулировать её надо точно:
+// ожидаемое значение гейта не выводится из словаря ЭМИТТЕРА — оно выводится из
+// модели. Пакетной независимости у этого тестового пакета нет и не было (соседние
+// файлы того же пакета импортируют домен), поэтому прежняя формулировка «гейт не
+// зависит от пакета эмиттера» была неточна уже до этой правки.
 
 // tierRelations / membershipRelation — the non-verb relations a tenant may
 // legitimately expand ("who can do X on object Y"). Mirror of the model's tier
@@ -217,25 +224,23 @@ func parseModelDSL(dsl string) modelFacts {
 	return f
 }
 
-// hasFullVerbSet reports whether the type defines ALL closed v_* relations.
-func (f modelFacts) hasFullVerbSet(typ string) bool {
-	rels := f.relations[typ]
-	for _, v := range closedVerbRelations {
-		if !rels[v] {
-			return false
+// verbRelationsOfType — имена `v_*`, которые модель определяет У ЭТОГО типа,
+// отсортированно. Опознание по приставке, а не по литеральному списку: список
+// выражал бы допущение «набор одинаков у всех» и краснел бы на законном расширении.
+func (f modelFacts) verbRelationsOfType(typ string) []string {
+	var out []string
+	for rel := range f.relations[typ] {
+		if strings.HasPrefix(rel, "v_") {
+			out = append(out, rel)
 		}
 	}
-	return true
+	sort.Strings(out)
+	return out
 }
 
 // hasAnyVerbRelation reports whether the type defines AT LEAST one v_* relation.
 func (f modelFacts) hasAnyVerbRelation(typ string) bool {
-	for _, v := range closedVerbRelations {
-		if f.relations[typ][v] {
-			return true
-		}
-	}
-	return false
+	return len(f.verbRelationsOfType(typ)) > 0
 }
 
 // allRelationNames returns every relation name defined anywhere in the model.
@@ -291,9 +296,11 @@ func TestDrift_VerbBearingTypesHaveFullSet(t *testing.T) {
 				"tier-only objectType %q unexpectedly defines a v_* relation in the model (update tierOnlyObjectTypes / guard)", ot)
 			continue
 		}
-		// D-2: resource-type must define the FULL closed per-verb set.
-		require.Truef(t, f.hasFullVerbSet(ot),
-			"resource objectType %q is missing one or more of %v in the model (a CRUD verb would emit an unsatisfiable tuple)", ot, closedVerbRelations)
+		// D-2: у ресурсного типа модель обязана определять НЕПУСТОЙ набор `v_*`.
+		// Какой именно — требует D-2b (TestDrift_TypeVerbSetsMatchModelExactly),
+		// потому что набор есть атрибут ТИПА и «полнота» больше не платформенная.
+		require.NotEmptyf(t, f.verbRelationsOfType(ot),
+			"resource objectType %q defines no v_* relation in the model (a CRUD verb would emit an unsatisfiable tuple)", ot)
 	}
 }
 
@@ -314,13 +321,10 @@ func TestDrift_TypeVerbSetsMatchModelExactly(t *testing.T) {
 
 	checked := 0
 	for _, ot := range types {
-		want := []string{}
-		for rel := range f.relations[ot] {
-			if strings.HasPrefix(rel, "v_") {
-				want = append(want, rel)
-			}
+		want := f.verbRelationsOfType(ot)
+		if want == nil {
+			want = []string{}
 		}
-		sort.Strings(want)
 		got := authzmap.VerbRelationsOfType(ot)
 		if got == nil {
 			got = []string{}
@@ -343,7 +347,7 @@ func TestDrift_TypeVerbSetsMatchModelExactly(t *testing.T) {
 func TestDrift_GuardMatchesModel(t *testing.T) {
 	f := parseModel(t)
 	for _, ot := range catalogObjectTypes(t) {
-		modelHasVerbs := f.hasFullVerbSet(ot)
+		modelHasVerbs := f.hasAnyVerbRelation(ot)
 		guard := authzmap.TypeHasVerbRelations(ot)
 		require.Equalf(t, modelHasVerbs, guard,
 			"TypeHasVerbRelations(%q)=%v but model full-v_*-set=%v — emission guard drifted from the canonical model", ot, guard, modelHasVerbs)
@@ -418,10 +422,16 @@ func TestDrift_ExpandableRelationsMatchModel(t *testing.T) {
 	f := parseModel(t)
 	modelRelations := f.allRelationNames()
 
+	// Глагольная часть ВЫВОДИТСЯ: объединение наборов `v_*` каталожных типов.
+	// Литеральный список здесь означал бы, что гейт краснеет на законном расширении
+	// набора одного типа — то есть сторожил бы платформенное допущение, а не модель.
 	want := map[string]bool{}
-	for _, v := range closedVerbRelations {
-		want[v] = true
+	for _, ot := range catalogObjectTypes(t) {
+		for _, rel := range f.verbRelationsOfType(ot) {
+			want[rel] = true
+		}
 	}
+	require.NotEmpty(t, want, "объединение наборов пусто — предпосылка гейта сломана")
 	for _, v := range tierRelations {
 		want[v] = true
 	}

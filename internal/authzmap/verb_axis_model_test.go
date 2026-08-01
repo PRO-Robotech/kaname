@@ -24,22 +24,15 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // emitterVerbRelations — какие `v_*` эмиттер написал бы НА ЭТОМ типе.
 //
-// S1Ф1: набор глобален и гейтится булевым предикатом — форма, которую фаза Ф2
-// заменяет на набор-у-типа.
+// S1Ф2: набор читается У ТИПА. Сменилась ТОЛЬКО эта функция — утверждение ниже не
+// тронуто ни на строку: гейт остался той же проверкой с другой правой частью. В
+// этом и был смысл выносить правую часть отдельно.
 func emitterVerbRelations(fgaType string) []string {
-	if !authzmap.TypeHasVerbRelations(fgaType) {
-		return nil
-	}
-	out := make([]string, 0, len(domain.ClosedVerbs))
-	for _, v := range domain.ClosedVerbs {
-		out = append(out, "v_"+v)
-	}
-	return out
+	return authzmap.VerbRelationsOfType(fgaType)
 }
 
 // readCanonicalModel читает каноническую модель тем же путём, что и гейт дрейфа
