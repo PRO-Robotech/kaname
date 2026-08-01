@@ -8,7 +8,7 @@ MIGRATOR_BIN   := kacho-migrator
 MIGRATOR_CMD   := ./cmd/migrator
 IMAGE          := kacho-iam:dev
 
-.PHONY: build build-migrator test test-short vet lint docker generate
+.PHONY: build build-migrator test test-short vet lint docker generate audit-list-filter
 .PHONY: proto-install-plugins proto-vendor proto-lint proto-gen
 
 build:
@@ -32,6 +32,32 @@ vet:
 
 lint:
 	golangci-lint run ./...
+
+# audit-list-filter — CI gate for the public List<Resource> surface: a caller must
+# receive only the rows it may see (per-object `viewer ∪ v_list` over the page just
+# read), not every row of its project.
+#
+# iam carries the largest narrowable List surface on the platform — ten resources
+# declare List, against seven in vpc — and was the ONLY such service outside this
+# gate: the CI step looped over compute, nlb, registry, storage and vpc. The blind
+# spot sat exactly where the subject is densest, and the first run proved it: three
+# findings, one of them a real gap (ConditionsService/List handed back the whole
+# project page while Get/Update/Delete of the same conditions gate per object).
+#
+# The check parses the tree, so a resource is recognised by what its declaration IS —
+# a package declaring `List` on the transport type — and never by which file holds
+# it; see tools/listfiltergate for the whole contract.
+#
+# The run always prints its census (files, packages, resources, checked,
+# whitelisted): "zero findings" must be distinguishable from "zero read", so a tree
+# the gate could not open is a finding, not an OK. The two exclusions live in
+# tools/audit-list-filter.sh next to the reason for each, and an exclusion with
+# nothing left to exclude is a finding too.
+#
+# Invoked by CI as `make -C services/iam audit-list-filter`; that it is invoked at
+# all is locked by services/iam/tools/auditlistfilter/ci_wiring_test.go.
+audit-list-filter:
+	@./tools/audit-list-filter.sh
 
 # Общая `operations`-таблица из kacho-corelib/migrations/common/0001_operations.sql
 # встроена inline в internal/migrations/0001_initial.sql под схемой kacho_iam.
