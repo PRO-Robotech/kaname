@@ -4,18 +4,20 @@
 package audit_test
 
 // testhelpers_test.go — shared
-// testcontainers + seed + audit-assert helpers for the durable audit_outbox
+// database + seed + audit-assert helpers for the durable audit_outbox
 // emit-on-CRUD integration tests (Account / Project / User / ServiceAccount /
 // Group / Role Create / Update / Delete).
 //
 // One package (`audit_test`) drives all six resource use-cases through their
 // real Execute → operations.Run worker → writer-tx, then reads back the
-// kacho_iam.audit_outbox rows. Centralising the testcontainers helper here
-// avoids duplicating setupTestDB across six packages.
+// kacho_iam.audit_outbox rows. Centralising the setup helper here avoids
+// duplicating setupTestDB across six packages.
+//
+// The Postgres itself is one per test BINARY (testmain_pgtest_test.go); each
+// caller of setupTestDB still gets its own database.
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -24,16 +26,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
@@ -73,32 +73,17 @@ func awaitWorkers(t *testing.T) {
 	require.NoError(t, operations.Wait(context.Background()))
 }
 
+// setupTestDB hands the calling test its OWN database, with kacho_iam on the
+// search path.
+//
+// It used to start a fresh container and replay the whole migration chain on
+// every call. The database now comes from the one container this test binary
+// owns (wired in testmain_pgtest_test.go), cloned from a template migrated once
+// — see internal/pgtest for why a clone is the same isolation a separate
+// container gave.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
-
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
-	return appendSearchPathOptions(dsn)
+	return appendSearchPathOptions(pgtest.NewDB(t))
 }
 
 func appendSearchPathOptions(dsn string) string {

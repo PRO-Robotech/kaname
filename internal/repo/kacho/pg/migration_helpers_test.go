@@ -16,12 +16,13 @@ package pg_test
 
 import (
 	"database/sql"
-	"fmt"
 	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
@@ -35,30 +36,7 @@ import (
 // same starting point, without paying for a server start per test.
 func setupTestDBNoUp(t testing.TB) string {
 	t.Helper()
-	if sharedBaseDSN == "" {
-		t.Fatal("shared Postgres was not started — a migration test ran under -short " +
-			"without skipping (see TestMain)")
-	}
-
-	name := fmt.Sprintf("kacho_iam_bare%03d", testDBSeq.Add(1))
-
-	admin, err := sql.Open("pgx", sharedBaseDSN)
-	require.NoError(t, err)
-	defer func() { _ = admin.Close() }()
-
-	_, err = admin.Exec(`CREATE DATABASE ` + name)
-	require.NoError(t, err, "create bare database %s", name)
-
-	t.Cleanup(func() {
-		drop, derr := sql.Open("pgx", sharedBaseDSN)
-		if derr != nil {
-			return
-		}
-		defer func() { _ = drop.Close() }()
-		_, _ = drop.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`)
-	})
-
-	return appendSearchPathOptions(dsnForDB(name))
+	return appendSearchPathOptions(pgtest.NewEmptyDB(t))
 }
 
 // applyMigrationUpBody reads <prefix>_*.sql, extracts the `-- +goose Up` body and

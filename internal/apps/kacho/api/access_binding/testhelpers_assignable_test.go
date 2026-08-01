@@ -3,15 +3,17 @@
 
 package access_binding_test
 
-// testhelpers_assignable_test.go — testcontainers PG16 setup + seed helpers for
-// the assignable-roles use-case integration tests (ListAssignableRoles +
+// testhelpers_assignable_test.go — PG16 setup + seed helpers for the
+// assignable-roles use-case integration tests (ListAssignableRoles +
 // AccessBinding.Create scope-enforcement). Lives in package access_binding_test
 // (black-box) — mirrors the helpers used by internal/repo/kacho/pg and the
 // cluster handler integration tests, which cannot be shared across packages.
+//
+// The Postgres itself is one per test BINARY (testmain_pgtest_test.go); each
+// caller of setupTestDB still gets its own database.
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -19,17 +21,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // allowRelationStore — fake clients.RelationStore that grants every Check.
@@ -46,32 +46,18 @@ func (allowRelationStore) DeleteTuples(context.Context, []clients.RelationTuple)
 
 var _ clients.RelationStore = allowRelationStore{}
 
+// setupTestDB hands the calling test its OWN database, with kacho_iam on the
+// search path.
+//
+// It used to start a fresh container and replay the whole migration chain on
+// every call — 32 callers, 32 containers, ~254s before a single assertion. The
+// database now comes from the one container this test binary owns (wired in
+// testmain_pgtest_test.go), cloned from a template migrated once — see
+// internal/pgtest for why a clone is the same isolation a separate container
+// gave. The OpenFGA containers this package also starts are unaffected.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
-
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
-	return appendSearchPathOptions(dsn)
+	return appendSearchPathOptions(pgtest.NewDB(t))
 }
 
 func appendSearchPathOptions(dsn string) string {

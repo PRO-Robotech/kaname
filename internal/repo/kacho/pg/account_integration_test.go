@@ -22,7 +22,6 @@ package pg_test
 
 import (
 	"context"
-	"database/sql"
 	stderrors "errors"
 	"fmt"
 	"strings"
@@ -35,6 +34,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 
@@ -54,35 +54,7 @@ import (
 // did when each test owned a container.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
-	if sharedBaseDSN == "" {
-		// Only reachable if a test forgets its own -short skip: TestMain starts the
-		// container for every non-short run. Fail loudly rather than hand back a DSN
-		// pointing at nothing.
-		t.Fatal("shared Postgres was not started — an integration test ran under -short " +
-			"without skipping (see TestMain)")
-	}
-
-	name := fmt.Sprintf("kacho_iam_t%03d", testDBSeq.Add(1))
-
-	admin, err := sql.Open("pgx", sharedBaseDSN)
-	require.NoError(t, err)
-	defer func() { _ = admin.Close() }()
-
-	_, err = admin.Exec(`CREATE DATABASE ` + name + ` TEMPLATE ` + templateDB)
-	require.NoError(t, err, "clone %s from %s", name, templateDB)
-
-	t.Cleanup(func() {
-		drop, derr := sql.Open("pgx", sharedBaseDSN)
-		if derr != nil {
-			return
-		}
-		defer func() { _ = drop.Close() }()
-		// WITH (FORCE) evicts connections a test left open; without it a leaked
-		// pool would keep the database alive for the rest of the run.
-		_, _ = drop.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`)
-	})
-
-	return appendSearchPathOptions(dsnForDB(name))
+	return appendSearchPathOptions(pgtest.NewDB(t))
 }
 
 func appendSearchPathOptions(dsn string) string {

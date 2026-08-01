@@ -3,63 +3,52 @@
 
 // testhelpers.go — exported helpers for cross-package integration tests.
 //
-// These are intentionally guarded by build tag `iamtesthelpers` so they
-// do not bloat production binaries. The tag is set automatically by `go
-// test`-driven runs (Go test files belong to the same package whether
-// they're guarded or not — but exporting helpers as non-test names lets
-// other test packages depend on them).
+// The helper lives in a non-_test.go file so other packages' *_test.go can depend on
+// it. It pulls in testing; that is acceptable for a helper never linked into a
+// production binary (nothing under cmd/ imports it).
 //
 // To use from another package's *_test.go:
 //
 //	dsn := pg.NewTestPostgres(t)
-//
-// The helper boots a fresh container per call (so tests stay isolated).
 package pg
 
 import (
-	"context"
-	"database/sql"
 	"strings"
 	"testing"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
-	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 )
 
-// NewTestPostgres spins up a clean Postgres container, runs all migrations
-// up, and returns the DSN string with search_path=kacho_iam,public.
+// NewTestPostgres returns a DSN for the CALLER's own database, with
+// search_path=kacho_iam,public.
 //
-// Suitable for cross-package integration tests; per-call container ensures
-// test isolation (slower than shared, safer against state-leak).
+// It used to boot a fresh container and replay every migration on each call, which is
+// what made packages calling it grow past the 600s `go test` gives a package by
+// default. Now it hands back a database on the one container the calling test binary
+// owns — see internal/pgtest for why a clone of a migrated template is the same
+// isolation a separate container gave.
+//
+// The caller's package must wire TestMain, because the container belongs to the test
+// BINARY and each package is its own binary:
+//
+//	func TestMain(m *testing.M) {
+//		os.Exit(pgtest.Run(m, pgtest.Config{
+//			Name:    "iam",
+//			Migrate: pgtest.Goose(migrations.FS),
+//		}))
+//	}
+//
+// Without it pgtest fails the test naming what is missing, rather than handing back a
+// DSN pointing at nothing.
 func NewTestPostgres(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
+	return AppendIAMSearchPath(pgtest.NewDB(t))
+}
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
+// AppendIAMSearchPath adds the libpq runtime parameter that puts kacho_iam on the
+// search path. The URL-query form `search_path=` is not honoured by pgx, hence the
+// `options=-c …` spelling.
+func AppendIAMSearchPath(dsn string) string {
 	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
 	if strings.Contains(dsn, "?") {
 		return dsn + "&" + optionsParam

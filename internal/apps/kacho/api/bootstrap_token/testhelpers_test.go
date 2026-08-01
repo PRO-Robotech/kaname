@@ -4,48 +4,26 @@
 package bootstrap_token
 
 import (
-	"context"
-	"database/sql"
 	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
-	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 )
 
-// setupTestDB starts a fresh Postgres testcontainer, runs all goose migrations
-// (including 0058 which seeds the bootstrap SA + grant), and returns a dsn with
-// search_path=kacho_iam.
+// setupTestDB hands the calling test its OWN database — all goose migrations
+// already applied (including 0058, which seeds the bootstrap SA + grant) — and
+// returns a dsn with search_path=kacho_iam.
+//
+// It used to start a fresh container and replay the whole chain on every call.
+// The database now comes from the one container this test binary owns (wired in
+// testmain_pgtest_test.go), cloned from a template migrated once — see
+// internal/pgtest for why a clone is the same isolation a separate container
+// gave. The 0058 seed is part of the template, so it is present in every clone.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
-	ctx := context.Background()
-
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
-	return appendSearchPathOptions(dsn)
+	return appendSearchPathOptions(pgtest.NewDB(t))
 }
 
 func appendSearchPathOptions(dsn string) string {

@@ -27,39 +27,32 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
-// setupKac127TestDB разворачивает Postgres 16 в testcontainer, прогоняет ВСЕ миграции
-// (включая 0011..0014). Возвращает *sql.DB, чтобы caller мог рантаймно проверять
-// schema (information_schema, pg_constraint, и т.д.).
+// setupKac127TestDB отдаёт вызывающему СОБСТВЕННУЮ базу с полностью прогнанными
+// миграциями на общем Postgres пакета. Возвращает *sql.DB, чтобы caller мог
+// рантаймно проверять schema (information_schema, pg_constraint, и т.д.).
+//
+// Раньше на каждый вызов поднимался отдельный контейнер и заново проигрывалась
+// вся цепочка. Теперь база клонируется из шаблона, который TestMain смигрировал
+// один раз тем же `goose.Up(db, ".")` — состояние то же и изоляция та же (см.
+// internal/pgtest), а контейнер один на пакет.
+//
+// goose BaseFS/dialect выставляются здесь, а не в телах тестов: они сами зовут
+// goose.Up / goose.DownTo на возвращённом *sql.DB и полагаются на эту настройку.
 func setupKac127TestDB(t testing.TB) *sql.DB {
 	t.Helper()
-	ctx := context.Background()
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-	dsn = appendSearchPathOptions(dsn)
-
-	db, err := sql.Open("pgx", dsn)
+	db, err := sql.Open("pgx", appendSearchPathOptions(pgtest.NewDB(t)))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
 
 	return db
 }

@@ -18,53 +18,36 @@ package seed_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// setupBootstrapDB hands the caller its own migrated database on the package's
+// shared Postgres, with search_path defaulting to kacho_iam.
+//
+// It used to boot a container and replay the whole migration chain per call, which
+// this package paid seven times over. The caller still gets a database of its own —
+// see internal/pgtest for why a clone of a migrated template is the isolation a
+// separate container gave.
 func setupBootstrapDB(t *testing.T) string {
 	t.Helper()
-	ctx := context.Background()
 
-	pgc, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("kacho_iam_test"),
-		postgres.WithUsername("iam"),
-		postgres.WithPassword("iam"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pgc.Terminate(ctx) })
-
-	dsn, err := pgc.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-
+	dsn := pgtest.NewDB(t)
 	if strings.Contains(dsn, "?") {
 		dsn += "&"
 	} else {
