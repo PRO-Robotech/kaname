@@ -289,23 +289,47 @@ var typeVerbRelations = map[string][]string{
 // those are emitter-internal plumbing, not relations a tenant audits "who can do
 // X" against. Forwarding an arbitrary string into the FGA Read would let a caller
 // probe the model's internal relation graph — ExpandAccess validates against this
-// closed set and rejects anything else with INVALID_ARGUMENT. Kept in lockstep
-// with fga_model.fga; the drift-gate
-// (authzmap/fga_model_drift_test.go) guards the v_* / tier / member names.
-var expandableRelations = map[string]bool{
-	// per-verb leaf relations
-	"v_get":    true,
-	"v_list":   true,
-	"v_create": true,
-	"v_update": true,
-	"v_delete": true,
-	// tier relations
-	"viewer": true,
-	"editor": true,
-	"admin":  true,
-	// group membership
-	"member": true,
-}
+// set and rejects anything else with INVALID_ARGUMENT.
+//
+// XC-3 S1Ф2: глагольная часть больше НЕ перечисляется — она выводится из наборов
+// типов, поэтому список не может отстать от модели. Обе стороны запрета
+// (принимаемое ⊆ модель, машинерия ∉ принимаемое) держит гейт дрейфа
+// (authzmap/fga_model_drift_test.go).
+// expandableTierRelations / expandableMembershipRelation — НЕглагольная часть
+// поверхности. Глагольная часть не перечисляется: она ВЫВОДИТСЯ как объединение
+// наборов всех типов (см. expandableRelations ниже).
+var expandableTierRelations = []string{"viewer", "editor", "admin"}
+
+const expandableMembershipRelation = "member"
+
+// expandableRelations — ВЫВОДИМОЕ множество: объединение наборов `v_*` всех
+// глагольных типов ∪ ярусные ∪ членство.
+//
+// Прежде глагольная часть перечислялась отдельным литералом, поэтому новое
+// отношение у типа пришлось бы дописывать сюда руками — место, о котором надо не
+// забыть, и о котором не напоминает ничто. Теперь: объявил тип отношение — оно
+// появилось в принимаемых; снял — исчезло.
+//
+// Множество остаётся РАСШИРЯЕМЫМ, а не ОТКРЫТЫМ. Внутренняя машинерия модели
+// по-прежнему вне его: переносчики охвата (sg_*), подтягивающие резолверы
+// (g_admin_* / g_editor_* / g_vcreate_*) и платформенные отношения (system_admin /
+// fga_writer / owner / use / …) — эмиттерная сантехника, а не поверхность, против
+// которой тенант спрашивает «кто может делать X». Обратная проверка этого запрета
+// живёт в гейте дрейфа (TestDrift_ExpandableRelationsMatchModel) и доказана
+// инъекцией: объявление машинерии принимаемой краснеет с координатой.
+var expandableRelations = func() map[string]bool {
+	m := make(map[string]bool, len(expandableTierRelations)+1)
+	for _, set := range typeVerbRelations {
+		for _, r := range set {
+			m[r] = true
+		}
+	}
+	for _, r := range expandableTierRelations {
+		m[r] = true
+	}
+	m[expandableMembershipRelation] = true
+	return m
+}()
 
 // IsExpandableRelation reports whether `relation` is in the closed set of
 // relations ExpandAccess accepts (see expandableRelations). An unknown relation
