@@ -112,7 +112,8 @@ func listByUser(t *testing.T, h *Handler, ctx context.Context, target string) (*
 // is the owner's own miss, verbatim.
 func TestListByUser_ForeignSubject_IsRefusedAndStoreIsNotRead(t *testing.T) {
 	store := victimHistory()
-	h := newHandler(&fakeRevoker{}, store).WithRelationStore(grants())
+	checker := grants()
+	h := newHandler(&fakeRevoker{}, store).WithRelationStore(checker)
 
 	resp, err := listByUser(t, h, asUser(neighbourID), victimID)
 
@@ -123,6 +124,13 @@ func TestListByUser_ForeignSubject_IsRefusedAndStoreIsNotRead(t *testing.T) {
 		"the refusal must read exactly like the owner's own miss — a distinguishable text is an existence oracle")
 	assert.Zero(t, store.reads,
 		"the revocation store was read for a caller who may not read it")
+
+	// The question that was actually put to the model — not merely that SOME
+	// question was. A gate asking about the wrong object refuses just as
+	// convincingly and narrows nothing: the object has to be the user the
+	// request named, and the subject the caller who asked.
+	assert.Contains(t, checker.asked, "user:"+neighbourID+"|viewer|iam_user:"+victimID,
+		"the model was never asked whether this caller may read THIS user")
 }
 
 // ── the admissions it must leave intact ─────────────────────────────────────
