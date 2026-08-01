@@ -62,7 +62,7 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 }
 
 // TestMigration_F53_SystemRolesReseededWithRules — every system role has
-// non-empty rules after re-seed; count is exactly 65.
+// non-empty rules after re-seed; the count is exact.
 func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -75,7 +75,12 @@ func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	var total int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.roles WHERE is_system`).Scan(&total))
-	assert.Equal(t, 66, total, "F-53: exactly 65 system roles expected after re-seed (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035 + registry mig 0044 + storage mig 0057)")
+	// 66 seeded (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035 + registry
+	// mig 0044 + storage mig 0057) MINUS the 9 compute block-storage roles migration
+	// 0074 withdrew (compute.{disk,image,snapshot}.{admin,edit,view} — kacho-storage
+	// owns those resources). The number is asserted exactly, not as a floor, so a
+	// re-seed that quietly brings a retired role back fails here.
+	assert.Equal(t, 57, total, "F-53: exactly 57 system roles expected after re-seed (66 seeded, less the 9 compute block-storage roles retired by migration 0074)")
 
 	var withoutRules int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -145,7 +150,7 @@ func TestMigration_F53_AccessNotSevered(t *testing.T) {
 
 	rolesBefore := countSystemRoles()
 	bindingsBefore := countSystemBindings()
-	require.Equal(t, 66, rolesBefore)
+	require.Equal(t, 57, rolesBefore)
 	require.Greater(t, bindingsBefore, 0,
 		"F-53: at least the cluster-admin (0004) + module-SA (0009) bindings on system roles must exist")
 

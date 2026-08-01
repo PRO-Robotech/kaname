@@ -10,18 +10,20 @@ This file is the STORAGE table (volume / snapshot / image), the block-storage ow
 verifies: removing the matching label on a storage resource Update revokes the
 ARM_LABELS grant (Check v_list flips True→False).
 
-WHY THIS FILE EXISTS — it is the storage half of a check that only existed for the
-compute duplicate. Block storage is owned by kacho-storage, but kacho-compute still
-carries a live Disk/Image/Snapshot duplicate, and the label-revoke evidence lived
-ENTIRELY on the compute side (label-revoke-compute.py). Deleting the duplicate would
-have deleted the only executable proof that a label removal revokes access to a block-
+WHY THIS FILE EXISTS — it is the storage half of a check that once existed only for
+the compute duplicate. Block storage is owned by kacho-storage; compute used to carry
+a live Disk/Image/Snapshot duplicate, and the label-revoke evidence lived ENTIRELY on
+the compute side (label-revoke-compute.py). Retiring the duplicate would have taken
+with it the only executable proof that a label removal revokes access to a block-
 storage object — leaving the storage FGA types (storage_volume / storage_snapshot /
-storage_image) with no revoke coverage at all, and the removal itself invisible.
+storage_image) with no revoke coverage at all, and the removal itself invisible. The
+duplicate is now retired on both sides (compute resources, then iam roles/vocabularies/
+model types); this file is what carries the invariant forward.
 
 CLOSED-TABLE NAMES ARE PLURAL FOR STORAGE. The rule's `resources` entries are the
 second segment of the closed dotted key in authzmap: compute registers
-`compute.disk` / `compute.image` / `compute.snapshot` (SINGULAR) while storage
-registers `storage.volumes` / `storage.snapshots` / `storage.images` (PLURAL, matching
+`compute.instance` (SINGULAR) while storage registers `storage.volumes` /
+`storage.snapshots` / `storage.images` (PLURAL, matching
 the permission-catalog form storage.volumes.*). Copying the compute file's singular
 resource names would produce a rule the domain rejects (`unknown module` is not the
 failure here — the module is known; the pair simply is not in the table), so the

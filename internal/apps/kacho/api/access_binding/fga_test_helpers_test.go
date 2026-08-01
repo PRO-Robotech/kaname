@@ -236,14 +236,14 @@ func startOpenFGA(t *testing.T) *fgaClient {
 
 // hierarchyTuples wires a standard test topology into FGA:
 //
-//	account:acc_A → project:prj_P → {compute_instance:inst_x, compute_image:img_v,
+//	account:acc_A → project:prj_P → {compute_instance:inst_x, storage_image:img_v,
 //	                                 vpc_subnet:sub_y, vpc_network:net_w}
 //	account:acc_B → project:prj_B → compute_instance:inst_z
 func hierarchyTuples() []abrepo.RelationTuple {
 	return []abrepo.RelationTuple{
 		{User: "account:acc_A", Relation: "account", Object: "project:prj_P"},
 		{User: "project:prj_P", Relation: "project", Object: "compute_instance:inst_x"},
-		{User: "project:prj_P", Relation: "project", Object: "compute_image:img_v"},
+		{User: "project:prj_P", Relation: "project", Object: "storage_image:img_v"},
 		{User: "project:prj_P", Relation: "project", Object: "vpc_subnet:sub_y"},
 		{User: "project:prj_P", Relation: "project", Object: "vpc_network:net_w"},
 		{User: "project:prj_P", Relation: "project", Object: "vpc_address:addr5k"},

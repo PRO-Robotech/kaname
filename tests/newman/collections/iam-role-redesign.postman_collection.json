@@ -87,7 +87,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"rdtier{{runId}}\", \"definitionTier\": {\"tierType\": \"iam.account\", \"tierId\": \"{{accountAId}}\"}, \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"get\", \"list\", \"create\", \"update\"]}]}",
+              "raw": "{\"name\": \"rdtier{{runId}}\", \"definitionTier\": {\"tierType\": \"iam.account\", \"tierId\": \"{{accountAId}}\"}, \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"list\", \"create\", \"update\"]}, {\"module\": \"storage\", \"resources\": [\"volumes\"], \"verbs\": [\"get\", \"list\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"

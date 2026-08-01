@@ -151,9 +151,6 @@ func TypeHasVerbRelations(fgaType string) bool {
 // D-7); verb-bearing status is additive on top, not a replacement.
 var verbBearingTypes = map[string]bool{
 	"compute_instance":          true,
-	"compute_disk":              true,
-	"compute_image":             true,
-	"compute_snapshot":          true,
 	"vpc_network":               true,
 	"vpc_subnet":                true,
 	"vpc_address":               true,
@@ -232,9 +229,6 @@ func IsExpandableRelation(relation string) bool {
 var objectTypes = map[string]string{
 	// compute
 	"compute.instance": "compute_instance",
-	"compute.disk":     "compute_disk",
-	"compute.image":    "compute_image",
-	"compute.snapshot": "compute_snapshot",
 
 	// vpc
 	"vpc.network":          "vpc_network",
