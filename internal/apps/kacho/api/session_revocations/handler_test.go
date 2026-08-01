@@ -305,7 +305,9 @@ func TestListByUser_DelegatesToReader(t *testing.T) {
 	}}
 	h := newHandler(&fakeRevoker{}, r)
 
-	resp, err := h.ListByUser(context.Background(), &iamv1.ListByUserRequest{UserId: "usr_alice"})
+	// Self-read: this case is about the reader delegation. Who may read WHOSE
+	// history is settled separately, in list_by_user_authz_test.go.
+	resp, err := h.ListByUser(asUser("usr_alice"), &iamv1.ListByUserRequest{UserId: "usr_alice"})
 	require.NoError(t, err)
 	require.Len(t, resp.GetRevocations(), 1)
 	assert.Equal(t, "jti-1", resp.GetRevocations()[0].GetTokenJti())

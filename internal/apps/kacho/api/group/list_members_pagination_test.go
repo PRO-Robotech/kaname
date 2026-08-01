@@ -84,9 +84,20 @@ func (r *memberPageRdr) IsMember(context.Context, domain.GroupID, domain.Subject
 	return false, nil
 }
 
+// membersHandler builds the handler for the PAGING cases, so it wires a caller
+// who is allowed to read this group. Who may read WHOSE roster is settled in
+// list_members_authz_test.go; here the subject is the cursor.
 func membersHandler(repo *memberPageRepo) *Handler {
-	return NewHandler(nil, nil, nil, nil, nil, nil, nil, NewListMembersUseCase(repo))
+	uc := NewListMembersUseCase(repo).WithRelationStore(
+		rosterGrants("user:" + pagingCaller + "|v_list|iam_group:" + pageGroupID))
+	return NewHandler(nil, nil, nil, nil, nil, nil, nil, uc)
 }
+
+// pagingCaller — the granted identity every paging case runs under.
+const pagingCaller = "usr0000000000000pagr"
+
+// asPagingCaller is the context those cases use.
+func asPagingCaller() context.Context { return asRosterUser(pagingCaller) }
 
 // The continuation token the storage produced must reach the caller. Without it the
 // published page_token is unusable: a client cannot ask for the next page of a
@@ -99,7 +110,7 @@ func TestListMembers_EmitsTheContinuationToken(t *testing.T) {
 		}},
 		next: "opaque-continuation",
 	}
-	resp, err := membersHandler(repo).ListMembers(context.Background(),
+	resp, err := membersHandler(repo).ListMembers(asPagingCaller(),
 		&iamv1.ListGroupMembersRequest{GroupId: pageGroupID, PageSize: 25})
 	require.NoError(t, err)
 	assert.Equal(t, "opaque-continuation", resp.GetNextPageToken(),
@@ -112,7 +123,7 @@ func TestListMembers_EmitsTheContinuationToken(t *testing.T) {
 // the beginning would repeat the first page for ever.
 func TestListMembers_PassesTheCallersTokenThrough(t *testing.T) {
 	repo := &memberPageRepo{}
-	_, err := membersHandler(repo).ListMembers(context.Background(),
+	_, err := membersHandler(repo).ListMembers(asPagingCaller(),
 		&iamv1.ListGroupMembersRequest{GroupId: pageGroupID, PageToken: "caller-cursor"})
 	require.NoError(t, err)
 	assert.Equal(t, "caller-cursor", repo.seen.PageToken, "the caller's cursor must reach the storage")
@@ -124,7 +135,7 @@ func TestListMembers_PassesTheCallersTokenThrough(t *testing.T) {
 func TestListMembers_RejectsOutOfRangePageSize(t *testing.T) {
 	for _, size := range []int64{1001, -1} {
 		repo := &memberPageRepo{}
-		_, err := membersHandler(repo).ListMembers(context.Background(),
+		_, err := membersHandler(repo).ListMembers(asPagingCaller(),
 			&iamv1.ListGroupMembersRequest{GroupId: pageGroupID, PageSize: size})
 		require.Error(t, err, "page_size=%d must be refused", size)
 		assert.Equal(t, codes.InvalidArgument, status.Code(err), "page_size=%d", size)
@@ -135,7 +146,7 @@ func TestListMembers_RejectsOutOfRangePageSize(t *testing.T) {
 // Zero means "use the default", the same default every other listing applies.
 func TestListMembers_UnsetPageSizeBecomesTheDefault(t *testing.T) {
 	repo := &memberPageRepo{}
-	_, err := membersHandler(repo).ListMembers(context.Background(),
+	_, err := membersHandler(repo).ListMembers(asPagingCaller(),
 		&iamv1.ListGroupMembersRequest{GroupId: pageGroupID})
 	require.NoError(t, err)
 	assert.EqualValues(t, 50, repo.seen.PageSize, "an unset page size must become the platform default")

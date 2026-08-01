@@ -1036,12 +1036,14 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "iam.session_revocations.listByUser",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "1",
+    "hide_existence": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",

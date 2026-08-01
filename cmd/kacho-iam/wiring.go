@@ -328,7 +328,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	groupList := groupapp.NewListGroupsUseCase(kachoRepo).WithRelationStore(relationStore)
 	groupAdd := groupapp.NewAddMemberUseCase(kachoRepo, opsRepo)
 	groupRemove := groupapp.NewRemoveMemberUseCase(kachoRepo, opsRepo)
-	groupListMembers := groupapp.NewListMembersUseCase(kachoRepo)
+	// ListMembers names the group in the request, so it re-asks the model about
+	// that group on `v_list` — the same relation the front door requires, and the
+	// layer its two sibling reads already carry.
+	groupListMembers := groupapp.NewListMembersUseCase(kachoRepo).WithRelationStore(relationStore)
 	groupHandler := groupapp.NewHandler(groupCreate, groupUpdate, groupDelete, groupGet, groupList,
 		groupAdd, groupRemove, groupListMembers).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
@@ -554,10 +557,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Revoke (logout / force-logout) + IsRevoked (api-gateway hot-path) +
 	// ListByUser (admin audit). Shares the session_revocations table with the
 	// refresh-hook reader. Internal-only (запрет #6).
+	//
+	// ListByUser answers about the user NAMED IN THE REQUEST, so it is authorized
+	// against that user through the same relation store UserService.Get uses. The
+	// listener's own gates narrow the calling MODULE and never read `user_id`;
+	// unwired, the RPC serves nobody but the caller themselves.
 	sessionRevocationsHandler := sessionrevapp.NewHandler(
 		sessionrevapp.NewRevokeUseCase(sessionRevAdapter, opsRepo),
 		sessionRevAdapter,
-	)
+	).WithRelationStore(relationStore)
 
 	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)

@@ -115,7 +115,10 @@ func TestListByUser_CursorRoundTrips(t *testing.T) {
 	// A well-formed opaque cursor, in the platform's own encoding.
 	const cursor = "MjAyNi0wNy0yOVQxMDoxMTowMFp8anRpLTE="
 
-	resp, err := h.ListByUser(context.Background(), &iamv1.ListByUserRequest{
+	// Self-read: this case is about the cursor, so it runs under the one identity
+	// that needs no grant. Who may read WHOSE history is settled separately, in
+	// list_by_user_authz_test.go.
+	resp, err := h.ListByUser(asUser("usr_alice"), &iamv1.ListByUserRequest{
 		UserId: "usr_alice", PageSize: 25, PageToken: cursor,
 	})
 
@@ -133,7 +136,7 @@ func TestListByUser_ZeroPageSize_UsesStoreDefault(t *testing.T) {
 	r := &pagingReader{rows: []domain.SessionRevocation{revRow("jti-3")}}
 	h := newHandler(&fakeRevoker{}, r)
 
-	_, err := h.ListByUser(context.Background(), &iamv1.ListByUserRequest{UserId: "usr_alice"})
+	_, err := h.ListByUser(asUser("usr_alice"), &iamv1.ListByUserRequest{UserId: "usr_alice"})
 
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, r.gotPageSize, "0 is forwarded so the store applies the documented default")

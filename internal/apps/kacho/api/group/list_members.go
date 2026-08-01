@@ -11,7 +11,9 @@ import (
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	repogroup "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
 )
 
@@ -30,10 +32,21 @@ type ListMembersOutput struct {
 
 type ListMembersUseCase struct {
 	repo Repo
+	// relations — the relation-Check port this read re-asks about the group NAMED
+	// IN THE REQUEST. See Execute.
+	relations authzguard.RelationChecker
 }
 
 func NewListMembersUseCase(r Repo) *ListMembersUseCase {
 	return &ListMembersUseCase{repo: r}
+}
+
+// WithRelationStore wires the relation-Check port. Unwired, the roster is served
+// to nobody: a read whose remaining authorization lives one layer up must not
+// quietly become a read with none.
+func (u *ListMembersUseCase) WithRelationStore(relations authzguard.RelationChecker) *ListMembersUseCase {
+	u.relations = relations
+	return u
 }
 
 // Execute returns one page of the membership.
@@ -43,6 +56,14 @@ func NewListMembersUseCase(r Repo) *ListMembersUseCase {
 // everything it asked for), and the refusal must not depend on how far down the
 // call the storage happens to check. The adapter keeps its own check as the
 // authoritative backstop.
+//
+// Then the group NAMED IN THE REQUEST is re-asked about, on `v_list` — the same
+// relation the front door requires of this RPC, so a caller admitted there is
+// admitted here. Both sibling reads of this resource already do it (`Get` on
+// `v_get`, `List` through the per-object page filter); this one did not, and it is
+// also the only one of the three whose name the List-surface analyser cannot see.
+// A denial is the resource's own miss, verbatim, so it cannot be told from the
+// group not existing; a model that could not be ASKED is an outage, never a miss.
 func (u *ListMembersUseCase) Execute(ctx context.Context, in ListMembersInput) (ListMembersOutput, error) {
 	if err := shared.ValidateResourceID(string(in.GroupID), domain.PrefixGroup, "group"); err != nil {
 		return ListMembersOutput{}, err
@@ -50,6 +71,16 @@ func (u *ListMembersUseCase) Execute(ctx context.Context, in ListMembersInput) (
 	size, err := corevalidate.PageSize("page_size", in.PageSize)
 	if err != nil {
 		return ListMembersOutput{}, err
+	}
+	// Authorized BEFORE the storage is read: a refusal that has already fetched
+	// the roster has paid for the answer it claims to withhold.
+	allowed, azErr := authzguard.AllowsVerb(ctx, u.relations, "v_list", "iam_group", string(in.GroupID))
+	if azErr != nil {
+		return ListMembersOutput{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	if !allowed {
+		return ListMembersOutput{}, shared.MapRepoErr(
+			iamerr.Wrapf(iamerr.ErrNotFound, "Group %s not found", in.GroupID))
 	}
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {

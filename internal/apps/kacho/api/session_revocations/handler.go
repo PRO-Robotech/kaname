@@ -38,6 +38,7 @@ import (
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -66,12 +67,21 @@ type Handler struct {
 
 	revoke revoker
 	read   reader
+	// relations — the relation-Check port deciding whether the caller may read
+	// the user NAMED IN THE REQUEST. See ListByUser.
+	relations authzguard.RelationChecker
 }
 
 // NewHandler — builder. `revoke` carries the RevokeUseCase; `read` is the
 // read-side adapter (may be nil in degraded/dev — reads then fail-closed).
 func NewHandler(revoke revoker, read reader) *Handler {
 	return &Handler{revoke: revoke, read: read}
+}
+
+// WithRelationStore wires the relation-Check port ListByUser authorizes against.
+func (h *Handler) WithRelationStore(relations authzguard.RelationChecker) *Handler {
+	h.relations = relations
+	return h
 }
 
 // Revoke — record a token revocation. Async per the proto envelope: the row is
@@ -139,6 +149,12 @@ func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*
 // and an ignored cursor additionally re-serves page one under a token the caller
 // believes advances. The repo re-checks both as the authoritative backstop; this
 // gate makes the answer deterministic regardless of wiring.
+//
+// The caller NAMES the user whose history this returns, so the read is then
+// authorized against that user — see authorizeListByUser for the predicate and
+// for why the interceptors in front of this RPC do not supply it. The decision
+// runs BEFORE the store is touched: a refusal that has already read the rows has
+// paid for the answer it claims to withhold.
 func (h *Handler) ListByUser(ctx context.Context, req *iamv1.ListByUserRequest) (*iamv1.ListByUserResponse, error) {
 	userID := strings.TrimSpace(req.GetUserId())
 	if userID == "" {
@@ -148,6 +164,9 @@ func (h *Handler) ListByUser(ctx context.Context, req *iamv1.ListByUserRequest) 
 		return nil, err
 	}
 	if err := shared.ValidatePageToken("page_token", req.GetPageToken()); err != nil {
+		return nil, err
+	}
+	if err := authorizeListByUser(ctx, h.relations, userID); err != nil {
 		return nil, err
 	}
 	if h.read == nil {

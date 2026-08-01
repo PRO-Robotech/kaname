@@ -94,6 +94,10 @@ func ReadFloorRPCs() []string {
 		"/kacho.cloud.iam.v1.InternalUserService/Get",
 		// InternalSessionRevocationsService — admin-UI revocation history. (Both
 		// the floor AND the gateway-only restriction apply — see CallerPolicy.)
+		// Neither of them is the per-USER decision for this RPC, and this comment
+		// says so deliberately: the RPC answers about a user the CALLER NAMES, and
+		// nothing on this chain reads that name. That decision is made against the
+		// named user in api/session_revocations/list_by_user_authz.go.
 		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
 		// InternalAuthorizeService — admin-tooling tuple/store reads (gateway-
 		// fronted; floor AND gateway-only both apply).
