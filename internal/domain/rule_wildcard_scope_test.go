@@ -109,11 +109,12 @@ func TestMaterializingSelectors_RolePersistence_ExpandsWildcard(t *testing.T) {
 // fails — forcing the migration to be updated in lockstep.
 //
 // rule_fp is UNCHANGED across every re-seed (it hashes the RULE, not object_types); only
-// object_types grows. The constant below mirrors the latest re-seed migration's list.
+// object_types moves. The constant below mirrors the latest migration to touch the row —
+// currently 0074, which array_remove'd the retired compute block-storage types out of it.
 func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 	const migrationRuleFP = "3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4"
 	migrationObjectTypes := []string{
-		"compute.disk", "compute.image", "compute.instance", "compute.snapshot",
+		"compute.instance",
 		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
@@ -147,10 +148,11 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 // All three project the SAME anchor object_types (the full materializable set) — only
 // the verbs (and thus rule_fp) differ; verbs are not stored in role_rule_selectors.
 func TestSystemWildcardRoleSelectors_MigrationLockstep(t *testing.T) {
-	// The full materializable type set migration 0053 hard-codes (mirror of the owner
+	// The full materializable type set the seed migrations hard-code, as it stands after
+	// migration 0074 removed the retired compute block-storage types (mirror of the owner
 	// selector list in TestOwnerRoleSelector_MigrationLockstep).
 	migrationObjectTypes := []string{
-		"compute.disk", "compute.image", "compute.instance", "compute.snapshot",
+		"compute.instance",
 		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",

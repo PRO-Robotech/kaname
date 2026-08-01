@@ -16,9 +16,6 @@ import (
 func TestObjectType_KnownPairs(t *testing.T) {
 	cases := []struct{ module, resource, want string }{
 		{"compute", "instance", "compute_instance"},
-		{"compute", "disk", "compute_disk"},
-		{"compute", "image", "compute_image"},
-		{"compute", "snapshot", "compute_snapshot"},
 		{"vpc", "network", "vpc_network"},
 		{"vpc", "subnet", "vpc_subnet"},
 		{"vpc", "address", "vpc_address"},

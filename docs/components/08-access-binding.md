@@ -62,9 +62,9 @@ revoked_at IS NULL` — основа strict-create (дубль активног�
 **ResourceType whitelist** (см. `internal/domain/types.go`):
 
 ```
-account, project, vpc_network, vpc_subnet, vpc_address, vpc_route_table,
+cluster, account, project, vpc_network, vpc_subnet, vpc_address, vpc_route_table,
 vpc_security_group, vpc_gateway, vpc_network_interface,
-compute_instance, compute_disk, compute_image, compute_snapshot,
+compute_instance,
 loadbalancer_nlb, loadbalancer_target_group,
 iam_account, iam_project, iam_user, iam_service_account, iam_group, iam_role,
 *  (wildcard)

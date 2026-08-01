@@ -28,9 +28,6 @@ import "sort"
 var labelSelectableTypes = map[string]struct{}{
 	// compute — mirror-fed via compute→iam RegisterResource.
 	"compute.instance": {},
-	"compute.disk":     {},
-	"compute.image":    {},
-	"compute.snapshot": {},
 
 	// vpc — mirror-fed via vpc→iam RegisterResource extended payload.
 	"vpc.network":          {},

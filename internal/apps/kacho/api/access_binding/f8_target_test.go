@@ -123,10 +123,10 @@ func TestAB_IAM_1_21_DtoEmitsTarget(t *testing.T) {
 func TestAB_IAM_1_29_TargetDigestOrderIndependent(t *testing.T) {
 	a := domain.AccessTarget{Resources: []domain.ResourceRef{
 		{Type: "compute.instance", ID: "ins-1"},
-		{Type: "compute.disk", ID: "dsk-9"},
+		{Type: "storage.volumes", ID: "vol-9"},
 	}}
 	b := domain.AccessTarget{Resources: []domain.ResourceRef{
-		{Type: "compute.disk", ID: "dsk-9"},
+		{Type: "storage.volumes", ID: "vol-9"},
 		{Type: "compute.instance", ID: "ins-1"},
 	}}
 	assert.Equal(t, a.Digest(), b.Digest(), "same set, different order → same digest")

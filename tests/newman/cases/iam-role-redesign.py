@@ -77,8 +77,10 @@ CASES.append(Case(
             body={
                 "name": "rdtier{{runId}}",
                 "definitionTier": {"tierType": "iam.account", "tierId": "{{accountAId}}"},
-                "rules": [{"module": "compute", "resources": ["instance", "disk"],
-                           "verbs": ["get", "list", "create", "update"]}],
+                "rules": [{"module": "compute", "resources": ["instance"],
+                           "verbs": ["get", "list", "create", "update"]},
+                          {"module": "storage", "resources": ["volumes"],
+                           "verbs": ["get", "list"]}],
             },
             auth="jwtAccountAdminA",
             test_script=[
@@ -450,7 +452,8 @@ CASES.append(Case(
 
 # NOTE — no separate "catalog token accepted" newman case: the very first case in
 # this file (IAM-ROL-RD-CR-DEFINITIONTIER-OK) already creates a role with the
-# canonical tokens compute.instance/compute.disk end-to-end, so it goes RED if the
+# canonical tokens compute.instance/storage.volumes end-to-end — two modules and
+# both spellings the catalog uses (singular and plural) — so it goes RED if the
 # gate ever over-rejects a grantable token. The exhaustive both-ways conformance
 # (every published catalog pair is accepted) is locked in Go —
 # role/rules_catalog_test.go::TestRuleCatalogGate_AcceptsEveryPublishedCatalogToken.
