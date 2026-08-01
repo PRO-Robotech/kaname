@@ -309,6 +309,11 @@ func (h *Handler) ListByScope(ctx context.Context, req *iamv1.ListAccessBindings
 	if err != nil {
 		return nil, err
 	}
+	// Формат страницы — по СЫРОМУ запросу, ДО use-case'а: он замыкается по правам
+	// раньше, чем читает страницу, а сужение int64→int32 ниже насыщающее.
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	rows, next, err := h.listByScope.Execute(ctx,
 		domain.ResourceType(scopeType), scopeID,
 		repoab.PageFilter{PageSize: safeconv.ClampNonNegInt32(req.GetPageSize()), PageToken: req.GetPageToken()},
@@ -320,6 +325,11 @@ func (h *Handler) ListByScope(ctx context.Context, req *iamv1.ListAccessBindings
 }
 
 func (h *Handler) ListBySubject(ctx context.Context, req *iamv1.ListAccessBindingsBySubjectRequest) (*iamv1.ListAccessBindingsResponse, error) {
+	// Формат страницы — по СЫРОМУ запросу, ДО use-case'а: он замыкается по правам
+	// (self-only) раньше, чем читает страницу, а сужение int64→int32 ниже насыщающее.
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	rows, next, err := h.listBySubject.Execute(ctx,
 		domain.SubjectType(req.GetSubjectType()), domain.SubjectID(req.GetSubjectId()),
 		repoab.PageFilter{PageSize: safeconv.ClampNonNegInt32(req.GetPageSize()), PageToken: req.GetPageToken()},
@@ -331,6 +341,11 @@ func (h *Handler) ListBySubject(ctx context.Context, req *iamv1.ListAccessBindin
 }
 
 func (h *Handler) ListByAccount(ctx context.Context, req *iamv1.ListAccessBindingsByAccountRequest) (*iamv1.ListAccessBindingsResponse, error) {
+	// Формат страницы — по СЫРОМУ запросу, ДО use-case'а: он замыкается по правам
+	// раньше, чем читает страницу, а сужение int64→int32 ниже насыщающее.
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	rows, next, err := h.listByAccount.Execute(ctx,
 		req.GetAccountId(),
 		repoab.AccountPageFilter{
@@ -350,6 +365,12 @@ func (h *Handler) ListByAccount(ctx context.Context, req *iamv1.ListAccessBindin
 // the dual subjects[]/legacy projection; the use-case enforces the
 // per-row grant-authority scope-filter.
 func (h *Handler) ListByRole(ctx context.Context, req *iamv1.ListAccessBindingsByRoleRequest) (*iamv1.ListAccessBindingsResponse, error) {
+	// Формат страницы — по СЫРОМУ запросу, ДО use-case'а: он замыкается по правам
+	// (grant-authority scope-filter) раньше, чем читает страницу, а сужение
+	// int64→int32 ниже насыщающее.
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	rows, next, err := h.listByRole.Execute(ctx,
 		req.GetRoleId(),
 		repoab.ListByRoleFilter{
@@ -386,6 +407,12 @@ func (h *Handler) ExpandAccess(ctx context.Context, req *iamv1.ExpandAccessReque
 // role_name is resolved server-side via the repo JOIN; authz
 // is "self OR account-admin of the subject's home Account" (use-case).
 func (h *Handler) ListSubjectPrivileges(ctx context.Context, req *iamv1.ListSubjectPrivilegesRequest) (*iamv1.ListSubjectPrivilegesResponse, error) {
+	// Формат страницы — по СЫРОМУ запросу, ДО use-case'а: он замыкается по правам
+	// (self OR account-admin) раньше, чем читает страницу, а сужение int64→int32
+	// ниже насыщающее.
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	rows, next, err := h.listSubjectPrivileges.Execute(ctx,
 		domain.SubjectType(req.GetSubjectType()), domain.SubjectID(req.GetSubjectId()),
 		repoab.PageFilter{PageSize: safeconv.ClampNonNegInt32(req.GetPageSize()), PageToken: req.GetPageToken()},
@@ -411,6 +438,12 @@ func (h *Handler) ListAssignableRoles(ctx context.Context, req *iamv1.ListAssign
 	scopeType, scopeID, err := scopeCoordinate(
 		req.GetScopeType(), req.GetScopeId(), req.GetResourceType(), req.GetResourceId())
 	if err != nil {
+		return nil, err
+	}
+	// Формат страницы — по СЫРОМУ запросу, ДО use-case'а: он замыкается по правам
+	// (grant-authority) раньше, чем читает страницу, а сужение int64→int32 ниже
+	// насыщающее.
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err
 	}
 	roles, next, err := h.listAssignableRoles.Execute(ctx,

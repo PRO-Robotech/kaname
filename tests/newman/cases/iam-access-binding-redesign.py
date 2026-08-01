@@ -624,6 +624,50 @@ CASES.append(Case(
 ))
 
 
+# ОТРИЦАТЕЛЬНЫЙ page_size — вторая половина диапазона, и до сих пор её не отправлял
+# НИКТО. Суффикс -NEG у соседнего кейса означает «негативная проба», а не
+# «отрицательное значение»: единственный его шаг посылает 2000. Отрицательная граница
+# при этом вела себя иначе, чем верхняя — она НЕ отвергалась: сужение int64→int32
+# насыщало её в 0, а 0 в контракте значит «применить умолчание», поэтому вызывающий
+# получал первую страницу и об этом не узнавал.
+#
+# Шесть полос ListBy* того же сервиса несли ту же дыру и в придачу отвечали на
+# мусорную страницу кодом ПРАВ, а не кодом формата. Здесь их шагов нет намеренно:
+# у этой сюиты нет переменной с чужим субъектом, а шаг с неподставленным
+# `{{...}}` вернул бы 400 по РАЗБОРУ ссылки и зеленел бы, ничего не проверив.
+# Транспортную границу всех шести держат пробы Go
+# (services/iam/.../access_binding/list_page_size_rejected_test.go).
+CASES.append(Case(
+    id="IAM-ACB-RD-LS-PAGESIZE-NEGATIVE-VALUE-NEG",
+    title="IAM-1-32: pageSize=-1 → 400 INVALID_ARGUMENT "
+          "'page_size must be in [0..1000]' (отвергается, НЕ схлопывается в 0)",
+    classes=["NEG", "BVA", "PAGE"],
+    priority="P1",
+    steps=[
+        Step(
+            name="ls-pagesize-negative",
+            method="GET",
+            path="/iam/v1/accessBindings?pageSize=-1",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                "pm.test('page_size range text', () => pm.expect(JSON.stringify(pm.response.json()).toLowerCase(), pm.response.text()).to.include('page_size must be in [0..1000]'));",
+            ],
+        ),
+        # Положительный контроль рядом: ГРАНИЦА диапазона обязана проходить. Без него
+        # «стало 400 на всё» читалось бы как успех.
+        Step(
+            name="ls-pagesize-upper-boundary-ok",
+            method="GET",
+            path="/iam/v1/accessBindings?pageSize=1000",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200)],
+        ),
+    ],
+))
+
+
 CASES.append(Case(
     id="IAM-ACB-RD-LS-FILTER-UNKNOWN-KEY-NEG",
     title="IAM-1-32: List ?filter=bogus=\"x\" (ключ вне whitelist subject/role/scope/scopeId) → 400 "

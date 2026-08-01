@@ -16,6 +16,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"time"
+
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 )
 
 // ValidatePageToken returns InvalidArgument when a non-empty token is not a
@@ -57,9 +59,41 @@ const MaxListPageSize int32 = 1000
 //
 // Репозиторий остаётся авторитетным: он повторяет обе проверки на служимом
 // пути.
+//
+// ВАЖНО про место вызова: сюда приходит уже суженное до int32 значение. Если
+// вызывающий сузил его насыщающим преобразованием, отрицательный ввод превратился
+// в 0 ещё ДО этой строки, а 0 в контракте значит «применить умолчание» — проверка
+// стоит, верна и не может сработать. Формат СЫРОГО запроса судит
+// ValidateRawPagination; эта функция остаётся проверкой уже разобранного фильтра.
 func ValidatePagination(pageToken string, pageSize int32) error {
 	if pageSize < 0 || pageSize > MaxListPageSize {
 		return InvalidArg("page_size", "Illegal argument page_size")
+	}
+	return ValidatePageToken("page_token", pageToken)
+}
+
+// ValidateRawPagination — формат пагинации по СЫРЫМ значениям запроса, до любого
+// преобразования типа и до любого решения о доступе.
+//
+// Зачем отдельная функция и почему она принимает int64. `page_size` приезжает по
+// проводу как int64, а внутренние фильтры iam — int32, поэтому транспорт сужал
+// значение насыщающим преобразованием (safeconv.ClampNonNegInt32). Насыщение —
+// не проверка: −1 становится нулём, ноль означает «умолчание», и вызывающий
+// получает страницу, о которой не просил, ничего об этом не узнав. Судить надо то,
+// что прислали, а сужать — уже проверенное (после этой строки значение лежит в
+// [0..1000] и в int32 помещается by construction).
+//
+// Порядок тоже её предмет. Вопрос «правильно ли составлен запрос» имеет ОДИН ответ
+// для всех вызывающих, поэтому отвечать на него надо раньше, чем на вопрос «что
+// этому вызывающему видно» (api-conventions.md: формат → authz → repo). Иначе один
+// и тот же мусорный курсор даёт InvalidArgument тому, у кого грант есть, и отказ
+// либо пустую страницу тому, у кого его нет.
+//
+// Текст отказа — платформенный (`validate.PageSize`), тот же, что у vpc/geo/storage
+// и что записан в требованиях к продукту: "page_size must be in [0..1000]".
+func ValidateRawPagination(pageToken string, pageSize int64) error {
+	if _, err := corevalidate.PageSize("page_size", pageSize); err != nil {
+		return err
 	}
 	return ValidatePageToken("page_token", pageToken)
 }

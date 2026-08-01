@@ -47,7 +47,14 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetConditionRequest) (*iam
 }
 
 // List — see iamv1.ConditionsServiceServer.
+//
+// Формат страницы судится по СЫРОМУ запросу первым стейтментом: сужение int64→int32
+// ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
+// того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListConditionsRequest) (*iamv1.ListConditionsResponse, error) {
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	rows, next, err := h.svc.List(ctx, condition.ListFilter{
 		ProjectID: req.GetProjectId(),
 		PageSize:  safeconv.ClampNonNegInt32(req.GetPageSize()),
