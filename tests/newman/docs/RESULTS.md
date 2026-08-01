@@ -307,15 +307,32 @@ catalog itself: `services/iam/internal/authzguard/deny_details_test.go`. The cas
 expected green on the next stand run; this row stays until a run observes it, because the
 fix is proven in-process and not yet end to end.
 
-## Known failing — honest must-DENY canary (NOT whitelisted, NOT masked)
+## СНЯТО 2026-08-01 — was: known failing, user-list over-show canary (`kacho-iam#276`)
 
-This one is an **over-SHOW** shape (a subject sees data). It is the last-standing honest
-canary for user-list over-show — **deliberately left un-whitelisted** so a genuine leak
-still fires the gate. It fires the gate honestly; leave RED until the product/fixture fix.
+The row declared `IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY::list-nonmember` expected-red
+because a shared no-bindings subject carried a residual account-A viewer that the case's
+own pre-clean could not strip. **Every mechanism it named is gone from this tree**, and
+each half was checked separately rather than inferred from the others:
 
-| Suite | Case / step | Signature (observed) | Root (product) | Issue |
-|---|---|---|---|---|
-| `iam-user` | `IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY::list-nonmember` (honest canary — intentionally NOT whitelisted) | `jwtNoBindings` lists `?accountId=accountA` → 200 + **1 user** (a PENDING invitee) instead of empty. Root: `nob_preclean_account_a` cannot strip NOB's residual account-A viewer left by the #276 cross-suite collision because **`GET /iam/v1/accessBindings:listBySubject?subjectId={userNOB}` as `jwtAccountAdminA` → `403 permission denied`** (listBySubject is self/cluster-admin-scoped; an account-admin listing *another* subject is denied), so the pre-clean is a no-op. | Compound: **#276 cross-suite fixture pollution** (IAM-ACB-CR-CRUD-OK grants `userNOB` a global `*.*` viewer on account-A) + the `listBySubject` non-self 403 leaves the pollution un-cleanable. Also documented as an env-flake that clears on re-run. Real fix = de-share the umbrella account across suites and/or a resource-scoped bindings-list the account-admin may call. | `kacho-iam#276` |
+1. **The subject changed.** The row is about `jwtNoBindings`; the case reads
+   `jwtPureNoBindings` — a dedicated principal — and the generated collection agrees, so
+   this is what actually runs, not just what the source says. The case's own comment
+   names `kacho-iam#276` as the root-cause fix it implements.
+2. **The pre-clean it blames does not exist.** `nob_preclean_account_a` — the step the row
+   says is a no-op — resolves nowhere in the repository.
+3. **The polluter it blames does not exist.** `IAM-ACB-CR-CRUD-OK`, named as the case that
+   grants the shared subject a global viewer, is not a case id anywhere in the tree.
+4. **The new subject is never granted**, measured with a control in both directions so the
+   negative means something: searching binding bodies for `userPureNoBindingsId` finds
+   **0** in `cases/`, while the same search for the old `userNOBId` finds **12** in
+   `cases/` and **46** in the generated collections — the predicate demonstrably finds
+   grants when they exist. The 4 occurrences of `userPureNoBindingsId` in collections are
+   the `AUTHZ-ESC-SELF-ADMIN-*` must-DENY canaries, which assert 401/anon and 403/no-bind:
+   they assert the subject **stays** ungranted. `tests/authz-fixtures/setup.sh` seeds it
+   with that contract written down.
+
+The canary itself stays exactly as it is — un-whitelisted, single-shot, no retry — so a
+genuine over-show still fails it honestly. What is removed is the sentence excusing it.
 
 ## Resolved — label-remove on storage revokes (was: known failing, NOT whitelisted)
 
