@@ -33,31 +33,33 @@ vet:
 lint:
 	golangci-lint run ./...
 
-# audit-list-filter — CI gate for the public List<Resource> surface: a caller must
-# receive only the rows it may see (per-object `viewer ∪ v_list` over the page just
-# read), not every row of its project.
+# audit-list-filter — CI gate for kacho-iam's listing surface: every method that
+# hands a page to a caller must narrow it, and must declare HOW. What is checked
+# lives in tools/listfiltergate; how this service is laid out lives in
+# services/iam/tools/auditlistfilter.
 #
-# iam carries the largest narrowable List surface on the platform — it declares ten
-# `List` methods against vpc's eight — and was the ONLY such service outside this
-# gate: the CI step looped over compute, nlb, registry, storage and vpc. The blind
-# spot sat exactly where the subject is densest, and the first run produced three
-# findings.
+# iam carries the widest listing surface in the repository — 30 methods across 21
+# packages, more than compute, nlb, registry and storage together — and for a long
+# time had no gate of this class at all. Nothing was red, because the set of
+# services to analyse was written by hand and iam was in neither the CI loop nor the
+# set of directories anyone remembered to create.
 #
 # The check parses the tree, so a resource is recognised by what its declaration IS —
-# a package declaring `List` on the transport type — and never by which file holds
-# it; see tools/listfiltergate for the whole contract.
+# a package declaring a listing method on the transport type — and never by which
+# file holds it; see tools/listfiltergate for the whole contract.
 #
-# The run always prints its census (files, packages, resources, checked,
-# whitelisted): "zero findings" must be distinguishable from "zero read", so a tree
-# the gate could not open is a finding, not an OK. The three exclusions live in
-# tools/audit-list-filter.sh next to the reason for each — and the reasons are NOT
-# the same reason, which is the point. An exclusion with nothing left to exclude is
-# a finding too, and the `conditions` one carries a machine-checked expiry
-# (tools/auditlistfilter/exclusion_expiry_test.go).
+# The run always prints its census (files, packages, resources, listing methods,
+# undeclared, cluster-scoped): "zero findings" must be distinguishable from "zero
+# read", so a tree the gate could not open is a finding, not an OK. Exclusions live
+# in the profile as a declared SHAPE, next to the reason for each, and an exclusion
+# with nothing left to exclude is a finding too — which is how the `conditions`
+# entry left: its subject was retired, so there was nothing for it to describe.
 #
-# Invoked by CI as `make -C services/iam audit-list-filter`; that it is invoked at
-# all is locked by internal/repohygiene/listfiltergatewiring_test.go, which derives
-# the service list from the tree and from the workflow rather than hand-writing it.
+# Invoked by CI as `make -C services/iam audit-list-filter`. That it is invoked at
+# all is locked twice over: internal/repohygiene/listfiltergatewiring_test.go
+# derives the service list from this Makefile and from the workflow and compares
+# them in both directions, and tools/listfiltergate/coverage_test.go reports an
+# unanalysed service as a finding.
 audit-list-filter:
 	@./tools/audit-list-filter.sh
 
@@ -138,18 +140,3 @@ sync-permission-catalog:
 	cp "$(GATEWAY_CATALOG)" "$(IAM_CATALOG_EMBED)"
 	@cmp -s "$(GATEWAY_CATALOG)" "$(IAM_CATALOG_EMBED)" || { echo "копии разошлись после копирования"; exit 1; }
 	@echo "каталог прав синхронизирован из копии шлюза (побайтово)."
-
-# audit-list-filter — CI gate for kacho-iam's listing surface: every method that
-# hands a page to a caller must narrow it, and must declare HOW. What is checked
-# lives in tools/listfiltergate; how this service is laid out lives in
-# services/iam/tools/auditlistfilter.
-#
-# This target is NEW: iam had no gate of this class, and nothing was red because the
-# set of services to analyse was written by hand and iam was in neither the CI loop
-# nor the set of directories anyone remembered to create. That set is now derived
-# from the committed tree by tools/listfiltergate/coverage_test.go, which reports an
-# unanalysed service as a finding.
-#
-# Invoked by CI as `make -C services/iam audit-list-filter`.
-audit-list-filter:
-	@./tools/audit-list-filter.sh
