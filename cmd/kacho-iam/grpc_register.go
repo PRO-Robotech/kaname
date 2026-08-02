@@ -108,6 +108,14 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	if svcs != nil && svcs.internalClusterHandler != nil {
 		iamv1.RegisterInternalClusterServiceServer(srv, svcs.internalClusterHandler)
 	}
+	// InternalInteractiveClientService — lifecycle of the OAuth2 client a HUMAN
+	// signs in through (IAM-INT-1). Internal-only (ban #6): NEVER registered on
+	// the external listener. Gateway-fronted admin surface — the caller policy
+	// admits only the api-gateway SA, the read floor covers Get/List, and the
+	// catalog carries the step-up floor acr=2 on the three mutations.
+	if svcs != nil && svcs.interactiveClientHandler != nil {
+		iamv1.RegisterInternalInteractiveClientServiceServer(srv, svcs.interactiveClientHandler)
+	}
 	// InternalSessionRevocationsService — token revocation
 	// (logout / force-logout write + IsRevoked hot-path + admin ListByUser).
 	// Internal-only (запрет #6); the api-gateway logout handler + refresh-hook
