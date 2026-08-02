@@ -79,13 +79,21 @@ func TestAB_IAM_1_23_UnknownTargetType(t *testing.T) {
 	assert.Contains(t, st.Message(), "target.resources[].type")
 }
 
-// domain closed type-registry: dotted <module>.<resource> resolved against the
-// existing bare vocabulary.
+// domain closed type-registry: a dotted <module>.<resource> is a valid target iff
+// the materialization feed emits objects under that exact string.
+//
+// `vpc.route_table` used to be listed here as accepted. It never was a type the
+// feed emits — the mirror spells it `vpc.routeTable` — so a binding naming it was
+// stored, reconciled, matched nothing and granted nothing. The assertion pinned
+// that, which is why it read as correct. The feed spelling is asserted below, and
+// the snake_case one now sits with the refusals; the property is held for the
+// whole vocabulary, not these examples, by
+// domain/access_binding_target_vocabulary_test.go.
 func TestAB_IAM_1_23_ValidTargetType(t *testing.T) {
-	for _, ok := range []string{"compute.instance", "vpc.network", "vpc.route_table", "iam.account"} {
+	for _, ok := range []string{"compute.instance", "vpc.network", "vpc.routeTable", "iam.account", "storage.volumes"} {
 		assert.True(t, domain.ValidTargetType(ok), ok)
 	}
-	for _, bad := range []string{"unknown.thing", "compute", "", ".instance", "compute."} {
+	for _, bad := range []string{"unknown.thing", "compute", "", ".instance", "compute.", "vpc.route_table"} {
 		assert.False(t, domain.ValidTargetType(bad), bad)
 	}
 }
