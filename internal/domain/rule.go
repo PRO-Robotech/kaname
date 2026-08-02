@@ -146,11 +146,41 @@ func (r Rule) Validate(systemCtx bool) error {
 			"Illegal argument: wildcard cannot combine with resourceNames or matchLabels"))
 	}
 
+	// retirement gate: a retired type is not grantable on ANY arm. Unlike the
+	// feed-gate below this is a deny-list, because ARM_ANCHOR/ARM_NAMES feed two
+	// consumers with far larger vocabularies than the label feed and no allow-list
+	// in the tree accepts every rule the migrations already seed (see
+	// retired_types.go for the measurement).
+	errs = multierr.Append(errs, r.validateRetirementGate())
+
 	// feed-availability gate: match_labels only on fed types.
 	if len(r.MatchLabels) > 0 {
 		errs = multierr.Append(errs, r.validateFeedGate())
 	}
 
+	return errs
+}
+
+// validateRetirementGate rejects a rule naming a resource the platform has
+// retired, on every arm. Without it such a rule is stored and compiled: it grants
+// nothing (the reconciler materializes from a mirror that has no rows of the type,
+// so it fails closed), but the caller is told the grant was taken and the role
+// advertises access that can never take effect — accepted-and-ignored at the level
+// of the permission contract.
+func (r Rule) validateRetirementGate() error {
+	var errs error
+	for _, res := range r.Resources {
+		if r.Module == wildcard || res == wildcard {
+			// A wildcard names no specific type; the expansion sets are closed and
+			// contain no retired type, so there is nothing to reject here.
+			continue
+		}
+		typ := r.Module + "." + res
+		if IsRetiredType(typ) {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"type %s is retired (no resource of this type exists)", typ))
+		}
+	}
 	return errs
 }
 

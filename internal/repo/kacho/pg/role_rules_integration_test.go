@@ -52,7 +52,10 @@ func TestRole_A01_RulesRoundTrip(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-ra01", uid)
 
 	rules := domain.Rules{
-		{Module: "compute", Resources: []string{"image"}, Verbs: []string{"get"}},
+		// A LIVE type: the subject here is the rules[] JSONB round-trip, not the
+		// resource. `compute.image` used to stand here — a retired name, which the
+		// domain now refuses on every arm (domain/retired_types.go).
+		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}},
 		{Module: "vpc", Resources: []string{"subnet"}, Verbs: []string{"create"}, MatchLabels: map[string]string{"env": "prod"}},
 		{Module: "vpc", Resources: []string{"address"}, Verbs: []string{"get", "update"}, ResourceNames: []string{"addr5k", "addr9m"}},
 	}
@@ -85,7 +88,7 @@ func TestRole_A01_RulesRoundTrip(t *testing.T) {
 	assert.Equal(t, map[string]string{"env": "prod"}, got.Rules[1].MatchLabels)
 	assert.Equal(t, []string{"addr5k", "addr9m"}, got.Rules[2].ResourceNames)
 	// Stored compiled set excludes the matchLabels arm.
-	assert.Contains(t, got.Permissions, domain.Permission("compute.image.*.get"))
+	assert.Contains(t, got.Permissions, domain.Permission("compute.instance.*.get"))
 	assert.Contains(t, got.Permissions, domain.Permission("vpc.address.addr5k.update"))
 	for _, p := range got.Permissions {
 		assert.NotContains(t, string(p), "vpc.subnet.", "matchLabels arm must not compile")

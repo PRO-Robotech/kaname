@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -73,6 +74,29 @@ var liveBlockStorage = []retiredType{
 	{dotted: "storage.volumes", fga: "storage_volume"},
 	{dotted: "storage.snapshots", fga: "storage_snapshot"},
 	{dotted: "storage.images", fga: "storage_image"},
+}
+
+// TestRetiredListMatchesTheProductionOne — this file's table and the production
+// vocabulary the rule-validator enforces (domain.RetiredTypes) must be ONE list.
+//
+// The two are written separately on purpose: this gate reads artefacts that
+// production code never loads (the model file, the generated ConfigMap), and
+// domain must stay pure. Separate spellings of the same set, however, are an
+// unwatched edit path — retire a fourth resource in one and the other keeps
+// admitting it. This assertion is what makes them a single decision.
+func TestRetiredListMatchesTheProductionOne(t *testing.T) {
+	prod := domain.RetiredTypes()
+	require.NotEmpty(t, prod, "domain.RetiredTypes() is empty — the rule-validator would refuse nothing")
+
+	local := make([]string, 0, len(retiredBlockStorage))
+	for _, r := range retiredBlockStorage {
+		local = append(local, r.dotted)
+	}
+	sort.Strings(local)
+	require.Equal(t, prod, local,
+		"this file's retired table and domain.RetiredTypes() disagree — one of them is admitting a "+
+			"type the other retired; they must name the same set")
+	t.Logf("lockstep: %d retired types, identical in both spellings", len(prod))
 }
 
 // splitDotted splits "compute.disk" into ("compute", "disk").
