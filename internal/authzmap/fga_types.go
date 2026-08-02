@@ -266,7 +266,6 @@ var typeVerbRelations = map[string][]string{
 	"iam_group":           fullCrudVerbRelations,
 	"iam_role":            fullCrudVerbRelations,
 	"iam_access_binding":  fullCrudVerbRelations,
-	"iam_condition":       fullCrudVerbRelations,
 	// rbac-2026 P3 / D-6: account/project are now verb-bearing (additive — they
 	// also keep their tier relations as write-authz anchors, D-7).
 	"account": fullCrudVerbRelations,
@@ -385,5 +384,4 @@ var objectTypes = map[string]string{
 	"iam.group":          "iam_group",
 	"iam.role":           "iam_role",
 	"iam.accessBinding":  "iam_access_binding",
-	"iam.condition":      "iam_condition",
 }

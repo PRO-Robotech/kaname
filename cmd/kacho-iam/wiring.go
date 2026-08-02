@@ -23,7 +23,6 @@ import (
 	authorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/authorize"
 	bootstraptoken "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/cluster"
-	conditionsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/conditions"
 	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
 	internalauthorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_authorize"
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
@@ -67,7 +66,6 @@ type services struct {
 
 	// AuthZ core handlers.
 	authorizeHandler         *authorizeapp.Handler
-	conditionsHandler        *conditionsapp.Handler
 	internalAuthorizeHandler *internalauthorizeapp.Handler
 
 	// permissionCatalogHandler — PermissionCatalogService.ListPermissionCatalog
@@ -170,7 +168,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// is part of the contract up to 1000.
 	structuralRepo := kachopg.NewStructuralFactsRepo(pool)
 	structuralFacts := authzcascade.New(kachopg.New(pool, nil)).
-		WithConditions(kachopg.NewConditionsRepo(pool)).
 		WithBatch(authzcascade.BatchSourceFunc(
 			func(ctx context.Context) (authzcascade.StructuralSnapshot, error) {
 				return structuralRepo.StructuralSnapshot(ctx)
@@ -462,7 +459,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, fgaTransport, relationStore,
-		structuralFacts, cfg.Conditions, cfg.AuthN.Mode.IsProduction(), logger)
+		structuralFacts, cfg.AuthN.Mode.IsProduction(), logger)
 
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
@@ -666,7 +663,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// AuthZ core.
 		authorizeHandler:         authzServices.authorize,
-		conditionsHandler:        authzServices.conditions,
 		internalAuthorizeHandler: authzServices.internalAuthorize,
 
 		// RBAC rules-model G — public grantable role-rule catalog.
@@ -806,15 +802,14 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 // authzServiceBundle — handlers produced by buildAuthZServices.
 type authzServiceBundle struct {
 	authorize         *authorizeapp.Handler
-	conditions        *conditionsapp.Handler
 	internalAuthorize *internalauthorizeapp.Handler
 	// authorizeSvc — raw AuthorizeService use-case, exposed so the
 	// InternalIAMService.Check gate can delegate to the SAME FGA pipeline.
 	authorizeSvc *service.AuthorizeService
 }
 
-// buildAuthZServices wires AuthorizeService + ConditionsService +
-// InternalAuthorizeService against a fully-configured OpenFGA HTTP client.
+// buildAuthZServices wires AuthorizeService + InternalAuthorizeService against a
+// fully-configured OpenFGA HTTP client.
 //
 // The FGA model is the sole policy gate: AuthorizeService does not evaluate any
 // additional guardrail overlay after the FGA Check.
@@ -828,7 +823,7 @@ type authzServiceBundle struct {
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	kachoRepo kachorepo.Repository, fgaTransport *clients.OpenFGAHTTPClient,
 	ownGates *authzcascade.Client, structuralFacts *authzcascade.Resolver,
-	condCfg config.ConditionsConfig, prodMode bool, logger *slog.Logger) authzServiceBundle {
+	prodMode bool, logger *slog.Logger) authzServiceBundle {
 	modelID := fgaTransport.AuthorizationModel
 	logger.Info("openfga extended client wired for AuthZ",
 		"endpoint", fgaTransport.Endpoint, "store_id", fgaTransport.StoreID, "model_id", modelID)
@@ -842,7 +837,7 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// parent pointers (internal/authzcascade). Without it the cascade resolves only
 	// over pointers the fga_outbox drainer has already delivered, which makes the
 	// three tiers exactly as delivery-dependent as the flat index they were chosen
-	// over — the ConditionsRepo is attached so iam_condition is covered too.
+	// over.
 	//
 	// It is the SAME resolver the own-gate wrapper uses — built once by the caller — so the
 	// two surfaces cannot come to derive facts from different places.
@@ -885,33 +880,9 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	tupleWriter := service.NewRelationProjector(fgaTransport)
 	internalAuthH := internalauthorizeapp.NewHandler(tupleWriter, opsRepo, modelID)
 
-	// ConditionsService — Postgres-backed.
-	condRepo := kachopg.NewConditionsRepo(pool)
-	condEvaluator := service.NewBuiltinEvaluatorWithCache(condCfg.CacheSize, condCfg.CacheTTL())
-	condSvc := service.NewConditionsCRUDService(condRepo, opsRepo, condEvaluator)
-	// In-service authz: reads require `viewer` and mutations require `editor` on
-	// the condition's owning project(folder) scope (cluster-admin short-circuits),
-	// mirroring the sibling IAM resources. Without this, ConditionsService had no
-	// server-side authorization (cross-tenant BOLA read + tamper).
-	condSvc.WithRelationStore(ownGates)
-	// Durable audit_outbox emitter — emits
-	// iam.condition.created / .updated / .deleted rows inside the ConditionsService
-	// worker-tx, atomic with the conditions-row mutation (запрет #10). Payload
-	// carries only non-secret compliance dimensions (actor / condition_id /
-	// expression name), never the opaque params blob.
-	condSvc.WithAuditEmitter(kachopg.NewAuditOutboxEmitter(pool), kachopg.NewPoolTxBeginner(pool))
-	// Hierarchy pointer — `iam_condition:<id> # project @ project:<projectId>`,
-	// co-committed with the row and retracted on Delete. `type iam_condition`
-	// derives its super-admin from `super_admin from project`, so without this
-	// tuple the cloud administrator, the bootstrap identity and the account
-	// administrator all resolve to nothing on a Condition.
-	condSvc.WithRelationOutbox(kachopg.NewFGAOutboxEmitter())
-	conditionsH := conditionsapp.NewHandler(condSvc)
-
 	return authzServiceBundle{
 		authorize:         authzH,
 		authorizeSvc:      authSvc,
-		conditions:        conditionsH,
 		internalAuthorize: internalAuthH,
 	}
 }

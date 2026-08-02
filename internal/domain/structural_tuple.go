@@ -154,15 +154,9 @@ func AccountScopedStructuralFact(accountID, objectType, objectID string) (Struct
 	}, true
 }
 
-// ProjectScopedStructuralFact is the same for the project-scoped iam types
-// (`super_admin: super_admin from project`) — today iam_condition.
-func ProjectScopedStructuralFact(projectID, objectType, objectID string) (StructuralTuple, bool) {
-	if projectID == "" || objectType == "" || objectID == "" {
-		return StructuralTuple{}, false
-	}
-	return StructuralTuple{
-		User:     "project:" + projectID,
-		Relation: "project",
-		Object:   objectType + ":" + objectID,
-	}, true
-}
+// Проектно-скоупленной проекции здесь больше нет: единственным типом,
+// выводившимся из проекта (`super_admin: super_admin from project`), был снятый
+// ресурс условия. Функция без прод-вызывающих — не «задел на будущее», а
+// мёртвый код, который следующий читатель примет за живой контракт. Когда
+// появится настоящий проектно-скоупленный тип, она пишется под него — вместе с
+// вызывающим.

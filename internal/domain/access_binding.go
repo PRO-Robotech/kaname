@@ -11,8 +11,8 @@ import (
 )
 
 // AccessBinding — link (subject_type, subject_id) ↔ role_id ↔
-// (resource_type, resource_id) with lifecycle fields (status,
-// condition_id, expires_at, granted_by, revoked_at/revoked_by).
+// (resource_type, resource_id) with lifecycle fields (status, expires_at,
+// granted_by, revoked_at/revoked_by).
 //
 // State machine: PENDING → ACTIVE → REVOKED (terminal). Transitions are
 // atomic CAS-style UPDATEs (no TOCTOU). REVOKED is irreversible via
@@ -29,14 +29,13 @@ type AccessBinding struct {
 	SubjectID       SubjectID
 	RoleID          RoleID
 	ResourceType    ResourceType
-	ResourceID      string                   // opaque id (any prefix, cross-service OK)
-	Scope           Scope                    // RBAC v2 — anchor tier (CLUSTER/ACCOUNT/PROJECT)
-	Status          AccessBindingStatus      // PENDING|ACTIVE|REVOKED
-	ConditionID     AccessBindingConditionID // nullable — overlay condition
-	ExpiresAt       *time.Time               // nullable — TTL
-	GrantedByUserID UserID                   // audit
-	RevokedAt       *time.Time               // nullable
-	RevokedByUserID *UserID                  // nullable
+	ResourceID      string              // opaque id (any prefix, cross-service OK)
+	Scope           Scope               // RBAC v2 — anchor tier (CLUSTER/ACCOUNT/PROJECT)
+	Status          AccessBindingStatus // PENDING|ACTIVE|REVOKED
+	ExpiresAt       *time.Time          // nullable — TTL
+	GrantedByUserID UserID              // audit
+	RevokedAt       *time.Time          // nullable
+	RevokedByUserID *UserID             // nullable
 	CreatedAt       time.Time
 
 	// MaterializedAt — OUTPUT-ONLY. When this binding's per-object access last

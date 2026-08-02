@@ -157,16 +157,19 @@ or one that carries `v_*` outside the grantable catalog, fails the build.
 
 ---
 
-## 5. Fat authz/conditions service structs not yet split into per-RPC use-cases (deferred reorg)
+## 5. Fat authz service struct not yet split into per-RPC use-cases (deferred reorg)
 
 **Convention** (evgeniy/godzila regime): one `UseCase` struct + one file per RPC
 (as in `internal/apps/kacho/api/account`).
 
-**Divergence**: `ConditionsCRUDService` (`conditions_crud_service.go`) and
-`AuthorizeService` (`authorize_service.go`) each carry the full CRUD/authz method
-set on a single struct, and some services keep their use-cases in one file
+**Divergence**: `AuthorizeService` (`authorize_service.go`) carries the full authz
+method set on a single struct, and some services keep their use-cases in one file
 (`sa_keys/usecases.go`, `user_tokens/usecases.go`). These predate the per-RPC
 regime the rest of the codebase follows.
+
+`ConditionsCRUDService` was the third example and is no longer one: the
+tenant-facing condition surface was retired, so that half of this record has no
+subject left and has been struck rather than carried forward.
 
 **Why deferred (not fixed in r3)**: splitting is a pure mechanical reorganisation
 with **no** runtime, wire, or security impact, but a large blast radius across the
@@ -192,42 +195,19 @@ Tracked as a dedicated refactor-only change.
 
 ---
 
-## 7. Conditions domain→proto projection + required-field validation live in the service/handler, not the dto registry / a domain constructor (deferred reorg)
+## 7. СНЯТО — расхождение по проекции условий (предмета больше нет)
 
-**Convention** (godzila/evgeniy regime): domain→proto mapping goes through the
-generic `internal/dto` + `internal/dto/toproto/*` registry (`dto.Transfer` /
-`RegTransfer`), and required-field/business validation lives in self-validating
-domain newtypes + a `domain.X.Validate()` constructor — the pattern every core
-resource (Account/Project/User/ServiceAccount/Group/Role/AccessBinding) follows.
+Запись описывала, как ресурс условия проецировался в ответ и валидировался в
+транспортном обработчике мимо общего реестра. Тенантская поверхность условного
+доступа снята целиком — сервис, хранилище, наложение на привязку, — поэтому
+описываемого кода не существует.
 
-**Divergence**: the conditions feature hand-rolls its projection
-(`service.ConditionToProto` / `conditionStatusToProto` in
-`conditions_crud_service.go`) instead of a registered `toproto/condition.go`, and
-validates required fields (`project_id` / `name` / `expression`, and `context` on
-Evaluate) **inline in the transport handler**
-(`internal/apps/kacho/api/conditions/handler.go`) rather than in a
-`domain.Condition` constructor.
+Номер сохранён намеренно: на него ссылаются снаружи, а перенумерация превратила бы
+чужие ссылки в указатели на другое расхождение. Запись, которой больше нечего
+описывать, — находка, а не наследство: она вычеркнута, а не оставлена «на всякий
+случай».
 
-**Why deferred (not fixed here)**: this is the same cohesive-service area already
-recorded in §5 (conditions/authorize kept as fat services). Moving the projection
-into the registry would **not** by itself close the stated risk — the
-`conditionStatusToProto` `switch` keeps a catch-all `STATUS_UNSPECIFIED` default,
-so an unhandled future `domain.ConditionStatus` would still map silently regardless
-of where the switch lives; and the `parameters_schema` JSON→structpb path
-currently swallows a decode error (omit-on-bad-JSON) that a registry impl returning
-`(T, error)` would surface differently. Both are behaviour-affecting nuances that
-belong in a focused, independently-reviewed conditions refactor (with a domain
-constructor and a loud-on-unknown status mapping), not folded into a security
-hardening pass. Introducing a second entry point to condition creation before that
-refactor is the only way the inline-handler validation could be bypassed; today the
-gRPC handler is the sole caller, so the invariant holds for every real path.
-
-**Convergence path (deferred)**: add `internal/dto/toproto/condition.go`
-(registered via `RegTransfer`, added to the `Transferrable` type-set), introduce a
-self-validating `domain.Condition` (ConditionName/Expression newtypes +
-`Validate()`), make the status mapping fail loud on an unknown value, and reduce the
-handler to transport parsing + delegation. Tracked as a dedicated refactor-only
-change.
+Приёмка снятия — `services/iam/docs/acceptance/retire-tenant-condition-surface.md`.
 
 ---
 
@@ -296,54 +276,13 @@ _Reviewed 2026-07-06 (r7b security-hardening audit)._
 
 ---
 
-## 10. `ConditionsService` CRUD lives as one cohesive service, not slice-per-RPC use-cases
+## 10. СНЯТО — расхождение по компоновке сервиса условий (предмета больше нет)
 
-**Convention** (architecture.md + evgeniy/godzila regime): each CRUD resource is
-implemented as slice-per-RPC `UseCase` structs under
-`internal/apps/kacho/api/<resource>/` (e.g. `CreateAccountUseCase`,
-`UpdateAccountUseCase`), with a thin handler as the composition target. The seven
-core IAM resources (account/project/user/group/role/access_binding/
-service_account) all follow this.
+Запись обосновывала, почему CRUD условий жил одним связным сервисом, а не срезами
+по RPC. Сервиса нет: тенантская поверхность условного доступа снята.
 
-**Divergence**: the standalone Condition resource (`cnd_…`,
-`internal/service/conditions_crud_service.go`) is implemented as a single
-`ConditionsCRUDService` type that bundles every RPC (Get/List/Create/Update/
-Delete/Evaluate), the folder-authz helpers, the CEL-evaluation glue, the
-outbox/audit wiring, and the `doCreate`/`doUpdate`/`doDelete` Operation-worker
-bodies. Its handler (`internal/apps/kacho/api/conditions/handler.go`) is a
-pass-through with its own inline required-field validation and a package-local
-`mapErr`, rather than a thin composition of per-RPC slices.
-
-**Why (by design, not a defect)**: Condition is not a tenant-owned CRUD aggregate
-like the seven core resources — it is an **authz-engine artefact** whose whole
-lifecycle is one tightly-coupled unit: a Create/Update/Delete is only meaningful
-together with CEL expression recognition (shared process-lifetime
-`ConditionsEvaluator` LRU), the reference-count gate against
-`access_bindings.condition_ref`, the tombstone→hard-delete Operation worker, and
-the audit-atomic worker-tx (ban #10). These do not decompose into independent
-per-RPC slices without threading the same evaluator + txb + audit ports through
-each — the cohesion is real, mirroring the *other* `internal/service` engine
-services (`authorize`, `internal_authorize`, `internal_iam`) that the regime
-already treats as legitimately single-responsibility. The shape carries **zero**
-proto/REST/DB contract difference; it is purely an internal code-organisation
-choice on the least tenant-facing resource in the domain.
-
-**Safety**: no runtime, wire, or security consequence — the service is exercised
-by the same unit + integration + newman coverage as the sibling resources, and
-the authz-critical CEL/refcount/audit paths are unchanged by the layout. The only
-cost is code-organisation asymmetry (a contributor copying the account slice
-pattern gets a different shape for Conditions).
-
-**Convergence path (deferred)**: if/when a per-RPC split buys real isolation
-(e.g. Conditions grows independent mutable fields with divergent CAS logic),
-split `ConditionsCRUDService` into `create.go/update.go/delete.go/get.go/list.go/
-evaluate.go` slices under `internal/apps/kacho/api/conditions/`, move required-
-field validation into the domain constructor, and drop the package-local `mapErr`
-in favour of the shared helper. Undertaken as a dedicated refactor-only change so
-the diff over the authz-critical path is reviewed in isolation — not folded into a
-hardening pass where refactor churn could mask a security-relevant change.
-
-_Reviewed 2026-07-06 (r8b security-hardening audit)._
+Номер сохранён по той же причине, что и у §7. Приёмка снятия —
+`services/iam/docs/acceptance/retire-tenant-condition-surface.md`.
 
 ---
 

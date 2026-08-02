@@ -40,8 +40,7 @@ gRPC-поверхности — иначе утекла бы внутрення�
 **Публичный `:9090`** (`registerPublicServices`): `OperationService`,
 `AccountService`, `ProjectService`, `UserService`, `ServiceAccountService`,
 `GroupService`, `RoleService`, `AccessBindingService`, `AuthorizeService`
-(PDP: `Check`/`ListObjects`/`ListSubjects`), `ConditionsService` (CEL ABAC
-overlay), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
+(PDP: `Check`/`ListObjects`/`ListSubjects`), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
 taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
 
 **Internal `:9091`** (`registerInternalServices`, только cluster-internal —

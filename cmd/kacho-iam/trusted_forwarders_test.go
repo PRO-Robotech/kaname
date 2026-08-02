@@ -235,7 +235,6 @@ func TestConfigRefusal_NamesTheEnvOverride(t *testing.T) {
 	}
 	cfg.Repository.Postgres.URL = "postgres://u:p@db:5432/kacho_iam"
 	cfg.Repository.Postgres.SSLMode = "require"
-	cfg.Conditions = config.ConditionsConfig{CacheSize: 1, CacheTTLSeconds: 1}
 
 	err := cfg.Validate()
 	if err == nil {

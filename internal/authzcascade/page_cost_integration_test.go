@@ -260,7 +260,7 @@ func (w *costWorld) measure(t *testing.T, label, subject string, ids []string, s
 	)
 	if sh != noSecondChance {
 		primary = &countingPrimary{inner: kachopg.New(pool, nil)}
-		resolver := New(primary).WithConditions(kachopg.NewConditionsRepo(pool))
+		resolver := New(primary)
 		if sh == pagePrefetched {
 			batch = &countingBatch{inner: kachopg.NewStructuralFactsRepo(pool)}
 			resolver = resolver.WithBatch(batch)

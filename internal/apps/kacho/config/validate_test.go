@@ -48,9 +48,6 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			HydraJWKSURL:  "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json",
 			HydraTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
 		},
-		// Positive cache knobs so the (unrelated) conditions validation passes;
-		// RegisterDefaults sets these in the real load path.
-		Conditions: config.ConditionsConfig{CacheSize: 1000, CacheTTLSeconds: 60},
 	}
 }
 

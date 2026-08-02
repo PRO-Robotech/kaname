@@ -258,9 +258,6 @@ func TestListPermissionCatalog_HasListEndpoint_FromClosedTable(t *testing.T) {
 
 	wantTrue := []string{
 		"iam.role", "iam.account", "iam.project", "iam.serviceAccount", "iam.group", "iam.accessBinding",
-		// iam.condition — ConditionsService.List is now mounted on the external
-		// mux (GET /iam/v1/conditions), so the former exception is gone.
-		"iam.condition",
 		"vpc.subnet", "vpc.network", "compute.instance",
 	}
 	for _, key := range wantTrue {

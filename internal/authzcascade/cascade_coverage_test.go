@@ -27,7 +27,6 @@
 package authzcascade
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,8 +54,8 @@ import (
 // access_binding/tuples.go::hierarchyParentTuple, account/create.go::ownerTuples,
 // project/create.go::projectStructuralTuples. The account pointer for the remaining
 // five types is still built as a literal at its own site (user/internal_upsert.go,
-// group/create.go, role/create.go, service_account/create.go,
-// conditions_crud_service.go). For those the delivered tuple and the request-time fact
+// group/create.go, role/create.go, service_account/create.go). For those the
+// delivered tuple and the request-time fact
 // agree by inspection rather than by construction. That is a real, named remainder: the
 // safe direction of a drift there is a denial (the two facts differ, so the cascade
 // resolves over one of them and not the other), never an over-grant, because both are
@@ -124,7 +123,6 @@ func suppliedPairs() map[string]map[string]bool {
 	for _, ot := range []string{"iam_user", "iam_group", "iam_role", "iam_service_account"} {
 		add(toConditionalOne(domain.AccountScopedStructuralFact("acc-x", ot, "id-x")))
 	}
-	add(toConditionalOne(domain.ProjectScopedStructuralFact("prj-x", "iam_condition", "cnd-x")))
 	return out
 }
 
@@ -191,7 +189,7 @@ func modelPath(t *testing.T) string {
 // TestEveryCascadedTypeIsCoveredOrExcluded — gate 1.
 func TestEveryCascadedTypeIsCoveredOrExcluded(t *testing.T) {
 	model := parseModel(t)
-	r := New(nil).WithConditions(stubConditionReader{})
+	r := New(nil)
 
 	cascaded, uncovered := 0, []string(nil)
 	for name, mt := range model {
@@ -231,7 +229,7 @@ func TestEveryCascadedTypeIsCoveredOrExcluded(t *testing.T) {
 // blind spot inherits it.
 func TestExclusionListHasSomethingLeftToExclude(t *testing.T) {
 	model := parseModel(t)
-	r := New(nil).WithConditions(stubConditionReader{})
+	r := New(nil)
 	for name, reason := range notDerivableHere {
 		mt, ok := model[name]
 		if !ok {
@@ -405,12 +403,4 @@ func readsRelation(def, name string) bool {
 	}
 	bare := strings.TrimSpace(regexp.MustCompile(`\[[^\]]*\]`).ReplaceAllString(def, ""))
 	return regexp.MustCompile(`(^|\bor\s+)` + regexp.QuoteMeta(name) + `\b`).MatchString(bare)
-}
-
-// stubConditionReader makes iam_condition count as wired for the coverage gates
-// without needing a database (they never call StructuralFacts).
-type stubConditionReader struct{}
-
-func (stubConditionReader) Get(context.Context, domain.ConditionID) (domain.Condition, error) {
-	return domain.Condition{}, nil
 }

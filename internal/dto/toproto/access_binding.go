@@ -36,11 +36,10 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		ScopeId:   b.ResourceID,
 		CreatedAt: createdAt,
 		// redesign-2026 F10: the lifecycle projection MUST be surfaced on every read
-		// — status (ACTIVE on create, REVOKED after :revoke) + the audit/overlay
-		// columns. Previously dropped here → every binding read back as
-		// STATUS_UNSPECIFIED and revoke was invisible to clients.
+		// — status (ACTIVE on create, REVOKED after :revoke) + the audit columns.
+		// Previously dropped here → every binding read back as STATUS_UNSPECIFIED
+		// and revoke was invisible to clients.
 		Status:          abStatusToProto(b.Status),
-		ConditionId:     string(b.ConditionID),
 		ExpiresAt:       nullableTsTrunc(b.ExpiresAt),
 		GrantedByUserId: string(b.GrantedByUserID),
 		RevokedAt:       nullableTsTrunc(b.RevokedAt),

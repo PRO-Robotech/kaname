@@ -359,22 +359,6 @@ func TestIamExtRepos_6_5_5_AccessBinding_InvalidStatus_CHECK(t *testing.T) {
 // Conditions whitelist
 // ────────────────────────────────────────────────────────────────────────────
 
-func TestIamExtRepos_6_7_2_Condition_RejectsUnknownExpression(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
-	ctx, pool := kac127Setup(t)
-	_, abID, _, _ := kac127SeedABRow(t, ctx, pool, "cn72", domain.AccessBindingStatusActive)
-
-	// Raw SQL — Whitelist CHECK живет в DB-level access_binding_conditions, не в repo.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO access_binding_conditions (id, binding_id, expression, params)
-		VALUES ('cond_kac127cn720001ab', $1, 'arbitrary_unknown', '{}'::jsonb)`,
-		abID)
-	require.Error(t, err)
-	assertSQLState(t, err, "23514")
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // Federation Trust Policy
 // ────────────────────────────────────────────────────────────────────────────

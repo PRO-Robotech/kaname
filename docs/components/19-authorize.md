@@ -93,9 +93,6 @@ sequenceDiagram
     IAM->>FGA: Check(subject, relation, resource_object, context)
     Note over FGA: ReBAC tuple resolution +<br/>Conditional tuples (CEL) вдоль пути
     FGA-->>IAM: allowed=true|false
-    opt AccessBindingCondition overlay (если задан condition_id)
-        IAM->>IAM: CEL evaluate(kind, params, context)
-    end
     IAM-->>GW: AuthorizeCheckResponse{allowed, deny_reasons, authorization_model_id}
     GW-->>Cli: 200 {allowed:true}
 ```

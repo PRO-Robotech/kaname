@@ -28,32 +28,11 @@ set -euo pipefail
 
 # ── Exclusions, and why each one has a subject ────────────────────────────────
 #
-# `conditions` — excluded because narrowing it TODAY would hand back an empty page
-# to every project-tier principal, INCLUDING the editor who created the condition.
-#
-# The model declares `iam_condition` with the full verb set, so per-object grants
-# look expressible — but nothing ever writes one. `iam.condition` is absent from
-# the reconciler's materialisable set (services/iam/internal/domain/feed_registry.go)
-# and from the direct-scan specs, and Create emits only the structural project
-# pointer. So `viewer`/`v_list` on a condition resolve for exactly one population:
-# whoever reaches it through the `super_admin from project` cascade.
-#
-# That is why this is NOT the same finding as its nine siblings: the seven iam types
-# that are narrowed per object are all in that materialisable set. Conditions are the
-# one that is not, and the sibling assumption does not transfer.
-#
-# The real defect sits one layer down and is NOT a list-filter defect: a project
-# editor may create a condition and then cannot read, update or delete it, because
-# those RPCs are gated per object at the edge while nothing materialises the object.
-# Narrowing List on top of that would remove the last thing that still worked.
-# Recorded in services/iam/docs/architecture/list-filter-exclusions.md; it needs an
-# owner decision, not a filter.
-#
-# This exclusion EXPIRES ON AN EXTERNAL FACT, not on someone remembering: the moment
-# `iam.condition` becomes materialisable, the premise is gone and the filter is owed.
-# That is asserted mechanically by TestConditionsExclusion_ExpiresWhenConditionsBecomeMaterialisable
-# (services/iam/tools/auditlistfilter/exclusion_expiry_test.go), which FAILS while the
-# exclusion is still listed here after the fact changes.
+# The `conditions` exclusion is GONE, and not because someone remembered to look at
+# it: its subject was retired. The tenant-facing Condition resource — service,
+# storage and the per-binding overlay — no longer exists, so there is no
+# `ConditionsService/List` left to narrow and nothing for the exclusion to name. An
+# entry with nothing left to exclude is a finding, not an inheritance.
 #
 # ── The other two ─────────────────────────────────────────────────────────────
 #
@@ -81,4 +60,4 @@ SERVICE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$(dirname "$0")/../../.."
 
 exec go run ./services/iam/tools/auditlistfilter/cmd/audit-list-filter \
-  --allow=conditions --allow=sa_keys --allow=user_tokens --root="$SERVICE_ROOT" "$@"
+  --allow=sa_keys --allow=user_tokens --root="$SERVICE_ROOT" "$@"

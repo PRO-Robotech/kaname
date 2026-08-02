@@ -20,9 +20,9 @@ package pg
 // idempotent-upsert) удален — он маскировал реальный duplicate-grant и
 // засорял audit-чейн.
 //
-// Full column coverage (13 cols):
+// Full column coverage (12 cols):
 //   id, subject_type, subject_id, role_id, resource_type, resource_id,
-//   status (PENDING|ACTIVE|REVOKED — DEFAULT 'ACTIVE'), condition_id (nullable FK),
+//   status (PENDING|ACTIVE|REVOKED — DEFAULT 'ACTIVE'),
 //   expires_at (nullable TTL), granted_by_user_id (audit),
 //   revoked_at (nullable), revoked_by_user_id (nullable), created_at.
 //
@@ -66,7 +66,7 @@ type abReader struct {
 // SetDeletionProtection/DeleteGuarded). `target_digest` is write-only (index key,
 // computed on Insert) — NOT scanned, so it is deliberately absent here.
 const abCols = "id, subject_type, subject_id, role_id, resource_type, resource_id, " +
-	"status, condition_id, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
+	"status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
 	"deletion_protection, labels, target"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
@@ -548,9 +548,9 @@ type abWriter struct {
 // больше не вызывает FindExisting для pre-resolution candidate-id; reseats
 // strictly create-or-conflict.
 //
-// Записывает все 13 колонок. Пустой Status проходит как DB-default ACTIVE
-// (через COALESCE(NULLIF($7, ”), 'ACTIVE')). Nullable поля (condition_id,
-// expires_at, revoked_at, revoked_by_user_id) передаются через
+// Записывает все 12 колонок. Пустой Status проходит как DB-default ACTIVE
+// (через COALESCE(NULLIF($7, ”), 'ACTIVE')). Nullable поля (expires_at,
+// revoked_at, revoked_by_user_id) передаются через
 // nullableString/nullableTimePtr хелперы.
 func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	now := time.Now().UTC()
@@ -576,13 +576,13 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	q := fmt.Sprintf(`
 		INSERT INTO access_bindings (
 			id, subject_type, subject_id, role_id, resource_type, resource_id,
-			status, condition_id, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope,
+			status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope,
 			deletion_protection, labels, target, target_digest
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 		)
 		RETURNING %s`, abCols)
 	var scopeArg any
@@ -595,7 +595,6 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		string(b.ID), string(b.SubjectType), string(b.SubjectID), string(b.RoleID),
 		string(b.ResourceType), b.ResourceID,
 		string(b.Status),
-		nullableString(string(b.ConditionID)),
 		nullableTimePtr(b.ExpiresAt),
 		string(b.GrantedByUserID),
 		nullableTimePtr(b.RevokedAt),
@@ -881,7 +880,6 @@ func scanAB(row scanner) (domain.AccessBinding, error) {
 func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding, error) {
 	var (
 		ab           domain.AccessBinding
-		conditionID  sql.NullString
 		expiresAt    sql.NullTime
 		revokedAt    sql.NullTime
 		revokedByUID sql.NullString
@@ -901,7 +899,6 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		(*string)(&ab.ResourceType),
 		&ab.ResourceID,
 		(*string)(&ab.Status),
-		&conditionID,
 		&expiresAt,
 		(*string)(&ab.GrantedByUserID),
 		&revokedAt,
@@ -923,9 +920,6 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	ab.Target, err = unmarshalTarget(targetJSON)
 	if err != nil {
 		return domain.AccessBinding{}, err
-	}
-	if conditionID.Valid {
-		ab.ConditionID = domain.AccessBindingConditionID(conditionID.String)
 	}
 	if expiresAt.Valid {
 		t := expiresAt.Time

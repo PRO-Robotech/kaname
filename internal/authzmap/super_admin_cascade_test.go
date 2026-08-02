@@ -316,7 +316,7 @@ func TestSuperAdminCascade_ProjectIsNotACascadeSource(t *testing.T) {
 	// would re-open the leak one type at a time.
 	for _, leaf := range []string{
 		"vpc_network", "vpc_subnet", "compute_instance", "storage_volume",
-		"nlb_network_load_balancer", "nlb_listener", "registry_registry", "iam_condition",
+		"nlb_network_load_balancer", "nlb_listener", "registry_registry",
 	} {
 		lb := typeBody(t, dsl, leaf)
 		m := regexp.MustCompile(`(?m)^\s*define super_admin:\s*(.*)$`).FindStringSubmatch(lb)

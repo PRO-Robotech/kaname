@@ -53,17 +53,6 @@ func (c Config) Validate() error {
 			fmt.Errorf("repository.postgres.url is empty"))
 	}
 
-	// conditions cache knobs must be positive (a non-positive size/TTL would
-	// silently disable or thrash the recognition cache).
-	if c.Conditions.CacheSize <= 0 {
-		errs = multierr.Append(errs,
-			fmt.Errorf("conditions.cache-size must be > 0 (got %d)", c.Conditions.CacheSize))
-	}
-	if c.Conditions.CacheTTLSeconds <= 0 {
-		errs = multierr.Append(errs,
-			fmt.Errorf("conditions.cache-ttl-seconds must be > 0 (got %d)", c.Conditions.CacheTTLSeconds))
-	}
-
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())

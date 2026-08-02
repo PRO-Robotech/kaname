@@ -93,6 +93,18 @@
       "table": "kacho_iam.oidc_jwks_keys",
       "kind": "retire",
       "expect_rows": 0
+    },
+    {
+      "version": 75,
+      "table": "kacho_iam.access_binding_conditions",
+      "kind": "retire",
+      "expect_rows": 0
+    },
+    {
+      "version": 75,
+      "table": "kacho_iam.conditions",
+      "kind": "retire",
+      "expect_rows": 0
     }
   ]
 }

@@ -528,7 +528,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-VOLUME-03 :: create-volume-volume-rya37",
+          "name": "T31-LBLREVOKE-STORAGE-VOLUME-03 :: create-volume-volume-rya35",
           "request": {
             "method": "POST",
             "header": [
@@ -1807,7 +1807,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-volume-snapsrc-rya38",
+          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-volume-snapsrc-rya36",
           "request": {
             "method": "POST",
             "header": [
@@ -1962,7 +1962,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-snapshot-rya39",
+          "name": "T31-LBLREVOKE-STORAGE-SNAPSHOT-03 :: create-snapshot-rya37",
           "request": {
             "method": "POST",
             "header": [
@@ -3241,7 +3241,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-volume-imgsrc-rya40",
+          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-volume-imgsrc-rya38",
           "request": {
             "method": "POST",
             "header": [
@@ -3396,7 +3396,7 @@
           ]
         },
         {
-          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-image-rya41",
+          "name": "T31-LBLREVOKE-STORAGE-IMAGE-03 :: create-image-rya39",
           "request": {
             "method": "POST",
             "header": [

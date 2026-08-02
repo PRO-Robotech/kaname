@@ -2581,7 +2581,7 @@
           ]
         },
         {
-          "name": "IAM-USR-DL-CRUD-OK :: delete-user-rya29",
+          "name": "IAM-USR-DL-CRUD-OK :: delete-user-rya27",
           "request": {
             "method": "DELETE",
             "header": [
@@ -3718,7 +3718,7 @@
           ]
         },
         {
-          "name": "IAM-USR-BLK-NEG-PENDING :: block-pending-rya30",
+          "name": "IAM-USR-BLK-NEG-PENDING :: block-pending-rya28",
           "request": {
             "method": "POST",
             "header": [
@@ -4105,7 +4105,7 @@
           ]
         },
         {
-          "name": "IAM-USR-UBK-NEG-PENDING :: unblock-pending-rya31",
+          "name": "IAM-USR-UBK-NEG-PENDING :: unblock-pending-rya29",
           "request": {
             "method": "POST",
             "header": [

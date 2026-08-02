@@ -96,14 +96,6 @@ import (
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
 
-// ConditionReader — narrow port over the pool-direct conditions repository (the
-// only iam resource whose reader is not on kachorepo.Reader). Optional: when it
-// is not wired, iam_condition is simply not derivable and the coverage gate says
-// so.
-type ConditionReader interface {
-	Get(ctx context.Context, id domain.ConditionID) (domain.Condition, error)
-}
-
 // PrimaryReaderSource opens a read-only transaction on the PRIMARY.
 //
 // It is deliberately NOT kachorepo.Repository, whose Reader() prefers a replica. The
@@ -118,8 +110,7 @@ type PrimaryReaderSource interface {
 // Resolver reads iam's committed rows and projects them into the structural
 // tuples the cascade derives over.
 type Resolver struct {
-	repo       PrimaryReaderSource
-	conditions ConditionReader
+	repo PrimaryReaderSource
 	// batch — OPTIONAL page-shaped read of the same facts (batch.go). Absent ⇒ every
 	// question resolves its own object, which is the right shape for a gate about one
 	// object and the wrong one for a page.
@@ -150,20 +141,13 @@ func (r *Resolver) WithReadTimeout(d time.Duration) *Resolver {
 	return r
 }
 
-// WithConditions wires the conditions reader, making iam_condition derivable.
-func (r *Resolver) WithConditions(c ConditionReader) *Resolver {
-	r.conditions = c
-	return r
-}
-
 // DerivableTypes — the FGA object types whose structural facts this package can
 // prove from a committed iam row. Exported so the coverage gate can compare it
 // against the model instead of restating it.
 //
 // Every entry is a type whose row lives in kacho_iam and carries its parent
 // scope as a COLUMN, so the projection is a single authoritative read with no
-// ambiguity. iam_condition is included only when the conditions reader is wired
-// (see Derivable).
+// ambiguity.
 var DerivableTypes = map[string]struct{}{
 	"iam_access_binding":  {},
 	"account":             {},
@@ -172,16 +156,12 @@ var DerivableTypes = map[string]struct{}{
 	"iam_group":           {},
 	"iam_role":            {},
 	"iam_service_account": {},
-	"iam_condition":       {},
 }
 
 // Derivable reports whether StructuralFacts can say anything about this object
 // type at all, WITHOUT touching the database. The decision path calls it first so
 // a Check on an object iam does not own costs no read.
 func (r *Resolver) Derivable(objectType string) bool {
-	if objectType == "iam_condition" {
-		return r.conditions != nil
-	}
 	_, ok := DerivableTypes[objectType]
 	return ok
 }
@@ -290,17 +270,9 @@ func parseObjectRef(s string) (objectRef, bool) {
 
 // factsFor projects ONE row, on the walk's shared snapshot. StructuralFacts is the
 // transitive closure over it.
-//
-// The conditions reader is pool-direct (it is the one iam resource whose reader is
-// not on kachorepo.Reader), so an iam_condition read is outside the snapshot. That is
-// harmless here: a condition is a leaf of the chain — its project pointer is the last
-// hop taken from it, and the project itself is then read on the snapshot.
 func (r *Resolver) factsFor(
 	ctx context.Context, rd kachorepo.Reader, objectType, objectID string,
 ) ([]authztypes.TupleKey, error) {
-	if objectType == "iam_condition" {
-		return r.conditionFacts(ctx, objectID)
-	}
 	if rd == nil {
 		return nil, nil
 	}
@@ -355,14 +327,6 @@ func (r *Resolver) factsFor(
 		return toConditionalOne(domain.AccountScopedStructuralFact(string(sa.AccountID), "iam_service_account", objectID)), nil
 	}
 	return nil, nil
-}
-
-func (r *Resolver) conditionFacts(ctx context.Context, objectID string) ([]authztypes.TupleKey, error) {
-	c, err := r.conditions.Get(ctx, domain.ConditionID(objectID))
-	if err != nil {
-		return nil, absentIsNotAnError(err)
-	}
-	return toConditionalOne(domain.ProjectScopedStructuralFact(c.ProjectID, "iam_condition", objectID)), nil
 }
 
 // absentIsNotAnError collapses "no such row" to (nil, nil) and passes every other

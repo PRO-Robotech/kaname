@@ -58,8 +58,6 @@ var metadataDeclRe = regexp.MustCompile(`metadata:\s*"([A-Za-z0-9_]+)"`)
 // как отсутствующий (kindDelete), и убрать строку отсюда.
 var unresolvedMetadata = []string{
 	"AddGroupMemberMetadata",
-	"CreateConditionMetadata",
-	"DeleteConditionMetadata",
 	"DeleteUserMetadata",
 	"ForceLogoutMetadata",
 	"GrantClusterAdminMetadata",
@@ -72,7 +70,6 @@ var unresolvedMetadata = []string{
 	"RevokeMetadata",
 	"RevokeSAKeyMetadata",
 	"RevokeUserTokenMetadata",
-	"UpdateConditionMetadata",
 	"UpsertFromIdentityMetadata",
 	"WriteTuplesMetadata",
 }

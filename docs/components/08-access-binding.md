@@ -42,8 +42,6 @@ Grant-идентичность AccessBinding (5-tuple subject↔role↔resource)
 | `resource_type`     | `ResourceType`               | да           | да        | Whitelist (см. ниже).                                |
 | `resource_id`       | `string`                     | да           | да        | opaque (cross-service id).                           |
 | `status`            | `AccessBindingStatus`        | да           | нет (CAS) | `PENDING | ACTIVE | REVOKED`. Default `ACTIVE`.    |
-| `condition_id`      | `AccessBindingConditionID`   | нет          | нет       | FK → `access_binding_conditions(id)`. nullable. Logical-oneof с `builtin_condition`. |
-| `builtin_condition` | `BuiltinCondition` (enum)    | нет          | нет       | Built-in condition overlay (oneof с `condition_id`). |
 | `expires_at`        | `*time.Time`                 | нет          | нет       | TTL.                                                |
 | `granted_by_user_id`| `UserID`                     | нет (audit)  | да        | Кто грантнул.                                       |
 | `revoked_at`        | `*time.Time`                 | нет          | нет       | Stamp на REVOKED.                                   |

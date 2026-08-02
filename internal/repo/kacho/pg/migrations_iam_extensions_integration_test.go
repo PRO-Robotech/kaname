@@ -97,7 +97,6 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 	// Verify expected tables exist after the extension migrations (sample check).
 	for _, table := range []string{
 		"clusters", "cluster_admin_grants",
-		"access_binding_conditions",
 		"service_account_oauth_clients",
 		"audit_outbox",
 		"session_revocations",
@@ -115,9 +114,13 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 	// Retired tables — must NOT come back. 0065 drops the signing-key store:
 	// iam owns no keyset (it mints nothing; Hydra is the issuer and signer),
 	// the table's only writers died with the nightly rotation (713f7e1), and it
-	// held zero rows on a fully working stand.
+	// held zero rows on a fully working stand. 0075 drops the tenant-facing
+	// condition surface: the resource table and the per-binding overlay, the
+	// latter with no production writer at any point in its life.
 	for _, table := range []string{
 		"oidc_jwks_keys",
+		"conditions",
+		"access_binding_conditions",
 	} {
 		var exists bool
 		err := db.QueryRowContext(ctx, `
@@ -136,7 +139,6 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		{"roles", "cluster_id"},
 		{"roles", "project_id"},
 		{"access_bindings", "status"},
-		{"access_bindings", "condition_id"},
 		{"access_bindings", "expires_at"},
 		{"access_bindings", "granted_by_user_id"},
 		{"access_bindings", "revoked_at"},

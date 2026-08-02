@@ -123,12 +123,6 @@ func (s *Snapshot) FactsByIDs(
 			})
 	case "iam_access_binding":
 		return s.scanBinding(ctx, ids)
-	case "iam_condition":
-		return s.scan(ctx,
-			`SELECT id, COALESCE(project_id, '') FROM kacho_iam.conditions WHERE id = ANY($1)`, ids,
-			func(id, projectID string) []domain.StructuralTuple {
-				return oneFact(domain.ProjectScopedStructuralFact(projectID, "iam_condition", id))
-			})
 	}
 	table, ok := accountScopedTables[objectType]
 	if !ok {

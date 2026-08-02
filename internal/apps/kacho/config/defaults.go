@@ -106,11 +106,6 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.bootstrap-mint.signing-key-env", "KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM")
 	v.SetDefault("authn.bootstrap-mint.allowed-client-sans", []string{})
 
-	// conditions — ConditionsService evaluator recognition-cache tuning. Legacy
-	// env aliases KACHO_IAM_CONDITIONS_CACHE_SIZE / _CACHE_TTL_SECONDS (load.go).
-	v.SetDefault("conditions.cache-size", 1000)
-	v.SetDefault("conditions.cache-ttl-seconds", 60)
-
 	// OpenFGA, the gateway-internal drainer, Enterprise SSO, Governance,
 	// Federation/CAEP/ComplianceReport/Notify and the dead healthcheck
 	// placeholder were all removed (dead config) — OpenFGA + the drainer are

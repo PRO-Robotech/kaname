@@ -29,28 +29,9 @@ type Config struct {
 	APIServer  APIServerConfig  `mapstructure:"api-server"`
 	Repository RepositoryConfig `mapstructure:"repository"`
 	AuthN      AuthNConfig      `mapstructure:"authn"`
-	Conditions ConditionsConfig `mapstructure:"conditions"`
 	// OpenFGA is configured from KACHO_IAM_OPENFGA_* env vars in the composition
 	// root (cmd/kacho-iam), not from this YAML. The Prometheus /metrics listener
 	// is real — see APIServer.MetricsEndpoint.
-}
-
-// ConditionsConfig — ConditionsService evaluator tuning. The expression→builtin
-// recognition LRU is process-lifetime; these knobs size/expire it. Injected into
-// service.NewBuiltinEvaluatorWithCache from the composition root (never read via
-// os.Getenv in the service layer). Legacy env aliases
-// KACHO_IAM_CONDITIONS_CACHE_SIZE / KACHO_IAM_CONDITIONS_CACHE_TTL_SECONDS bind
-// here (see load.go).
-type ConditionsConfig struct {
-	// CacheSize — max entries in the expression-recognition cache (>0).
-	CacheSize int `mapstructure:"cache-size"`
-	// CacheTTLSeconds — per-entry TTL in seconds (>0).
-	CacheTTLSeconds int `mapstructure:"cache-ttl-seconds"`
-}
-
-// CacheTTL returns the recognition-cache TTL as a Duration.
-func (c ConditionsConfig) CacheTTL() time.Duration {
-	return time.Duration(c.CacheTTLSeconds) * time.Second
 }
 
 // LoggerConfig — logger section.

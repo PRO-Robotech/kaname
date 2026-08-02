@@ -60,13 +60,12 @@ func newEqWorld(t *testing.T) *eqWorld {
 	t.Cleanup(pool.Close)
 
 	repo := kachopg.New(pool, nil)
-	conds := kachopg.NewConditionsRepo(pool)
 	batchRepo := kachopg.NewStructuralFactsRepo(pool)
 
 	w := &eqWorld{
 		pool:   pool,
-		perObj: New(repo).WithConditions(conds),
-		batched: New(repo).WithConditions(conds).WithBatch(BatchSourceFunc(
+		perObj: New(repo),
+		batched: New(repo).WithBatch(BatchSourceFunc(
 			func(ctx context.Context) (StructuralSnapshot, error) { return batchRepo.StructuralSnapshot(ctx) })),
 		account:  costID("acc", "eq1"),
 		project:  costID("prj", "eq1"),
@@ -112,9 +111,6 @@ func newEqWorld(t *testing.T) *eqWorld {
 	user := costID("usr", "eqmem1")
 	exec(`INSERT INTO kacho_iam.users (id, external_id, email, account_id)
 	      VALUES ($1, $1, $1 || '@example.test', $2)`, user, w.account)
-	cond := "cnd" + strings.Repeat("e", 10)
-	exec(`INSERT INTO kacho_iam.conditions (id, project_id, name, expression)
-	      VALUES ($1, $2, $3, 'true')`, cond, w.project, lowerName(cond))
 
 	// Bindings on all three scope tiers: the project-scoped one is the two-level chain.
 	//
@@ -147,7 +143,6 @@ func newEqWorld(t *testing.T) *eqWorld {
 		"iam_group":           {group},
 		"iam_role":            {accountRole, systemRole},
 		"iam_service_account": {sa},
-		"iam_condition":       {cond},
 		"iam_access_binding":  {projBinding, accBinding, cluBinding},
 	}
 	// One id per type that has no row at all.
@@ -158,7 +153,6 @@ func newEqWorld(t *testing.T) *eqWorld {
 		"iam_group":           costID("grp", "eqmiss"),
 		"iam_role":            costID("rol", "eqmiss"),
 		"iam_service_account": costID("sva", "eqmiss"),
-		"iam_condition":       "cnd" + strings.Repeat("m", 10),
 		"iam_access_binding":  costID("acb", "eqmiss"),
 	}
 	return w
@@ -225,7 +219,11 @@ func TestBatchFactsMatchPerObjectFacts(t *testing.T) {
 	require.Equal(t, len(DerivableTypes), len(w.byType),
 		"every derivable type must be covered here; a type added to the resolver without a "+
 			"fixture would otherwise be silently unexamined")
-	require.GreaterOrEqual(t, examined, 12, "examined %d rows", examined)
+	// Floor lowered 12 → 11 when the tenant-facing condition surface was retired:
+	// `iam_condition` was one of the fixture's derivable types and its row went
+	// with the type. A floor guards against a SILENT shrink of what is compared;
+	// a deliberate retire moves it, and only by what the retire actually removed.
+	require.GreaterOrEqual(t, examined, 11, "examined %d rows", examined)
 	require.GreaterOrEqual(t, withFacts, 8,
 		"only %d of the compared rows produced any facts — an equivalence over empty sets "+
 			"would prove nothing", withFacts)

@@ -27,23 +27,10 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/condition"
 )
 
 // overMaxPageSize — one above the platform maximum.
 const overMaxPageSize = int32(maxListPageSize) + 1
-
-func TestConditionsList_PageSizeOverMax_Rejected(t *testing.T) {
-	r := &ConditionsRepo{}
-
-	_, _, err := r.List(context.Background(), condition.ListFilter{
-		ProjectID: "prj00000000000000001",
-		PageSize:  overMaxPageSize,
-	})
-
-	require.Error(t, err, "page_size over the maximum must be rejected, never clamped")
-	assert.ErrorIs(t, err, iamerr.ErrInvalidArg)
-}
 
 func TestUserOAuthClientList_PageSizeOverMax_Rejected(t *testing.T) {
 	r := &UserOAuthClientRepo{}

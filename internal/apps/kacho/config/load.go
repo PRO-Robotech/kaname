@@ -114,10 +114,6 @@ func applyLegacyEnv(v *viper.Viper) {
 		{"KACHO_IAM_SAKEY_MAX_TTL", "authn.sakey-max-ttl"},
 		{"KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL", "authn.sakey-access-token-ttl"},
 		{"KACHO_IAM_SAKEY_BIND_DPOP", "authn.sakey-bind-dpop"},
-		// ConditionsService evaluator cache — flat aliases for the documented env
-		// knobs (moved out of the service layer's os.Getenv into viper config).
-		{"KACHO_IAM_CONDITIONS_CACHE_SIZE", "conditions.cache-size"},
-		{"KACHO_IAM_CONDITIONS_CACHE_TTL_SECONDS", "conditions.cache-ttl-seconds"},
 		// OpenFGA legacy aliases — extend as the rollout adds them.
 	}
 	for _, m := range simple {

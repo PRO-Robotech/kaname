@@ -34,7 +34,6 @@ func TestObjectType_KnownPairs(t *testing.T) {
 		{"iam", "group", "iam_group"},
 		{"iam", "role", "iam_role"},
 		{"iam", "accessBinding", "iam_access_binding"},
-		{"iam", "condition", "iam_condition"},
 	}
 	for _, tc := range cases {
 		got, ok := authzmap.ObjectType(tc.module, tc.resource)

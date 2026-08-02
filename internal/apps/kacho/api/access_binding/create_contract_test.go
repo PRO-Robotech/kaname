@@ -16,8 +16,10 @@ package access_binding
 //
 // So the two fields are OFF the contract, with tag and name reserved (a future
 // design starts from a clean number rather than inheriting a meaning nobody
-// implemented). Conditions remain a first-class resource of their own
-// (ConditionsService), which is where that capability belongs.
+// implemented). The tenant-facing condition resource that once stood behind those
+// fields has since been retired too — the same reasoning, applied to the rest of
+// the surface: what remains is the condition ON A TUPLE, which the model declares
+// and the server keys itself.
 //
 // This test reads the descriptor, so re-adding a field — by any route, including
 // a regenerated stub — turns it red.

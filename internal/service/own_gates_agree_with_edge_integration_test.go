@@ -94,7 +94,6 @@ func newAgreeWorld(t *testing.T, withFacts bool) *agreeWorld {
 		// the per-object path either way, so both are exercised here.
 		structuralRepo := kachopg.NewStructuralFactsRepo(ci.pool)
 		facts = authzcascade.New(repo).
-			WithConditions(kachopg.NewConditionsRepo(ci.pool)).
 			WithBatch(authzcascade.BatchSourceFunc(
 				func(ctx context.Context) (authzcascade.StructuralSnapshot, error) {
 					return structuralRepo.StructuralSnapshot(ctx)

@@ -7,7 +7,6 @@ IAM-сервис Kachō: control-plane для identity & access. Управля�
 - **AuthZ (OpenFGA ReBAC)** — публичный `AuthorizeService` (PDP) + internal
   `Check` (authz-gate, который зовут остальные сервисы). Гранты `AccessBinding`
   транслируются в FGA-tuples через transactional-outbox внутри writer-tx.
-- **Условные гранты** — `ConditionsService` (CEL-выражения, request-time `Evaluate`).
 - **Permission catalog** — `PermissionCatalogService`: грантуемая таксономия `<module>.<resource>.<verb>`.
 - **Service-account keys** — `SAKeyService` (static SA-ключи через Ory Hydra).
 - **Cluster-admin grants** — internal `InternalClusterService` (time-bombed/permanent).

@@ -28,8 +28,6 @@
   `ListObjects` / `ListSubjects` / `ExpandRelations` / `WhoAmI`.
 - **InternalIAMService.Check** — authz-gate, который каждый control-plane сервис
   (`kacho-vpc`, `kacho-compute`, `kacho-nlb`, `kacho-geo`) зовет перед мутацией.
-- **ConditionsService** — ABAC-overlay поверх ReBAC: условные гранты на CEL-выражениях
-  (`Evaluate` в request-time).
 - **PermissionCatalogService** — грантуемая таксономия `<module>.<resource>.<verb>`
   (backend-driven каталог прав для UI и валидации Role).
 - **Cluster-admin grants** — internal-only `InternalClusterService`: time-bombed либо
@@ -175,8 +173,9 @@ C4Context
    - peer-путь: `kacho-vpc` / `kacho-compute` / `kacho-nlb` / `kacho-geo` зовут
      `InternalIAMService.Check` перед мутацией (mTLS, fail-closed).
    - Оба упираются в один OpenFGA Check над материализованными tuple'ами.
-4. **ABAC-overlay** — если на гранте висит Condition, `ConditionsService` вычисляет
-   CEL-выражение (IP-CIDR / время / атрибуты запроса) и может сузить решение.
+4. **Условие на кортеже** — модель прав объявляет условия (`mfa_fresh` и другие),
+   и OpenFGA вычисляет их на каждом Check по контексту запроса. Ключ условия
+   задаёт сервер; тенантской поверхности управления условиями нет.
 5. **Owner-tuple'ы** — consumer-сервисы регистрируют владение своими ресурсами через
    `InternalIAMService.RegisterResource` / `UnregisterResource` (fgaproxy): модули не
    ходят в OpenFGA напрямую, only через iam.
@@ -216,7 +215,6 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `GroupService`                  | CRUD Group + member-операции                           |
 | `:9090`   | `RoleService`                   | CRUD Role (system seed + custom)                       |
 | `:9090`   | `AccessBindingService`          | Create / Delete (immutable)                            |
-| `:9090`   | `ConditionsService`             | CRUD + CEL `Evaluate` (ABAC overlay)                   |
 | `:9090`   | `AuthorizeService`              | public PDP: Check / BatchCheck / ListObjects / ListSubjects |
 | `:9090`   | `PermissionCatalogService`      | грантуемая таксономия прав                              |
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |

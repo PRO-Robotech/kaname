@@ -15,8 +15,8 @@ package permission_catalog
 // this table MUST stay in lockstep with kacho-api-gateway PUBLIC-mux
 // registration (internal/restmux/mux.go). A (module,resource) is `true` here
 // IFF the api-gateway registers its per-object filtered List<Resource> on the
-// EXTERNAL listener. Two deliberate `false` cases (both grantable + verb-bearing
-// in objectTypes, so they DO appear in the catalog, but with hasListEndpoint=false):
+// EXTERNAL listener. One deliberate `false` case (grantable + verb-bearing in
+// objectTypes, so it DOES appear in the catalog, but with hasListEndpoint=false):
 //
 //   - vpc.addressPool — AddressPool is an admin Internal-only resource.
 //     Its only List is
@@ -25,10 +25,6 @@ package permission_catalog
 //     a Select here would have the UI dial a non-existent external List (404 /
 //     route-not-allowed) or, worse, surface the admin Internal surface. So the
 //     picker MUST render free-text and NEVER a Select for addressPool.
-//   - iam.condition — ConditionsService.List exists in proto (GET
-//     /iam/v1/conditions) but is NOT registered on the api-gateway external mux
-//     (the catalog filters EXISTING public Lists per-object; it does not promise
-//     to REGISTER new public routes). Internal/unregistered → false.
 //
 // Modelled as an explicit DENY-set rather than an ALLOW-set so a future
 // objectTypes addition defaults to `true` (the common case — most grantable

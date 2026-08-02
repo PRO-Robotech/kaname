@@ -133,13 +133,11 @@ func TestScopedStructuralFacts(t *testing.T) {
 	_, ok = domain.AccountScopedStructuralFact("", "iam_role", "rol-system")
 	assert.False(t, ok, "an object with no owning account must yield no account pointer")
 
-	got, ok = domain.ProjectScopedStructuralFact("prj-1", "iam_condition", "cnd-1")
-	require.True(t, ok)
-	assert.Equal(t, domain.StructuralTuple{
-		User: "project:prj-1", Relation: "project", Object: "iam_condition:cnd-1"}, got)
-
-	for _, tc := range [][3]string{{"prj-1", "", "cnd-1"}, {"prj-1", "iam_condition", ""}} {
-		if _, ok := domain.ProjectScopedStructuralFact(tc[0], tc[1], tc[2]); ok {
+	// Зеркальная половина той же проверки: неполная координата не становится
+	// кортежем и на аккаунтной проекции — иначе «пустое поле» превратилось бы в
+	// указатель на объект `account:`, достижимый администратором любого аккаунта.
+	for _, tc := range [][3]string{{"acc-1", "", "grp-1"}, {"acc-1", "iam_group", ""}} {
+		if _, ok := domain.AccountScopedStructuralFact(tc[0], tc[1], tc[2]); ok {
 			t.Fatalf("an incomplete coordinate must not become a tuple: %v", tc)
 		}
 	}

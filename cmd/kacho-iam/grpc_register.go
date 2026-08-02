@@ -47,9 +47,6 @@ func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations
 	if svcs != nil && svcs.authorizeHandler != nil {
 		iamv1.RegisterAuthorizeServiceServer(srv, svcs.authorizeHandler)
 	}
-	if svcs != nil && svcs.conditionsHandler != nil {
-		iamv1.RegisterConditionsServiceServer(srv, svcs.conditionsHandler)
-	}
 	// PermissionCatalogService — RBAC rules-model G: PUBLIC sync read of the
 	// backend-driven grantable role-rule taxonomy (GET /iam/v1/permissionCatalog).
 	// Platform metadata (NOT infra-sensitive, G-D3) → public listener;
