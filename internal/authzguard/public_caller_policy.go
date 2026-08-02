@@ -112,8 +112,13 @@ const (
 //     ProjectServiceClient pointed at iam's PUBLIC address and call Get on the
 //     request path of their own Create (project existence + owning account).
 //   - AccountService/List → ProjectService/List — the namespace operator's
-//     read-only fan-out (SEC-G); iam seeds its module SA with exactly
-//     `iam.projectses.*.list` and cluster system_viewer for this.
+//     read-only fan-out (SEC-G). This admits the operator as a CALLER; it says
+//     nothing about what it may see. The role that once backed the fan-out is
+//     retired (0076): its four resource names were absent from the closed
+//     object-type table, so it materialized no tuple, and the cascade it relied
+//     on is out of the model. The operator now sees exactly what it was granted
+//     per object, which today is nothing — reviving the fan-out means granting
+//     names the table carries, not re-adding the retired role.
 //   - AuthorizeService/BatchCheck — the per-page visibility filter in
 //     vpc/compute/nlb/storage (internal/authzfilter, the sole AuthorizeService
 //     method any of them calls). Its edge belongs on the internal listener and

@@ -53,7 +53,11 @@ INSERT INTO kacho_iam.roles (id, cluster_id, account_id, name, description, perm
   ('rol' || substr(md5('module.compute_sa'), 1, 17), 'cluster_kacho_root', NULL, 'module.compute_sa', 'Backing least-priv role for kacho-compute module SA (SEC-C)', '["vpc.subnets.*.get","vpc.security_groups.*.get","vpc.addresses.*.get","vpc.addresses.*.create","vpc.addresses.*.delete","vpc.addresses.*.update","iam.projects.*.get"]'::jsonb),
   ('rol' || substr(md5('module.vpc_sa'), 1, 17), 'cluster_kacho_root', NULL, 'module.vpc_sa', 'Backing least-priv role for kacho-vpc module SA (SEC-C)', '["compute.zones.*.get","iam.projects.*.get"]'::jsonb),
   ('rol' || substr(md5('module.nlb_sa'), 1, 17), 'cluster_kacho_root', NULL, 'module.nlb_sa', 'Backing least-priv role for kacho-nlb module SA (SEC-C)', '["vpc.subnets.*.get","iam.projects.*.get"]'::jsonb),
-  ('rol' || substr(md5('module.vpc_operator_sa'), 1, 17), 'cluster_kacho_root', NULL, 'module.vpc_operator_sa', 'Backing read-only role for kacho-vpc-operator module SA (SEC-C)', '["vpc.subnetses.*.list","vpc.networks.*.get","vpc.network_interfaces.*.get","iam.projectses.*.list"]'::jsonb),
+  -- module.vpc_operator_sa is ABSENT on purpose: migration 0076 retired it (its
+  -- four rules named resources the closed object-type table does not carry, so the
+  -- role materialized nothing). Re-inserting it here would resurrect the retired
+  -- declaration on every call of this helper — a re-apply path must not
+  -- reintroduce what a migration removed.
   ('rol' || substr(md5('module.api_gateway_sa'), 1, 17), 'cluster_kacho_root', NULL, 'module.api_gateway_sa', 'Identity-only role for kacho-api-gateway module SA (SEC-C); authz by user JWT', '["iam.projects.*.get"]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
@@ -61,7 +65,7 @@ INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, re
   ('acb' || substr(md5('module.vpc_sa'), 1, 17), 'service_account', 'sva' || substr(md5('kacho-vpc'), 1, 17), 'rol' || substr(md5('module.vpc_sa'), 1, 17), 'cluster', 'cluster_kacho_root', 1, 'ACTIVE'),
   ('acb' || substr(md5('module.compute_sa'), 1, 17), 'service_account', 'sva' || substr(md5('kacho-compute'), 1, 17), 'rol' || substr(md5('module.compute_sa'), 1, 17), 'cluster', 'cluster_kacho_root', 1, 'ACTIVE'),
   ('acb' || substr(md5('module.nlb_sa'), 1, 17), 'service_account', 'sva' || substr(md5('kacho-nlb'), 1, 17), 'rol' || substr(md5('module.nlb_sa'), 1, 17), 'cluster', 'cluster_kacho_root', 1, 'ACTIVE'),
-  ('acb' || substr(md5('module.vpc_operator_sa'), 1, 17), 'service_account', 'sva' || substr(md5('kacho-vpc-operator'), 1, 17), 'rol' || substr(md5('module.vpc_operator_sa'), 1, 17), 'cluster', 'cluster_kacho_root', 1, 'ACTIVE'),
+  -- No binding for the operator either — the role it granted is retired (0076).
   ('acb' || substr(md5('module.api_gateway_sa'), 1, 17), 'service_account', 'sva' || substr(md5('kacho-api-gateway'), 1, 17), 'rol' || substr(md5('module.api_gateway_sa'), 1, 17), 'cluster', 'cluster_kacho_root', 1, 'ACTIVE')
 ON CONFLICT DO NOTHING;
 

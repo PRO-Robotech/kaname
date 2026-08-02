@@ -6,9 +6,11 @@
 // Verifies the seed migration (0009) that provisions least-privilege
 // module ServiceAccount identities in the ReBAC model:
 //   - 5 module SAs (deterministic sva-id, system account, cluster scope);
-//   - per-module backing RBAC-v2 role with exact 4-segment permission set
-//     (byte-for-byte from permission_catalog.json);
-//   - per-module AccessBinding (subject=service_account, role, cluster-scope);
+//   - a backing RBAC-v2 role with the exact 4-segment permission set
+//     (byte-for-byte from permission_catalog.json) for FOUR of them — the
+//     vpc-operator's was retired by migration 0076;
+//   - an AccessBinding (subject=service_account, role, cluster-scope) for those
+//     same four;
 //   - FGA relation-tuples `<sva>#fga_writer@iam_fgaproxy:system` in fga_outbox
 //     for vpc/compute/nlb only (vpc-operator / api-gateway have none);
 //   - immutable system role; idempotent ON CONFLICT re-apply.
@@ -19,8 +21,7 @@
 //	            vpc.addresses.*.get/create/delete/update, iam.projects.*.get
 //	vpc         compute.zones.*.get, iam.projects.*.get
 //	nlb         vpc.subnets.*.get, iam.projects.*.get
-//	vpc-operator vpc.subnetses.*.list, vpc.networks.*.get,
-//	            vpc.network_interfaces.*.get, iam.projectses.*.list
+//	vpc-operator (none — role retired by 0076; identity kept, no grant)
 //	api-gateway (none — identity-only)
 //
 // Skipped under `go test -short`.
@@ -169,7 +170,19 @@ func TestSeedModuleSA_B04_NlbExactPermissionSet(t *testing.T) {
 	require.Equal(t, "kacho-nlb", name)
 }
 
-func TestSeedModuleSA_B05_OperatorReadOnlyNoFGAWriter(t *testing.T) {
+// TestSeedModuleSA_B05_OperatorRoleRetiredIdentityKept — у оператора сети
+// остаётся ЛИЧНОСТЬ и не остаётся выдачи.
+//
+// Прежняя редакция пинила ЧЕТЫРЕ строки прав его backing-роли как «набор из
+// исходного каталога». Роль снята миграцией 0076: ни одно из четырёх имён
+// закрытая таблица типов не несёт, поэтому пообъектно она не материализовала
+// ничего, а каскад, ради которого веер задумывался, из модели удалён. Пиновать
+// состав снятой роли значило бы требовать её возвращения.
+//
+// Учётка при этом остаётся: она — личность оператора на внутреннем периметре, а
+// не право. Как и прежде, у неё нет кортежа fga_writer (read-only sync ничего не
+// регистрирует).
+func TestSeedModuleSA_B05_OperatorRoleRetiredIdentityKept(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -178,21 +191,29 @@ func TestSeedModuleSA_B05_OperatorReadOnlyNoFGAWriter(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	got := readRolePermissions(t, ctx, pool, rolID("vpc-operator"))
-	want := []string{
-		"iam.projectses.*.list",
-		"vpc.network_interfaces.*.get",
-		"vpc.networks.*.get",
-		"vpc.subnetses.*.list",
-	}
-	require.Equal(t, want, got, "vpc-operator SA backing-role permission set must match the source catalog")
+	// Роль снята — вместе с правами, правилами и привязкой (0076).
+	var roleCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.roles WHERE id = $1`, rolID("vpc-operator")).Scan(&roleCnt))
+	require.Zero(t, roleCnt,
+		"backing-роль оператора сети обязана быть снята: её правила не разрешаются закрытой "+
+			"таблицей типов и не материализуют ни одного кортежа")
 
-	// Read-only: no mutating verbs.
-	for _, p := range got {
-		require.NotContains(t, p, ".create", "operator SA must be read-only")
-		require.NotContains(t, p, ".update", "operator SA must be read-only")
-		require.NotContains(t, p, ".delete", "operator SA must be read-only")
-	}
+	var bindCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.access_bindings WHERE subject_id = $1`,
+		svaID("vpc-operator")).Scan(&bindCnt))
+	require.Zero(t, bindCnt, "снятая роль не может оставаться выданной оператору")
+
+	// Личность остаётся — контроль в положительную сторону: «ноль» выше получен
+	// не из того, что учётки нет вовсе.
+	var name string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT name FROM kacho_iam.service_accounts WHERE id = $1`,
+		svaID("vpc-operator")).Scan(&name))
+	require.Equal(t, "kacho-vpc-operator", name,
+		"учётка оператора — его личность на внутреннем периметре; снятие выдачи её не касается")
+
 	// No fga_writer tuple for operator (read-only sync, registers nothing).
 	requireFGAWriterTuple(t, ctx, pool, svaID("vpc-operator"), false)
 	// api-gateway also has no fga_writer tuple.
@@ -208,7 +229,12 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	for _, svc := range []string{"vpc", "compute", "nlb", "vpc-operator", "api-gateway"} {
+	// vpc-operator намеренно ВНЕ этого перечня: его backing-роль и привязка сняты
+	// миграцией 0076 (веер мёртв — имена не разрешаются закрытой таблицей типов).
+	// Учётка при этом остаётся, поэтому проверять её нужно отдельным
+	// утверждением, а не молчаливым отсутствием в цикле.
+	boundModules := []string{"vpc", "compute", "nlb", "api-gateway"}
+	for _, svc := range boundModules {
 		var count int
 		var resourceType, resourceID string
 		var scope int16
@@ -227,15 +253,33 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 		require.Equal(t, int16(1), scope, "cluster scope = 1")
 	}
 
+	requireOperatorUnbound := func(t *testing.T, when string) {
+		t.Helper()
+		var count int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*) FROM kacho_iam.access_bindings WHERE subject_id = $1`,
+			svaID("vpc-operator")).Scan(&count))
+		require.Zerof(t, count, "оператор сети обязан остаться без привязки (%s)", when)
+	}
+	requireOperatorUnbound(t, "после миграций")
+
 	// Re-apply seed body (idempotent ON CONFLICT DO NOTHING) — count unchanged.
 	reapplySeed(t, ctx, pool)
-	for _, svc := range []string{"vpc", "compute", "nlb", "vpc-operator", "api-gateway"} {
+	for _, svc := range boundModules {
 		var count int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM kacho_iam.access_bindings
 			  WHERE subject_type='service_account' AND subject_id=$1`, svaID(svc)).Scan(&count))
 		require.Equal(t, 1, count, "re-apply must not duplicate AccessBinding for %q", svc)
 	}
+	// Повтор посева — путь ВОСКРЕШЕНИЯ снятого объявления, и он обязан быть
+	// закрыт: тело посева больше не содержит роли оператора, поэтому повторный
+	// прогон не возвращает ни роль, ни привязку.
+	requireOperatorUnbound(t, "после повторного посева")
+	var roleCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.roles WHERE id = $1`, rolID("vpc-operator")).Scan(&roleCnt))
+	require.Zero(t, roleCnt, "повторный посев не должен воскрешать снятую backing-роль оператора")
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

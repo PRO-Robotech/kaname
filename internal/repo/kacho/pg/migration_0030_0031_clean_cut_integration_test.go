@@ -61,6 +61,22 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 		"F-51: access_binding_target_members must SURVIVE (rules reconciler uses it)")
 }
 
+// wantSystemRoles — how many system roles the migration chain leaves seeded.
+//
+// Derivation: 66 seeded (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035
+// + registry mig 0044 + storage mig 0057), MINUS the 9 compute block-storage roles
+// migration 0074 withdrew (compute.{disk,image,snapshot}.{admin,edit,view} —
+// kacho-storage owns those resources), MINUS the 1 network-operator backing role
+// migration 0076 retired (module.vpc_operator_sa — its four rules named resources
+// the closed object-type table does not carry, so it materialized nothing).
+//
+// The number is asserted EXACTLY, not as a floor, so a re-seed that quietly brings
+// a retired role back fails here — that is the guard, and it is worth the upkeep.
+// It lives in ONE place because it was previously written out twice and a
+// deliberate retire then had to find both; the second copy is a precondition in
+// TestMigration_F53_AccessNotSevered.
+const wantSystemRoles = 56
+
 // TestMigration_F53_SystemRolesReseededWithRules — every system role has
 // non-empty rules after re-seed; the count is exact.
 func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
@@ -75,12 +91,9 @@ func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	var total int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.roles WHERE is_system`).Scan(&total))
-	// 66 seeded (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035 + registry
-	// mig 0044 + storage mig 0057) MINUS the 9 compute block-storage roles migration
-	// 0074 withdrew (compute.{disk,image,snapshot}.{admin,edit,view} — kacho-storage
-	// owns those resources). The number is asserted exactly, not as a floor, so a
-	// re-seed that quietly brings a retired role back fails here.
-	assert.Equal(t, 57, total, "F-53: exactly 57 system roles expected after re-seed (66 seeded, less the 9 compute block-storage roles retired by migration 0074)")
+	assert.Equal(t, wantSystemRoles, total,
+		"F-53: exactly %d system roles expected after re-seed — see wantSystemRoles for the derivation",
+		wantSystemRoles)
 
 	var withoutRules int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -150,7 +163,7 @@ func TestMigration_F53_AccessNotSevered(t *testing.T) {
 
 	rolesBefore := countSystemRoles()
 	bindingsBefore := countSystemBindings()
-	require.Equal(t, 57, rolesBefore)
+	require.Equal(t, wantSystemRoles, rolesBefore)
 	require.Greater(t, bindingsBefore, 0,
 		"F-53: at least the cluster-admin (0004) + module-SA (0009) bindings on system roles must exist")
 
