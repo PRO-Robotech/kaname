@@ -114,12 +114,21 @@ external TLS :8443):
   BOUND REST paths — `/iam/v1/internal/users:upsertFromIdentity`,
   `iam:lookupSubject`, `iam:check`:
       internal 200 / 404-from-service / 400-from-service   (the route is real)
-      public   404 "404 page not found"                     (mux miss)
-      external 404 "404 page not found"                     (mux miss)
+      public   404 {"code":5,"message":"Not Found"}         (mux miss)
+      external 404 {"code":5,"message":"Not Found"}         (mux miss)
   These carry the evidence: the path demonstrably works somewhere, and is
-  demonstrably absent from the external mux. The body is checked too — a
-  grpc-gateway mux miss is plain text, a service-level miss is JSON with a grpc
-  code, and conflating them would let a real 404-from-iam pass as isolation.
+  demonstrably absent from the external mux. The body is checked too — a mux miss
+  is grpc-gateway's ROUTING error, the bare {code:5, message:"Not Found"}, and a
+  service-level miss NAMES the resource and the id ("<Resource> <id> not found",
+  contract tone). Conflating them would let a real 404-from-iam pass as isolation.
+
+  The measurement above was re-taken after the hidden route stopped being answered
+  by a SECOND producer. It used to reply "404 page not found" in text/plain while
+  an ordinary miss replied JSON — so the CONTENT TYPE of a 404 told an outside
+  caller whether an administrative path lived at that address, which is exactly
+  the reconnaissance ban #6 exists to deny. The discriminator this case relies on
+  is therefore the MESSAGE now, not the content type; a mux miss here is
+  byte-identical to the nonsense-path control fired at the same listener.
 
   UNBOUND fully-qualified paths — InternalAuthorizeService/WriteTuples,
   InternalSessionRevocationsService/{Revoke,IsRevoked},
@@ -262,9 +271,9 @@ CASES.append(Case(
 #
 # The path is proven real by the positive controls further down (same path, the
 # internal-rest listener, 200 / service-level 4xx). Here it must be a
-# grpc-gateway MUX MISS: status 404 AND a plain-text body. The body matters —
-# a service-level "not found" is JSON carrying a grpc code, and accepting it
-# here would let a genuine iam 404 masquerade as route isolation.
+# grpc-gateway MUX MISS: status 404 AND grpc-gateway's own ROUTING body. The body
+# matters — a service-level "not found" NAMES the resource and the id, and
+# accepting it here would let a genuine iam 404 masquerade as route isolation.
 # ===========================================================================
 
 def _mux_miss_assertions(label: str, leak_expr: str = None, leak_desc: str = None):
@@ -272,14 +281,21 @@ def _mux_miss_assertions(label: str, leak_expr: str = None, leak_desc: str = Non
         *assert_answered(label),
         f"pm.test('{label}: status 404 — path is not routed on the external mux', () =>",
         f"  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
-        "// Discriminate a MUX miss from a SERVICE miss: grpc-gateway answers an",
-        "// unrouted path with plain text, while iam's own NOT_FOUND is JSON with a",
-        "// grpc `code`. Only the first is evidence of ban #6.",
+        "// Discriminate a MUX miss from a SERVICE miss. An unrouted path is answered by",
+        "// grpc-gateway's ROUTING error — the bare {code:5, message:'Not Found'}, the same",
+        "// answer a nonsense path gets on this listener. iam's own NOT_FOUND always names",
+        "// the resource and the id ('<Resource> <id> not found', contract tone), so any",
+        "// other message here would mean the request REACHED the service.",
+        "//",
+        "// This used to ask whether the body was JSON AT ALL, because the hidden route was",
+        "// answered by a second producer in plain text. That difference was itself an",
+        "// existence-oracle for the admin surface and has been removed; the discriminator",
+        "// is the message, not the content type.",
         f"pm.test('{label}: 404 is a mux miss, not a service-level NOT_FOUND', () => {{",
         "  let j = null;",
         "  try { j = pm.response.json(); } catch (e) { j = null; }",
-        "  pm.expect((j || {}).code, 'a JSON grpc error here would mean the request REACHED the service')",
-        "    .to.be.undefined;",
+        "  pm.expect((j || {}).message, 'any other message here would mean the request REACHED the service')",
+        "    .to.eql('Not Found');",
         "});",
     ]
     if leak_expr:

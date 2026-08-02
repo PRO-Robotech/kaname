@@ -55,7 +55,8 @@ def _internal_url_override(path):
     ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are served
     ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design (ban #6).
     gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
-    public port → "404 page not found" → JSONError on the first pm.response.json().
+    public port → the edge's routing error {"code":5,"message":"Not Found"} → the first
+    pm.response.json() parses but carries no result.
     Mirrors label-revoke-iam.py::_internal_url_override. internalBaseUrl is injected at
     runtime by the newman harness (--env-var); a MISSING value is a broken harness, not a legal mode, so the
     guard ASSERTS it (RED, naming the variable) before skipping — see
