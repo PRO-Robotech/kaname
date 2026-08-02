@@ -175,16 +175,25 @@ func (rs Rules) CoversType(dottedType string) bool {
 	return false
 }
 
-// ValidTargetType reports whether a dotted `<module>.<resource>` target type is in
-// the closed type-registry. It maps the dotted form to the bare vocabulary
-// (`compute.instance` → `compute_instance`) shared with `validResourceTypes`, so the
-// target registry stays in sync with the FGA object-type vocabulary by construction.
-// The wildcard `*` is NOT a valid per-object target type.
+// ValidTargetType reports whether a dotted `<module>.<resource>` may be named as a
+// per-object AccessBinding target. The answer is membership in the materialization
+// feed (`AllMaterializableTypes`), because that is the only place a target type is
+// ever used: the reconciler calls AccessTarget.Contains with the object type taken
+// from the feed and keeps the object on an exact string match. The wildcard `*`,
+// malformed input and anything the feed does not emit are all refused.
+//
+// It is a lookup, not a derivation. The predicate used to re-spell the dotted form
+// into the bare scope-anchor vocabulary (`compute.instance` → `compute_instance`,
+// checked against validResourceTypes) and claimed that kept the two in sync by
+// construction; it did not, because the two vocabularies answer different questions
+// and are spelled in different conventions. Deriving one name from another instead
+// of resolving it against the one table that owns it is the same mistake as reading
+// a region out of a zone's name (data-integrity.md) — it is silently wrong for every
+// pair the two conventions disagree on, in BOTH directions: a type the feed emits is
+// refused, so the grant can only be written as the whole anchor and the check widens
+// what it appears to restrict; and a type the feed never emits is accepted, stored
+// and reconciled, matching nothing and telling the caller nothing.
 func ValidTargetType(dotted string) bool {
-	module, resource, ok := splitDottedType(dotted)
-	if !ok {
-		return false
-	}
-	_, known := validResourceTypes[ResourceType(module+"_"+resource)]
-	return known
+	_, ok := materializableTypes[dotted]
+	return ok
 }
