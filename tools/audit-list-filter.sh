@@ -11,7 +11,7 @@
 # invocation lives here.
 #
 # Why this file is new. iam had no gate of this class at all, while having the widest
-# listing surface in the repository — 31 methods. Nothing was red because the set of
+# listing surface in the repository — 30 methods. Nothing was red because the set of
 # services to analyse was written by hand and iam was not in it.
 #
 # Arguments are forwarded as-is:

@@ -9,8 +9,11 @@
 //
 // It did not, until 2026-08. Every other service with a public listing surface had
 // an analyser of this class; iam, which has the widest listing surface in the
-// repository — 31 methods across 22 packages, more than compute, nlb, registry and
-// storage combined — had none. Not a weak one, not a stale one: none. And nothing
+// repository — 30 methods across 21 packages, more than compute, nlb, registry and
+// storage combined (3+6+5+7=21) — had none. Not a weak one, not a stale one: none.
+// The counts are the gate's own census re-measured on the tree this profile landed
+// on; the branch this came from said 31 across 22, true until the tenant
+// conditional-access surface was retired out from under it. And nothing
 // was red, because the set of services to analyse was written by hand, in a CI loop
 // and in whoever remembered to create a directory, and iam was in neither list.
 //
@@ -40,7 +43,7 @@
 // its own authorization graph, its own operation histories, the members of a group,
 // the keys of a service account, and the objects the authorization store itself can
 // see. There is no single shape that fits, which is precisely why every method is
-// declared and why five different shapes appear below.
+// declared and why all six shapes of the vocabulary appear below.
 //
 // # What is NOT proven here, stated so nobody reads more into a pass
 //
@@ -53,7 +56,7 @@
 // not this gate's, and pretending otherwise would be exactly the form-without-
 // substance this class is about.
 //
-// Likewise, the four EdgeGate methods delegate their check to the per-RPC
+// Likewise, the three EdgeGate methods delegate their check to the per-RPC
 // authorization at the edge. The gate verifies that the delegation is real — the RPC
 // carries a required_relation and a scope_extractor on the declared field, and where
 // the scope is the cluster singleton, that the relation is not one a wildcard tuple
