@@ -1,9 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// Package authzfilter resolves per-object READ-visibility (`viewer` ∪ `v_list`)
-// for kacho-iam's own read surfaces by asking a DIRECT per-object question —
-// never by enumerating the objects a subject may see.
+// Package authzfilter resolves per-object READ-visibility for kacho-iam's own read
+// surfaces by asking a DIRECT per-object question — never by enumerating the objects
+// a subject may see. The predicate is RelationsFor(objectType): the relation that
+// gates a single-object read of that type.
 //
 // # Why not ListObjects (this was the bug)
 //
@@ -29,13 +30,15 @@
 // (List) or for the single object being read (Get). Cost then scales with the
 // PAGE, not with the type's population.
 //
-// # The visibility predicate is unchanged
+// # The predicate: the relation that gates the read
 //
-// `ListObjects` returns, by definition, the objects `Check` would allow, and iam
-// unioned two relations — `viewer ∪ v_list` (AuthorizeService.ListObjects, and
-// every use-case-level copy). This package evaluates EXACTLY that predicate,
-// only per-object: `viewer` first, then `v_list` for the ids `viewer` denied. No
-// weakening and no widening — the same question, asked in a bounded shape.
+// Bounding the SHAPE of the question was one change; which question is asked is a
+// second, and the two are independent. The enumeration this package replaced asked
+// the union `viewer ∪ v_list`, while the gateway gates a single-object `Get` on
+// `v_get` — different sets in a model that decouples tiers from verbs, so the page
+// and the read disagreed in both directions. A row now belongs on a page exactly
+// when its holder may read it by id; see pageRelations for why that loses no granted
+// access, and for the one type whose read carries no catalog relation at all.
 //
 // # Fail-closed
 //
@@ -50,15 +53,73 @@ import (
 	"sync"
 )
 
-// Relations — the union that constitutes read-visibility, in cost order:
-//   - `viewer` — the read tier (direct usersets ∪ editor ∪ admin); covers the
-//     overwhelming majority of visible objects;
-//   - `v_list` — the object-only selector grant ("see in the selector without
-//     content"), which on the decoupled Design-B model does NOT resolve `viewer`.
+// The predicate below. A row belongs on a public List page exactly when the caller may
+// read that row by id, so the page predicate IS the relation the gateway's per-RPC
+// Check enforces on a single-object read (`<Service>/Get` in the generated permission
+// catalog) — `v_get` for every iam type but one.
 //
-// Order matters only for cost: `viewer` is queried first and `v_list` only for
-// the objects `viewer` denied.
-var Relations = [...]string{"viewer", "v_list"}
+// It used to be the union `viewer ∪ v_list`, and that was not wider access but a
+// DIVERGENCE, working in both directions. Tier relations (`viewer`/`editor`/`admin`)
+// and verb relations (`v_*`) are deliberately decoupled in the model (Design B,
+// fga_model.fga) — neither is derived from the other — so:
+//
+//   - a subject holding the tier without the verb was handed the row while its own Get
+//     refused it: the caller learned of an object it may not read AND received that
+//     object's full contents, because List returns the same resource message Get does.
+//     "Visible in a selector without contents" is unrealizable on that payload;
+//   - conversely, a subject holding `v_get` without any tier did not find its OWN
+//     readable object in its OWN list.
+//
+// Neither state is hypothetical: a partially reconciled role, or a revoked verb grant
+// whose back-compat tier tuple outlived it, produces exactly them.
+//
+// Narrowing loses no granted access. Every iam type unions `or super_admin` into
+// `v_get` (and `account` also `or owner`), so all three cascading super-levels and the
+// account owner resolve it structurally; the reconciler emits `v_get` for every role
+// authoring the `get` verb; and the floors that never go through this package are
+// untouched (the caller's own user row, an account owner's projects, the system-role
+// catalog).
+//
+// pageRelations — the page-membership predicate BY OBJECT TYPE, TOTAL by construction:
+// the entry under the empty key is the default every type not named here takes, so
+// there is no type whose predicate is implicit. That totality is what lets a repo-wide
+// gate read this declaration and compare it against the permission catalog
+// type-by-type (internal/repohygiene/listreadrelationparity_test.go); a predicate
+// hidden in a function body is one no gate can see, which is how the previous sweep
+// narrowed four services and left this one.
+//
+// `iam_role` is the single iam type whose catalog entry for Get declares NO relation
+// (`<exempt>`): a custom role's single-object read is enforced IN-SERVICE by the very
+// function that filters the page (role.resolveVisibleRoleIDs, shared by ListRoles and
+// GetRole). Page and read are therefore the same question by construction and cannot
+// diverge — there is nothing here to narrow, and the object-only selector grant
+// (`v_list` without a tier) is that surface's declared contract, which its Get honours
+// identically. Locked by TestVisibleSet_RoleKeepsTheUnionItsOwnGetEnforces.
+var pageRelations = map[string][]string{
+	"": {"v_get"}, // default: the relation the catalog gates `<Service>/Get` on
+
+	"account":             {"v_get"},
+	"project":             {"v_get"},
+	"iam_user":            {"v_get"},
+	"iam_group":           {"v_get"},
+	"iam_service_account": {"v_get"},
+	"iam_access_binding":  {"v_get"},
+
+	"iam_role": {"viewer", "v_list"}, // read has no catalog relation — see above
+}
+
+// RelationsFor returns the page-membership predicate for one FGA object type, in the
+// order it is asked. Each relation is queried only for the objects the previous one
+// denied, so the order is a cost decision and never a correctness one.
+//
+// A type with no entry takes the default, which is narrow: an omission can never
+// silently widen a page.
+func RelationsFor(objectType string) []string {
+	if rels, ok := pageRelations[objectType]; ok && objectType != "" {
+		return rels
+	}
+	return pageRelations[""]
+}
 
 // DefaultParallelism bounds how many per-object Checks VisibleSet keeps in flight.
 //
@@ -67,11 +128,13 @@ var Relations = [...]string{"viewer", "v_list"}
 // It bounds DEPTH, not COUNT. Every question is an HTTP round-trip to the relation
 // store, which runs in its own pod: iam holds the OpenFGA client in-process, but
 // the store is across the network, so "in-process client" says nothing about the
-// price of asking. A page pays len(Relations) questions for every object the first
-// relation does not resolve, so a contract-sized page (validate.MaxPageSize = 1000)
-// costs up to 2000 round-trips, and this bound turns them into 125 sequential
-// waves rather than removing any of them. At a 10ms answer that is over a second
-// of wall time on ONE List; at 50ms, over six.
+// price of asking. A page pays len(RelationsFor(objectType)) questions for every
+// object the first relation does not resolve, so a contract-sized page
+// (validate.MaxPageSize = 1000) costs up to 1000 round-trips on the types gated by a
+// single relation — and up to 2000 on `iam_role`, the one type that still asks two.
+// This bound turns them into sequential waves rather than removing any of them: 63
+// waves at one relation, 125 at two. At a 10ms answer that is over half a second of
+// wall time on ONE List; at 50ms, over three.
 //
 // The 200ms budget on a Check belongs to the CALL, not to the page — nothing caps
 // the page as a whole — so those waves accumulate without any per-call deadline
@@ -119,8 +182,8 @@ type pagePreparer interface {
 	PrefetchStructural(ctx context.Context, objectType string, ids []string) context.Context
 }
 
-// Visible reports whether `subject` may read `<objectType>:<id>` — the
-// `viewer ∪ v_list` union, evaluated per-object.
+// Visible reports whether `subject` may read `<objectType>:<id>`, evaluated as a
+// direct per-object question over RelationsFor(objectType).
 //
 // Fail-closed: a nil checker, an empty subject or an empty id yields
 // (false, nil); a Check transport error yields (false, err) and the caller MUST
@@ -131,7 +194,7 @@ func Visible(ctx context.Context, chk ObjectChecker, subject, objectType, id str
 		return false, nil
 	}
 	object := objectType + ":" + id
-	for _, relation := range Relations {
+	for _, relation := range RelationsFor(objectType) {
 		allowed, err := chk.CheckWithContext(ctx, subject, relation, object, nil)
 		if err != nil {
 			return false, err

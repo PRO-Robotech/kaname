@@ -305,6 +305,11 @@ func TestPageCost(t *testing.T) {
 	// it down to each binding are not.
 	w.harness.Write(t, admin, "admin", "account:"+w.account)
 
+	// How many relations a page pays per object is a property of the predicate, not of
+	// this test — derive it, so the numbers below are re-derived rather than re-baselined
+	// when the predicate changes.
+	relsPerObject := int64(len(authzfilter.RelationsFor("iam_access_binding")))
+
 	baseDeny := w.measure(t, "denied page, no second chance", stranger, w.ids, noSecondChance)
 	objDeny := w.measure(t, "denied page, per-object facts", stranger, w.ids, perObjectSecondChance)
 	pageDeny := w.measure(t, "denied page, page-prefetched", stranger, w.ids, pagePrefetched)
@@ -322,11 +327,11 @@ func TestPageCost(t *testing.T) {
 
 	// Why the per-object shape is not the shipped one: it doubles the questions AND opens
 	// a transaction per question. These are the numbers the choice was made on.
-	require.Equal(t, int64(2*pageSize), baseDeny.questions(),
-		"premise: the page filter asks two relations per denied object")
+	require.Equal(t, relsPerObject*pageSize, baseDeny.questions(),
+		"premise: a denied object costs one question per relation of its page predicate")
 	require.Equal(t, 2*baseDeny.questions(), objDeny.questions(),
-		"per-object: every denial is asked twice")
-	require.Equal(t, int64(2*pageSize), objDeny.perObjTx,
+		"per-object: every denial is asked twice — once plain, once carrying the derived facts")
+	require.Equal(t, relsPerObject*pageSize, objDeny.perObjTx,
 		"per-object: one transaction per denied question")
 
 	// The shipped shape: the SAME number of questions as before the second chance existed,
@@ -339,10 +344,13 @@ func TestPageCost(t *testing.T) {
 	require.Less(t, pageDeny.statements, objDeny.statements/10,
 		"the page read must cost an order of magnitude less than deriving per object")
 
-	// A tier-allowed page pays FEWER questions than the baseline, because the first relation
-	// already resolves and the filter never asks the second.
+	// An object allowed on the FIRST relation is asked once and no more. With a
+	// single-relation predicate that is also the ceiling; with a longer one it is strictly
+	// cheaper than the denied page above, which pays every relation before giving up.
 	require.Equal(t, int64(pageSize), pageAllow.questions(),
-		"an object allowed on the first relation is asked once, not twice")
+		"an object allowed on the first relation is asked exactly once")
+	require.LessOrEqual(t, pageAllow.questions(), baseDeny.questions(),
+		"resolving early can never cost more than being denied by every relation")
 	require.Equal(t, int64(1), pageAllow.snapshots)
 
 	t.Logf("SUMMARY denied page of %d — questions %d (was %d), page snapshots %d, sql %d, "+
@@ -380,8 +388,10 @@ func TestPageReadDoesNotGrowWithThePage(t *testing.T) {
 		"the page read must cost the same for 10 rows and %d — it is one statement per "+
 			"level of the hierarchy, not per row", pageSize)
 	require.Equal(t, small.snapshots, full.snapshots, "and one snapshot either way")
-	require.Equal(t, int64(2*10), small.questions(), "premise: two relations per denied object")
-	require.Equal(t, int64(2*pageSize), full.questions())
+	relsPerObject := int64(len(authzfilter.RelationsFor("iam_access_binding")))
+	require.Equal(t, relsPerObject*10, small.questions(),
+		"premise: a denied object costs one question per relation of its page predicate")
+	require.Equal(t, relsPerObject*pageSize, full.questions())
 }
 
 // TestForeignObjectCostsNoRead — the cheap half of the answer, asserted so it stays cheap:

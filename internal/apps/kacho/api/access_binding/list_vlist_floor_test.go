@@ -5,7 +5,7 @@ package access_binding
 
 // list_vlist_floor_test.go — unit-тесты D-6 модели видимости AccessBinding:
 //
-//	visible(iam_access_binding) = viewer ∪ v_list ∪ self/granted-floor
+//	visible(iam_access_binding) = read-relation ∪ self/granted-floor
 //
 // label-селектор материализует v_list на matching-binding'и (T3.3-AB-01), но
 // существующие self (ListBySubject) / granted (ListByScope/ListByAccount owner|admin)
@@ -130,7 +130,7 @@ func TestABListByScope_T33AB01_VListUnionFloor(t *testing.T) {
 
 	// usr_member is NOT the owner (no granted-floor here) but holds v_list on acb1.
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_member", []string{"acb000000000000prod1"})
+	fga.set("v_get", "user:usr_member", []string{"acb000000000000prod1"})
 
 	// Check-stub grants nothing → usr_member is NOT a grant-authority → the union floor
 	// (v_list) is the sole visibility path under test.
@@ -143,8 +143,8 @@ func TestABListByScope_T33AB01_VListUnionFloor(t *testing.T) {
 	out, _, err := uc.Execute(newOwnerContext("usr_member"), "account", accountID, repoab.PageFilter{PageSize: 100})
 	require.NoError(t, err)
 	ids := abIDs(out)
-	assert.Contains(t, ids, "acb000000000000prod1", "v_list-matched labeled binding is visible (union floor)")
-	assert.NotContains(t, ids, "acb0000000000000dev2", "non-matching binding stays hidden for a v_list-only caller")
+	assert.Contains(t, ids, "acb000000000000prod1", "the label-matched binding this caller may read is visible")
+	assert.NotContains(t, ids, "acb0000000000000dev2", "a binding the label selector did not match stays hidden")
 }
 
 // owner keeps full granted-floor visibility (ALL bindings on the scope) even without

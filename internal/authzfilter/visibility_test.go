@@ -159,16 +159,22 @@ func TestVisible_DegradedInputs_Deny(t *testing.T) {
 // VisibleSet answers only for the ids given (page-scoped, never the universe),
 // deduplicates repeats, and returns a usable non-nil map.
 func TestVisibleSet_PageScopedAndDeduplicated(t *testing.T) {
-	f := newFakeChecker("viewer|acc:a1", "v_list|acc:a3")
+	// The arithmetic below counts relation questions, so the type and its predicate are
+	// derived: a literal relation pair would stop describing the cost the moment the
+	// predicate changes, and the count would get re-baselined instead of re-derived.
+	objType, rels := dearestPredicate()
 
-	got, err := VisibleSet(context.Background(), f, "user:u1", "acc",
+	f := newFakeChecker(rels[0]+"|"+objType+":a1", rels[len(rels)-1]+"|"+objType+":a3")
+
+	got, err := VisibleSet(context.Background(), f, "user:u1", objType,
 		[]string{"a1", "a2", "a3", "a1", "", "a2"})
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"a1": true, "a3": true}, got)
 
-	// a1 costs 1 check (viewer allows), a2 costs 2 (both deny), a3 costs 2
-	// (viewer denies, v_list allows) → 5. Repeats and "" cost nothing.
-	assert.Equal(t, int64(5), f.nCalls.Load(),
+	// a1 costs 1 question (the first relation allows and short-circuits); a2 costs the
+	// full predicate (all deny); a3 costs the full predicate (only the last allows).
+	// Repeats and "" cost nothing.
+	assert.Equal(t, int64(1+2*len(rels)), f.nCalls.Load(),
 		"each distinct id is resolved once; duplicates and empties are free")
 }
 
@@ -212,7 +218,8 @@ func TestVisibleSet_LargePageConcurrent(t *testing.T) {
 		id := fmt.Sprintf("obj%04d", i)
 		ids = append(ids, id)
 		if i%2 == 0 {
-			granted = append(granted, "v_list|t:"+id)
+			// An unlisted type takes the default predicate, so grant exactly that.
+			granted = append(granted, RelationsFor("t")[0]+"|t:"+id)
 			want[id] = true
 		}
 	}

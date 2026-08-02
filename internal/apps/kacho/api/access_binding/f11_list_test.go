@@ -10,7 +10,7 @@ package access_binding
 //     consulted);
 //   - the optional whitelist filter (subject/role/scope/scopeId) rejects an
 //     unknown key with INVALID_ARGUMENT and maps `scope` dotted→bare;
-//   - visibility is the caller's viewer ∪ v_list set (anonymous → empty, never a
+//   - visibility is the relation that gates a single-object read (anonymous → empty, never a
 //     leak; FGA error → UNAVAILABLE), resolved PER-OBJECT over the page the repo
 //     returned (never by a server-capped ListObjects enumeration —
 //     internal/authzfilter).
@@ -74,7 +74,7 @@ func TestABList_IAM_1_32_PageSizeTooLarge(t *testing.T) {
 func TestABList_IAM_1_32_FilterWhitelist(t *testing.T) {
 	repo := newABFakeRepo("usr_o", "acc_l32c", "", "rol_v", "kacho.view", nil)
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_x", []string{"acb000000000000keep1"})
+	fga.set("v_get", "user:usr_x", []string{"acb000000000000keep1"})
 	h := newListHandler(repo, fga)
 
 	t.Run("unknown key rejected", func(t *testing.T) {
@@ -101,8 +101,8 @@ func TestABList_IAM_1_32_FilterWhitelist(t *testing.T) {
 	})
 }
 
-// IAM-1-32: visibility is viewer ∪ v_list applied per-object to the page — a
-// v_list-only caller sees exactly their matched bindings, not the whole set.
+// IAM-1-32: visibility is the read relation applied per-object to the page — a caller
+// sees exactly the bindings it may read by id, not the whole set.
 func TestABList_IAM_1_32_VisibilityFilteredPerObject(t *testing.T) {
 	repo := newABFakeRepo("usr_o", "acc_l32d", "", "rol_v", "kacho.view", nil)
 	acbKeep := domain.AccessBinding{ID: "acb000000000000keep1", ResourceType: "account", ResourceID: "acc_l32d", SubjectID: "usr_a"}
@@ -110,13 +110,13 @@ func TestABList_IAM_1_32_VisibilityFilteredPerObject(t *testing.T) {
 	seedABListByScope(repo, []domain.AccessBinding{acbKeep, acbHide})
 
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_member", []string{"acb000000000000keep1"})
+	fga.set("v_get", "user:usr_member", []string{"acb000000000000keep1"})
 	h := newListHandler(repo, fga)
 
 	resp, err := h.List(newOwnerContext("usr_member"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
 	require.NoError(t, err)
 	got := respIDs(resp)
-	assert.Equal(t, []string{"acb000000000000keep1"}, got, "only the v_list-visible binding is returned")
+	assert.Equal(t, []string{"acb000000000000keep1"}, got, "only the binding this caller may read by id is returned")
 	// The repo page carried BOTH rows (the fake applies no visibility predicate);
 	// hide2 is dropped by the use-case's per-object check, not by the SQL. That
 	// order is the fix for the OpenFGA ListObjects cap — see internal/authzfilter.
@@ -145,7 +145,7 @@ func TestABList_IAM_1_32_AnonEmpty_FGAErrorUnavailable(t *testing.T) {
 	})
 }
 
-// IAM-1-32 / D-9: a cluster super-admin holds NO per-object viewer/v_list tuple on
+// IAM-1-32 / D-9: a cluster super-admin holds NO per-object tuple on
 // iam_access_binding (the access-cascade is contracted — see helpers.go
 // requireGrantAuthority Path 0), so a purely per-object visibility push-down hands
 // them an EMPTY page while every sibling read (Get / ListByScope / ListByAccount /
@@ -159,7 +159,7 @@ func TestABList_IAM_1_32_ClusterAdminUnfiltered(t *testing.T) {
 	seedABListByScope(repo, []domain.AccessBinding{acbA, acbB})
 
 	t.Run("cluster-admin without per-object tuples sees the whole page", func(t *testing.T) {
-		fga := newABQueriesStub() // ZERO viewer / v_list tuples — the post-contraction shape
+		fga := newABQueriesStub() // ZERO per-object tuples — the post-contraction shape
 		h := newListHandlerWithStore(repo, fga, onlyClusterAdmin())
 
 		resp, err := h.List(clusterAdminCtx("usr_root"), &iamv1.ListAccessBindingsRequest{PageSize: 100})

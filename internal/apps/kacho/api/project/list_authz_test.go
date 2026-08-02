@@ -240,11 +240,16 @@ func TestListProjects_RBACv2_CanonicalScenario_GrantsConcreteIDs(t *testing.T) {
 
 	require.Equal(t, "user:usr-bob", fga.called.subject)
 	require.Equal(t, "project", fga.called.objectType)
-	// visibility unions viewer ∪ v_list — both relations are queried. (The filter
-	// is per-object now, so each relation appears once PER PAGE ROW it was needed
-	// for; assert membership, not an exact 2-element sequence.)
-	require.Subset(t, fga.relations, []string{"viewer", "v_list"},
-		"P7 list-filter must query BOTH viewer and v_list (union)")
+	// The page is filtered by the relation that gates a single-object read, and by
+	// nothing else. Asserted as an exact SET rather than a subset: a stray extra
+	// relation is precisely how the page came to be wider than the read. (The filter
+	// is per-object, so a relation appears once per row it was needed for.)
+	seen := map[string]bool{}
+	for _, r := range fga.relations {
+		seen[r] = true
+	}
+	require.Equal(t, map[string]bool{"v_get": true}, seen,
+		"the list-filter must ask the relation that gates ProjectService/Get, and only that one")
 }
 
 // NoGrantsReturnsEmpty — resource-existence disclosure guard: a subject

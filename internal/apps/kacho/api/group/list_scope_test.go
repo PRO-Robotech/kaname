@@ -187,46 +187,44 @@ func TestListGroups_ExactSet_OnlyGrantedSubset(t *testing.T) {
 		{ID: "grp0000000000000cccc", AccountID: grpScopeAcct},
 	}}
 	fga := newGroupUnionFGAStub()
-	fga.set("viewer", "user:"+grpScopeUser, []string{"grp0000000000000aaaa"})
-	fga.set("v_list", "user:"+grpScopeUser, []string{"grp0000000000000bbbb"})
+	fga.set("v_get", "user:"+grpScopeUser, []string{"grp0000000000000aaaa", "grp0000000000000bbbb"})
 
 	uc := NewListGroupsUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxGrpUser(grpScopeUser), repogroup.ListFilter{AccountID: grpScopeAcct})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"grp0000000000000aaaa", "grp0000000000000bbbb"}, grpIDs(out),
-		"List returns EXACTLY the viewer∪v_list-granted subset; the ungranted group stays hidden")
+		"List returns EXACTLY the readable subset; the ungranted group stays hidden")
 }
 
-// v_list-only grant (object-only, без viewer) → группа ВИДНА (see-in-selector).
-func TestListGroups_VListOnlyGrant_Visible(t *testing.T) {
-	repo := &scopeGroupRepo{groups: []domain.Group{
-		{ID: "grp0000000000000aaaa", AccountID: grpScopeAcct},
-		{ID: "grp0000000000000bbbb", AccountID: grpScopeAcct},
-	}}
-	fga := newGroupUnionFGAStub()
-	fga.set("v_list", "user:"+grpScopeUser, []string{"grp0000000000000aaaa"})
-	fga.set("viewer", "user:"+grpScopeUser, nil)
+// Страница не может быть ШИРЕ чтения: держатель яруса (или объектного грант-селектора
+// `v_list`) не должен получать строку, которую его же Get не отдаст. Отрицание идёт В
+// ПАРЕ с положительным — одиночное «не видно» зеленеет сильнее всего тогда, когда
+// фильтр не показывает вообще ничего.
+func TestListGroups_PageMembershipRequiresReadRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		relation string
+		wantSeen []string
+	}{
+		{name: "ярус — Get откажет", relation: "viewer", wantSeen: nil},
+		{name: "объектный грант-селектор", relation: "v_list", wantSeen: nil},
+		{name: "отношение, которым гейтится Get", relation: "v_get", wantSeen: []string{"grp0000000000000aaaa"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &scopeGroupRepo{groups: []domain.Group{
+				{ID: "grp0000000000000aaaa", AccountID: grpScopeAcct},
+				{ID: "grp0000000000000bbbb", AccountID: grpScopeAcct},
+			}}
+			fga := newGroupUnionFGAStub()
+			fga.set(tc.relation, "user:"+grpScopeUser, []string{"grp0000000000000aaaa"})
 
-	uc := NewListGroupsUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxGrpUser(grpScopeUser), repogroup.ListFilter{AccountID: grpScopeAcct})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"grp0000000000000aaaa"}, grpIDs(out),
-		"v_list-only grant делает группу видимой, вторая остается скрытой")
-	require.GreaterOrEqual(t, fga.calls["v_list"], 1, "must query v_list relation")
-}
-
-// viewer grant выводит группу (account-admin cascade).
-func TestListGroups_ViewerGrant_Visible(t *testing.T) {
-	repo := &scopeGroupRepo{groups: []domain.Group{
-		{ID: "grp0000000000000aaaa", AccountID: grpScopeAcct},
-	}}
-	fga := newGroupUnionFGAStub()
-	fga.set("viewer", "user:"+grpScopeUser, []string{"grp0000000000000aaaa"})
-
-	uc := NewListGroupsUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxGrpUser(grpScopeUser), repogroup.ListFilter{AccountID: grpScopeAcct})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"grp0000000000000aaaa"}, grpIDs(out))
+			uc := NewListGroupsUseCase(repo).WithRelationStore(fga)
+			out, _, err := uc.Execute(ctxGrpUser(grpScopeUser), repogroup.ListFilter{AccountID: grpScopeAcct})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, grpIDs(out),
+				"в странице ровно те группы, которые вызывающий вправе прочитать по id")
+		})
+	}
 }
 
 // over-show устранен: член аккаунта БЕЗ per-object гранта НЕ видит группу аккаунта

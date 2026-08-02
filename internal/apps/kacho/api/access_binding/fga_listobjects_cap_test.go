@@ -55,12 +55,12 @@ type cappedFGAQueries struct {
 	checkCalls       atomic.Int64
 }
 
-// newCappedFGAQueries grants `viewer` on nothing and `v_list` on the given bare
+// newCappedFGAQueries grants `viewer` on nothing and the READ relation on the given bare
 // ids of type iam_access_binding (the D-6 label-selector grant shape).
 func newCappedFGAQueries(vlistIDs ...string) *cappedFGAQueries {
 	g := make(map[string]bool, len(vlistIDs))
 	for _, id := range vlistIDs {
-		g["v_list|iam_access_binding:"+id] = true
+		g["v_get|iam_access_binding:"+id] = true
 	}
 	return &cappedFGAQueries{granted: g}
 }
@@ -132,7 +132,7 @@ func capBindingScenario(t *testing.T) (*abFakeRepo, *cappedFGAQueries, domain.Ac
 }
 
 // capCallerCtx — the authenticated grantee (neither the binding's subject nor a
-// scope authority; visibility comes ONLY from the v_list label grant).
+// scope authority; visibility comes ONLY from the label grant's read relation).
 func capCallerCtx() context.Context { return newOwnerContext("usr_grantee") }
 
 // Get of the caller's OWN granted binding must succeed. Before the fix the
@@ -251,7 +251,7 @@ func TestABListByScope_OwnBindingBeyondFGAListObjectsCap(t *testing.T) {
 
 	rows, _, err := uc.Execute(capCallerCtx(), "account", "acc00000000000cap01a",
 		repoab.PageFilter{PageSize: 100})
-	require.NoError(t, err, "a v_list-granted caller must not be denied by a truncated enumeration")
+	require.NoError(t, err, "a granted caller must not be denied by a truncated enumeration")
 	assert.Contains(t, abIDs(rows), string(ownedID))
 	assert.Zero(t, fga.listObjectsCalls.Load(), "ListByScope must not enumerate the universe")
 }
@@ -269,7 +269,7 @@ func TestABListByAccount_OwnBindingBeyondFGAListObjectsCap(t *testing.T) {
 
 	rows, _, err := uc.Execute(capCallerCtx(), "acc00000000000cap01a",
 		repoab.AccountPageFilter{PageSize: 100})
-	require.NoError(t, err, "a v_list-granted caller must not be denied by a truncated enumeration")
+	require.NoError(t, err, "a granted caller must not be denied by a truncated enumeration")
 	assert.Contains(t, abIDs(rows), string(ownedID))
 	assert.Zero(t, fga.listObjectsCalls.Load(), "ListByAccount must not enumerate the universe")
 }

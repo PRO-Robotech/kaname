@@ -1,24 +1,20 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// list_vlist_union_test.go — rbac-2026 P7 (D-6 / acceptance rbac-B-01).
+// list_vlist_union_test.go — what makes an account a member of a List page.
 //
-// P7 makes AccountService.List visibility the UNION of the principal's FGA
-// `viewer`-set AND `v_list`-set on `account`:
+// A row belongs on the page exactly when its holder may read that row by id. The
+// gateway gates AccountService/Get on `v_get`, so that is the page predicate too
+// (internal/authzfilter).
 //
-//	visible(account) = ListObjects(subject, "viewer", "account")
-//	                 ∪ ListObjects(subject, "v_list", "account")
-//
-// Rationale (the owner's original goal): on the flat explicit model (P2/P3),
-// a grant of `iam.account.{get,list}` with names/labels materializes ONLY
-// `account:<id> # v_list/v_get @ subj` — an OBJECT-ONLY tuple with NO cascade
-// into the account's contents (D-2). Before P7 the List filtered by `viewer`
-// alone, so such a grant left the account INVISIBLE in the selector even
-// though the subject was explicitly granted list on it. P7 adds the `v_list`
-// branch so "see the account in the selector WITHOUT access to its contents"
-// works — while a Check on the contents (project/network inside) still DENIES.
-//
-// These are RED until ListAccountsUseCase unions the two ListObjects calls.
+// It used to be the union `viewer ∪ v_list`, argued as "see the account in the
+// selector without access to its contents". That argument does not survive the
+// payload: List returns the same Account message Get does, so a row on the page IS
+// its contents. What the union actually produced was a divergence — the tier holder
+// was handed an account its own Get refused, and a `v_get` holder did not find its
+// own readable account in its own list. The tests below therefore assert the
+// predicate in BOTH directions rather than the union.
+
 package account
 
 import (
@@ -94,65 +90,60 @@ func (s *acctUnionFGAStub) CheckWithContext(_ context.Context, subject, relation
 	return false, nil
 }
 
-// P7-A — v_list-only grant (object-only, no viewer cascade) → account VISIBLE.
-// This is the literal "see account in selector without contents" goal: the
-// subject has v_list on acc-1 but NOT viewer (no cascade to contents).
-func TestListAccounts_P7_VListOnlyGrant_AccountVisible(t *testing.T) {
-	repo := newAcctListFakeRepo()
-	seedAcct(repo, "acc-1", "usr-owner")
-	seedAcct(repo, "acc-2", "usr-other")
+// The page cannot be WIDER than the read: a holder of the tier (or of the
+// object-only `v_list` selector grant) must NOT be handed an account whose Get it
+// cannot obtain. Paired with the positive arm in the same table, because a lone
+// "is hidden" goes green most convincingly when the filter shows nothing at all.
+func TestListAccounts_PageMembershipRequiresReadRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		relation  string
+		wantVisib bool
+	}{
+		{name: "tier only — Get would refuse it", relation: "viewer", wantVisib: false},
+		{name: "object-only selector grant", relation: "v_list", wantVisib: false},
+		{name: "the relation that gates Get", relation: "v_get", wantVisib: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newAcctListFakeRepo()
+			seedAcct(repo, "acc-1", "usr-owner")
+			seedAcct(repo, "acc-2", "usr-other")
 
-	fga := newAcctUnionFGAStub()
-	// usr-u1 holds ONLY v_list on acc-1 (object-only grant, no viewer).
-	fga.set("v_list", "user:usr-u1", []string{"acc-1"})
-	fga.set("viewer", "user:usr-u1", nil)
+			fga := newAcctUnionFGAStub()
+			fga.set(tc.relation, "user:usr-u1", []string{"acc-1"})
 
-	uc := NewListAccountsUseCase(repo).WithRelationStore(fga)
+			uc := NewListAccountsUseCase(repo).WithRelationStore(fga)
 
-	out, _, err := uc.Execute(ctxUser("usr-u1"), repoaccount.ListFilter{PageSize: 100})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"acc-1"}, acctIDs(out),
-		"v_list-only grant makes acc-1 VISIBLE in the selector (see-without-contents, D-6/B-01)")
-	require.GreaterOrEqual(t, fga.calls["v_list"], 1,
-		"P7 must query the v_list relation in addition to viewer")
+			out, _, err := uc.Execute(ctxUser("usr-u1"), repoaccount.ListFilter{PageSize: 100})
+			require.NoError(t, err)
+			if tc.wantVisib {
+				require.ElementsMatch(t, []string{"acc-1"}, acctIDs(out),
+					"a holder of the read relation must find its own readable account in its own list")
+				return
+			}
+			require.Empty(t, acctIDs(out),
+				"the page must not name an account the caller's own Get refuses — and, since List "+
+					"returns the same message Get does, must not hand over its contents either")
+		})
+	}
 }
 
-// P7-B — viewer grant still surfaces the account (regression: viewer branch
-// retained; a viewer grant implies full access including contents elsewhere).
-func TestListAccounts_P7_ViewerGrant_StillVisible(t *testing.T) {
-	repo := newAcctListFakeRepo()
-	seedAcct(repo, "acc-1", "usr-u1")
-	seedAcct(repo, "acc-2", "usr-other")
-
-	fga := newAcctUnionFGAStub()
-	fga.set("viewer", "user:usr-u1", []string{"acc-1"})
-	fga.set("v_list", "user:usr-u1", nil)
-
-	uc := NewListAccountsUseCase(repo).WithRelationStore(fga)
-
-	out, _, err := uc.Execute(ctxUser("usr-u1"), repoaccount.ListFilter{PageSize: 100})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"acc-1"}, acctIDs(out),
-		"viewer grant keeps the account visible (regression — viewer branch retained)")
-}
-
-// P7-C — UNION + dedup: an account present in BOTH sets appears EXACTLY once.
-func TestListAccounts_P7_UnionDedup(t *testing.T) {
+// Dedup: an id repeated on the page is resolved once and appears once.
+func TestListAccounts_ReadRelationDedup(t *testing.T) {
 	repo := newAcctListFakeRepo()
 	seedAcct(repo, "acc-1", "usr-u1")
 	seedAcct(repo, "acc-2", "usr-u1")
 	seedAcct(repo, "acc-3", "usr-other")
 
 	fga := newAcctUnionFGAStub()
-	fga.set("viewer", "user:usr-u1", []string{"acc-1", "acc-2"})
-	fga.set("v_list", "user:usr-u1", []string{"acc-2"}) // acc-2 in both → dedup
+	fga.set("v_get", "user:usr-u1", []string{"acc-1", "acc-2"})
 
 	uc := NewListAccountsUseCase(repo).WithRelationStore(fga)
 
 	out, _, err := uc.Execute(ctxUser("usr-u1"), repoaccount.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"acc-1", "acc-2"}, acctIDs(out),
-		"union of viewer ∪ v_list, deduplicated (acc-2 once, acc-3 hidden)")
+		"each granted account appears exactly once; the ungranted one stays hidden")
 }
 
 // P7-D — no-leak: a foreign account in NEITHER set stays hidden.
@@ -173,24 +164,41 @@ func TestListAccounts_P7_ForeignAccount_NoLeak(t *testing.T) {
 		"foreign account in neither viewer nor v_list set must stay hidden (no-leak)")
 }
 
-// P7-E — operator-SA system_viewer floor not broken: the operator resolves
-// viewer on every account → sees ALL even with empty v_list.
-func TestListAccounts_P7_OperatorFloor_Unbroken(t *testing.T) {
-	repo := newAcctListFakeRepo()
-	seedAcct(repo, "acc-1", "usr-u1")
-	seedAcct(repo, "acc-2", "usr-u2")
-
+// A machine principal is filtered by the SAME relation as a human one — there is no
+// tier back door for service accounts.
+//
+// This replaces a case that asserted an "operator system_viewer floor": it stubbed a
+// `viewer` grant on every account and concluded the operator sees them all. The seed
+// produces no such grant. kacho-vpc-operator's backing role authors its iam rule on
+// the resource name `projectses`, which the closed object-type table does not carry
+// (`iam.project` does), so that rule resolves to no FGA type and materializes no
+// tuple at all — the floor the case described was a property of its own fixture.
+func TestListAccounts_ServiceAccountFilteredByTheSameRelation(t *testing.T) {
 	op := "sva-operator"
-	fga := newAcctUnionFGAStub()
-	fga.set("viewer", "service_account:"+op, []string{"acc-1", "acc-2"})
-	fga.set("v_list", "service_account:"+op, nil)
 
-	uc := NewListAccountsUseCase(repo).WithRelationStore(fga)
+	for _, tc := range []struct {
+		relation string
+		wantSeen []string
+	}{
+		{relation: "viewer", wantSeen: nil},
+		{relation: "v_get", wantSeen: []string{"acc-1", "acc-2"}},
+	} {
+		t.Run(tc.relation, func(t *testing.T) {
+			repo := newAcctListFakeRepo()
+			seedAcct(repo, "acc-1", "usr-u1")
+			seedAcct(repo, "acc-2", "usr-u2")
 
-	out, _, err := uc.Execute(ctxSA(op), repoaccount.ListFilter{PageSize: 100})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"acc-1", "acc-2"}, acctIDs(out),
-		"operator system_viewer floor (SEC-L INV-2) still sees ALL accounts under the union")
+			fga := newAcctUnionFGAStub()
+			fga.set(tc.relation, "service_account:"+op, []string{"acc-1", "acc-2"})
+
+			uc := NewListAccountsUseCase(repo).WithRelationStore(fga)
+
+			out, _, err := uc.Execute(ctxSA(op), repoaccount.ListFilter{PageSize: 100})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, acctIDs(out),
+				"a service account is subject to the read relation exactly as a user is")
+		})
+	}
 }
 
 // P7-F — fail-closed: an FGA error on EITHER relation query → Unavailable,

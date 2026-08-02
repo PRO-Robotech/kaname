@@ -190,32 +190,35 @@ func seedListUsers() []domain.User {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-// T3.3-MAT-01 — v_list-only grant (object-only, no viewer) → user VISIBLE.
-func TestListUsers_VListOnlyGrant_Visible(t *testing.T) {
-	repo := &scopeUserRepo{users: seedListUsers()}
-	fga := newUserUnionFGAStub()
-	fga.set("v_list", "user:"+listMemberID, []string{listUser1ID})
-	fga.set("viewer", "user:"+listMemberID, nil)
+// Страница не может быть ШИРЕ чтения: держатель яруса (или объектного грант-селектора
+// `v_list`) не должен получать строку, которую его же Get не отдаст. Отрицание идёт В
+// ПАРЕ с положительным — одиночное «не видно» зеленеет сильнее всего тогда, когда
+// фильтр не показывает вообще ничего.
+//
+// Собственная запись вызывающего сюда не попадает: она держится ПОЛОМ, который вообще
+// не спрашивает модель (TestListUsers_SelfFloor_NoFGATuple), и сужением не задета.
+func TestListUsers_PageMembershipRequiresReadRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		relation string
+		wantSeen []string
+	}{
+		{name: "ярус — Get откажет", relation: "viewer", wantSeen: nil},
+		{name: "объектный грант-селектор", relation: "v_list", wantSeen: nil},
+		{name: "отношение, которым гейтится Get", relation: "v_get", wantSeen: []string{listUser1ID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &scopeUserRepo{users: seedListUsers()}
+			fga := newUserUnionFGAStub()
+			fga.set(tc.relation, "user:"+listMemberID, []string{listUser1ID})
 
-	uc := NewListUsersUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxListUser(listMemberID), repouser.ListFilter{AccountID: listAcctA})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{listUser1ID}, userIDs(out),
-		"v_list-only grant makes the user visible (see-in-selector); the other stays hidden")
-	require.GreaterOrEqual(t, fga.calls["v_list"], 1, "must query v_list relation")
-}
-
-// T3.3-MAT-01 — viewer grant surfaces the user (account-admin/owner cascade).
-func TestListUsers_ViewerGrant_Visible(t *testing.T) {
-	repo := &scopeUserRepo{users: seedListUsers()}
-	fga := newUserUnionFGAStub()
-	fga.set("viewer", "user:"+listMemberID, []string{listUser1ID, listUser2ID})
-
-	uc := NewListUsersUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxListUser(listMemberID), repouser.ListFilter{AccountID: listAcctA})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{listUser1ID, listUser2ID}, userIDs(out),
-		"owner/admin sees all via viewer tier-cascade (no admin visibility loss)")
+			uc := NewListUsersUseCase(repo).WithRelationStore(fga)
+			out, _, err := uc.Execute(ctxListUser(listMemberID), repouser.ListFilter{AccountID: listAcctA})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, userIDs(out),
+				"в странице ровно те пользователи, которых вызывающий вправе прочитать по id")
+		})
+	}
 }
 
 // T3.3-MAT-02 — membership-over-show устранен: член аккаунта БЕЗ per-object гранта

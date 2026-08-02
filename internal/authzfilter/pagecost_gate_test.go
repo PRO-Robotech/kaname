@@ -38,14 +38,39 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/validate"
 )
 
+// dearestPredicate returns the object type whose page-membership predicate asks the
+// MOST relations, and that predicate. It is derived from the declaration itself —
+// every per-type entry plus the default that every unlisted type takes — so the
+// ceiling below cannot go on describing a type that stopped being the worst one.
+//
+// Ties resolve to the lexically smaller type name, so the answer is deterministic.
+func dearestPredicate() (string, []string) {
+	worstType, worstRels := "", RelationsFor("")
+	for typ := range pageRelations {
+		rels := RelationsFor(typ)
+		if len(rels) > len(worstRels) || (len(rels) == len(worstRels) && (worstType == "" || typ < worstType)) {
+			worstType, worstRels = typ, rels
+		}
+	}
+	if worstType == "" {
+		// No per-type entry is dearer than the default; any unlisted type exhibits it.
+		worstType = "unlisted_type_takes_the_default"
+	}
+	return worstType, worstRels
+}
+
 // TestVisibleSet_WorstCasePageCost — the ceiling, asserted as a COUNT.
 //
 // A page is filtered by asking one direct relation question per (object, relation)
 // until one of them allows. So the cheapest page asks once per object and the
-// dearest asks len(Relations) times per object — and the dearest is every page on
-// which the first relation does not resolve: a page a subject cannot see at all,
-// and a page a subject sees only through the object-only selector grant. Both are
-// ordinary, so the ceiling is not a pathological case.
+// dearest asks len(RelationsFor(objectType)) times per object — and the dearest is
+// every page on which the first relation does not resolve: a page a subject cannot
+// see at all, and a page a subject sees only through the object-only selector grant.
+// Both are ordinary, so the ceiling is not a pathological case.
+//
+// The predicate is per-object-type, so the ceiling is measured on the DEAREST type
+// and that type is DERIVED here, not named: a literal would quietly stop being the
+// worst one the moment a dearer type is declared.
 //
 // Counts, not seconds: a question is an HTTP round-trip to the relation store in a
 // separate pod, so wall time here would measure this machine and assert nothing
@@ -53,20 +78,22 @@ import (
 // authzcascade writes down at length.
 //
 // The premises are asserted rather than assumed, because the number is a product
-// of exactly two constants: widen Relations or move DefaultParallelism and this
-// test must be re-derived, not silently re-baselined.
+// of exactly two things: widen the dearest type's predicate or move
+// DefaultParallelism and this test must be re-derived, not silently re-baselined.
 func TestVisibleSet_WorstCasePageCost(t *testing.T) {
-	require.Len(t, Relations, 2,
-		"premise: the cost below is len(Relations) questions per object; widening the union "+
-			"changes the ceiling and this test must restate it")
+	dearestType, dearestRels := dearestPredicate()
+
+	require.Len(t, dearestRels, 2,
+		"premise: the cost below is len(RelationsFor(%q)) questions per object; widening any "+
+			"type's predicate changes the ceiling and this test must restate it", dearestType)
 	require.Equal(t, 16, DefaultParallelism,
 		"premise: the wave count below divides the ceiling by this bound")
 
 	const (
-		wantChecks = 2000 // len(Relations) × validate.MaxPageSize
+		wantChecks = 2000 // len(dearest predicate) × validate.MaxPageSize
 		wantWaves  = 125  // wantChecks / DefaultParallelism
 	)
-	require.Equal(t, int64(wantChecks), int64(len(Relations))*validate.MaxPageSize,
+	require.Equal(t, int64(wantChecks), int64(len(dearestRels))*validate.MaxPageSize,
 		"premise: the literal ceiling must agree with the constants it is derived from")
 
 	pageSize := int(validate.MaxPageSize)
@@ -84,8 +111,10 @@ func TestVisibleSet_WorstCasePageCost(t *testing.T) {
 			wantSeen: 0,
 		},
 		{
-			name:     "page visible only through the second relation",
-			grantFor: func(id string) string { return Relations[len(Relations)-1] + "|t:" + id },
+			name: "page visible only through the second relation",
+			grantFor: func(id string) string {
+				return dearestRels[len(dearestRels)-1] + "|" + dearestType + ":" + id
+			},
 			wantSeen: int(validate.MaxPageSize),
 		},
 	} {
@@ -101,7 +130,7 @@ func TestVisibleSet_WorstCasePageCost(t *testing.T) {
 			}
 			f := newFakeChecker(granted...)
 
-			got, err := VisibleSet(context.Background(), f, "user:u1", "t", ids)
+			got, err := VisibleSet(context.Background(), f, "user:u1", dearestType, ids)
 			require.NoError(t, err)
 			require.Len(t, got, tc.wantSeen, "the verdict itself must be unaffected by how it is counted")
 
@@ -113,9 +142,9 @@ func TestVisibleSet_WorstCasePageCost(t *testing.T) {
 			require.Equal(t, wantWaves, waves,
 				"the bound caps how many are in flight, so it sets DEPTH; it does not reduce the count")
 
-			t.Logf("page=%d ids | relations=%d | questions=%d | in-flight bound=%d | depth=%d waves | "+
+			t.Logf("type=%s | page=%d ids | relations=%d | questions=%d | in-flight bound=%d | depth=%d waves | "+
 				"wall at 10ms per question ≈ %dms, at 50ms ≈ %dms",
-				pageSize, len(Relations), checks, DefaultParallelism, waves, waves*10, waves*50)
+				dearestType, pageSize, len(dearestRels), checks, DefaultParallelism, waves, waves*10, waves*50)
 		})
 	}
 }

@@ -34,7 +34,7 @@ func TestABList_MaterializedAt_ProjectedOnReadPath(t *testing.T) {
 	repo.seedMaterializedAt(live.ID, at)
 
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_x", []string{string(live.ID), string(fresh.ID)})
+	fga.set("v_get", "user:usr_x", []string{string(live.ID), string(fresh.ID)})
 	h := newListHandler(repo, fga)
 
 	resp, err := h.List(newOwnerContext("usr_x"), &iamv1.ListAccessBindingsRequest{PageSize: 10})

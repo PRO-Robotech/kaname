@@ -1,23 +1,21 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// list_vlist_union_test.go — rbac-2026 P7 (D-6 / acceptance rbac-B-02).
+// list_vlist_union_test.go — what makes a project a member of a List page.
 //
-// P7 makes ProjectService.List visibility the UNION of the principal's FGA
-// `viewer`-set AND `v_list`-set on `project` (on top of the retained
-// owner-via-parent-Account branch):
+// A row belongs on the page exactly when its holder may read that row by id. The
+// gateway gates ProjectService/Get on `v_get`, so that is the page predicate too
+// (internal/authzfilter). The owner-via-parent-Account branch is separate and
+// untouched: it never asks the relation store at all.
 //
-//	visible(project) = owned-via-account
-//	                 ∪ ListObjects(subject, "viewer", "project")
-//	                 ∪ ListObjects(subject, "v_list", "project")
+//	visible(project) = owned-via-account ∪ Check(subject, "v_get", "project:"+id)
 //
-// A grant of `iam.project.{get,list}` on the flat explicit model materializes
-// ONLY `project:<id> # v_list/v_get @ subj` (object-only, no cascade into the
-// project's resources, D-2). Before P7 the List filtered by `viewer` alone, so
-// the project stayed invisible. P7 adds the v_list branch → the project shows
-// up in the selector while a Check on a resource INSIDE it still DENIES.
-//
-// RED until ListProjectsUseCase unions viewer ∪ v_list.
+// It used to union `viewer ∪ v_list`, argued as "the project shows up in the
+// selector while a Check on a resource INSIDE it still denies". The second half of
+// that sentence is true and irrelevant to the first: List returns the same Project
+// message Get does, so a row on the page IS the project's own contents, and the tier
+// holder was handed a project its own Get refused. Asserted in both directions below.
+
 package project
 
 import (
@@ -95,67 +93,61 @@ func (s *projUnionFGAStub) CheckWithContext(_ context.Context, subject, relation
 	return false, nil
 }
 
-// P7-A — v_list-only grant (object-only, no viewer, non-owner) → project VISIBLE.
-func TestListProjects_P7_VListOnlyGrant_ProjectVisible(t *testing.T) {
-	repo := newListFakeRepo()
-	seedAccount(repo, "acc-other", "usr-other") // usr-u1 does NOT own it
-	seedProject(repo, "prj-a", "acc-other")
-	seedProject(repo, "prj-b", "acc-other")
+// The page cannot be WIDER than the read: a non-owner holding the tier (or the
+// object-only `v_list` selector grant) must not be handed a project whose Get it
+// cannot obtain. Paired with the positive arm, because a lone "is hidden" goes green
+// most convincingly when the filter shows nothing at all.
+func TestListProjects_PageMembershipRequiresReadRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		relation string
+		wantSeen []string
+	}{
+		{name: "tier only — Get would refuse it", relation: "viewer", wantSeen: nil},
+		{name: "object-only selector grant", relation: "v_list", wantSeen: nil},
+		{name: "the relation that gates Get", relation: "v_get", wantSeen: []string{"prj-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newListFakeRepo()
+			seedAccount(repo, "acc-other", "usr-other") // usr-u1 does NOT own it
+			seedProject(repo, "prj-a", "acc-other")
+			seedProject(repo, "prj-b", "acc-other")
 
-	fga := newProjUnionFGAStub()
-	fga.set("v_list", "user:usr-u1", []string{"prj-a"}) // object-only grant
-	fga.set("viewer", "user:usr-u1", nil)
+			fga := newProjUnionFGAStub()
+			fga.set(tc.relation, "user:usr-u1", []string{"prj-a"})
 
-	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+			uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
 
-	out, _, err := uc.Execute(ctxAs("usr-u1"), repoproject.ListFilter{PageSize: 100})
-	require.NoError(t, err)
-	ids := projIDs(out)
-	require.ElementsMatch(t, []string{"prj-a"}, ids,
-		"v_list-only grant makes prj-a visible (see-without-contents, D-6/B-02); prj-b hidden")
-	require.GreaterOrEqual(t, fga.calls["v_list"], 1,
-		"P7 must query the v_list relation on project in addition to viewer")
+			out, _, err := uc.Execute(ctxAs("usr-u1"), repoproject.ListFilter{PageSize: 100})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, projIDs(out),
+				"the page must name exactly the projects this caller may read by id")
+		})
+	}
 }
 
-// P7-B — viewer grant still surfaces the project (regression).
-func TestListProjects_P7_ViewerGrant_StillVisible(t *testing.T) {
-	repo := newListFakeRepo()
-	seedAccount(repo, "acc-other", "usr-other")
-	seedProject(repo, "prj-a", "acc-other")
-	seedProject(repo, "prj-b", "acc-other")
-
-	fga := newProjUnionFGAStub()
-	fga.set("viewer", "user:usr-u1", []string{"prj-a"})
-	fga.set("v_list", "user:usr-u1", nil)
-
-	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
-
-	out, _, err := uc.Execute(ctxAs("usr-u1"), repoproject.ListFilter{PageSize: 100})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"prj-a"}, projIDs(out),
-		"viewer grant keeps the project visible (regression — viewer branch retained)")
-}
-
-// P7-C — UNION of owner ∪ viewer ∪ v_list, deduplicated.
-func TestListProjects_P7_UnionDedup(t *testing.T) {
+// Ownership is a floor that does not go through the relation store at all, so it
+// survives the narrowing — and a granted project still appears exactly once when it
+// is also owned.
+func TestListProjects_OwnerFloorAndReadRelationDedup(t *testing.T) {
 	repo := newListFakeRepo()
 	seedAccount(repo, "acc-alice", "usr-alice") // alice OWNS this
 	seedAccount(repo, "acc-bob", "usr-bob")
-	seedProject(repo, "prj-alice-1", "acc-alice") // owned
-	seedProject(repo, "prj-bob-1", "acc-bob")     // viewer grant
-	seedProject(repo, "prj-bob-2", "acc-bob")     // v_list grant
-	seedProject(repo, "prj-bob-3", "acc-bob")     // hidden
+	seedProject(repo, "prj-alice-1", "acc-alice") // owned AND granted → dedup
+	seedProject(repo, "prj-alice-2", "acc-alice") // owned only, no grant at all
+	seedProject(repo, "prj-bob-1", "acc-bob")     // granted
+	seedProject(repo, "prj-bob-2", "acc-bob")     // hidden
 
 	fga := newProjUnionFGAStub()
-	fga.set("viewer", "user:usr-alice", []string{"prj-bob-1", "prj-alice-1"}) // prj-alice-1 also owned → dedup
-	fga.set("v_list", "user:usr-alice", []string{"prj-bob-2"})
+	fga.set("v_get", "user:usr-alice", []string{"prj-bob-1", "prj-alice-1"})
 
 	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
 
 	out, _, err := uc.Execute(ctxAs("usr-alice"), repoproject.ListFilter{PageSize: 100})
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"prj-alice-1", "prj-bob-1", "prj-bob-2"}, projIDs(out),
-		"union owner ∪ viewer ∪ v_list, deduplicated; prj-bob-3 hidden")
+	require.ElementsMatch(t, []string{"prj-alice-1", "prj-alice-2", "prj-bob-1"}, projIDs(out),
+		"owned projects stay visible without any relation tuple; a granted one appears once; "+
+			"prj-bob-2 stays hidden")
 }
 
 // P7-D — no-leak: a project in none of the three sets stays hidden.
@@ -177,25 +169,44 @@ func TestListProjects_P7_Foreign_NoLeak(t *testing.T) {
 		"project in neither owner/viewer/v_list set must stay hidden (no-leak)")
 }
 
-// P7-E — operator-SA system_viewer floor: resolves viewer on every project →
-// sees ALL even with empty v_list.
-func TestListProjects_P7_OperatorFloor_Unbroken(t *testing.T) {
-	repo := newListFakeRepo()
-	seedAccount(repo, "acc-1", "usr-u1")
-	seedProject(repo, "prj-1", "acc-1")
-	seedProject(repo, "prj-2", "acc-1")
-
+// A machine principal is filtered by the SAME relation as a human one — there is no
+// tier back door for service accounts.
+//
+// This replaces a case that asserted an "operator system_viewer floor": it stubbed a
+// `viewer` grant on every project and concluded kacho-vpc-operator sees them all. The
+// seed produces no such grant. The operator's backing role authors its iam rule on the
+// resource name `projectses`, which the closed object-type table does not carry
+// (`iam.project` does), so that rule resolves to no FGA type and materializes no tuple
+// at all — the floor the case described was a property of its own fixture, not of the
+// deployment. The operator's project fan-out is tracked separately; it is a dead grant,
+// not a predicate this page may widen for.
+func TestListProjects_ServiceAccountFilteredByTheSameRelation(t *testing.T) {
 	op := "sva-operator"
-	fga := newProjUnionFGAStub()
-	fga.set("viewer", "service_account:"+op, []string{"prj-1", "prj-2"})
-	fga.set("v_list", "service_account:"+op, nil)
 
-	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+	for _, tc := range []struct {
+		relation string
+		wantSeen []string
+	}{
+		{relation: "viewer", wantSeen: nil},
+		{relation: "v_get", wantSeen: []string{"prj-1", "prj-2"}},
+	} {
+		t.Run(tc.relation, func(t *testing.T) {
+			repo := newListFakeRepo()
+			seedAccount(repo, "acc-1", "usr-u1") // the operator owns nothing
+			seedProject(repo, "prj-1", "acc-1")
+			seedProject(repo, "prj-2", "acc-1")
 
-	out, _, err := uc.Execute(ctxSAProj(op), repoproject.ListFilter{PageSize: 100})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"prj-1", "prj-2"}, projIDs(out),
-		"operator system_viewer floor still sees ALL projects under the union")
+			fga := newProjUnionFGAStub()
+			fga.set(tc.relation, "service_account:"+op, []string{"prj-1", "prj-2"})
+
+			uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+			out, _, err := uc.Execute(ctxSAProj(op), repoproject.ListFilter{PageSize: 100})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, projIDs(out),
+				"a service account is subject to the read relation exactly as a user is")
+		})
+	}
 }
 
 // P7-F — fail-closed: FGA error on either relation → Unavailable.

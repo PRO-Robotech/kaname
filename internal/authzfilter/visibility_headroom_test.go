@@ -41,6 +41,12 @@ func TestVisibleSet_MaxPageBoundedFanOut(t *testing.T) {
 	pageSize := int(validate.MaxPageSize)
 	const perCheckLatency = 2 * time.Millisecond
 
+	// A MIXED page needs a type whose predicate asks more than one relation, so the
+	// type is DERIVED rather than named: a literal would silently stop being mixed the
+	// moment its predicate is narrowed, and the "1666 of a permitted 2000" shape stated
+	// above would quietly become a different measurement wearing the same words.
+	objType, rels := dearestPredicate()
+
 	granted := make([]string, 0, pageSize)
 	ids := make([]string, 0, pageSize)
 	want := map[string]bool{}
@@ -48,11 +54,11 @@ func TestVisibleSet_MaxPageBoundedFanOut(t *testing.T) {
 		id := fmt.Sprintf("obj%04d", i)
 		ids = append(ids, id)
 		switch i % 3 {
-		case 0:
-			granted = append(granted, "viewer|t:"+id)
+		case 0: // resolves on the FIRST relation asked — one question
+			granted = append(granted, rels[0]+"|"+objType+":"+id)
 			want[id] = true
-		case 1:
-			granted = append(granted, "v_list|t:"+id)
+		case 1: // resolves only on the LAST — the full per-object price
+			granted = append(granted, rels[len(rels)-1]+"|"+objType+":"+id)
 			want[id] = true
 		}
 	}
@@ -60,7 +66,7 @@ func TestVisibleSet_MaxPageBoundedFanOut(t *testing.T) {
 	f.sleep = perCheckLatency
 
 	t0 := time.Now()
-	got, err := VisibleSet(context.Background(), f, "user:u1", "t", ids)
+	got, err := VisibleSet(context.Background(), f, "user:u1", objType, ids)
 	elapsed := time.Since(t0)
 
 	require.NoError(t, err)

@@ -161,36 +161,35 @@ func ctxUser(id string) context.Context {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-// T3.3 — v_list-only grant (object-only, no viewer) → SA VISIBLE.
-func TestListServiceAccounts_VListOnlyGrant_Visible(t *testing.T) {
-	repo := &scopeSARepo{sas: []domain.ServiceAccount{
-		{ID: "sva0000000000000xxxx", AccountID: scopeAcctA},
-		{ID: "sva0000000000000yyyy", AccountID: scopeAcctA},
-	}}
-	fga := newSAUnionFGAStub()
-	fga.set("v_list", "user:"+scopeUserID, []string{"sva0000000000000xxxx"})
-	fga.set("viewer", "user:"+scopeUserID, nil)
+// Страница не может быть ШИРЕ чтения: держатель яруса (или объектного грант-селектора
+// `v_list`) не должен получать строку, которую его же Get не отдаст. Отрицание идёт В
+// ПАРЕ с положительным — одиночное «не видно» зеленеет сильнее всего тогда, когда
+// фильтр не показывает вообще ничего.
+func TestListServiceAccounts_PageMembershipRequiresReadRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		relation string
+		wantSeen []string
+	}{
+		{name: "ярус — Get откажет", relation: "viewer", wantSeen: nil},
+		{name: "объектный грант-селектор", relation: "v_list", wantSeen: nil},
+		{name: "отношение, которым гейтится Get", relation: "v_get", wantSeen: []string{"sva0000000000000xxxx"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &scopeSARepo{sas: []domain.ServiceAccount{
+				{ID: "sva0000000000000xxxx", AccountID: scopeAcctA},
+				{ID: "sva0000000000000yyyy", AccountID: scopeAcctA},
+			}}
+			fga := newSAUnionFGAStub()
+			fga.set(tc.relation, "user:"+scopeUserID, []string{"sva0000000000000xxxx"})
 
-	uc := NewListServiceAccountsUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxUser(scopeUserID), reposa.ListFilter{AccountID: scopeAcctA})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"sva0000000000000xxxx"}, saIDs(out),
-		"v_list-only grant makes the SA visible (see-in-selector), the other stays hidden")
-	require.GreaterOrEqual(t, fga.calls["v_list"], 1, "must query v_list relation")
-}
-
-// T3.3 — viewer grant surfaces the SA (account-admin cascade).
-func TestListServiceAccounts_ViewerGrant_Visible(t *testing.T) {
-	repo := &scopeSARepo{sas: []domain.ServiceAccount{
-		{ID: "sva0000000000000xxxx", AccountID: scopeAcctA},
-	}}
-	fga := newSAUnionFGAStub()
-	fga.set("viewer", "user:"+scopeUserID, []string{"sva0000000000000xxxx"})
-
-	uc := NewListServiceAccountsUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxUser(scopeUserID), reposa.ListFilter{AccountID: scopeAcctA})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"sva0000000000000xxxx"}, saIDs(out))
+			uc := NewListServiceAccountsUseCase(repo).WithRelationStore(fga)
+			out, _, err := uc.Execute(ctxUser(scopeUserID), reposa.ListFilter{AccountID: scopeAcctA})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, saIDs(out),
+				"в странице ровно те служебные учётки, которые вызывающий вправе прочитать по id")
+		})
+	}
 }
 
 // T3.3 — membership-over-show устранен: член аккаунта БЕЗ per-object гранта НЕ
