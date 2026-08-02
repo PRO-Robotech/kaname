@@ -46,7 +46,7 @@ Test-design techniques applied:
   - Conformance: response shapes vs the proto contract (subjects[], principals[],
     accessBindings[]); error text "Illegal argument subjects (must be 1..32)".
 
-Fixture dependency (tests/authz-fixtures/setup-jwt.py + setup.py): jwtAccountAdminA,
+Fixture dependency (tests/authz-fixtures/setup.sh → prodseed_all.py): jwtAccountAdminA,
 jwtNoBindings, accountAId, userAAAId, userAABId, userNOBId. AccessBinding subjects
 must reference an EXISTING user/service_account/group in the iam DB — migration 0049
 (subject_ref_exists BEFORE INSERT/UPDATE trigger) closes the (subject_type,
