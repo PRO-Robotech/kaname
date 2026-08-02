@@ -88,6 +88,65 @@ func (c *countingRelations) CheckWithContextualTuples(
 	return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, contextual)
 }
 
+// BatchCheckWithContext / BatchCheckItems — the batched doors, counted in the SAME
+// unit as the per-object ones: one QUESTION per item.
+//
+// The unit has to stay the question, not the request, or the measurement below stops
+// measuring the thing it was written for. Its subject is "does a page pay more relation
+// questions than it did before the second chance existed", and a batch that carries 50
+// questions in one message still asks the store 50 things. Counting requests would show
+// the page getting forty times cheaper the day batching landed and would say nothing at
+// all about whether the second chance had started doubling them again.
+//
+// They must also EXIST. A double that omits them is not neutral: authzcascade.Client
+// falls back to the per-object path when its Relations cannot carry per-item tuples, so
+// a double without these methods quietly measures the fallback and reports it as the
+// shipped shape.
+func (c *countingRelations) BatchCheckWithContext(
+	ctx context.Context, subject, relation string, objects []string, condCtx map[string]any,
+) ([]bool, error) {
+	c.plain.Add(int64(len(objects)))
+	return c.Relations.BatchCheckWithContext(ctx, subject, relation, objects, condCtx)
+}
+
+func (c *countingRelations) BatchCheckItems(
+	ctx context.Context, subject, relation string,
+	items []clients.BatchCheckItem, condCtx map[string]any,
+) ([]bool, error) {
+	// An item carrying facts is a with-facts question and an item without is a plain
+	// one, exactly as the per-object counters classify them — the classification is
+	// about what the question carries, not about how it travelled.
+	for _, it := range items {
+		if len(it.Contextual) > 0 {
+			c.withFacts.Add(1)
+			continue
+		}
+		c.plain.Add(1)
+	}
+	if bc, ok := c.Relations.(interface {
+		BatchCheckItems(context.Context, string, string, []clients.BatchCheckItem, map[string]any) ([]bool, error)
+	}); ok {
+		return bc.BatchCheckItems(ctx, subject, relation, items, condCtx)
+	}
+	out := make([]bool, len(items))
+	for i, it := range items {
+		var (
+			allowed bool
+			err     error
+		)
+		if len(it.Contextual) > 0 {
+			allowed, err = c.Relations.CheckWithContextualTuples(ctx, subject, relation, it.Object, condCtx, it.Contextual)
+		} else {
+			allowed, err = c.Relations.CheckWithContext(ctx, subject, relation, it.Object, condCtx)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
+}
+
 // countingPrimary counts per-object read transactions on the primary — the unit a network
 // hop to the database charges for, independently of how many rows are read inside one.
 type countingPrimary struct {

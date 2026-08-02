@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
@@ -301,4 +303,29 @@ func TestListUsers_FGAUnavailable_FailClosed(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok, "want grpc status; got %v", err)
 	require.Equal(t, codes.Unavailable, st.Code())
+}
+
+// BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
+// answers from, so a verdict cannot depend on which door the filter chose.
+//
+// It is not optional politeness: authzfilter takes its batched path whenever the
+// checker offers this method, so a stub that omitted it would leave every test in
+// this file exercising a code path production does not take. It refuses an
+// over-cap partition the way the relation store refuses one — an error, never a
+// trim — so the stub is never more permissive than the thing it stands in for.
+func (s *userUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
+		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+			len(objects), authzfilter.MaxBatchChecksPerRequest)
+	}
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := s.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
 }

@@ -285,81 +285,119 @@ _Reviewed 2026-07-06 (r7b security-hardening audit)._
 `services/iam/docs/acceptance/retire-tenant-condition-surface.md`.
 
 ---
+## 11. iam's own pages ask the relation store in batches; the RPC it publishes for siblings still does not
 
-## 11. A visibility-filtered page costs one relation question per row (up to 2000)
-
-> **This record previously described the opposite shape and has been rewritten.**
-> Until 2026-07-31 it documented, as current behaviour, a scope filter that
-> enumerated the whole visible set (`ListObjects` with no client-side cap) and
-> post-filtered the page against it, and it named the page-then-`Check` shape as a
-> *deferred* convergence path. The enumeration was removed when that convergence
-> was implemented: the surfaces below read a page from their own database and ask
-> about the ids on that page. What the record called the deferred goal is the
-> shipped code; what it called current behaviour no longer exists. The **batch**
-> part of that goal, however, was never implemented — and that is the open item
-> restated below, with its number.
+> **Rewritten 2026-08-02. The heading and the number both changed.**
+> Until this revision the record read "A visibility-filtered page costs one
+> relation question per row (up to 2000)" and named the batched question as the
+> open convergence path. That path has landed for iam's own read surfaces: a
+> contract-sized page now costs **40 requests** to the relation store instead of
+> **2000**, asking about the same 2000 tuples. What remains open is the OTHER
+> half — the `BatchCheck` RPC iam publishes to sibling services, which still
+> resolves its items one at a time. The number below is that half.
 
 **Convention**: a request's cost must be bounded by what the request asks for, and
 `page_size` is part of the contract up to 1000 (`pkg/validate`); narrowing a page
 to fit a budget is forbidden.
 
-**Divergence**: visibility is resolved with one **direct relation question per
-(object, relation)**, and the questions are individual HTTP round-trips to the
-relation store. `authzfilter.Relations` is `{viewer, v_list}` and `v_list` is asked
-only for the objects `viewer` denied, so a page costs between `page_size` and
-`2 × page_size` round-trips. At the contract ceiling that is **2000 round-trips for
-one `List`**. `authzfilter.DefaultParallelism = 16` bounds how many are in flight,
-which makes the page **125 sequential waves** — it bounds depth, not count.
+### Converged: iam's own nine `List` RPCs
+
+`authzfilter.VisibleSet` partitions a page into groups of
+`MaxBatchChecksPerRequest` and asks the store one relation question per group, the
+groups issued concurrently (`BatchParallelism`). The predicate is unchanged —
+`viewer` for the page, then `v_list` only for what `viewer` denied — so the same
+tuples are resolved; only the message count falls.
+
+| | requests per max page | depth |
+|---|---|---|
+| before | 2000 | 125 waves |
+| after | 40 | ≤ 6 waves |
+
+Measured on the deployed stand (`openfga/openfga:v1.14.0`, in-cluster, idle
+store, trivially-denying tuples): a single check answers in **3.0 ms** mean over
+50 sequential calls; a batch of 50 answers in **19 ms** (three repeats: 19.9 /
+17.8 / 19.3 ms) — **0.38 ms per check amortised**, and 50× fewer round-trips.
+Time figures describe that stand and that tuple set; the request count does not.
+
+**The partition size is the STORE's cap, not the published one.** iam publishes
+`AuthorizeService.BatchCheck` at 100, and that number governs how large a page a
+*sibling* may hand to iam. The store behind iam caps a request at **50**
+(`OPENFGA_MAX_CHECKS_PER_BATCH_CHECK`, default) and refuses an over-cap request
+outright — `batchCheck received 51 checks, the maximum allowed is 50`, HTTP 400,
+read off the running build rather than assumed. Splitting a page against the
+published 100 would make every partition a refusal. The two constants are declared
+on opposite sides of the boundary (`clients.fgaMaxChecksPerBatchCheck`,
+`authzfilter.MaxBatchChecksPerRequest`) and their agreement is asserted where both
+are visible.
+
+The three conditions the earlier record said must not be traded away are held and
+each has a test: the budget belongs to the **request** (partitions are issued
+concurrently, not one after another —
+`TestVisibleSet_BatchesRunConcurrently`); `page_size` is **not narrowed**
+(`TestVisibleSet_PageSizeIsNotNarrowedToFitTheBudget`); the filter stays
+**fail-closed** (any partition's error fails the whole page, and a refusing batch
+door is never papered over by falling back to per-object questions —
+`TestVisibleSet_BatchErrorFailsTheWholePage`).
 
 Affected surfaces — **nine** `List` RPCs over **seven** object types, all through
-the one implementation (`authzfilter.VisibleSet`):
-`account`, `project`, `iam_user`, `iam_service_account`, `iam_group`, `iam_role`,
-and `iam_access_binding` (whose helper serves `List`, `ListByAccount`,
-`ListByScope`).
+the one implementation: `account`, `project`, `iam_user`, `iam_service_account`,
+`iam_group`, `iam_role`, and `iam_access_binding` (whose helper serves `List`,
+`ListByAccount`, `ListByScope`).
 
-**Why the shape is nonetheless right**: the alternative it replaced was worse and
-was a correctness defect, not a cost one. Enumerating "every object of this type
-the subject may see" is bounded SERVER-side by OpenFGA (`listObjectsMaxResults`,
-default 1000) with no continuation token, and that bound applies to the type across
-the whole store rather than to the tenant — so on a long-lived store a tenant's own
-resource fell outside the returned prefix and became **permanently invisible** while
-its row, its grant and its mutations all worked. Asking for a larger `max_results`
-could not widen the answer, because that argument only trims an already-cut
-response. Cost that scales with the page is the price of an answer that is correct
-at any store size; see the package doc of `internal/authzfilter` for the full
-argument.
+### Open, with a number: `AuthorizeService.BatchCheck` resolves items one at a time
 
-**Open item (a cost, with a number)**: the count is reducible and has not been
-reduced. OpenFGA exposes a batched check endpoint that iam does not use anywhere —
-`services/iam/internal/clients` has no batch-check call — even though iam itself
-*publishes* a batched `AuthorizeService.BatchCheck` (bounded at 100 per the
-contract the sibling services split their pages against), and resolves it with a
-plain per-item loop. So vpc / compute / nlb / storage each batch their pages into
-≤100-id requests, and every one of those batches becomes one-question-per-id again
-at the iam boundary. Converging this is a request-path change with its own
-acceptance, and it is bounded by three conditions that must not be traded away:
-the time budget belongs to the **request** (batches must not run one after another,
-or a legitimate `page_size=1000` returns `UNAVAILABLE` on the *positive* path);
-`page_size` must not be narrowed to fit; and the filter stays **fail-closed** (an
-error resolving any part of a page fails the whole page — a partially-resolved set
-is never returned). Whether the deployed OpenFGA build serves that endpoint is
-**unverified**: `deploy/helm/umbrella/Chart.yaml` requests the openfga chart as a
-floating patch range, and a chart version does not determine the binary version in
-any case — so the endpoint is a hypothesis until it is read off the image, not a
-plan. (The same file's neighbouring dependency carries a comment about a floating
-range resolving differently on different days; this one is still floating.)
+`AuthorizeService.BatchCheck` is a sequential `for` loop over the single-`Check`
+implementation. Nothing is shared across a pass except the cluster-administrator
+verdict, and nothing runs concurrently. So a batch of the contract-maximum 100
+costs **100 sequential relation-store round-trips**.
 
-**Guards**: the ceiling is asserted as a count (not as seconds, which would measure
-the test machine) by `TestVisibleSet_WorstCasePageCost`; the in-flight bound by
-`TestVisibleSet_MaxPageBoundedFanOut`; and `TestRelationQuestionsStayInsideTheMeasuredPath`
-keeps the number meaningful by refusing a per-row relation question written
-anywhere in the use-case tree outside that one implementation — a tenth surface
-asking its own questions would otherwise be measured by nothing. That gate reports
-how many files it read and how many looped questions it cleared as legitimate
-relation cascades, so "no findings" is distinguishable from "nothing was read".
+This is not internal: `services/{vpc,compute,nlb,storage}/internal/authzfilter`
+each split their pages into batches of 100 and send up to 20 of them per
+contract-sized page. Each batch becomes 100 sequential round-trips at the iam
+boundary, so a sibling's max page still costs **up to 2000 relation-store
+round-trips** — the number this record used to be about, now living one hop away.
+Four services are on that path.
 
-_Rewritten 2026-07-31 (the shape it described had been replaced; the batch item is
-the part that remains open)._
+Converging it means routing the loop through the same batched question
+(`clients.OpenFGAHTTPClient.BatchCheckWithContext`), which now exists and is
+wired. It is not a mechanical substitution: the per-item path also runs the
+super-access cascade and a structural fallback with contextual tuples on the deny
+side, so the shape is "batch the common first question, then take the slow path
+only for the items it denied". That is a request-path change to an authorization
+surface and wants its own acceptance.
+
+### Also open, with numbers: two per-row list paths
+
+Both are declared, self-expiringly, in `declaredPerRowQuestions`
+(`internal/authzfilter/pagecost_gate_test.go`):
+
+- `access_binding/list_by_role.go: requireGrantAuthority` — a per-row scope filter
+  over a list page: up to **two** relation questions per binding (a
+  cluster-administrator question that is subject-scoped and therefore constant
+  across the page, plus a per-scope `admin` question), i.e. up to **2000** per
+  contract-sized page, plus per-row DB reads for hierarchy scopes.
+- `authorize/handler.go: authorizeCaller` — per-item caller authority inside
+  `BatchCheck`, bounded by that RPC's contract at **100** per call.
+
+Both are batchable in principle — one relation over many heterogeneous objects is
+exactly the shape the new client method takes — and neither was converged here.
+
+**Guards**: the per-object ceiling is still asserted as a count by
+`TestVisibleSet_WorstCasePageCost` (it describes the fallback path);
+the batched ceiling and the tuple count by
+`TestVisibleSet_BatchedWorstCasePageCost`; the in-flight bounds by
+`TestVisibleSet_MaxPageBoundedFanOut` and `TestVisibleSet_BatchesRunConcurrently`.
+Two structural gates keep those numbers meaningful:
+`TestRelationQuestionsStayInsideTheMeasuredPath` refuses a per-row relation
+question written anywhere in the use-case tree outside the one implementation, and
+`TestVisibilityCallSitesAllHoldABatchCapableChecker` censuses the eight call sites
+and refuses one holding a checker whose declared type cannot answer in batches —
+which would take the fallback silently, returning correct rows at the old cost.
+Both report how much they read, so "no findings" is distinguishable from "nothing
+was read".
+
+_Rewritten 2026-08-02 (the batched question landed for iam's own pages; the
+published RPC and two per-row list paths remain, each with a number)._
 
 ---
 

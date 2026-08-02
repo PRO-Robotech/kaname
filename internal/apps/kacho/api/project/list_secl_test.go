@@ -14,6 +14,7 @@ package project
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
 )
@@ -151,4 +153,29 @@ func TestListProjects_SECL_AnonDuringOutage_StillEmpty(t *testing.T) {
 	out, _, err := uc.Execute(context.Background(), repoproject.ListFilter{PageSize: 100})
 	require.NoError(t, err, "anon path is unaffected by FGA outage (short-circuit before FGA)")
 	require.Empty(t, out)
+}
+
+// BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
+// answers from, so a verdict cannot depend on which door the filter chose.
+//
+// It is not optional politeness: authzfilter takes its batched path whenever the
+// checker offers this method, so a stub that omitted it would leave every test in
+// this file exercising a code path production does not take. It refuses an
+// over-cap partition the way the relation store refuses one — an error, never a
+// trim — so the stub is never more permissive than the thing it stands in for.
+func (s *seclFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
+		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+			len(objects), authzfilter.MaxBatchChecksPerRequest)
+	}
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := s.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
 }

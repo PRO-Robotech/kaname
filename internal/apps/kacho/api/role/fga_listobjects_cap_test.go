@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
@@ -157,4 +158,29 @@ func TestRoleReads_UngrantedCustomStaysInvisibleUnderCap(t *testing.T) {
 			"ungranted custom → NOT_FOUND (no existence leak)")
 		assert.Empty(t, got.Rules, "no body leak on deny")
 	})
+}
+
+// BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
+// answers from, so a verdict cannot depend on which door the filter chose.
+//
+// It is not optional politeness: authzfilter takes its batched path whenever the
+// checker offers this method, so a stub that omitted it would leave every test in
+// this file exercising a code path production does not take. It refuses an
+// over-cap partition the way the relation store refuses one — an error, never a
+// trim — so the stub is never more permissive than the thing it stands in for.
+func (c *cappedRoleFGA) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
+		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+			len(objects), authzfilter.MaxBatchChecksPerRequest)
+	}
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := c.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
 }
