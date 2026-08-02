@@ -397,16 +397,25 @@ func TestRelationQuestionsStayInsideTheMeasuredPath(t *testing.T) {
 // because the function moved down its own file.
 var declaredPerRowQuestions = map[string]string{
 	"../apps/kacho/api/access_binding/list_by_role.go: requireGrantAuthority": "" +
-		"Per-row scope filter over a LIST page: one relation question per binding " +
-		"whose subject is not the caller. Bounded by page_size, so it is the shape " +
-		"this gate exists to find — surfaced only once the gate could see through " +
-		"the helper. Converging it needs the batched question tracked in " +
-		"known-divergences §11, not a re-order.",
+		"Per-row scope filter over a LIST page: up to TWO relation questions per " +
+		"binding whose subject is not the caller — a cluster-administrator question " +
+		"that is subject-scoped and therefore constant across the page, plus a " +
+		"per-scope admin question — so up to 2000 per contract-sized page, plus " +
+		"per-row DB reads for hierarchy scopes. THE BLOCKER THIS DECLARATION USED " +
+		"TO NAME IS GONE: it read 'converging it needs the batched question tracked " +
+		"in known-divergences §11', and that question now exists and is wired " +
+		"(clients.OpenFGAHTTPClient.BatchCheckWithContext). What remains is that " +
+		"the value here is a clients.RelationStore, which does not carry it, and " +
+		"that the loop interleaves relation questions with DB reads — a request-path " +
+		"change to an authorization surface, with its own acceptance.",
 	"../apps/kacho/api/authorize/handler.go: authorizeCaller": "" +
 		"Per-item caller authority in BatchCheck, bounded by the contract at 100 " +
-		"items (rejected above that). This is the open item the doc comment used to " +
-		"call 'outside the volume' — it is inside it, asked through a method, and " +
-		"converges with the same batched question.",
+		"items (rejected above that). SAME CORRECTION: this declaration used to say " +
+		"it 'converges with the same batched question' as a thing not yet available. " +
+		"It is available. Converging is not a substitution — the per-item path also " +
+		"runs the super-access cascade and a contextual-tuple fallback on the deny " +
+		"side, so the shape is 'batch the common first question, slow path only for " +
+		"what it denied'. Tracked as a number in known-divergences §11.",
 }
 
 // perRowFinding — one per-row relation question. `key` is file + calling name,

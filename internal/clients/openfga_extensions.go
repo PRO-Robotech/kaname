@@ -38,6 +38,22 @@ type RelationQueries interface {
 	// the tuple to be matched is Conditional.
 	CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (allowed bool, err error)
 
+	// BatchCheckWithContext — ONE relation question about MANY objects, carried
+	// in a single request; one verdict per object, positionally.
+	//
+	// It belongs to this interface rather than being an optional add-on, because
+	// this interface is the declared type of the `relationQueries` field in every
+	// read use-case, and internal/authzfilter takes its batched path by asserting
+	// the capability at run time. A checker without it still answers correctly,
+	// one row at a time — so a wiring that lost the capability would keep
+	// returning the right rows while paying one round-trip per row again, with
+	// nothing anywhere to notice. Requiring it here makes that a compile error.
+	//
+	// Bounded by the store's own per-request ceiling; an over-cap request is an
+	// error, never a trim. See openfga_batchcheck.go.
+	BatchCheckWithContext(ctx context.Context, subject, relation string, objects []string,
+		condCtx map[string]any) (allowed []bool, err error)
+
 	// ListObjects — object ids (no type prefix) the subject has `relation` on,
 	// within `objectType`.
 	//

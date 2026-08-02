@@ -10,6 +10,7 @@ package clients
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -109,6 +110,30 @@ func (c *OpenFGAStubClient) LastListSubject() string {
 	return c.lastListSubject
 }
 
+// BatchCheckWithContext — see RelationQueries. Answers the batched shape from
+// the same in-memory tuple set the single Check answers from, so a test cannot
+// get a different verdict depending on which door was used.
+//
+// It refuses an over-cap request exactly as the store does — an error, never a
+// trim — because a stub more permissive than the thing it stands in for is how a
+// partitioning bug reaches a deployment green.
+func (c *OpenFGAStubClient) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	if len(objects) > fgaMaxChecksPerBatchCheck {
+		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+			len(objects), fgaMaxChecksPerBatchCheck)
+	}
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := c.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
+}
+
 // ListObjects — see RelationQueries. Returns the preloaded id-set for the
 // (subject, relation, objectType) key, or the preloaded error.
 func (c *OpenFGAStubClient) ListObjects(ctx context.Context, subject, relation, objectType string,
@@ -133,6 +158,9 @@ func (c *OpenFGAStubClient) CheckWithContext(ctx context.Context, subject, relat
 }
 
 func (c *OpenFGAStubClient) ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error) {
+	if err := stubPagination(pageSize, pageToken); err != nil {
+		return nil, "", err
+	}
 	return nil, "", nil
 }
 
@@ -141,7 +169,30 @@ func (c *OpenFGAStubClient) Expand(ctx context.Context, objectType, objectID, re
 }
 
 func (c *OpenFGAStubClient) ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]ConditionalTuple, string, error) {
+	if err := stubPagination(pageSize, pageToken); err != nil {
+		return nil, "", err
+	}
 	return nil, "", nil
+}
+
+// stubPagination — the pagination contract the stub holds callers to.
+//
+// Both paginated stub methods return an empty page and, with it, an EMPTY
+// continuation token: they never issue one. A caller that presents a non-empty
+// token is therefore presenting a token this store never produced, and a caller
+// that asks for a negative page is asking for something no page size means.
+// Answering either with "here is your empty page" makes the stub more permissive
+// than the thing it stands in for, and a test written against such a stub is
+// green no matter what it passes — which is the same as having no assertion
+// about pagination at all.
+func stubPagination(pageSize int, pageToken string) error {
+	if pageSize < 0 {
+		return fmt.Errorf("openfga stub: page size %d is not a page size", pageSize)
+	}
+	if pageToken != "" {
+		return fmt.Errorf("openfga stub: continuation token %q was never issued by this store", pageToken)
+	}
+	return nil
 }
 
 func (c *OpenFGAStubClient) WriteConditionalTuples(ctx context.Context, writes, deletes []ConditionalTuple) error {

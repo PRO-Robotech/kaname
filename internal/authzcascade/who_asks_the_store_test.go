@@ -103,6 +103,8 @@ var askingSites = map[string]lane{
 	"internal/authzcascade/own_gates.go:Check":                                                     laneWrapper,
 	"internal/authzcascade/own_gates.go:CheckWithContext":                                          laneWrapper,
 	"internal/authzcascade/own_gates.go:secondChance":                                              laneWrapper,
+	"internal/authzcascade/batch_check.go:BatchCheckWithContext":                                   laneWrapper,
+	"internal/authzcascade/batch_check.go:checkCarryingFacts":                                      laneWrapper,
 	"internal/authzguard/read_authz.go:AllowsVerb":                                                 laneOwnGate,
 	"internal/authzguard/scope.go:RequireScopeRelation":                                            laneOwnGate,
 	"internal/authzfilter/visibility.go:Visible":                                                   laneOwnGate,
