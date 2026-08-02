@@ -48,8 +48,12 @@ CREATE TABLE IF NOT EXISTS interactive_clients (
     status                      TEXT        NOT NULL DEFAULT 'ACTIVE',
 
     -- id form: `ic-<17 crockford-base32>`, 20 chars (ids.PrefixInteractiveClientHyphen).
+    -- The alphabet is LOWERCASE crockford (ids.crockfordAlphabet:
+    -- 0-9 a-h j k m n p-t v-z; no i, l, o, u). Writing it uppercase here refused
+    -- every id the generator actually produces — caught by the integration test,
+    -- which is the only place that runs this DDL against a real server.
     CONSTRAINT interactive_clients_id_form_ck
-        CHECK (id ~ '^ic-[0-9A-HJKMNP-TV-Z]{17}$'),
+        CHECK (id ~ '^ic-[0-9a-hjkmnp-tv-z]{17}$'),
 
     -- name: the same kebab convention every other iam resource name uses, so the
     -- DB CHECK and domain.InteractiveClientName.Validate agree.
@@ -63,8 +67,12 @@ CREATE TABLE IF NOT EXISTS interactive_clients (
     -- (Postgres forbids a subquery in a CHECK, and `unnest` needs one), so it is
     -- enforced by the trigger below. Both are the database's word, not the
     -- service's — that is the point.
+    -- coalesce is load-bearing: array_length of an EMPTY array is NULL, and
+    -- `NULL BETWEEN 1 AND 16` evaluates to NULL, which a CHECK treats as
+    -- satisfied. Written without it the constraint accepted exactly the case it
+    -- exists to refuse — a client with no target at all.
     CONSTRAINT interactive_clients_redirect_uris_count_ck
-        CHECK (array_length(redirect_uris, 1) BETWEEN 1 AND 16),
+        CHECK (coalesce(array_length(redirect_uris, 1), 0) BETWEEN 1 AND 16),
 
     CONSTRAINT interactive_clients_post_logout_uris_count_ck
         CHECK (coalesce(array_length(post_logout_redirect_uris, 1), 0) <= 16)
