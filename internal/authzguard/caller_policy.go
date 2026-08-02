@@ -67,7 +67,11 @@ const gatewayServiceName = "api-gateway"
 //   - InternalSessionRevocationsService/IsRevoked — the gateway's own hot-path
 //     lookup, runs before per-user authz can possibly run (chicken-and-egg).
 //   - InternalUserService/Get — service→service lookup.
-//   - InternalIamHooksService/* — Hydra hook callbacks.
+//   - Hydra hook callbacks are not in this set and cannot be: they are served
+//     over HTTP by internal/handler/iamhooks, not as gRPC methods. The gRPC
+//     declaration that once mirrored them (InternalIamHooksService) had no
+//     implementation and was retired — see retiredRPCSurface in
+//     internal/repohygiene.
 //   - the fga-proxy writes InternalIAMService/{RegisterResource,UnregisterResource,
 //     WriteCreatorTuple} — gated in-handler by RelationWriteGate (module SAs).
 func GatewayFrontedInternalRPCs() []string {

@@ -260,15 +260,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.compute.v1.InternalResourceLifecycleService/Subscribe",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.InternalWatchService/Watch",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
@@ -930,24 +921,6 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/WriteCreatorTuple",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
-    "fqn": "kacho.cloud.iam.v1.InternalIamHooksService/RefreshTokenHook",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
-    "fqn": "kacho.cloud.iam.v1.InternalIamHooksService/TokenHook",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
     "scope_extractor": {
@@ -2444,24 +2417,6 @@
       "from_request_field": "*"
     },
     "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.InternalResourceLifecycleService/Subscribe",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.InternalWatchService/Watch",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/Create",
