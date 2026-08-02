@@ -129,21 +129,29 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 
 	// (3) AccessBinding target whitelist — what a binding may name as its target.
 	//
-	// The positive control here is compute.instance, NOT the storage types used
-	// everywhere else in this file, and that is a measured fact rather than a
-	// convenience: domain.validResourceTypes covers 10 of the 25 grantable types,
-	// so storage/registry/nlb/several vpc and iam types are already not nameable
-	// as a binding target (the derivation `module + "_" + resource` also spells
-	// vpc.securityGroup as vpc_securityGroup while the whitelist holds
-	// vpc_security_group). That gap predates this retire and is a different
-	// defect with a different fix; asserting storage here would assert something
-	// the tree has never claimed. compute.instance IS in the whitelist, so it is
-	// the honest live control for THIS vocabulary.
+	// The live control here USED to be compute.instance rather than the storage
+	// types, because the target predicate re-spelled the dotted form into the
+	// scope-anchor vocabulary and that vocabulary never carried storage: the
+	// successor of the retired resources could not be named as a per-object target
+	// at all, so the only expressible grant on a volume was the whole anchor. That
+	// was recorded here as a separate defect, and it has since been fixed — the
+	// predicate now resolves against the materialization feed, the one vocabulary
+	// the reconciler actually compares a target against
+	// (domain/access_binding_target_vocabulary_test.go holds it for every type).
+	//
+	// So the control is now the present OWNER of these resources, which is what
+	// this file asserts everywhere else: the retire moved the per-object grant, it
+	// did not remove it. domain.ResourceType keeps answering for the scope anchor,
+	// a different question, so its control stays compute_instance.
 	for _, r := range retiredBlockStorage {
 		require.Falsef(t, domain.ValidTargetType(r.dotted),
 			"domain.ValidTargetType(%q) is still true — an AccessBinding may still target the retired resource", r.dotted)
 		require.Errorf(t, domain.ResourceType(r.fga).Validate(),
 			"domain.ResourceType(%q).Validate() still accepts the retired type", r.fga)
+	}
+	for _, l := range liveBlockStorage {
+		require.Truef(t, domain.ValidTargetType(l.dotted),
+			"domain.ValidTargetType(%q) is false — block storage lost its per-object grant instead of moving it to its present owner, and the negative half above proves nothing", l.dotted)
 	}
 	require.True(t, domain.ValidTargetType("compute.instance"),
 		"domain.ValidTargetType(\"compute.instance\") is false — the live sibling must be targetable, or the negative half above proves nothing")
