@@ -141,7 +141,8 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
     The probe hits the cluster-internal REST listener via _internal_url_override
     (pre-request URL rewrite to {{internalBaseUrl}}): /iam/v1/internal/iam:check is
     served ONLY on :18081, so without the redirect gen.py's {{baseUrl}} (:18080)
-    404s ("404 page not found" → JSONError). Matches label-revoke-vpc.py."""
+    404s — the edge's routing error {"code":5,"message":"Not Found"}, byte-identical to a
+    nonsense path. Matches label-revoke-vpc.py."""
     retry = []
     if poll:
         retry = [
