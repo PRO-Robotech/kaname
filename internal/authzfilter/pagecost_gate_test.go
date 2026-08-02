@@ -234,7 +234,7 @@ const (
 //
 // # What it forbids, and why that is the right property
 //
-// Page visibility costs len(Relations) questions per row, and that number is a
+// Page visibility costs len(RelationsFor(objectType)) questions per row, and that number is a
 // property of VisibleSet in THIS package: it is measured here, and the bound that
 // keeps a page from arriving at the relation store all at once lives here too. A
 // read surface that asks its own relation question per row therefore pays a cost

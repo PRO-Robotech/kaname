@@ -139,7 +139,12 @@ func worstCasePage() (ids []string, granted []string) {
 	n := int(validate.MaxPageSize)
 	ids = make([]string, 0, n)
 	granted = make([]string, 0, n)
-	last := Relations[len(Relations)-1]
+	// Предикат членства принадлежит ТИПУ: тестовый тип "t" записи не имеет и берёт
+	// умолчание, поэтому число раундов читается отсюда, а не из исчезнувшей
+	// пакетной константы. Это не тавтология: утверждение ниже — про РАЗБИЕНИЕ
+	// страницы, а число отношений ему вход.
+	rels := RelationsFor("t")
+	last := rels[len(rels)-1]
 	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("obj%04d", i)
 		ids = append(ids, id)
@@ -158,8 +163,14 @@ func worstCasePage() (ids []string, granted []string) {
 // allowed to ask about more or fewer objects than the per-object shape asked
 // about, only to ask in fewer messages.
 func TestVisibleSet_BatchedWorstCasePageCost(t *testing.T) {
-	require.Len(t, Relations, 2,
-		"premise: the ceiling below is len(Relations) rounds of partitions")
+	rels := RelationsFor("t")
+	require.NotEmpty(t, rels,
+		"premise: the ceiling below is one round of partitions per relation of the type")
+	// Парный положительный контроль: предикат ДЕЙСТВИТЕЛЬНО зависит от типа, а не
+	// отдаёт одно и то же всем. Без него «умолчание» неотличимо от «константа».
+	require.NotEqual(t, rels, RelationsFor("iam_role"),
+		"premise: page membership is per-type — the default and the one type that "+
+			"keeps a union must not be the same answer")
 	require.Equal(t, 50, MaxBatchChecksPerRequest,
 		"premise: the partition count below divides the page by this cap — it is the "+
 			"relation store's own server-side ceiling, measured off the deployed build")
@@ -173,8 +184,8 @@ func TestVisibleSet_BatchedWorstCasePageCost(t *testing.T) {
 		"the verdict itself must be unaffected by how the question is carried")
 
 	perRelation := (int(validate.MaxPageSize) + MaxBatchChecksPerRequest - 1) / MaxBatchChecksPerRequest
-	wantRequests := int64(len(Relations) * perRelation) // 2 × 20 = 40
-	wantTuples := int64(len(Relations)) * validate.MaxPageSize
+	wantRequests := int64(len(rels) * perRelation)
+	wantTuples := int64(len(rels)) * validate.MaxPageSize
 
 	require.Equal(t, int64(0), f.nSingle.Load(),
 		"a checker that can answer in batches must never be asked object by object")
@@ -192,8 +203,8 @@ func TestVisibleSet_BatchedWorstCasePageCost(t *testing.T) {
 
 	t.Logf("page=%d ids | relations=%d | partition cap=%d | requests=%d (was %d per-object) | "+
 		"tuples=%d (unchanged) | in-flight batch bound=%d",
-		len(ids), len(Relations), MaxBatchChecksPerRequest, f.nBatch.Load(),
-		int64(len(Relations))*validate.MaxPageSize, f.nTuples.Load(), BatchParallelism)
+		len(ids), len(rels), MaxBatchChecksPerRequest, f.nBatch.Load(),
+		int64(len(rels))*validate.MaxPageSize, f.nTuples.Load(), BatchParallelism)
 }
 
 // TestVisibleSet_BatchesRunConcurrently — the partitions of one page must not be
@@ -237,7 +248,7 @@ func TestVisibleSet_BatchesRunConcurrently(t *testing.T) {
 // first and leaves the second green, which is what distinguishes this gate from
 // one that merely asserts a page resolves.
 func TestVisibleSet_BatchCapableCheckerIsNeverAskedPerObject(t *testing.T) {
-	f := newFakeBatchChecker("viewer|t:a")
+	f := newFakeBatchChecker(RelationsFor("t")[0]+"|t:a")
 
 	got, err := VisibleSet(context.Background(), f, "user:u1", "t", []string{"a", "b", "c"})
 	require.NoError(t, err)
@@ -256,7 +267,7 @@ func TestVisibleSet_BatchCapableCheckerIsNeverAskedPerObject(t *testing.T) {
 // use-case test suites implement only the narrow shape). The gate above must not
 // be satisfiable by refusing such a checker.
 func TestVisibleSet_NonBatchCheckerStillResolvesPerObject(t *testing.T) {
-	f := newFakeChecker("viewer|t:a", "v_list|t:c")
+	f := newFakeChecker(RelationsFor("t")[0]+"|t:a", RelationsFor("t")[len(RelationsFor("t"))-1]+"|t:c")
 
 	got, err := VisibleSet(context.Background(), f, "user:u1", "t", []string{"a", "b", "c"})
 	require.NoError(t, err)
@@ -322,5 +333,5 @@ func TestVisibleSet_PageSizeIsNotNarrowedToFitTheBudget(t *testing.T) {
 	require.Len(t, got, len(ids),
 		"every id of a contract-sized page must be answered; narrowing the page to fit a "+
 			"budget is the one cure that is forbidden")
-	require.EqualValues(t, int64(len(Relations))*validate.MaxPageSize, f.nTuples.Load())
+	require.EqualValues(t, int64(len(RelationsFor("t")))*validate.MaxPageSize, f.nTuples.Load())
 }

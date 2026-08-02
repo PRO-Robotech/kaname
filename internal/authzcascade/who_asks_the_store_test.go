@@ -105,9 +105,17 @@ var askingSites = map[string]lane{
 	"internal/authzcascade/own_gates.go:secondChance":                                              laneWrapper,
 	"internal/authzcascade/batch_check.go:BatchCheckWithContext":                                   laneWrapper,
 	"internal/authzcascade/batch_check.go:checkCarryingFacts":                                      laneWrapper,
+	"internal/authzcascade/batch_check.go:batchItems":                                              laneWrapper,
 	"internal/authzguard/read_authz.go:AllowsVerb":                                                 laneOwnGate,
 	"internal/authzguard/scope.go:RequireScopeRelation":                                            laneOwnGate,
 	"internal/authzfilter/visibility.go:Visible":                                                   laneOwnGate,
+	// Батчевая дверь той же видимости страницы: предмет вопроса тот же, что у Visible
+	// выше, — членство страницы по предикату типа, — меняется только то, сколькими
+	// сообщениями он несётся. Полоса та же, иначе перевод на батч стал бы способом
+	// спрашивать, не объявляя полосы.
+	"internal/authzfilter/visibility.go:batchRelationRound": laneOwnGate,
+	// Проброс обёртки к транспорту: сама вопроса не задаёт, несёт чужой.
+	"internal/clients/openfga_batchcheck.go:BatchCheckWithContext": laneWrapper,
 	"internal/apps/kacho/api/access_binding/helpers.go:fgaHoldsScopeAdmin":                         laneOwnGate,
 	"internal/apps/kacho/api/account/list_all_operations.go:requireAccountViewAuthority":           laneOwnGate,
 	"internal/apps/kacho/api/user/invite_authz.go:cascadeCheck":                                    laneOwnGate,
@@ -172,6 +180,13 @@ var questionMethods = map[string]bool{
 	"ListSubjects": true,
 	"ListUsers":    true,
 	"Expand":       true,
+	// Batched named-object questions — the SAME question as Check, carried in fewer
+	// messages. Классифицированы как вопросы, а не как отдельная категория: дверь
+	// иная, предмет тот же, и полоса у них та же — иначе батчевый путь стал бы
+	// местом, где спрашивают, никому не объявляя полосы. Появились вместе с
+	// переводом страничной видимости iam на батч.
+	"BatchCheckItems":       true,
+	"BatchCheckWithContext": true,
 	// Filtered reads — the store produces the TUPLES themselves for a filter. The port's own
 	// doc calls this shape a read ("ReadTuples — filtered read"), and it was the shape missing
 	// here while three production sites used it. A question can also be asked by reading the

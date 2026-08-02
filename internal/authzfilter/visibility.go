@@ -414,7 +414,10 @@ func visibleSetBatched(
 	subject, objectType string, pending []string, out map[string]bool,
 ) (map[string]bool, error) {
 	remaining := pending
-	for _, relation := range Relations {
+	// Предикат членства страницы принадлежит ТИПУ, а не пакету: батчевая дверь
+	// обязана спрашивать ровно то, чем гейтится одиночное чтение этого же типа,
+	// иначе она восстановит расхождение, снятое на пообъектном пути.
+	for _, relation := range RelationsFor(objectType) {
 		if len(remaining) == 0 {
 			break
 		}
