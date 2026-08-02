@@ -66,16 +66,23 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 // Derivation: 66 seeded (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035
 // + registry mig 0044 + storage mig 0057), MINUS the 9 compute block-storage roles
 // migration 0074 withdrew (compute.{disk,image,snapshot}.{admin,edit,view} —
-// kacho-storage owns those resources), MINUS the 1 network-operator backing role
-// migration 0076 retired (module.vpc_operator_sa — its four rules named resources
-// the closed object-type table does not carry, so it materialized nothing).
+// kacho-storage owns those resources), MINUS ALL SEVEN module-SA backing roles:
+// 0076 retired the network operator's and 0077 the remaining six
+// (module.{api_gateway,compute,nlb,registry,storage,vpc}_sa). Each of the seven
+// authored rules naming resources the closed object-type table does not carry — an
+// EMPTY resolvable set per role — so none materialized a single tuple. What those
+// service accounts work by is untouched: their fga_writer tuples, the
+// system_viewer@cluster tuples of 0014, and the requesting tenant's own identity,
+// propagated on every peer call.
+//
+// 66 − 9 − 7 = 50.
 //
 // The number is asserted EXACTLY, not as a floor, so a re-seed that quietly brings
 // a retired role back fails here — that is the guard, and it is worth the upkeep.
 // It lives in ONE place because it was previously written out twice and a
 // deliberate retire then had to find both; the second copy is a precondition in
 // TestMigration_F53_AccessNotSevered.
-const wantSystemRoles = 56
+const wantSystemRoles = 50
 
 // TestMigration_F53_SystemRolesReseededWithRules — every system role has
 // non-empty rules after re-seed; the count is exact.

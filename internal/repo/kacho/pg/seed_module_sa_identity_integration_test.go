@@ -65,8 +65,16 @@ func roleName(svc string) string {
 		return "module.vpc_operator_sa"
 	case "api-gateway":
 		return "module.api_gateway_sa"
+	case "registry":
+		return "module.registry_sa"
+	case "storage":
+		return "module.storage_sa"
 	default:
-		return "module." + svc
+		// Не «правдоподобное» имя по шаблону: `module.`+svc даёт `module.registry`
+		// там, где посев завёл `module.registry_sa`, и утверждение о такой роли
+		// зеленеет всегда — считает строки id, которого не существует. Неизвестное
+		// имя обязано быть видно как неизвестное.
+		return "module.UNKNOWN_SVC_" + svc
 	}
 }
 
@@ -98,7 +106,21 @@ func TestSeedModuleSA_B01_AllFiveModuleSAsCreated(t *testing.T) {
 	}
 }
 
-func TestSeedModuleSA_B02_ComputeExactPermissionSet(t *testing.T) {
+// TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept — у compute снята
+// backing-роль и осталось то, чем он работает.
+//
+// Прежняя редакция пинила СЕМЬ строк прав этой роли «дословно по исходному
+// каталогу». Роль снята миграцией 0077: все четыре пары её правил
+// (`vpc.subnets`, `vpc.security_groups`, `vpc.addresses`, `iam.projects`)
+// закрытая таблица типов не несёт, разрешимое множество пусто, материализация не
+// эмитила ни одного кортежа. Пиновать состав снятой роли значило бы требовать её
+// возвращения — а возвращение рулесс-строкой выдало бы compute
+// system_admin@cluster (см. tuples_module_sa_branch_test.go).
+//
+// Право ЗАПИСИ, которым compute действительно пользуется, — кортеж fga_writer, и
+// он остаётся: это положительная половина пары, без неё «ноль» выше был бы
+// получен из пустой базы.
+func TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -107,30 +129,14 @@ func TestSeedModuleSA_B02_ComputeExactPermissionSet(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	got := readRolePermissions(t, ctx, pool, rolID("compute"))
-	want := []string{
-		"iam.projects.*.get",
-		"vpc.addresses.*.create",
-		"vpc.addresses.*.delete",
-		"vpc.addresses.*.get",
-		"vpc.addresses.*.update",
-		"vpc.security_groups.*.get",
-		"vpc.subnets.*.get",
-	}
-	require.Equal(t, want, got, "compute SA backing-role permission set must match the source catalog byte-for-byte")
-
-	// Over-grant negative: no vpc-network mutations.
-	for _, forbidden := range []string{"vpc.networks.*.delete", "vpc.networks.*.create", "vpc.networks.*.update"} {
-		require.NotContains(t, got, forbidden, "least-priv: compute SA must NOT carry %q", forbidden)
-	}
-	// 3-segment form must be absent (4-segment grammar only).
-	require.NotContains(t, got, "vpc.subnets.get", "3-segment form must not appear (4-segment grammar)")
-
-	// FGA relation-tuple fga_writer present.
+	requireRoleRetired(t, ctx, pool, "compute")
 	requireFGAWriterTuple(t, ctx, pool, svaID("compute"), true)
 }
 
-func TestSeedModuleSA_B03_VpcExactPermissionSet(t *testing.T) {
+// TestSeedModuleSA_B03_VpcRoleRetiredWriteCapabilityKept — то же для vpc. Его
+// роль называла ещё и `compute.zones`, ресурс, который вместе со всей топологией
+// размещения ушёл в geo, — то есть пара не разрешалась дважды.
+func TestSeedModuleSA_B03_VpcRoleRetiredWriteCapabilityKept(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -139,17 +145,14 @@ func TestSeedModuleSA_B03_VpcExactPermissionSet(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	got := readRolePermissions(t, ctx, pool, rolID("vpc"))
-	want := []string{"compute.zones.*.get", "iam.projects.*.get"}
-	require.Equal(t, want, got, "vpc SA backing-role permission set must match the source catalog")
-
-	for _, forbidden := range []string{"compute.instances.*.create", "compute.instances.*.delete", "iam.accounts.*.get"} {
-		require.NotContains(t, got, forbidden, "least-priv: vpc SA must NOT carry %q", forbidden)
-	}
+	requireRoleRetired(t, ctx, pool, "vpc")
 	requireFGAWriterTuple(t, ctx, pool, svaID("vpc"), true)
 }
 
-func TestSeedModuleSA_B04_NlbExactPermissionSet(t *testing.T) {
+// TestSeedModuleSA_B04_NlbRoleRetiredIdentityAndWriteKept — то же для nlb, плюс
+// прежнее утверждение об имени учётки: оно про ЛИЧНОСТЬ, снятие роли его не
+// касается.
+func TestSeedModuleSA_B04_NlbRoleRetiredIdentityAndWriteKept(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -158,9 +161,7 @@ func TestSeedModuleSA_B04_NlbExactPermissionSet(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	got := readRolePermissions(t, ctx, pool, rolID("nlb"))
-	want := []string{"iam.projects.*.get", "vpc.subnets.*.get"}
-	require.Equal(t, want, got, "nlb SA backing-role permission set must match the source catalog")
+	requireRoleRetired(t, ctx, pool, "nlb")
 	requireFGAWriterTuple(t, ctx, pool, svaID("nlb"), true)
 
 	// SA name segment canonical kacho-nlb (not legacy kacho-loadbalancer).
@@ -168,6 +169,31 @@ func TestSeedModuleSA_B04_NlbExactPermissionSet(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT name FROM kacho_iam.service_accounts WHERE id = $1`, svaID("nlb")).Scan(&name))
 	require.Equal(t, "kacho-nlb", name)
+}
+
+// requireRoleRetired — роль модуля снята вместе с привязкой, а его ЛИЧНОСТЬ на
+// месте. Личность проверяется тем же вызовом намеренно: «ноль ролей» из пустой
+// базы неотличим от «ноль ролей» по существу, и положительная клетка рядом
+// закрывает эту неотличимость.
+func requireRoleRetired(t *testing.T, ctx context.Context, pool *pgxpool.Pool, svc string) {
+	t.Helper()
+	var roleCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.roles WHERE id = $1`, rolID(svc)).Scan(&roleCnt))
+	require.Zerof(t, roleCnt,
+		"backing-роль %s обязана быть снята (0077): её правила не разрешаются закрытой "+
+			"таблицей типов и не материализуют ни одного кортежа", roleName(svc))
+
+	var bindCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.access_bindings WHERE role_id = $1`, rolID(svc)).Scan(&bindCnt))
+	require.Zerof(t, bindCnt, "снятая роль %s не может оставаться выданной", roleName(svc))
+
+	var name string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT name FROM kacho_iam.service_accounts WHERE id = $1`, svaID(svc)).Scan(&name))
+	require.Equalf(t, "kacho-"+svc, name,
+		"учётка kacho-%s — личность модуля на внутреннем периметре; снятие выдачи её не касается", svc)
 }
 
 // TestSeedModuleSA_B05_OperatorRoleRetiredIdentityKept — у оператора сети
@@ -229,57 +255,63 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// vpc-operator намеренно ВНЕ этого перечня: его backing-роль и привязка сняты
-	// миграцией 0076 (веер мёртв — имена не разрешаются закрытой таблицей типов).
-	// Учётка при этом остаётся, поэтому проверять её нужно отдельным
-	// утверждением, а не молчаливым отсутствием в цикле.
-	boundModules := []string{"vpc", "compute", "nlb", "api-gateway"}
-	for _, svc := range boundModules {
-		var count int
-		var resourceType, resourceID string
-		var scope int16
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM kacho_iam.access_bindings
-			  WHERE subject_type='service_account' AND subject_id=$1 AND role_id=$2`,
-			svaID(svc), rolID(svc)).Scan(&count))
-		require.Equal(t, 1, count, "exactly one AccessBinding per module SA %q", svc)
-
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT resource_type, resource_id, scope FROM kacho_iam.access_bindings
-			  WHERE subject_type='service_account' AND subject_id=$1 AND role_id=$2`,
-			svaID(svc), rolID(svc)).Scan(&resourceType, &resourceID, &scope))
-		require.Equal(t, "cluster", resourceType)
-		require.Equal(t, "cluster_kacho_root", resourceID)
-		require.Equal(t, int16(1), scope, "cluster scope = 1")
-	}
-
-	requireOperatorUnbound := func(t *testing.T, when string) {
+	// НИ ОДНА служебная учётка модуля больше не несёт привязки: все семь
+	// backing-ролей сняты (0076 — оператор сети, 0077 — остальные шесть). Прежняя
+	// редакция пинила «ровно одна привязка на модуль» для четырёх из них; после
+	// снятия это утверждение требовало бы возвращения снятого.
+	//
+	// Перечень — ОСЬ по всем семи учёткам, а не по тем, что остались: клетка,
+	// выпавшая из перечня, перестала бы проверяться молча.
+	allModuleSAs := []string{"vpc", "compute", "nlb", "vpc-operator", "api-gateway", "registry", "storage"}
+	requireAllUnbound := func(t *testing.T, when string) {
 		t.Helper()
-		var count int
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM kacho_iam.access_bindings WHERE subject_id = $1`,
-			svaID("vpc-operator")).Scan(&count))
-		require.Zerof(t, count, "оператор сети обязан остаться без привязки (%s)", when)
+		for _, svc := range allModuleSAs {
+			var count int
+			require.NoError(t, pool.QueryRow(ctx,
+				`SELECT count(*) FROM kacho_iam.access_bindings WHERE subject_id = $1`,
+				svaID(svc)).Scan(&count))
+			require.Zerof(t, count,
+				"служебная учётка kacho-%s обязана остаться без привязки (%s): её backing-роль снята", svc, when)
+		}
 	}
-	requireOperatorUnbound(t, "после миграций")
+	requireAllUnbound(t, "после миграций")
 
-	// Re-apply seed body (idempotent ON CONFLICT DO NOTHING) — count unchanged.
-	reapplySeed(t, ctx, pool)
-	for _, svc := range boundModules {
-		var count int
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM kacho_iam.access_bindings
-			  WHERE subject_type='service_account' AND subject_id=$1`, svaID(svc)).Scan(&count))
-		require.Equal(t, 1, count, "re-apply must not duplicate AccessBinding for %q", svc)
-	}
-	// Повтор посева — путь ВОСКРЕШЕНИЯ снятого объявления, и он обязан быть
-	// закрыт: тело посева больше не содержит роли оператора, поэтому повторный
-	// прогон не возвращает ни роль, ни привязку.
-	requireOperatorUnbound(t, "после повторного посева")
-	var roleCnt int
+	// Положительный контроль: привязки в базе ЕСТЬ — «ноль у модулей» получен не
+	// из пустой таблицы. Посев заводит кластерные выдачи бутстрап-учётке.
+	var totalBindings int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.roles WHERE id = $1`, rolID("vpc-operator")).Scan(&roleCnt))
-	require.Zero(t, roleCnt, "повторный посев не должен воскрешать снятую backing-роль оператора")
+		`SELECT count(*) FROM kacho_iam.access_bindings`).Scan(&totalBindings))
+	require.NotZero(t, totalBindings,
+		"контроль: в посеве нет НИ ОДНОЙ привязки — «ноль у служебных учёток» получен даром")
+
+	// Второй контроль — на ВЫВОД id: тем же выражением, что даёт нули выше, роль
+	// из посева обязана находиться. Без него опечатка в выводе id давала бы ноль
+	// на каждой клетке и читалась бы как «всё снято».
+	var liveRoleCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.roles WHERE id = 'rol' || substr(md5('vpc.subnet.view'), 1, 17)`).
+		Scan(&liveRoleCnt))
+	require.Equal(t, 1, liveRoleCnt,
+		"контроль: посеянная роль vpc.subnet.view не найдена тем же выводом id — «ноль» у снятых "+
+			"ролей получен из опечатки, а не из снятия")
+
+	// Повтор посева — путь ВОСКРЕШЕНИЯ снятого объявления, и он обязан быть
+	// закрыт: тело посева больше не содержит ни одной роли и ни одной привязки,
+	// поэтому повторный прогон не возвращает ничего. Отдельно проверяется, что
+	// повтор идемпотентен и по тому, что в нём ОСТАЛОСЬ (учётки).
+	reapplySeed(t, ctx, pool)
+	requireAllUnbound(t, "после повторного посева")
+	for _, svc := range allModuleSAs {
+		var roleCnt int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*) FROM kacho_iam.roles WHERE id = $1`, rolID(svc)).Scan(&roleCnt))
+		require.Zerof(t, roleCnt, "повторный посев не должен воскрешать снятую backing-роль %s", roleName(svc))
+
+		var saCnt int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*) FROM kacho_iam.service_accounts WHERE id = $1`, svaID(svc)).Scan(&saCnt))
+		require.Equalf(t, 1, saCnt, "повторный посев не должен ни удвоить, ни потерять учётку kacho-%s", svc)
+	}
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
