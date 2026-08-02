@@ -130,6 +130,20 @@ var askingSites = map[string]lane{
 	"internal/apps/kacho/api/access_binding/expand_access.go:Execute":                              laneEnumeration,
 	"internal/apps/kacho/api/authorize/handler.go:ListObjects":                                     laneEnumeration,
 	"internal/apps/kacho/api/authorize/handler.go:ListSubjects":                                    laneEnumeration,
+	// The read half of the reconciler's read-modify-write: what is already delivered on the
+	// object, so the next round writes only what is missing. The subject of the question IS
+	// delivery, and it reads at HIGHER_CONSISTENCY for exactly that reason — a replica-lagged
+	// answer would leave the delta unchanged round after round. No access decision turns on it.
+	"internal/repo/kacho/pg/reconcile_adapter.go:readExisting": laneDelivery,
+	// The denial message's hint: which direct relations the subject does hold on the object.
+	// It is diagnostic prose, not the decision — the decision was already taken above it, and
+	// this returns nil on any error. Being a flat read it sees only DIRECT tuples, so the hint
+	// can under-report what the cascade itself would admit; that is the bounded reporting gap
+	// named on laneEnumeration, and here it costs a less complete sentence, never an outcome.
+	"internal/service/authorize_service.go:readSubjectRelations": laneEnumeration,
+	// Pass-through for the internal tuple-reading surface: raw relations for an operator, on
+	// filters the caller supplies. Audit data — nothing is granted or refused on the answer.
+	"internal/service/fga_tuple_writer.go:ReadRaw": laneEnumeration,
 }
 
 // questionMethods — the relation-store methods that ASK something. Write methods are not
@@ -158,6 +172,12 @@ var questionMethods = map[string]bool{
 	"ListSubjects": true,
 	"ListUsers":    true,
 	"Expand":       true,
+	// Filtered reads — the store produces the TUPLES themselves for a filter. The port's own
+	// doc calls this shape a read ("ReadTuples — filtered read"), and it was the shape missing
+	// here while three production sites used it. A question can also be asked by reading the
+	// relations back, and an inventory that skips this spelling is not enumerating the store.
+	"ReadTuples":       true,
+	"ReadTuplesStrong": true,
 }
 
 // questionsIn — THE MATCHER, over one parsed file: enclosing function name → the question
@@ -373,4 +393,117 @@ func TestMatcherSeesEveryShapeOfTheCallAndNothingElse(t *testing.T) {
 					"the tree that miss is indistinguishable from there being nothing there.")
 		})
 	}
+}
+
+// nonQuestionMethods — exported relation-store methods that are NOT questions, each with
+// the reason it is not one. Declaring them is what makes the list below CHECKABLE: a new
+// method on the store must land in exactly one of the two sets, and neither set may name a
+// method the store no longer has.
+//
+// A write is not a question, and store metadata is not a question ABOUT RELATIONS — it
+// reports the store's own identifiers and counts, so no lane decision turns on it.
+var nonQuestionMethods = map[string]string{
+	"WriteTuples":            "write",
+	"DeleteTuples":           "write",
+	"WriteConditionalTuples": "write",
+	"GetStoreInfo":           "store metadata — not a question about relations",
+}
+
+// TestQuestionMethodsAccountForThePortItClaimsToEnumerate — the premise of `questionMethods`.
+//
+// The list above says which calls count as asking the relation store something, and the
+// inventory says it covers EVERY place that asks. Both statements are about the store's
+// surface, but nothing tied either of them TO that surface: the list was written by hand
+// and compared to nothing, so a read method could exist on the store, be called from
+// production, and be invisible to an inventory whose whole purpose is to leave nothing
+// invisible. That is the defect this test exists to make impossible, and it was real:
+// `ReadTuples` — whose own doc comment on the port calls it a "filtered read" — was absent
+// from the list while three production sites called it and its strong-consistency sibling.
+//
+// The unit here is the EXPORTED METHOD SET OF THE CONCRETE STORE CLIENT, not the port
+// interfaces. A port is a chosen subset, so an interface-driven premise would inherit
+// exactly the blind spot it is meant to remove: `ReadTuplesStrong` is reached through a
+// narrower port and appears on no interface in this package, yet it asks the store the same
+// question. The client's method set is the honest superset — every port is carved from it.
+func TestQuestionMethodsAccountForThePortItClaimsToEnumerate(t *testing.T) {
+	dir := filepath.Join("..", "clients")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	const receiver = "OpenFGAHTTPClient"
+	onTheStore := map[string]bool{}
+	filesRead := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, perr := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, parser.SkipObjectResolution)
+		require.NoError(t, perr)
+		filesRead++
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 {
+				continue
+			}
+			// Receiver may be `*OpenFGAHTTPClient` or `OpenFGAHTTPClient`.
+			var name string
+			switch rt := fd.Recv.List[0].Type.(type) {
+			case *ast.StarExpr:
+				if id, ok := rt.X.(*ast.Ident); ok {
+					name = id.Name
+				}
+			case *ast.Ident:
+				name = rt.Name
+			}
+			if name != receiver || !fd.Name.IsExported() {
+				continue
+			}
+			onTheStore[fd.Name.Name] = true
+		}
+	}
+
+	// Premise of the premise: "no findings" must stay distinguishable from "nothing parsed".
+	require.Greater(t, filesRead, 5, "read only %d client file(s) — the package moved", filesRead)
+	require.Greater(t, len(onTheStore), 10,
+		"found only %d exported method(s) on %s — the receiver was renamed and this gate went quiet",
+		len(onTheStore), receiver)
+
+	var unclassified []string
+	for m := range onTheStore {
+		if questionMethods[m] || nonQuestionMethods[m] != "" {
+			continue
+		}
+		unclassified = append(unclassified, m)
+	}
+	sort.Strings(unclassified)
+	require.Empty(t, unclassified,
+		"%d exported method(s) of the relation store are in neither questionMethods nor "+
+			"nonQuestionMethods: %s\n"+
+			"Every method of the store must be classified, because the inventory in this file "+
+			"claims to enumerate EVERY place that asks it something. An unclassified read is a "+
+			"call site nobody has to declare a lane for — and over the tree that omission looks "+
+			"exactly like there being no such site.",
+		len(unclassified), strings.Join(unclassified, " "))
+
+	// And the mirror direction: a declaration whose subject is gone is a false statement about
+	// the store, and it is the next reader's blind spot. An entry must not outlive its method.
+	var orphaned []string
+	for m := range questionMethods {
+		if !onTheStore[m] {
+			orphaned = append(orphaned, "questionMethods:"+m)
+		}
+	}
+	for m := range nonQuestionMethods {
+		if !onTheStore[m] {
+			orphaned = append(orphaned, "nonQuestionMethods:"+m)
+		}
+	}
+	sort.Strings(orphaned)
+	require.Empty(t, orphaned,
+		"%d declaration(s) name a method the relation store no longer has: %s",
+		len(orphaned), strings.Join(orphaned, " "))
+
+	t.Logf("classified %d exported store method(s) across %d file(s): %d questions, %d not",
+		len(onTheStore), filesRead, len(questionMethods), len(nonQuestionMethods))
 }
