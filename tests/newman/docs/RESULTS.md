@@ -374,7 +374,7 @@ than re-justified — see the section above.
 
 | Finding | Disposition |
 |---|---|
-| `GroupService.List` does not apply the per-object `v_list` listauthz filter — over-shows ALL account groups to an `account#v_list` holder (project/SA/role List filter; group does not) | The group by-label exact-set (INV-2) case is **omitted** (the invariant the matrix expects is not implemented for group List). Group v_list-only (INV-1) IS emitted and green (group Get gates on v_get). |
+| ~~`GroupService.List` does not apply the per-object listauthz filter~~ — **WITHDRAWN 2026-08-02: the claim was stale, i.e. false about the product.** | The use-case now applies the per-object visibility filter through the same helper as its sibling resources; verified in the tree, not relayed. The entry outlived its own fix and went on declaring a live defect — the class `testing.md` names when it requires that **every exclusion mechanism expire on its own**: an entry with nothing left to exclude is a finding, and the gate must fail on it. **Debt left behind by the withdrawal:** the omitted case (group by-label exact-set, INV-2) was dropped *because of* this defect. The defect is gone; the case has not been restored. That is an open debt with a subject — not a green row. INV-1 remains emitted and green. |
 
 ## Pre-existing environmental flakes (clear on CI re-run)
 
