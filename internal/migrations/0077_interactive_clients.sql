@@ -1,7 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: BUSL-1.1
 
--- 0076_interactive_clients.sql — the OAuth2 client a HUMAN signs in through.
+-- 0077_interactive_clients.sql — the OAuth2 client a HUMAN signs in through.
 --
 -- WHY THIS TABLE EXISTS. Every client the identity provider knows was registered
 -- by one of three iam use-cases, and all three hard-code `client_credentials` or
