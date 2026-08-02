@@ -249,3 +249,140 @@ func TestList_PaginationIsJudgedBeforeTheStore(t *testing.T) {
 		t.Error("a valid List never reached the store — the refusals above prove nothing")
 	}
 }
+
+// failingProvider — a provider that refuses to register (scenario 08) or refuses
+// to deregister (the compensation path). `deregistered` records whether the
+// compensation actually ran: that is the whole point of the test, and a fake
+// that only returned an error would not show it.
+type failingProvider struct {
+	registerErr  error
+	registered   bool
+	deregistered bool
+}
+
+func (p *failingProvider) Register(_ context.Context, _ ProviderClientSpec) (ProviderClient, error) {
+	if p.registerErr != nil {
+		return ProviderClient{}, p.registerErr
+	}
+	p.registered = true
+	return ProviderClient{
+		ClientID:                "provider-abc",
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		TokenEndpointAuthMethod: "none",
+		Audiences:               []string{"https://api.example"},
+	}, nil
+}
+
+func (p *failingProvider) Deregister(_ context.Context, _ string) error {
+	p.deregistered = true
+	return nil
+}
+
+// insertFailsRepo — accepts nothing, so the compensation path is reached.
+type insertFailsRepo struct {
+	fakeRepo
+	inserted bool
+}
+
+func (r *insertFailsRepo) Insert(_ context.Context, _ domain.InteractiveClient) (domain.InteractiveClient, error) {
+	r.inserted = true
+	return domain.InteractiveClient{}, iamerr.Wrapf(iamerr.ErrAlreadyExists,
+		"InteractiveClient with name console-a already exists")
+}
+
+func createReq() *iamv1.CreateInteractiveClientRequest {
+	return &iamv1.CreateInteractiveClientRequest{
+		Name:         "console-a",
+		RedirectUris: []string{"https://api.example/cb"},
+	}
+}
+
+// TestCreate_ProviderUnavailable_LeavesNothingBehind — scenario 08.
+//
+// The provider is contacted first, so its refusal must end the call with NO row
+// written. "No residue" is the substantive half: if a row were inserted anyway,
+// the name would stay taken by a client that was never registered, and the
+// retry the caller is entitled to make would fail for ever after.
+func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
+	repo := &insertFailsRepo{}
+	prov := &failingProvider{registerErr: iamerr.Wrapf(iamerr.ErrUnavailable, "identity provider unavailable")}
+	ops := &fakeOps{}
+
+	_, err := NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil).
+		Execute(context.Background(), createReq())
+
+	if st, _ := status.FromError(err); st.Code() != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable (fail-closed on a mutation)", st.Code())
+	}
+	if repo.inserted {
+		t.Error("a row was written although the provider never registered the client — the name is now taken by nothing")
+	}
+	if !ops.errMarked {
+		t.Error("the operation must be marked with a terminal error, not left for the caller to poll for ever")
+	}
+}
+
+// TestCreate_InsertFails_CompensatesTheRegistration — the other half of the same
+// ordering decision. The provider succeeded, the row did not, and the client that
+// was just registered must be removed again: otherwise the provider holds a
+// client the platform has no record of, nothing will ever remove it, and it keeps
+// accepting ceremonies.
+func TestCreate_InsertFails_CompensatesTheRegistration(t *testing.T) {
+	repo := &insertFailsRepo{}
+	prov := &failingProvider{}
+	ops := &fakeOps{}
+
+	_, err := NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil).
+		Execute(context.Background(), createReq())
+
+	if st, _ := status.FromError(err); st.Code() != codes.AlreadyExists {
+		t.Fatalf("code = %v, want AlreadyExists", st.Code())
+	}
+	if !prov.registered {
+		t.Fatal("the provider was never reached — this test proves nothing about compensation")
+	}
+	if !prov.deregistered {
+		t.Error("the registration was NOT compensated — an orphan client remains that the platform cannot name")
+	}
+}
+
+// TestUpdate_EmptyMask_AppliesEveryMutableField — scenario 07's positive half.
+// An empty mask is a full-object PATCH over the mutable fields; the immutable
+// values carried in the body are ignored rather than refused.
+func TestUpdate_EmptyMask_AppliesEveryMutableField(t *testing.T) {
+	stored := validStored()
+	stored.ClientID = "provider-original"
+	repo := &recordingRepo{fakeRepo: fakeRepo{get: stored}}
+	ops := &fakeOps{}
+
+	req := &iamv1.UpdateInteractiveClientRequest{
+		InteractiveClientId: "ic-00000000000000000",
+		Name:                "console-renamed",
+		Description:         "new description",
+		RedirectUris:        []string{"https://api.example/new"},
+	}
+	if _, err := NewUpdateUseCase(repo, ops, nil).Execute(context.Background(), req); err != nil {
+		t.Fatalf("empty-mask Update was refused: %v", err)
+	}
+	if got := string(repo.written.Name); got != "console-renamed" {
+		t.Errorf("name = %q, want the body value — an empty mask is a full PATCH", got)
+	}
+	if got := repo.written.RedirectURIs; len(got) != 1 || got[0] != "https://api.example/new" {
+		t.Errorf("redirect_uris = %v, want the body value", got)
+	}
+	if repo.written.ClientID != "provider-original" {
+		t.Errorf("client_id = %q — an immutable field must be left alone, not taken from the body",
+			repo.written.ClientID)
+	}
+}
+
+// recordingRepo — captures what Update was asked to write.
+type recordingRepo struct {
+	fakeRepo
+	written domain.InteractiveClient
+}
+
+func (r *recordingRepo) Update(_ context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error) {
+	r.written = c
+	return c, nil
+}
