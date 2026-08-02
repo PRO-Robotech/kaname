@@ -22,8 +22,8 @@ package account
 // internal/authzfilter package doc.
 //
 //   - The `viewer` branch surfaces accounts the principal holds the viewer tier
-//     on (owner-binding admin/editor/viewer write-authz anchor; the operator's
-//     system_viewer floor). A viewer grant implies broader access.
+//     on (owner-binding admin/editor/viewer write-authz anchor). A viewer grant
+//     implies broader access.
 //   - The `v_list` branch surfaces accounts granted ONLY `iam.account.{get,list}`
 //     via a names/labels selector — an OBJECT-ONLY `account:<id> # v_list @ subj`
 //     tuple with NO cascade into the account's contents (D-2). This is the
@@ -31,8 +31,21 @@ package account
 //     its contents" — the account is listed while a Check on a project/network
 //     inside it still DENIES.
 //   - The two sets are deduplicated; an account in both appears once.
-//   - The kacho-vpc-operator SA (seeded `system_viewer@cluster:cluster_kacho_root`)
-//     resolves viewer on EVERY account → sees ALL accounts (floor intact).
+//   - There is NO cluster-wide reader floor on this page, and this line used to
+//     say the opposite. It claimed the kacho-vpc-operator SA "resolves viewer on
+//     EVERY account → sees ALL accounts (floor intact)". That floor was the SEC-L
+//     read-cascade `viewer … or system_viewer from cluster`, and Contract-A
+//     REMOVED it — fga_model.fga says so on both `account` and `project`. What
+//     replaced it was per-object materialisation from the operator's role rules,
+//     and those rules resolve to nothing: every one of the four names its role
+//     authors (`vpc.subnetses`, `vpc.networks`, `vpc.network_interfaces`,
+//     `iam.projectses`) is absent from the closed object-type table, so the
+//     reconciler emits no tuple for any of them. Measured, with a control, and
+//     pinned by TestSeededRoleRulesResolveOrArePinned.
+//     Consequence for this page: the operator sees the same as anyone else —
+//     what it was granted per object. Do NOT widen the predicate here to restore
+//     the sentence; the fan-out is a dead grant to be revived or retired at the
+//     seed, not a floor this filter owes anybody.
 //   - Anonymous short-circuits to empty BEFORE any FGA call.
 //   - FGA outage on EITHER relation → fail-closed `Unavailable`: never a
 //     full-list leak, never a degraded/partial list.
