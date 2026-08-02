@@ -5,44 +5,87 @@
 // gate. The analysis itself — and why it parses instead of grepping — lives in
 // tools/listfiltergate.
 //
-// # Why iam was outside this gate, and why that was the wrong place to be outside
+// # Why this exists
 //
-// The CI step that drives this class looped over compute, nlb, registry, storage
-// and vpc. iam was absent — while carrying the largest narrowable List surface on
-// the platform (it declares ten `List` methods against vpc's eight). The blind
-// spot sat exactly where the subject is densest.
+// It did not, until 2026-08. Every other service with a public listing surface had
+// an analyser of this class; iam, which has the widest listing surface in the
+// repository — 30 methods across 21 packages, more than compute, nlb, registry and
+// storage combined (3+6+5+7=21) — had none. Not a weak one, not a stale one: none.
+// The counts are the gate's own census re-measured on the tree this profile landed
+// on; the branch this came from said 31 across 22, true until the tenant
+// conditional-access surface was retired out from under it. And nothing
+// was red, because the set of services to analyse was written by hand, in a CI loop
+// and in whoever remembered to create a directory, and iam was in neither list.
+//
+// That is the shape of the defect the gates themselves are written against: a check
+// is silent about what it never looked at. The remedy is not only this profile but
+// tools/listfiltergate/coverage_test.go, which derives the service list from the
+// committed tree so an unanalysed service is a FINDING rather than a quiet gap.
 //
 // # This service's shape
 //
-// Identical to vpc and nlb: one package per resource under
-// internal/apps/kacho/api, each declaring the transport type `Handler`. The
-// resource name is the directory.
+// iam colocates transport and use-cases per resource, like vpc and nlb:
+// internal/apps/kacho/api/<res> holds a `Handler` whose listing methods delegate to
+// per-RPC use-cases in the same package. So the PACKAGE tells one resource from
+// another, and the analyser's walk reaches the use-case.
 //
-// # What proves the page was narrowed
+// Two things differ from its neighbours and both shaped the declarations below.
 //
-// iam's per-object primitive is authzfilter.VisibleSet / authzfilter.Visible
-// (internal/authzfilter/visibility.go) — the `viewer ∪ v_list` union asked per
-// object of the page just read. Both names are accepted, and so are the two
-// package-level helpers that every resource routes through them, because the
-// analyser follows package-level functions and methods on package-local types
-// but stops at a field whose type is qualified.
+// First, the vocabulary. iam does NOT have FilterVisibleIDs or FilterVisiblePage —
+// those names exist only in compute and storage. Its per-object question to the
+// model is internal/authzfilter.VisibleSet (batched) or .Visible (single), reached
+// through package-local helpers with names like visibleAccountIDs and
+// visibleBindingIDsOnPage. A profile copied from a neighbour would have named calls
+// that do not exist here and failed every resource, which is the kind of red that
+// gets a gate disabled rather than read.
 //
-// # Banned
+// Second, the surface is genuinely heterogeneous — far more so than vpc's. iam lists
+// its own authorization graph, its own operation histories, the members of a group,
+// the keys of a service account, and the objects the authorization store itself can
+// see. There is no single shape that fits, which is precisely why every method is
+// declared and why all six shapes of the vocabulary appear below.
 //
-// The enumeration shape — ask the authorization store for every object the
-// subject may see, then narrow SQL to that prefix — is capped server-side with no
-// continuation, so a tenant's own row silently falls outside it and becomes
-// invisible for good.
+// # What is NOT proven here, stated so nobody reads more into a pass
 //
-// iam is a special case here and the ban still holds: iam OWNS the store client
-// and IMPLEMENTS `AuthorizeService.ListObjects` as a public RPC of its own
-// (api/authorize). That package declares no method named `List`, so it is not a
-// resource of this gate, and nothing reachable from any `Handler.List` calls it —
-// verified, not assumed. The ban therefore catches "an iam List narrows its page
-// by enumerating" without touching "iam serves the enumeration RPC".
+// access_binding.ListByRole narrows per row, but by evaluating requireGrantAuthority
+// inside the loop rather than by a batched VisibleSet. requireGrantAuthority is
+// therefore accepted as a filter call — and the analyser cannot tell a call inside a
+// per-row loop from a single call before it. For that one method the pass means "the
+// per-object question is asked", not "it is asked for every row". The stronger
+// statement is a test's job (services/iam/internal/apps/kacho/api/access_binding),
+// not this gate's, and pretending otherwise would be exactly the form-without-
+// substance this class is about.
+//
+// Likewise, the three EdgeGate methods delegate their check to the per-RPC
+// authorization at the edge. The gate verifies that the delegation is real — the RPC
+// carries a required_relation and a scope_extractor on the declared field, and where
+// the scope is the cluster singleton, that the relation is not one a wildcard tuple
+// satisfies. It does not verify that the edge is deployed, which is the boot guard's
+// subject.
 package auditlistfilter
 
 import "github.com/PRO-Robotech/kacho/tools/listfiltergate"
+
+// subjectGate is the shape of a listing whose containing object is checked in the
+// use-case before the page is read.
+func subjectGate(call string) listfiltergate.Listing {
+	return listfiltergate.Listing{Shape: listfiltergate.ParentGate, Gate: call}
+}
+
+// edgeGate is the shape of a listing settled by the per-RPC authorization at the
+// edge; the proto file and request field are what the gate verifies against.
+func edgeGate(file, field string) listfiltergate.Listing {
+	return listfiltergate.Listing{
+		Shape:       listfiltergate.EdgeGate,
+		ProtoFile:   "kacho/cloud/iam/v1/" + file,
+		ParentField: field,
+	}
+}
+
+var (
+	rowFilter     = listfiltergate.Listing{Shape: listfiltergate.RowFilter}
+	subjectScoped = listfiltergate.Listing{Shape: listfiltergate.SubjectScoped}
+)
 
 // Profile describes kacho-iam to the analyser.
 var Profile = listfiltergate.Profile{
@@ -51,8 +94,112 @@ var Profile = listfiltergate.Profile{
 	// One package per resource, all declaring the same transport type.
 	PerPackage:     true,
 	ReceiverSuffix: "Handler",
-	// VisibleSet/Visible are the primitive; the two names below are the helpers
-	// through which the resources reach it.
-	Filters: []string{"VisibleSet", "Visible", "visibleBindingIDsOnPage", "filterVisibleBindings"},
+
+	// iam's per-object question to the model. VisibleSet is the batched form every
+	// page filter reaches; Visible is the single-object form. requireGrantAuthority
+	// is the per-row form used by ListByRole — see the caveat in the package comment.
+	Filters: []string{"VisibleSet", "Visible", "requireGrantAuthority"},
 	Banned:  []string{"ListAllowedIDs", "ListObjects"},
+	// "listOp.Execute" is the delegation to shared.ListOperationsUseCase, which is
+	// where the narrowing actually happens. It has to be named this way because the
+	// use-case lives in a DIFFERENT package (internal/apps/kacho/shared) and the
+	// analyser's walk deliberately does not leave the package it is judging.
+	//
+	// Naming a field is against this gate's own doctrine — identify by declared type,
+	// never by a mutable label — so two things make it safe. It fails in the SAFE
+	// direction: rename the field and the gate goes red, it does not go quiet. And
+	// the thing being delegated TO is verified separately, by
+	// shared_operations_test.go in this package, so "the shared use-case narrows by
+	// the caller" is an assertion rather than an assumption. Without that test this
+	// entry would just be moving the unchecked claim one package over.
+	SubjectScopers: []string{"ListForCaller", "listOp.Execute"},
+
+	ProtoFiles: []string{
+		"kacho/cloud/iam/v1/internal_cluster_service.proto",
+		"kacho/cloud/iam/v1/sa_key_service.proto",
+		"kacho/cloud/iam/v1/user_token_service.proto",
+	},
+	FGAModel: "kacho/cloud/iam/v1/fga_model.fga",
+
+	Listings: map[string]listfiltergate.Listing{
+		// ---- pages narrowed per object, in the service ----
+		"access_binding.List":        rowFilter,
+		"access_binding.ListByScope": rowFilter,
+		// ListByScope and ListByAccount ask requireGrantAuthority first and WIDEN to
+		// the unfiltered page when it answers yes; when it answers no they fall
+		// through to the per-row filter. So the row filter is the floor, and that is
+		// what is declared.
+		"access_binding.ListByAccount": rowFilter,
+		"access_binding.ListByRole":    rowFilter,
+		"account.List":                 rowFilter,
+		"group.List":                   rowFilter,
+		"project.List":                 rowFilter,
+		"role.List":                    rowFilter,
+		"service_account.List":         rowFilter,
+		"user.List":                    rowFilter,
+
+		// ---- operation histories, narrowed by the caller in the context ----
+		"access_binding.ListOperations":  subjectScoped,
+		"account.ListOperations":         subjectScoped,
+		"group.ListOperations":           subjectScoped,
+		"project.ListOperations":         subjectScoped,
+		"role.ListOperations":            subjectScoped,
+		"service_account.ListOperations": subjectScoped,
+		"user.ListOperations":            subjectScoped,
+
+		// ---- one containing object, checked before the page is read ----
+		"access_binding.ListBySubject":         subjectGate("requireGroupMembership"),
+		"access_binding.ListSubjectPrivileges": subjectGate("IsSelf"),
+		"access_binding.ListAssignableRoles":   subjectGate("requireGrantAuthority"),
+		// ListAllOperations and ListIamOperations both gate first and then call the
+		// UNSCOPED operations repo — the one carrying an explicit IDOR warning — so
+		// the gate preceding the read is the whole of their protection, and a
+		// declaration that stopped verifying it would be worth nothing.
+		"account.ListAllOperations":             subjectGate("requireAccountViewAuthority"),
+		"internal_operations.ListIamOperations": subjectGate("requireClusterSystemAdmin"),
+		"group.ListMembers":                     subjectGate("AllowsVerb"),
+		"session_revocations.ListByUser":        subjectGate("authorizeListByUser"),
+		"authorize.ListSubjects":                subjectGate("authorizeCaller"),
+
+		// ---- the store's answer IS the response ----
+		//
+		// ListObjects is the RPC that exposes the authorization store's enumeration.
+		// The enumerate-then-narrow ban is about narrowing YOUR page by asking the
+		// store to enumerate; here the enumeration is what the caller asked for, so
+		// the ban is inapplicable by construction, not waived. What protects it is
+		// the gate on the subject the caller named.
+		"authorize.ListObjects": {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
+
+		// ---- settled by the per-RPC authorization at the edge ----
+		//
+		// ListAdmins scopes from "*" — the cluster singleton — which narrows only
+		// because it is gated on system_admin, a relation the model does NOT open to
+		// a wildcard subject. Had it been gated on cluster#viewer, which IS opened to
+		// `user:*` so every tenant can read the global catalog, the check would mean
+		// "authenticated" and narrow nothing. The gate reads the model and tells the
+		// two apart rather than assuming either.
+		"cluster.ListAdmins": edgeGate("internal_cluster_service.proto", "*"),
+		// conditions.List stood here and is GONE with its subject: the tenant-facing
+		// conditional-access surface was retired — proto, api/conditions package and
+		// repo all removed — so this declaration has nothing left to describe. The
+		// gate would say so itself (a declaration with no method is a finding, and
+		// an unreadable ProtoFile is another), but leaving it to be discovered at
+		// the first run would mean shipping a stated claim of protection over a
+		// surface that does not exist.
+		// sa_keys.List and user_tokens.List narrow their SQL by an id taken from the
+		// REQUEST BODY, so nothing in the service checks the caller against it. What
+		// does is the per-RPC scope extractor on that same field, which is why the
+		// declaration names the field and the gate verifies it in the proto.
+		"sa_keys.List":     edgeGate("sa_key_service.proto", "service_account_id"),
+		"user_tokens.List": edgeGate("user_token_service.proto", "user_id"),
+
+		// ---- reference data every authenticated caller may read ----
+		"permission_catalog.ListPermissionCatalog": {
+			Shape: listfiltergate.ClusterScoped,
+			Reason: "the permission catalog is the platform's own static list of RPCs and the " +
+				"relations they require — global reference data with no per-object grants to " +
+				"narrow to, and the caller must be authenticated to reach it. The exclusion " +
+				"expires with its method: retire the RPC and this entry becomes a finding.",
+		},
+	},
 }
