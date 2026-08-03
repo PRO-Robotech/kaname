@@ -11,7 +11,11 @@ package user
 // Cascade `admin > editor > viewer → member` is evaluated client-side in Go
 // (the ReBAC backend holds DIRECT tuples; cascade-traversal lives in code).
 
-import "context"
+import (
+	"context"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+)
 
 // AuthzChecker — narrow port for cascade-traversal Check (same signature as
 // clients.RelationStore.Check). InviteUserUseCase depends on this narrow iface,
@@ -63,10 +67,32 @@ func cascadeCheck(ctx context.Context, c AuthzChecker, subject, rel, object stri
 
 // canInviteUsers — one Check(editor) via cascade-traversal
 // covers {editor, admin, owner}. A viewer cannot invite (no cascade above
-// editor). Returns (true, nil) if principal holds editor/admin/owner on the
+// editor). Returns (true, nil) if the CALLER holds editor/admin/owner on the
 // target Account.
-func canInviteUsers(ctx context.Context, c AuthzChecker, principalID, accountID string) (bool, error) {
-	subject := "user:" + principalID
+//
+// The subject is named by `authzguard.SubjectFromPrincipal` — the single source of
+// truth for spelling a principal as an FGA subject — and NOT by joining "user:" to
+// the id. The difference is not cosmetic:
+//
+//   - Spelled "user:"+id, a SERVICE ACCOUNT was asked about under a subject that
+//     cannot exist. The store answered a well-formed "no", so the account's own
+//     administrator was refused whenever the caller was non-interactive — which on a
+//     production-posture stand is every caller, since tokens there are issued to
+//     service accounts. `security.md` is explicit that a service account is a
+//     first-class principal, not an exception.
+//   - The same spelling ADMITTED an unknown principal type, because it produced a
+//     "user:" subject for it regardless. That is the latent over-grant
+//     SubjectFromPrincipal documents in its own comment; here it is closed by
+//     construction, since an unnameable principal never reaches the store.
+//
+// `ok == false` is a refusal, not an error: a caller we cannot name is a caller we
+// cannot authorize, and asking about a subject we invented would decide access on
+// somebody else's grants.
+func canInviteUsers(ctx context.Context, c AuthzChecker, accountID string) (bool, error) {
+	subject, ok := authzguard.PrincipalSubject(ctx)
+	if !ok {
+		return false, nil
+	}
 	object := "account:" + accountID
 	return cascadeCheck(ctx, c, subject, "editor", object)
 }

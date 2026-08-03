@@ -176,7 +176,7 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 	if principal.ID == "" {
 		return nil, status.Error(codes.Unauthenticated, "principal required")
 	}
-	allowed, err := canInviteUsers(ctx, uc.authz, principal.ID, string(in.AccountID))
+	allowed, err := canInviteUsers(ctx, uc.authz, string(in.AccountID))
 	if err != nil {
 		return nil, fmt.Errorf("authz check: %w", err)
 	}

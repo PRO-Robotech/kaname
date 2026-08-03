@@ -147,16 +147,23 @@ func (h *Handler) WithAdminChecker(c authzguard.RelationChecker) *Handler {
 // forwarded acr (corelib grpcsrv x-kacho-token-acr) must satisfy it or the call
 // is rejected with a step-up signal. This gate stays the per-user ReBAC Check;
 // acr is no longer a gap on the internal route.
+// The subject is named by SubjectFromPrincipal, not by joining "user:" to the id.
+// `PrincipalUserID` deliberately admits `service_account` and `system` as well as
+// `user`, so prefixing its result with "user:" asked the store about a subject that
+// cannot exist whenever the caller was non-interactive — a machine cluster-admin was
+// refused by construction, however it was granted. Found by census of this class
+// after the same spelling was fixed in the invite gate; no e2e case covers this
+// route, which is why it survived there.
 func (h *Handler) requireSystemAdmin(ctx context.Context) error {
-	principal := authzguard.PrincipalUserID(ctx)
-	if principal == "" || authzguard.IsAnonymous(ctx) {
+	subject, ok := authzguard.PrincipalSubject(ctx)
+	if !ok {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	if h.adminCheck == nil {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	allowed, err := h.adminCheck.Check(ctx,
-		"user:"+principal, "system_admin", "cluster:"+domain.ClusterSingletonID)
+		subject, "system_admin", "cluster:"+domain.ClusterSingletonID)
 	if err != nil || !allowed {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
