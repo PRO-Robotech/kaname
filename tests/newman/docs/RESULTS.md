@@ -370,6 +370,37 @@ cluster. Neither explanation survived: the tail was measured at sub-second on 20
 and on 2026-07-28 every one of these steps passes. They are removed from the gate rather
 than re-justified — see the section above.
 
+### Superseded 2026-08-03 — `rbac-subject-channel-equivalence` has a counted debt
+
+The three `rbac-subject-channel-equivalence` rows in the 2026-07-28 table above, and the
+paragraph immediately preceding this one, say these steps pass. **They do not, and the
+reason is not a tail.** A stale GREEN declaration is the mirror of the stale RED this file
+warns about two sections up, and it is the more expensive of the two: it removes the
+reader's reason to look.
+
+Re-measured 2026-08-03 across three stored reports (0 failed / 12 / 12). The two red runs
+fail on the **byte-identical twelve assertions in the same six steps**, two days apart on
+two different seeds — deterministic, not wandering. Mechanism, established by decoding the
+fixtures rather than by inference: every failing step reads as `jwtInvitee`, whose token
+authenticates as a **service account**, while the binding under test names
+`user:{{userINVId}}` — an unrelated user row. The relation names one principal and every
+request carries another, so it cannot resolve at any budget; all six exhaust the 300-poll
+cap and end on the same 404. No `jwtSAA` step fails — that channel's id↔token pairing
+holds, which is the control in the other direction inside a single report.
+
+**Disposition — open debt with a number, not a mask and not a green:** 6 cases,
+12 assertions, ~1806 requests per run. Under production posture a machine harness obtains
+only `client_credentials`, i.e. a service account, so the user-principal channel is not
+drivable here at all; driving it needs its own wave that creates the condition (an
+interactive login). Nothing has been skipped, whitelisted or weakened.
+
+Landed alongside, so the shape cannot return silently: the seed no longer discards the
+invitee principal (it publishes `svaInviteeId`) and now **asserts its declared id↔token
+pairings at seed time** (`tests/authz-fixtures/principal_pairings.py`, injection-proved in
+both directions from `prodseed_all.py --self-test`). The case file's `POLL_CAP` comment,
+which pre-explained these failures as a drain tail and is why nobody examined them for
+three runs, has been replaced with the measured mechanism.
+
 ## Product findings (cases omitted, not RED)
 
 | Finding | Disposition |

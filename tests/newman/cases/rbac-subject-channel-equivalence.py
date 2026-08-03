@@ -3,6 +3,38 @@
 
 """RBAC explicit model — subject-channel equivalence black-box suite.
 
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║ READ THIS FIRST — SIX OF THESE CASES ARE A COUNTED DEBT, NOT A FLAKE.             ║
+║                                                                                   ║
+║ Measured 2026-08-03 over three stored reports (0 failed / 12 / 12). The two red   ║
+║ runs fail on the BYTE-IDENTICAL twelve assertions in the same six steps, two days ║
+║ apart and on two different seeds. That is not a wandering flake and it is not     ║
+║ eventual consistency:                                                             ║
+║                                                                                   ║
+║   every failing step reads as `jwtInvitee`, whose token authenticates as a        ║
+║   SERVICE ACCOUNT, while the binding under test names `user:{{userINVId}}` — an   ║
+║   unrelated user row. The relation names one principal, every request carries     ║
+║   another, so it cannot resolve at ANY budget. All six exhaust the full 300-poll  ║
+║   cap and end on the same 404. No `jwtSAA` step fails: that channel's id↔token    ║
+║   pairing holds, which is the control in the other direction inside one report.   ║
+║                                                                                   ║
+║ WHY IT COULD NOT BE PAIRED. Under production posture a machine harness obtains    ║
+║ only `client_credentials`, i.e. a service account: a user token needs interactive ║
+║ Kratos→Hydra login to carry `acr`, and the one iam issues is scoped to an         ║
+║ internal audience the edge rejects. So the USER-principal channel is not          ║
+║ something this harness can drive at all — «здесь его не запустить» is a fact of   ║
+║ scheduling, and it is recorded as an OPEN DEBT WITH A NUMBER (6 cases,            ║
+║ 12 assertions, ~1806 requests per run) rather than masked, skipped or weakened.   ║
+║ Driving it needs its own wave that CREATES the condition (an interactive login).  ║
+║                                                                                   ║
+║ The seed no longer discards the invitee principal — it publishes `svaInviteeId`   ║
+║ and asserts its declared id↔token pairings at seed time                           ║
+║ (tests/authz-fixtures/principal_pairings.py), so this shape cannot be introduced  ║
+║ silently again. Rebinding THESE cases onto that id would make them green while    ║
+║ deleting the distinction they exist to test (user channel vs SA channel), so it   ║
+║ is deliberately NOT done here.                                                    ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
 WHAT THIS PROVES (black-box through api-gateway → IAM → OpenFGA, camelCase REST):
 
   Channel equivalence — the SAME grant `(ROLE_VIEW, scope=ACCOUNT:accountAId)` delivered
@@ -69,21 +101,24 @@ isolation — grant for X does not leak to Y).
 
 CASES = []
 
-# Generous bounded cap for the grant→appears and revoke→gone probes to poll PAST the fga_outbox
-# drain (binding-tuple materialization / removal) — an eventual-consistency window that crossed
-# 30 s on a loaded run (where the FGA/cluster-admin bootstrap itself was lagging). At ~150 ms/
-# iteration this is ~45 s — bounded, never a runaway. Revoke removes the subject's tuples
-# byte-symmetrically (delete.go reads the full emitted-tuple ledger, sync-removes from OpenFGA +
-# async fga_outbox backstop), so the deny is GUARANTEED to converge — but on a resource-starved
-# single-node kind cluster the revoke-deny propagation can still exceed even this ~45 s cap under
-# peak load (the `*-gone` probes are each case's LAST step, where the per-case outbox backlog
-# peaks; later cases flake more as the cumulative backlog grows). The revoke-deny `*-gone`
-# convergence probes + the two-transition flip case used to be exempted by name as
-# eventual-consistency latency; that exemption was REMOVED with the runner's whole
-# subtraction list, so they gate like everything else and the bounded retry above is the
-# only thing absorbing the drain tail. delete.go additionally retries the sync FGA removal
-# past a transient OpenFGA failure to narrow it further. Nothing here is excused — a real
-# leak fails honestly.
+# Bounded cap for the grant→appears and revoke→gone probes, to poll past the fga_outbox drain
+# (binding-tuple materialization / removal). At ~150 ms/iteration this is ~45 s — bounded,
+# never a runaway. Revoke removes the subject's tuples byte-symmetrically (delete.go reads the
+# full emitted-tuple ledger, sync-removes from OpenFGA + async fga_outbox backstop), so a deny
+# that is going to converge does converge. Nothing here is excused — a real leak fails honestly.
+#
+# WHAT THIS COMMENT USED TO SAY, AND WHY IT IS GONE. It pre-explained the observed failures as
+# a drain tail on a resource-starved node, and predicted that "later cases flake more as the
+# cumulative backlog grows". That explanation was WRONG, and being written down in advance is
+# what kept the real cause unexamined across three runs: every reader arrived at the failure
+# already holding a story for it. The failures are deterministic and have nothing to do with
+# the drain — see the box at the top of this file. A budget cannot rescue a poll for a relation
+# that names a principal the request never carries, and a cap raised in response to one would
+# only have burned longer.
+#
+# The general lesson, stated because it outlives this case: a comment that explains a failure
+# the code has not yet been shown to have is not documentation, it is a prejudice with a
+# citation. Explain the mechanism after measuring it.
 POLL_CAP = 300
 
 # ROLE_VIEW — system viewer bundle (`*.* [read,list,get]`), assignable on ANY scope; on an
