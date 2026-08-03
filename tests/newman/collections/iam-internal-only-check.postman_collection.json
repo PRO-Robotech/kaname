@@ -124,7 +124,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-ALIVE: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-ALIVE: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -218,7 +218,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-UPSERT: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-UPSERT: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -327,7 +327,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-LOOKUPSUBJ: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-LOOKUPSUBJ: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -436,7 +436,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-IAM-CHECK: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-IAM-CHECK: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -533,7 +533,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-CONTROL: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-CONTROL: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -618,7 +618,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-WRITETUPLES: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-WRITETUPLES: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -703,7 +703,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-SR-REVOKE: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-SR-REVOKE: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -788,7 +788,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-SR-ISREVOKED: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-SR-ISREVOKED: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -873,7 +873,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-FORCELOGOUT: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-FORCELOGOUT: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -952,7 +952,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('EXT-USER-GET: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"EXT-USER-GET: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",

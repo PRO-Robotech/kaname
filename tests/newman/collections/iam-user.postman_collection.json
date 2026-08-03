@@ -2864,7 +2864,7 @@
                   "}",
                   "pm.environment.unset('_goneCount');",
                   "pm.environment.unset('_goneStarted');",
-                  "pm.test('User: gone after delete — 404 or 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
+                  "pm.test(\"User: gone after delete \\u2014 404 or 403\", () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
                 ]
               }
             }
@@ -3543,7 +3543,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('invite-blockprobe: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"invite-blockprobe: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -3788,7 +3788,7 @@
                   "}",
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('block-pending: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"block-pending: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -3854,7 +3854,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('pending-still-pending: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"pending-still-pending: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -3930,7 +3930,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('invite-unblockprobe: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"invite-unblockprobe: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4175,7 +4175,7 @@
                   "}",
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
-                  "pm.test('unblock-pending: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"unblock-pending: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4256,7 +4256,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('block-absent: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"block-absent: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4320,7 +4320,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('block-anon: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"block-anon: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4369,7 +4369,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('unblock-anon: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"unblock-anon: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4441,7 +4441,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('invite-crossprobe: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"invite-crossprobe: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4671,7 +4671,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('cross-account-block-denied: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"cross-account-block-denied: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4741,7 +4741,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('victim-untouched: request was ANSWERED (a check that did not run is not a check that passed)', () => {",
+                  "pm.test(\"victim-untouched: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
