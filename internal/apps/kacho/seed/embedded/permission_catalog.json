@@ -929,6 +929,56 @@
     }
   },
   {
+    "fqn": "kacho.cloud.iam.v1.InternalInteractiveClientService/Create",
+    "permission": "iam.interactive_clients.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalInteractiveClientService/Delete",
+    "permission": "iam.interactive_clients.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
+    "permission": "iam.interactive_clients.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalInteractiveClientService/List",
+    "permission": "iam.interactive_clients.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalInteractiveClientService/Update",
+    "permission": "iam.interactive_clients.update",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.InternalOperationsService/ListIamOperations",
     "permission": "iam.internal_operationses.listIamOperations",
     "required_relation": "system_admin",
