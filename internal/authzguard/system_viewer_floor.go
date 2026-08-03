@@ -99,6 +99,13 @@ func ReadFloorRPCs() []string {
 		// nothing on this chain reads that name. That decision is made against the
 		// named user in api/session_revocations/list_by_user_authz.go.
 		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
+		// InternalInteractiveClientService — admin reads of the interactive-login
+		// client surface (gateway-fronted; floor AND gateway-only both apply).
+		// The three mutations of the same service are deliberately ABSENT: the
+		// read floor is for reads, and the mutations are governed by the caller
+		// policy plus the acr floor.
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/List",
 		// InternalAuthorizeService — admin-tooling tuple/store reads (gateway-
 		// fronted; floor AND gateway-only both apply).
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
