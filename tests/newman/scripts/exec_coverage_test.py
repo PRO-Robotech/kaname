@@ -103,6 +103,25 @@ def _run(tmp):
     )
 
 
+def _coverage_line(stdout, name="c"):
+    """Строка ПРО КОЛЛЕКЦИЮ, а не весь вывод гейта.
+
+    Утверждения о классификации шага обязаны читать именно её. Гейт печатает ещё
+    и итоговую перепись пропусков, в которой имена категорий стоят ВСЕГДА — в том
+    числе нулями, потому что «объяснённых пропусков ноль» обязано быть отличимо
+    от «их никто не считал». Проверка подстроки по всему выводу подхватывает эту
+    строку и с тех пор утверждает не то, что написано в её имени: её исход
+    определяется текстом переписи, а не классификацией шага.
+
+    Это СУЖЕНИЕ проверки, а не ослабление: раньше она могла быть удовлетворена
+    посторонней строкой, теперь — только той, о которой говорит.
+    """
+    for line in stdout.splitlines():
+        if line.startswith(f"{name}: "):
+            return line
+    return ""
+
+
 def test_full_run_is_green(tmp_path):
     _collection(tmp_path, "c", [_item(f"i{i}") for i in range(5)])
     _report(tmp_path, "c", range(5), 5)
@@ -353,8 +372,16 @@ def test_guard_that_asserted_and_failed_is_not_filed_as_a_silent_skip(tmp_path):
     _report(tmp_path, "c", [0, 2], 3, failures=["poll"])
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "explained-skip" not in r.stdout, "a failed assertion was filed as a legal skip"
-    assert "ASSERTED" in r.stdout
+    line = _coverage_line(r.stdout)
+    assert line, "no per-collection coverage line — the gate said nothing about 'c'"
+    assert "explained-skip" not in line, "a failed assertion was filed as a legal skip"
+    # RECORDED-SKIP is the OTHER legal outcome for a step that asserted and did not
+    # run, and it must not apply here: the failure booked against `poll` is not the
+    # guard's own assertion, so the step's checks ran and its execution record is
+    # what went missing. Naming it explicitly keeps the new category from becoming
+    # a second door out of this finding.
+    assert "RECORDED-SKIP" not in line, "a failure that is not the guard's own was excused"
+    assert "ASSERTED" in line
     assert "poll" in r.stdout
 
 
@@ -375,8 +402,10 @@ def test_a_guard_that_skipped_quietly_is_still_explained(tmp_path):
     _report(tmp_path, "c", [0, 2], 3, failures=[])
     r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "1 explained-skip" in r.stdout
-    assert "ASSERTED" not in r.stdout
+    line = _coverage_line(r.stdout)
+    assert line, "no per-collection coverage line — the gate said nothing about 'c'"
+    assert "1 explained-skip" in line
+    assert "ASSERTED" not in line
 
 
 def test_the_gate_reconciles_its_own_count_with_the_summary(tmp_path):
