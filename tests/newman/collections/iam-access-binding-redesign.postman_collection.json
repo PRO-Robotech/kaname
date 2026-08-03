@@ -5522,7 +5522,7 @@
                   "}",
                   "pm.environment.unset('_goneCount');",
                   "pm.environment.unset('_goneStarted');",
-                  "pm.test('AccessBinding hard-deleted: gone after delete — 404 or 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
+                  "pm.test(\"AccessBinding hard-deleted: gone after delete \\u2014 404 or 403\", () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
                 ]
               }
             }

@@ -297,7 +297,10 @@ def assert_answered(label: str) -> List[str]:
     behaviour: a check that did not happen must not be able to report success.
     """
     return [
-        f"pm.test('{label}: request was ANSWERED (a check that did not run is not a check that passed)', () => {{",
+        # Encoded, not pasted: `label` is caller text and an apostrophe in it would break
+        # the literal, so the step would stop parsing and silently not run — the very
+        # outcome this probe exists to make impossible.
+        f"pm.test({json.dumps(f'{label}: request was ANSWERED (a check that did not run is not a check that passed)')}, () => {{",
         "  pm.expect(pm.response && pm.response.code,",
         "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: "
         "fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
@@ -867,7 +870,7 @@ def get_until_gone(path: str, label: str, auth: str = "jwtAccountAdminA") -> Ste
             "}",
             "pm.environment.unset('_goneCount');",
             "pm.environment.unset('_goneStarted');",
-            f"pm.test('{label}: gone after delete — 404 or 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));",
+            f"pm.test({json.dumps(f'{label}: gone after delete — 404 or 403')}, () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));",
         ],
     )
 

@@ -2996,7 +2996,7 @@
                   "}",
                   "pm.environment.unset('_goneCount');",
                   "pm.environment.unset('_goneStarted');",
-                  "pm.test('Account: gone after delete — 404 or 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
+                  "pm.test(\"Account: gone after delete \\u2014 404 or 403\", () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
                 ]
               }
             }
