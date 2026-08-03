@@ -80,6 +80,14 @@ type HydraOAuthClient struct {
 	// minted tokens to the client's TLS certificate (`cnf.x5t#S256`). Reserved
 	// for mTLS-authenticating clients; kacho-iam SA keys use DPoP.
 	TLSClientCertificateBoundAccessTokens bool `json:"tls_client_certificate_bound_access_tokens,omitempty"`
+	// RedirectURIs — where the provider may deliver an authorization code.
+	// Meaningful ONLY for the interactive-login client (IAM-INT-1): the
+	// machine grants this file otherwise registers (client_credentials,
+	// jwt-bearer) never redirect anywhere. Omitted when empty, so no existing
+	// registration changes shape.
+	RedirectURIs []string `json:"redirect_uris,omitempty"`
+	// PostLogoutRedirectURIs — RP-initiated-logout counterpart of the above.
+	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
 }
 
 // CreateOAuthClientRequest — input for HydraAdminClient.CreateOAuthClient.
@@ -120,6 +128,13 @@ type CreateOAuthClientRequest struct {
 	DPoPBoundAccessTokens bool
 	// TLSClientCertificateBoundAccessTokens — RFC 8705 mTLS-bound tokens.
 	TLSClientCertificateBoundAccessTokens bool
+	// RedirectURIs / PostLogoutRedirectURIs — interactive-login client only.
+	RedirectURIs           []string
+	PostLogoutRedirectURIs []string
+	// ResponseTypes — overrides the default ["token"]. The authorization-code
+	// ceremony needs ["code"]; leaving the default would register a client the
+	// provider refuses to run a code flow for.
+	ResponseTypes []string
 }
 
 // CreateOAuthClient registers a new client_credentials OAuth2 client with
@@ -139,11 +154,17 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 	if len(grants) == 0 {
 		grants = []string{"client_credentials"}
 	}
+	responseTypes := req.ResponseTypes
+	if len(responseTypes) == 0 {
+		responseTypes = []string{"token"}
+	}
 	payload := HydraOAuthClient{
 		ClientID:                    req.ClientID,
 		ClientName:                  req.ClientName,
 		GrantTypes:                  grants,
-		ResponseTypes:               []string{"token"},
+		ResponseTypes:               responseTypes,
+		RedirectURIs:                req.RedirectURIs,
+		PostLogoutRedirectURIs:      req.PostLogoutRedirectURIs,
 		Scope:                       req.Scope,
 		Audience:                    req.Audience,
 		Owner:                       req.Owner,

@@ -30,6 +30,9 @@ Coverage:
   IAM-INT-OK-INT-USER-UPSERT           — UpsertFromIdentity → 200 на internal (positive control)
   IAM-INT-OK-INT-IAM-LOOKUPSUBJECT     — LookupSubject → 200/404 на internal (positive control)
   IAM-INT-OK-INT-IAM-CHECK             — InternalIAMService.Check → 200 на internal
+  IAM-INT-NEG-EXT-IC-LIST              — InternalInteractiveClientService.List → 404 mux-miss на external
+  IAM-INT-NEG-EXT-IC-CREATE            — InternalInteractiveClientService.Create → 404 mux-miss на external
+  IAM-INT-OK-INT-IC-LIST               — тот же путь на internal → 200 со списком (positive control)
 
 Why no black-box POSITIVE revoke→IsRevoked case:
   InternalSessionRevocationsService is gRPC-only on :9091 — the api-gateway does
@@ -730,3 +733,104 @@ CASES.append(Case(
 ))
 
 
+
+# ===========================================================================
+# InternalInteractiveClientService — the interactive-login client, IAM-INT-1-11.
+#
+# WHAT KEEPS IT OFF THE OUTSIDE, STATED PRECISELY. The route IS mounted on both
+# multiplexers: registration walks the pair in ONE loop, `Internal*` included.
+# Isolation is the DISPATCHER's doing — `isInternalRoute` classifies the (method,
+# path) pair and answers 404 on external origin, hiding existence. Saying "it is
+# not mounted" would send the next reader to fix the registration instead of the
+# classifier.
+#
+# WHY THE PROBE CARRIES `jwtBootstrap` AND NOT A TENANT SUBJECT. Bootstrap is the
+# cluster `system_admin` ServiceAccount — the ONE principal that is authorised for
+# this surface and acr-exempt for its mutations. Probing with anybody else would
+# leave "not routed" indistinguishable from "not allowed", and the second is not
+# what ban #6 is about. Refused for the RIGHT reason is the whole assertion.
+#
+# The three cases here are the newman half of scenario 11. The behavioural census
+# on the tree side already carries the same pair — restmux/external_isolation_test.go
+# holds `{"POST", "/iam/v1/internal/interactiveClients"}` — and this file is the
+# black-box census; neither is a second copy of the other, and no third one is
+# started beside them.
+# ===========================================================================
+
+_IC_PATH = "/iam/v1/internal/interactiveClients"
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-IC-LIST",
+    title="InternalInteractiveClientService.List on the external TLS listener → 404 mux miss "
+          "(internal-only, ban #6) — refused even to the principal authorised for it",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _external_step(
+            name="ic-list-on-external",
+            method="GET",
+            path=_IC_PATH,
+            auth="jwtBootstrap",
+            test_script=_mux_miss_assertions(
+                "EXT-IC-LIST", "(j || {}).interactiveClients", "interactiveClients page"),
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-INT-NEG-EXT-IC-CREATE",
+    title="InternalInteractiveClientService.Create on the external TLS listener → 404 mux miss "
+          "(internal-only, ban #6) — no client is registered at the provider from the outside",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _external_step(
+            name="ic-create-on-external",
+            method="POST",
+            path=_IC_PATH,
+            auth="jwtBootstrap",
+            body={
+                "name": "iaclient-ext-{{runId}}",
+                "redirectUris": ["https://api.kacho.local/auth/callback"],
+            },
+            # The leak expression is the Operation id: if one came back, a client was
+            # registered at the identity provider through the advertised endpoint —
+            # the outcome ban #6 exists to prevent, not merely a routing surprise.
+            test_script=_mux_miss_assertions(
+                "EXT-IC-CREATE", "(j || {}).metadata", "Operation metadata (a client was registered)"),
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-INT-OK-INT-IC-LIST",
+    title="InternalInteractiveClientService.List on the cluster-internal listener → 200 with a page "
+          "(positive control: the two 404s above mean 'not routed here', not 'nowhere at all')",
+    classes=["CRUD", "SEC"],
+    priority="P0",
+    steps=[
+        Step(
+            name="ic-list-on-internal",
+            method="GET",
+            path=_IC_PATH,
+            pre_script=_internal_url_override(_IC_PATH),
+            # system_admin @ cluster — the catalog gate on all five RPCs. A tenant-tier
+            # subject gets a correct 403 here, which would make this control assert
+            # nothing about routing.
+            auth="jwtBootstrap",
+            test_script=[
+                *assert_status(200),
+                "pm.test('INT-IC-LIST: the internal listener serves the page', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j, JSON.stringify(j)).to.be.an('object');",
+                "  // An empty cluster is a legal page: the assertion is that the ROUTE",
+                "  // answers with the response message, not that anything was created.",
+                "  const items = j.interactiveClients === undefined ? [] : j.interactiveClients;",
+                "  pm.expect(items, 'interactiveClients must be a page, absent meaning empty').to.be.an('array');",
+                "});",
+            ],
+        ),
+    ],
+))

@@ -86,13 +86,25 @@ tot_empty=0
 # or a literal forward `setNextRequest('<name>')` that jumps over it), and it bans
 # `setNextRequest(null)` outright. It runs BEFORE the assertion loop because a
 # truncated run makes the assertion counts meaningless.
+#
+# Its exit code carries THREE answers, not two, and they are kept apart here:
+# 1 = coverage gaps found in this tree's run; 3 = there was no usable run to draw
+# a coverage verdict from (out/ empty, or holding another tree's reports). Both
+# stop the pipeline, but they send a reader to different places — one to a suite
+# that lost requests, the other to a runner that did not produce evidence. Folding
+# 3 into the same label would reintroduce, one level up, exactly the confusion the
+# gate now refuses to commit: an unasked question wearing an answer's name.
 _gate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "${_gate_dir}/exec-coverage.py" ] && command -v python3 >/dev/null 2>&1; then
-  if ! python3 "${_gate_dir}/exec-coverage.py" \
+  _cov_rc=0
+  python3 "${_gate_dir}/exec-coverage.py" \
         --collections-glob 'collections/*.postman_collection.json' \
-        --out-dir out; then
-    failed_suites+=("execution-coverage")
-  fi
+        --out-dir out || _cov_rc=$?
+  case "$_cov_rc" in
+    0) ;;
+    3) failed_suites+=("execution-coverage(did-not-run)") ;;
+    *) failed_suites+=("execution-coverage") ;;
+  esac
   echo
 else
   echo "FAIL: exec-coverage.py missing next to the gate — execution coverage unverified" >&2

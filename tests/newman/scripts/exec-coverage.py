@@ -106,14 +106,60 @@ Self-loop retries (`setNextRequest(pm.info.requestName)`) inflate
 `.run.stats.requests.total` far beyond the item count, which is why raw request
 totals are NOT a usable signal here — distinct executed positions are.
 
+WHOSE REPORTS THESE ARE (the third state of the GATE, not of a request)
+----------------------------------------------------------------------
+The coverage half above is computed from `out/<name>.json` — a run artifact this
+gate does NOT produce and git does not track (`services/iam/tests/newman/.gitignore`
+names `out/` and records why: a leftover `authz-deny-rerun.json` from a local run
+once resurfaced as a 511-failure phantom suite in CI). So the input is whatever
+happens to be lying in that directory, and it can be from another run, another
+branch, or no run at all.
+
+Both of those used to reach the verdict as if they were evidence:
+
+  * `out/` empty  → every collection returned before the coverage checks and the
+    run ended on "OK: every request either executed or is an explained skip." —
+    an affirmative about 1658 requests of which zero had been looked at. The
+    per-collection "NO REPORT" line was printed and then dropped on the floor:
+    the TOTAL line is scraped from "executed N/M" text, which "NO REPORT" does
+    not match, so it did not print either.
+  * `out/` holding another tree's reports → the coverage checks ran against them
+    and named collections RED. A red verdict about a tree the reports do not
+    describe is worse than no verdict: it sends someone to debug a suite that
+    was never in question.
+
+Measured on this gate, tree fixed, only `--out-dir` swapped: exit 0 with an empty
+directory, exit 1 with a five-day-old directory from another commit. The verdict
+was a function of the artifact directory alone.
+
+A run either happened or it did not, and "it did not" is NEITHER green NOR red —
+it is a third category that must not be spent on either side. Hence:
+
+  * a collection with no report is ABSTAINED, not passed;
+  * a report whose collection does not match the one on disk — compared by the
+    fingerprint of the flattened leaf (folder, name) sequence, not merely by leaf
+    COUNT, which the old cross-check used and which two different revisions of the
+    same suite routinely share — is ABSTAINED, not failed;
+  * the census (how many judged, how many abstained, and why) prints on every run,
+    so "nothing found" cannot read the same as "nothing examined";
+  * the affirmative sentence is emitted only when something was actually judged.
+
+The static bans keep applying in every case: they read the tracked collection,
+which IS this tree, so they need no run to be true.
+
 Usage:
     python3 exec-coverage.py [--collections-glob GLOB] [--out-dir DIR]
-Exit: 0 = every collection fully accounted for; 1 = ban hit or unexplained gaps.
+Exit: 0 = every collection judged and fully accounted for;
+      1 = ban hit or unexplained gaps;
+      2 = no collections matched (usage);
+      3 = DID NOT RUN — no usable report for at least one collection, so the
+          coverage question was not answered. Not a pass and not a failure.
 """
 from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -180,6 +226,32 @@ def _scripts(item, listen=None):
         else:
             out.extend(str(x) for x in exec_)
     return "\n".join(out)
+
+
+def _leaf_fingerprint(items):
+    """Identity of a collection as a RUN would see it: the flattened leaf sequence.
+
+    Returns (fingerprint, leaf_count). The fingerprint is over the (folder, name)
+    pair of every leaf in execution order, which is what makes it able to tell two
+    revisions of the same suite apart — renaming, reordering or replacing a step
+    all move it, while the leaf COUNT (the only thing the previous cross-check
+    compared) survives all three. That count-only check let 18 of 29 stale reports
+    through in a live measurement, and the 11 it did catch it filed as RED.
+
+    Deliberately NOT hashed: request URLs, script bodies, variables. A report is
+    "from this collection" if it ran these steps in this order; an edit to a script
+    body is a different question and belongs to the static bans, which read the
+    tracked file directly.
+    """
+    h = hashlib.sha256()
+    n = 0
+    for leaf, parent in zip(_iter_leaves(items), _iter_leaf_parents(items)):
+        h.update(parent.encode("utf-8"))
+        h.update(b"\x00")
+        h.update((leaf.get("name") or "").encode("utf-8"))
+        h.update(b"\x00")
+        n += 1
+    return h.hexdigest()[:16], n
 
 
 def _transport_error(ex):
@@ -282,12 +354,43 @@ def check_collection(col_path, out_dir):
 
     report = os.path.join(out_dir, f"{name}.json")
     if not os.path.isfile(report):
-        # Absence of a report is already the existing gate's business; say so and
-        # do not double-count it as an execution gap.
-        return (not problems, f"{name}: {total} items, NO REPORT", problems)
+        # No run happened for this collection, so the coverage question has no
+        # answer here. ABSTAIN — never fold an unasked question into the pass
+        # side. The static bans above already stand on their own.
+        return (not problems, False, f"{name}: {total} items, NO REPORT (not judged)", problems)
 
     with open(report, encoding="utf-8") as fh:
-        run = json.load(fh).get("run", {})
+        doc = json.load(fh)
+    run = doc.get("run", {})
+
+    # ── PROVENANCE: is this report about the collection sitting on disk? ──────
+    #
+    # newman's JSON reporter embeds the collection it executed. Comparing leaf
+    # identity (not leaf count) answers the question the count could not: a report
+    # left over from another branch of the same suite has the same number of steps
+    # far more often than it has the same steps.
+    want_fp, _ = _leaf_fingerprint(col.get("item", []))
+    rep_col = doc.get("collection")
+    if isinstance(rep_col, dict) and rep_col.get("item") is not None:
+        got_fp, got_n = _leaf_fingerprint(rep_col.get("item", []))
+        if got_fp != want_fp:
+            return (not problems, False,
+                    f"{name}: {total} items, REPORT IS NOT OF THIS COLLECTION "
+                    f"(disk {want_fp}/{total} leaves vs report {got_fp}/{got_n}) — "
+                    f"not judged; re-run the suite", problems)
+    else:
+        # Older reporter or a synthesised report: fall back to the leaf count. A
+        # mismatch here is still a provenance answer, not a product answer, so it
+        # abstains rather than reddening — that misfiling is what sent someone to
+        # debug another tree's suite.
+        lens = {ex.get("cursor", {}).get("length")
+                for ex in (run.get("executions") or [])
+                if isinstance(ex.get("cursor", {}).get("length"), int)}
+        if lens and total not in lens:
+            return (not problems, False,
+                    f"{name}: {total} items, REPORT IS NOT OF THIS COLLECTION "
+                    f"(report cursors say {sorted(lens)}; no embedded collection to "
+                    f"compare) — not judged; re-run the suite", problems)
     executions = run.get("executions", []) or []
     stats = run.get("stats", {}) or {}
     failures = run.get("failures", []) or []
@@ -316,12 +419,18 @@ def check_collection(col_path, out_dir):
         if pos in executed:
             del unanswered[pos]
 
-    # Cross-check: the report must describe THIS collection.
+    # The count cross-check that used to live here changed SIDES rather than
+    # disappearing: a report whose cursors do not describe this collection is a
+    # statement about the INPUT, and filing it as a `problems` entry made it a
+    # statement about the PRODUCT — which is how a five-day-old artifact directory
+    # came to name twelve collections as failing in a tree it knew nothing about.
+    # Positions that disagree with the collection cannot be read as coverage, so
+    # the honest answer is "not judged", not "failed".
     if lengths and total not in lengths:
-        problems.append(
-            f"  report/collection mismatch: collection has {total} leaf items, "
-            f"report cursors say {sorted(lengths)} — stale or mismatched report"
-        )
+        return (not problems, False,
+                f"{name}: {total} items, REPORT DOES NOT DESCRIBE THIS COLLECTION "
+                f"(report cursors say {sorted(lengths)} leaves) — not judged; "
+                f"re-run the suite", problems)
 
     # ── THE FOURTH STATE: asserted, but never executed ───────────────────────
     #
@@ -423,7 +532,7 @@ def check_collection(col_path, out_dir):
         if len(unexplained) > _MAX_REPORTED:
             problems.append(f"    ... and {len(unexplained) - _MAX_REPORTED} more")
 
-    return (not problems, line, problems)
+    return (not problems, True, line, problems)
 
 
 def main(argv=None):
@@ -438,27 +547,50 @@ def main(argv=None):
         return 2
 
     bad = []
+    unjudged = []
     tot_items = tot_exec = 0
     print("===== execution coverage (did every request actually run?) =====")
     for col in cols:
-        ok, line, problems = check_collection(col, args.out_dir)
+        ok, judged, line, problems = check_collection(col, args.out_dir)
         print(line)
         for p in problems:
             print(p)
+        stem = os.path.basename(col).replace(".postman_collection.json", "")
         if not ok:
-            bad.append(os.path.basename(col).replace(".postman_collection.json", ""))
+            bad.append(stem)
+        if not judged:
+            unjudged.append(stem)
         # totals for the headline number
         m = re.search(r"executed (\d+)/(\d+)", line)
         if m:
             tot_exec += int(m.group(1))
             tot_items += int(m.group(2))
 
+    # The census prints on EVERY path, including the ones that used to end on a
+    # bare affirmative. "Nothing found" and "nothing examined" must not read the
+    # same, and the number that separates them is how many collections were judged.
+    print(f"CENSUS: {len(cols)} collection(s) matched; judged {len(cols) - len(unjudged)}; "
+          f"not judged {len(unjudged)} (no usable report)")
     if tot_items:
         print(f"TOTAL executed {tot_exec}/{tot_items} ({100.0 * tot_exec / tot_items:.1f}%)")
+
     if bad:
         print(f"FAIL: execution-coverage gaps in: {' '.join(bad)}", file=sys.stderr)
         return 1
-    print("OK: every request either executed or is an explained skip.")
+    if unjudged:
+        # DID NOT RUN. Not a pass: nothing here says the requests executed. Not a
+        # failure either: nothing here says they did not. Spending this on either
+        # side is how an empty out/ came to print an affirmative about 1658
+        # requests that were never looked at.
+        print(
+            f"DID NOT RUN: no usable report for {len(unjudged)} of {len(cols)} collection(s): "
+            f"{' '.join(unjudged)}. The coverage question was not answered — run the suite "
+            f"(scripts/run.sh) so out/<name>.json belongs to THIS tree, then re-run this gate.",
+            file=sys.stderr,
+        )
+        return 3
+    print(f"OK: every request in all {len(cols)} collection(s) either executed or is an "
+          f"explained skip.")
     return 0
 
 

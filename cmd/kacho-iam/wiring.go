@@ -23,6 +23,7 @@ import (
 	authorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/authorize"
 	bootstraptoken "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/cluster"
+	interactiveclientapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/interactive_client"
 	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
 	internalauthorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_authorize"
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
@@ -83,6 +84,10 @@ type services struct {
 	// internalClusterHandler — InternalClusterService: cluster admin
 	// RBAC management. Internal-only (запрет #6), registered on port 9091.
 	internalClusterHandler *clusterapp.Handler
+
+	// interactiveClientHandler — InternalInteractiveClientService: lifecycle of
+	// the OAuth2 client a HUMAN signs in through (IAM-INT-1). Internal-only.
+	interactiveClientHandler *interactiveclientapp.Handler
 
 	// sessionRevocationsHandler — InternalSessionRevocationsService:
 	// token revocation on logout / force-logout + the api-gateway
@@ -626,6 +631,27 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	clusterListUC := clusterapp.NewListAdminsUseCase(clusterGrantReader)
 	internalClusterHandler := clusterapp.NewHandler(clusterGetUC, clusterGrantUC, clusterRevokeUC, clusterListUC)
 
+	// ── InternalInteractiveClientService — interactive-login client (IAM-INT-1) ──
+	// The audience stamped on every client this service registers is the EDGE's
+	// audience — the same `https://{API_DOMAIN}` the bootstrap mint requests and
+	// the gateway verifies. It is iam's decision, never a request field (Р2): a
+	// caller-supplied audience can be set but cannot be set correctly, and a wrong
+	// one is refused by the edge long after the client was created.
+	interactiveAudience := os.Getenv("KACHO_IAM_INTERACTIVE_CLIENT_AUDIENCE")
+	if interactiveAudience == "" {
+		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
+	}
+	interactiveRepo := kachopg.NewInteractiveClientRepo(pool)
+	interactiveProvider := clients.NewInteractiveClientProvider(mustProviderAdminClient(cfg))
+	interactiveClientHandler := interactiveclientapp.NewHandler(
+		interactiveclientapp.NewGetUseCase(interactiveRepo),
+		interactiveclientapp.NewListUseCase(interactiveRepo),
+		interactiveclientapp.NewCreateUseCase(interactiveRepo, interactiveProvider, opsRepo,
+			[]string{interactiveAudience}, logger),
+		interactiveclientapp.NewUpdateUseCase(interactiveRepo, opsRepo, logger),
+		interactiveclientapp.NewDeleteUseCase(interactiveRepo, interactiveProvider, opsRepo, logger),
+	)
+
 	// ── InternalOperationsService — cluster-wide admin op feed ────────────────
 	// security.md "AuthN+AuthZ ВЕЗДЕ": the in-handler ReBAC gate (relationStore
 	// satisfies authzguard.RelationChecker) enforces system_admin@cluster even
@@ -651,6 +677,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accessBindingHandler:   abHandler,
 		internalIAMHandler:     internalIAMHandler,
 		internalClusterHandler: internalClusterHandler,
+
+		// interactive-login client lifecycle.
+		interactiveClientHandler: interactiveClientHandler,
 
 		// token revocation (logout / force-logout).
 		sessionRevocationsHandler: sessionRevocationsHandler,

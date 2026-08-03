@@ -81,6 +81,18 @@ func GatewayFrontedInternalRPCs() []string {
 		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
 		"/kacho.cloud.iam.v1.InternalClusterService/ListAdmins",
 		"/kacho.cloud.iam.v1.InternalClusterService/Get",
+		// InternalInteractiveClientService — lifecycle of the OAuth2 client a
+		// HUMAN signs in through (admin UI / admin tooling). All five are
+		// gateway-fronted: the operator acts through the edge, and no module has
+		// business dialling them directly. The three mutations additionally carry
+		// the catalog step-up floor acr=2 (a redirect target is where an
+		// authorization code is delivered); the acr-floor interceptor reads that
+		// from the catalog, so it is not restated here.
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/List",
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Create",
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Update",
+		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Delete",
 		// InternalAuthorizeService — tuple/model administration (admin tooling).
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",

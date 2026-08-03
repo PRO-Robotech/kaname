@@ -43,7 +43,8 @@ def _collection(tmp, name, items):
     return p
 
 
-def _report(tmp, name, positions, total, assertions_failed=0, unanswered=(), failures=()):
+def _report(tmp, name, positions, total, assertions_failed=0, unanswered=(), failures=(),
+            embed=True, foreign_items=None):
     """Synthesise a newman JSON report where only `positions` executed.
 
     `unanswered` — positions that newman ATTEMPTED but that never produced a
@@ -51,6 +52,17 @@ def _report(tmp, name, positions, total, assertions_failed=0, unanswered=(), fai
     records an execution for these, at their cursor position, with `response:
     null` and a `requestError` — which is precisely why they used to read as
     "executed". They are listed in `positions` too, exactly as newman does it.
+
+    `embed` — newman's JSON reporter writes the collection it executed alongside
+    the run; a real report's top-level keys are `collection`, `environment`,
+    `globals`, `run`. The gate reads that copy to answer "is this report about the
+    collection on disk?", so embedding is the default here because it is what
+    newman does. `embed=False` models an older reporter and exercises the
+    count-only fallback.
+
+    `foreign_items` — embed a DIFFERENT collection than the one on disk. That is
+    what a leftover `out/` from another branch of the same suite looks like, and
+    it is the input the gate must refuse to draw a product verdict from.
     """
     d = tmp / "out"
     d.mkdir(exist_ok=True)
@@ -65,13 +77,21 @@ def _report(tmp, name, positions, total, assertions_failed=0, unanswered=(), fai
         execs.append(ex)
     fails = [{"error": {"test": f"assertion on {n}", "message": "boom"},
               "source": {"name": n}, "parent": {"name": "F"}} for n in failures]
-    (d / f"{name}.json").write_text(json.dumps({
+    doc = {
         "run": {"executions": execs,
                 "stats": {"assertions": {"total": len(execs) + len(fails),
                                          "failed": assertions_failed or len(fails)},
                           "requests": {"total": len(execs), "failed": len(unanswered)}},
                 "failures": fails},
-    }))
+    }
+    if embed:
+        if foreign_items is not None:
+            doc["collection"] = {"info": {"name": name}, "item": foreign_items}
+        else:
+            on_disk = json.loads(
+                (tmp / "collections" / f"{name}.postman_collection.json").read_text())
+            doc["collection"] = on_disk
+    (d / f"{name}.json").write_text(json.dumps(doc))
 
 
 def _run(tmp):
@@ -285,13 +305,22 @@ def test_answered_requests_stay_green(tmp_path):
     assert "UNANSWERED" not in r.stdout
 
 
-def test_report_for_a_different_collection_is_red(tmp_path):
-    """A stale report cannot be silently paired with a regenerated collection."""
+def test_report_whose_cursors_do_not_describe_this_collection_is_not_judged(tmp_path):
+    """A stale report cannot be silently paired with a regenerated collection.
+
+    This test previously demanded exit 1 and the words "report/collection
+    mismatch" — i.e. it pinned the misclassification. The detection is unchanged
+    and still fires; what changed is the SIDE it lands on. Positions that
+    disagree with the collection cannot be read as coverage of it, so the answer
+    is "not judged". Calling it a product failure is how another tree's artifact
+    directory came to name twelve collections as failing here.
+    """
     _collection(tmp_path, "c", [_item(f"i{i}") for i in range(5)])
     _report(tmp_path, "c", [0, 1, 2], 3)  # report says the collection had 3 items
     r = _run(tmp_path)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "report/collection mismatch" in r.stdout
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "REPORT DOES NOT DESCRIBE THIS COLLECTION" in r.stdout
+    assert "FAIL: execution-coverage gaps" not in r.stderr
 
 
 def test_guard_that_asserted_and_failed_is_not_filed_as_a_silent_skip(tmp_path):
@@ -364,11 +393,100 @@ def test_the_gate_reconciles_its_own_count_with_the_summary(tmp_path):
     assert "summary" in r.stdout, "the reconciliation against run.stats is not reported"
 
 
-def test_missing_report_is_left_to_the_assertion_gate(tmp_path):
-    """No report is already the existing gate's `(no-report)` failure — this gate
-    reports it but does not double-count it as an execution gap."""
+# ── WHOSE REPORTS THESE ARE ──────────────────────────────────────────────────
+#
+# The gate's coverage half is computed from `out/<name>.json`, a run artifact it
+# does not produce and git does not track. Until these tests existed, both an
+# EMPTY directory and a directory full of ANOTHER tree's reports reached the exit
+# code as if they were evidence: empty printed "OK: every request either executed
+# or is an explained skip." over 1658 requests nobody had looked at, and foreign
+# leftovers printed a product FAILURE naming collections from a tree the reports
+# do not describe.
+#
+# The test that used to stand here, `test_missing_report_is_left_to_the_assertion_gate`,
+# asserted `returncode == 0` on a missing report — it pinned that behaviour as
+# intended. It is replaced rather than amended: the pass it demanded is the defect.
+
+
+def test_missing_report_is_not_a_pass(tmp_path):
+    """No report means the coverage question was not answered.
+
+    Not a pass — nothing here says the requests ran. Not a failure — nothing here
+    says they did not. A third exit code, so a caller cannot spend it on either
+    side by accident.
+    """
     _collection(tmp_path, "c", [_item("i0")])
     (tmp_path / "out").mkdir(exist_ok=True)
     r = _run(tmp_path)
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "NO REPORT (not judged)" in r.stdout
+    assert "DID NOT RUN" in r.stderr
+    assert not r.stdout.startswith("OK:") and "\nOK:" not in r.stdout, (
+        "an affirmative was printed about a collection nobody looked at:\n" + r.stdout)
+
+
+def test_census_names_how_many_were_judged(tmp_path):
+    """"Zero findings" must not read the same as "zero examined", so the count of
+    judged collections prints on every path — including the affirmative one."""
+    _collection(tmp_path, "c", [_item(f"i{i}") for i in range(3)])
+    _report(tmp_path, "c", [0, 1, 2], 3)
+    r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "NO REPORT" in r.stdout
+    assert "CENSUS: 1 collection(s) matched; judged 1; not judged 0" in r.stdout
+
+
+def test_report_of_another_collection_abstains_instead_of_reddening(tmp_path):
+    """A leftover report from another branch of the same suite.
+
+    Same file name, same leaf COUNT — which is all the previous cross-check
+    compared, and why 18 of 29 stale reports were consumed as current in a live
+    measurement while the 11 it did catch were filed as product failures. The
+    verdict must be about the INPUT: not judged, not failed.
+    """
+    _collection(tmp_path, "c", [_item("alpha"), _item("beta"), _item("gamma")])
+    _report(tmp_path, "c", [0], 3,
+            foreign_items=[_item("alpha"), _item("BETA-renamed"), _item("gamma")])
+    r = _run(tmp_path)
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "REPORT IS NOT OF THIS COLLECTION" in r.stdout
+    assert "FAIL: execution-coverage gaps" not in r.stderr, (
+        "a report from another tree was turned into a verdict about this one:\n"
+        + r.stdout + r.stderr)
+
+
+def test_report_of_this_collection_is_judged(tmp_path):
+    """The paired positive: the same shape, legitimately produced.
+
+    Without this twin the provenance check would be indistinguishable from one
+    that refuses every report — and a gate that never judges anything is the same
+    blindness with the sign flipped.
+    """
+    items = [_item("alpha"), _item("beta"), _item("gamma")]
+    _collection(tmp_path, "c", items)
+    _report(tmp_path, "c", [0, 1, 2], 3)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "REPORT IS NOT OF THIS COLLECTION" not in r.stdout
+    assert "judged 1" in r.stdout
+
+
+def test_provenance_survives_a_report_without_an_embedded_collection(tmp_path):
+    """Older reporter: no `collection` key. The leaf-count fallback still answers
+    the provenance question — and still answers it as provenance, not as a gap."""
+    _collection(tmp_path, "c", [_item(f"i{i}") for i in range(3)])
+    _report(tmp_path, "c", [0], 9, embed=False)  # cursors describe a 9-leaf collection
+    r = _run(tmp_path)
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "REPORT IS NOT OF THIS COLLECTION" in r.stdout
+    assert "FAIL: execution-coverage gaps" not in r.stderr
+
+
+def test_static_ban_still_reds_without_any_report(tmp_path):
+    """The bans read the tracked collection, which IS this tree, so they need no
+    run to be true. Abstaining on coverage must not swallow them: a red outranks
+    a did-not-run."""
+    _collection(tmp_path, "c", [_item("i0", prereq=["pm.execution.setNextRequest(null);"])])
+    (tmp_path / "out").mkdir(exist_ok=True)
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "BANNED setNextRequest(null)" in r.stdout
