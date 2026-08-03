@@ -283,6 +283,65 @@ def _transport_error(ex):
     return "no response"
 
 
+# Литералы имён утверждений и текстов провала, объявленных В САМОМ пре-скрипте:
+#   pm.test('<имя>', () => { pm.expect.fail('<текст>'); })
+# Ими различается «пропуск, ЗАПИСАННЫЙ утверждением стража» и «шаг, чьи проверки
+# исполнились, а записи об исполнении нет».
+_TEST_NAME_RE = re.compile(r"""pm\.test\s*\(\s*(['"])(.*?)\1""", re.S)
+_EXPECT_FAIL_RE = re.compile(r"""pm\.expect\.fail\s*\(\s*(['"])(.*?)\1""", re.S)
+
+
+def _recorded_skip_guards(leaves):
+    """Индексы шагов, чей ПРЕ-СКРИПТ несёт САНКЦИОНИРОВАННУЮ форму стража:
+    «утвердить, назвав переменную, и только потом пропустить».
+
+    Возвращает {index: (имена pm.test, тексты pm.expect.fail)} — по ним ниже
+    сверяется, что упавшее утверждение шага принадлежит ИМЕННО стражу.
+
+    ЗАЧЕМ ОТДЕЛЬНАЯ КАТЕГОРИЯ. Форма «утвердить → skipRequest()» объявлена
+    правильной этим же гейтом (шапка, п. 2б) и уже применяется дважды —
+    `gen.py::require_env_url` и `gen.py::_op_id_guard(required=True)`. Но
+    классификатор относил КАЖДЫЙ такой шаг к ASSERTED-NOT-EXECUTED, то есть к
+    находке: страж утвердил (шаг «asserted») и не отправился (записи об
+    исполнении нет). Гейт наказывал ровно ту форму, которую сам предписывает, а
+    его текст находки — «a skip guard cannot explain a step that asserted» — для
+    этого приёма был неверен. Долг записан замером 2026-07-31: 135 таких шагов в
+    75 различимых местах, и он назван открытым в приёмке IAM-INT-1 (Р10).
+
+    ЧЕМ ЭТО НЕ АМНИСТИЯ. Извиняется не «есть страж», а «упало ИМЕННО утверждение
+    стража». Шаг, у которого провалилось утверждение тест-скрипта, ИСПОЛНЯЛСЯ —
+    тест-скрипт не выполняется без ответа, — и он остаётся находкой, даже если
+    страж в пре-скрипте у него есть. Именно эту половину класса гейт и заводился
+    ловить (пропавшие записи об исполнении в executions).
+    """
+    guards = {}
+    for i, it in enumerate(leaves):
+        pre = _scripts(it, "prerequest")
+        if not (_SKIP_RE.search(pre) and _ASSERT_RE.search(pre)):
+            continue
+        names = {m.group(2).strip() for m in _TEST_NAME_RE.finditer(pre)}
+        fails = {m.group(2).strip() for m in _EXPECT_FAIL_RE.finditer(pre)}
+        guards[i] = (names, fails)
+    return guards
+
+
+def _failure_belongs_to_guard(failure, names, fails):
+    """Принадлежит ли упавшее утверждение самому стражу.
+
+    FAIL-CLOSED: если отчёт не позволяет установить, ЧТО именно упало, шаг НЕ
+    извиняется. Неустановимое остаётся находкой — иначе «объяснённый пропуск»
+    стал бы корзиной «всё остальное», которой не бывает.
+    """
+    err = failure.get("error") or {}
+    test = (err.get("test") or "").strip()
+    if test:
+        return test in names
+    msg = (err.get("message") or "").strip()
+    if msg:
+        return any(msg.startswith(f) or f.startswith(msg) for f in fails if f)
+    return False
+
+
 def _explained_skippable(leaves):
     """Indices that are allowed to not execute, with the reason.
 
@@ -458,19 +517,45 @@ def check_collection(col_path, out_dir):
             asserted_names.add((par, src))
             asserted_names.add(("", src))
     asserted = set()
+    per_index_failures = {}
     if asserted_names:
         for i, (it, par) in enumerate(zip(leaves, parents)):
             nm = (it.get("name") or "").strip()
             if (par, nm) in asserted_names or ("", nm) in asserted_names:
                 asserted.add(i)
+                per_index_failures[i] = [
+                    f for f in failures
+                    if ((f.get("source") or {}).get("name") or "").strip() == nm
+                ]
 
     reasons = _explained_skippable(leaves)
     # An unanswered request is NOT explained by a skip guard: the guard says "this
     # request did not run", the transport error says "it ran and got nothing back".
     # Folding the second into the first is how the class hid in the first place.
-    # An ASSERTED-but-unexecuted step is not explained by one either — its script ran.
-    asserted_gap = sorted(i for i in range(total)
-                          if i not in executed and i not in unanswered and i in asserted)
+    guards = _recorded_skip_guards(leaves)
+
+    # ЗАПИСАННЫЙ ПРОПУСК vs НЕМОЙ РАЗРЫВ — две разные вещи, и до сих пор они
+    # считались одной. Шаг «утвердил и не исполнился» может быть:
+    #   * САНКЦИОНИРОВАННЫМ стражем — пре-скрипт назвал переменную падающим
+    #     утверждением и пропустил запрос. Пропуск ЗАПИСАН, счётен и виден в
+    #     вердикте как упавшее утверждение. Это не находка;
+    #   * НЕМЫМ разрывом — запись об исполнении пропала, а утверждения шага
+    #     исполнились (тест-скрипт не выполняется без ответа). Находка, как и была.
+    # Разделяет их не наличие стража, а ПРИНАДЛЕЖНОСТЬ упавшего утверждения
+    # стражу; неустановимое остаётся находкой (fail-closed).
+    recorded_skip, asserted_gap = [], []
+    for i in range(total):
+        if i in executed or i in unanswered or i not in asserted:
+            continue
+        g = guards.get(i)
+        fl = per_index_failures.get(i) or []
+        if g and fl and all(_failure_belongs_to_guard(f, g[0], g[1]) for f in fl):
+            recorded_skip.append(i)
+        else:
+            asserted_gap.append(i)
+    recorded_skip.sort()
+    asserted_gap.sort()
+
     unexplained = [i for i in range(total)
                    if i not in executed and i not in reasons and i not in unanswered
                    and i not in asserted]
@@ -489,6 +574,7 @@ def check_collection(col_path, out_dir):
     line = (
         f"{name}: executed {len(executed)}/{total} ({pct:.0f}%)"
         f"{f', {len(skipped_ok)} explained-skip' if skipped_ok else ''}"
+        f"{f', {len(recorded_skip)} RECORDED-SKIP' if recorded_skip else ''}"
         f"{f', {len(asserted_gap)} ASSERTED-NOT-EXECUTED' if asserted_gap else ''}"
         f"{f', {len(unanswered)} UNANSWERED' if unanswered else ''}"
         f"{f', {len(unexplained)} UNEXPLAINED' if unexplained else ''}"
@@ -501,9 +587,12 @@ def check_collection(col_path, out_dir):
         problems.append(
             f"  {len(asserted_gap)} step(s) ASSERTED but have no execution record — their "
             f"script ran and the run summary counts their assertions, while the executions "
-            f"array does not contain them. A skip guard cannot explain a step that asserted: "
-            f"read the verdict from run.stats / run.failures, and fix the step so its check "
-            f"either runs or is not written:"
+            f"array does not contain them. The failure booked against each of these does NOT "
+            f"belong to a precondition guard in its own pre-request script (or the report does "
+            f"not say what failed, which is not an excuse either) — so this is a step whose "
+            f"checks ran while its execution record vanished, NOT a recorded skip. Read the "
+            f"verdict from run.stats / run.failures, and fix the step so its check either runs "
+            f"or is not written:"
         )
         for i in asserted_gap[:_MAX_REPORTED]:
             problems.append(f"    [{i}] {leaves[i].get('name','?')}")
@@ -539,7 +628,24 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--collections-glob", default="collections/*.postman_collection.json")
     ap.add_argument("--out-dir", default="out")
+    # Доказательство инъекцией живёт РЯДОМ и запускается ОТСЮДА: гейт над гейтами
+    # (deploy/scripts/run-gate-self-tests.sh) находит самопроверки по РАЗБОРУ
+    # этого аргумента, а не по слову в тексте. Самопроверка, которую никто не
+    # исполняет, — доказательство, существующее только как проза.
+    ap.add_argument("--self-test", action="store_true",
+                    help="доказать инъекцией: записанный пропуск отличается от немого разрыва")
     args = ap.parse_args(argv)
+
+    if args.self_test:
+        import importlib.util as _ilu
+        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exec-coverage-selftest.py")
+        if not os.path.exists(_p):
+            print(f"ОТКАЗ: нет {_p} — доказывать нечем, и это не пропуск.", file=sys.stderr)
+            return 2
+        _s = _ilu.spec_from_file_location("exec_coverage_selftest", _p)
+        _m = _ilu.module_from_spec(_s)
+        _s.loader.exec_module(_m)
+        return _m.main()
 
     cols = sorted(glob.glob(args.collections_glob))
     if not cols:
@@ -549,6 +655,7 @@ def main(argv=None):
     bad = []
     unjudged = []
     tot_items = tot_exec = 0
+    tot_recorded = tot_explained = 0
     print("===== execution coverage (did every request actually run?) =====")
     for col in cols:
         ok, judged, line, problems = check_collection(col, args.out_dir)
@@ -565,6 +672,12 @@ def main(argv=None):
         if m:
             tot_exec += int(m.group(1))
             tot_items += int(m.group(2))
+        m = re.search(r"(\d+) RECORDED-SKIP", line)
+        if m:
+            tot_recorded += int(m.group(1))
+        m = re.search(r"(\d+) explained-skip", line)
+        if m:
+            tot_explained += int(m.group(1))
 
     # The census prints on EVERY path, including the ones that used to end on a
     # bare affirmative. "Nothing found" and "nothing examined" must not read the
@@ -573,6 +686,20 @@ def main(argv=None):
           f"not judged {len(unjudged)} (no usable report)")
     if tot_items:
         print(f"TOTAL executed {tot_exec}/{tot_items} ({100.0 * tot_exec / tot_items:.1f}%)")
+    # ПОПУЛЯЦИЯ ОБЪЯСНЁННЫХ ПРОПУСКОВ — счётна и РАЗДЕЛЕНА на два вида, потому что
+    # объясняют они разное:
+    #   RECORDED-SKIP  — страж предусловия назвал переменную ПАДАЮЩИМ утверждением
+    #                    и пропустил запрос. Пропуск записан: он виден в вердикте
+    #                    как упавшее утверждение и потому не может пройти незаметно;
+    #   explained-skip — пропуск НЕМОЙ: `skipRequest()` без утверждения либо
+    #                    перепрыгнутый литеральным `setNextRequest('<имя>')`. Он
+    #                    ничего не оставляет в вердикте, и это его свойство, а не
+    #                    оценка.
+    # Печатается ВСЕГДА, в том числе нулями: без этой строки «объяснённых пропусков
+    # ноль» неотличимо от «их не считали».
+    print(f"SKIPS: {tot_recorded} RECORDED-SKIP (пропуск записан падающим утверждением стража), "
+          f"{tot_explained} explained-skip (немой пропуск: skipRequest без утверждения / "
+          f"перепрыгнут литеральным setNextRequest)")
 
     if bad:
         print(f"FAIL: execution-coverage gaps in: {' '.join(bad)}", file=sys.stderr)
