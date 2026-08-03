@@ -25,11 +25,41 @@ import (
 // a principal that cannot be named must not be checked.
 const fgaReservedChars = ":#@ \t\n"
 
+// HumanUserID returns the principal's id ONLY when the principal is a human
+// user; "" for a service account, a system/bootstrap principal, an unknown type,
+// anonymous, or an empty ctx.
+//
+// Use this — NOT PrincipalUserID — for a column that is a foreign key into
+// `users(id)` (`users.invited_by` and anything like it). The distinction is not
+// cosmetic: PrincipalUserID deliberately answers for machine and system
+// principals too, so a caller that wants "the user" and reaches for the
+// user-shaped name gets `sva…`/`bootstrap` back and writes it into a column
+// where no such row can exist. That is a constraint violation at insert time,
+// surfaced to the caller as the unmapped-FK fallback text, which names neither
+// the column nor the cause.
+//
+// A non-user principal is not an error here and must not be turned into one: it
+// is a legitimate actor with no inviting/creating USER to record. Callers leave
+// the column NULL and rely on the Operation's `principalType`/`principalId` for
+// attribution, which is where a non-user actor belongs.
+func HumanUserID(ctx context.Context) string {
+	if IsAnonymous(ctx) {
+		return ""
+	}
+	if operations.PrincipalFromContext(ctx).Type != "user" {
+		return ""
+	}
+	return operations.PrincipalFromContext(ctx).ID
+}
+
 // PrincipalUserID returns the principal's user-id for user / service-account
 // / system-bootstrap principals; empty string for anonymous or empty ctx.
 //
 // Use this when writing DB rows or audit-log entries that must carry the
 // authenticated caller's id. Never trust a request-body field for these.
+//
+// NOTE the name is wider than it reads: the returned id is NOT necessarily a
+// `users(id)`. For a foreign key into that table use HumanUserID above.
 //
 // Bootstrap-principal (system/bootstrap) is treated as a legitimate identity
 // so internal seeds / migrations / fixtures continue to work; the audit row

@@ -40,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/relationhook"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -225,7 +226,21 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 	// 4. Pre-allocate user-id (на случай INSERT в async path; при idempotent
 	// возврате existing-row id игнорируется).
 	candidateUserID := domain.UserID(ids.NewID(domain.PrefixUser))
-	invitedBy := domain.UserID(principal.ID)
+
+	// `users.invited_by` is a foreign key into `users(id)` — it names the USER who
+	// invited, and nothing else can be named there. Stamping it from the principal
+	// id regardless of the principal's TYPE wrote `sva…` into that column for a
+	// machine caller, and the insert died on the constraint; the failure reached
+	// the caller as the unmapped-FK fallback text, which names neither the column
+	// nor the cause.
+	//
+	// A service account is a legitimate inviter — it simply is not a user, so there
+	// is no inviting user to record. The column is left NULL, and the actor is not
+	// lost: the Operation carries `principalType`/`principalId`, which is where a
+	// non-user actor belongs. Same question the authz model answers through
+	// authzguard.SubjectFromPrincipal — name the principal by the type it has,
+	// never by a type that merely fits the column.
+	invitedBy := domain.UserID(authzguard.HumanUserID(ctx))
 
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
