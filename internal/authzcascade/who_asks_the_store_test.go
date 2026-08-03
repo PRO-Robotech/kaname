@@ -99,23 +99,23 @@ var askingSites = map[string]lane{
 	// store's subject enumeration and nothing else: no relation is consulted, so the cascade
 	// has no bearing on it. It surfaced only when the matcher stopped filtering by receiver
 	// shape, and it is the whole cost of that widening — one recorded line.
-	"internal/apps/kacho/api/access_binding/get.go:Execute":                                        laneNotTheStore,
-	"internal/authzcascade/own_gates.go:Check":                                                     laneWrapper,
-	"internal/authzcascade/own_gates.go:CheckWithContext":                                          laneWrapper,
-	"internal/authzcascade/own_gates.go:secondChance":                                              laneWrapper,
-	"internal/authzcascade/batch_check.go:BatchCheckWithContext":                                   laneWrapper,
-	"internal/authzcascade/batch_check.go:checkCarryingFacts":                                      laneWrapper,
-	"internal/authzcascade/batch_check.go:batchItems":                                              laneWrapper,
-	"internal/authzguard/read_authz.go:AllowsVerb":                                                 laneOwnGate,
-	"internal/authzguard/scope.go:RequireScopeRelation":                                            laneOwnGate,
-	"internal/authzfilter/visibility.go:Visible":                                                   laneOwnGate,
+	"internal/apps/kacho/api/access_binding/get.go:Execute":      laneNotTheStore,
+	"internal/authzcascade/own_gates.go:Check":                   laneWrapper,
+	"internal/authzcascade/own_gates.go:CheckWithContext":        laneWrapper,
+	"internal/authzcascade/own_gates.go:secondChance":            laneWrapper,
+	"internal/authzcascade/batch_check.go:BatchCheckWithContext": laneWrapper,
+	"internal/authzcascade/batch_check.go:checkCarryingFacts":    laneWrapper,
+	"internal/authzcascade/batch_check.go:batchItems":            laneWrapper,
+	"internal/authzguard/read_authz.go:AllowsVerb":               laneOwnGate,
+	"internal/authzguard/scope.go:RequireScopeRelation":          laneOwnGate,
+	"internal/authzfilter/visibility.go:Visible":                 laneOwnGate,
 	// Батчевая дверь той же видимости страницы: предмет вопроса тот же, что у Visible
 	// выше, — членство страницы по предикату типа, — меняется только то, сколькими
 	// сообщениями он несётся. Полоса та же, иначе перевод на батч стал бы способом
 	// спрашивать, не объявляя полосы.
 	"internal/authzfilter/visibility.go:batchRelationRound": laneOwnGate,
 	// Проброс обёртки к транспорту: сама вопроса не задаёт, несёт чужой.
-	"internal/clients/openfga_batchcheck.go:BatchCheckWithContext": laneWrapper,
+	"internal/clients/openfga_batchcheck.go:BatchCheckWithContext":                                 laneWrapper,
 	"internal/apps/kacho/api/access_binding/helpers.go:fgaHoldsScopeAdmin":                         laneOwnGate,
 	"internal/apps/kacho/api/account/list_all_operations.go:requireAccountViewAuthority":           laneOwnGate,
 	"internal/apps/kacho/api/user/invite_authz.go:cascadeCheck":                                    laneOwnGate,

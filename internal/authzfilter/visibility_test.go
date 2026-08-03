@@ -233,7 +233,7 @@ func TestVisibleSet_LargePageConcurrent(t *testing.T) {
 // A parent context that expires mid-page must surface as an error, not as a
 // half-resolved "these are the visible ones" answer.
 func TestVisibleSet_ParentContextCancelled(t *testing.T) {
-	f := newFakeChecker(RelationsFor("t")[0]+"|t:a0")
+	f := newFakeChecker(RelationsFor("t")[0] + "|t:a0")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

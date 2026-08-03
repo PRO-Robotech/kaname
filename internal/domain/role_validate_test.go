@@ -54,7 +54,7 @@ func TestRole_A10_MixedArmRoleValidates(t *testing.T) {
 		// A LIVE type: the subject here is the mixed-arm shape, not the resource.
 		// `compute.image` used to stand here — a retired name, which Validate now
 		// refuses on every arm (domain/retired_types.go).
-		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}},                                           // ANCHOR → compiles
+		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}},                                             // ANCHOR → compiles
 		{Module: "vpc", Resources: []string{"subnet"}, Verbs: []string{"create"}, MatchLabels: map[string]string{"env": "prod"}}, // LABELS → excluded
 	}
 	compiled, err := CompileRules(rules)

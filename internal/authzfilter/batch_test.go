@@ -248,7 +248,7 @@ func TestVisibleSet_BatchesRunConcurrently(t *testing.T) {
 // first and leaves the second green, which is what distinguishes this gate from
 // one that merely asserts a page resolves.
 func TestVisibleSet_BatchCapableCheckerIsNeverAskedPerObject(t *testing.T) {
-	f := newFakeBatchChecker(RelationsFor("t")[0]+"|t:a")
+	f := newFakeBatchChecker(RelationsFor("t")[0] + "|t:a")
 
 	got, err := VisibleSet(context.Background(), f, "user:u1", "t", []string{"a", "b", "c"})
 	require.NoError(t, err)
