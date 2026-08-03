@@ -1333,15 +1333,21 @@ def _auth_pre_script(auth: str) -> List[str]:
         # against a different subject entirely. The typical expectation (401/403)
         # then still holds, so the case passes FOR THE WRONG REASON and the subject
         # under test is never exercised. Missing subject = misconfigured harness:
-        # FAIL naming the variable. The header is still removed afterwards so the
-        # request stays deterministic. (`auth="anonymous"` is the DELIBERATE
-        # anonymous case and takes the branch above — it is never affected.)
+        # FAIL naming the variable, THEN SKIP — the sanctioned shape, identical to
+        # gen.py::require_env_url. Dropping the header and sending anyway is NOT the
+        # sanctioned shape: the step still travels, and every OTHER assertion it
+        # carries is then scored against a principal the case never named.
+        # `pm.execution.skipRequest()` skips exactly one request — its test script
+        # does not run either — so nothing of this step is scored, while the
+        # pre-request assertion above has ALREADY run and keeps the skip RECORDED as
+        # a failure naming the variable, never a mute one. (`auth="anonymous"` is the
+        # DELIBERATE anonymous case and takes the branch above — never affected.)
         f"  pm.test('harness config: {auth} is set (subject under test)', () => {{",
         f"    pm.expect.fail('{auth} is not set — the authz-fixture seed "
         "(tests/authz-fixtures/setup.sh) did not provide this subject. Running the step "
         "anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
         "  });",
-        "  pm.request.headers.remove('Authorization');",
+        "  pm.execution.skipRequest();",
         "}",
     ]
 

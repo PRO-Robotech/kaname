@@ -63,6 +63,15 @@ Per collection, two independent things:
    environment guard must FAIL, not merely skip. The sanctioned shape is
    gen.py::require_env_url — assert (naming the variable), then skip.
 
+   THE MIRROR HALF LIVES ELSEWHERE, AND ON PURPOSE. 1b catches a guard that skips
+   MUTELY. The opposite deviation — a guard that asserts and SENDS ANYWAY — is
+   invisible to this gate by construction: the step executed and answered, so
+   coverage is satisfied while every OTHER assertion of that step was scored
+   against whatever the step became without its missing input (without a bearer:
+   an ANONYMOUS caller, i.e. a different principal). That half is held statically
+   by `internal/repohygiene/newmanprerequestguard_test.go` — a pre-request
+   assertion must be paired with `pm.execution.skipRequest()` in the same branch.
+
 2. EXECUTION COVERAGE — every leaf request must either have EXECUTED or be
    statically EXPLAINED as skippable. A request is explained when:
      a. its pre-request script calls `pm.execution.skipRequest()` (an explicit,

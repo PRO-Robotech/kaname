@@ -85,7 +85,7 @@
                   "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
-                  "  pm.request.headers.remove('Authorization');",
+                  "  pm.execution.skipRequest();",
                   "}",
                   "(function () {",
                   "  var _u = '';",
