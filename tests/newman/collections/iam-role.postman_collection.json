@@ -87,7 +87,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"custom_reader_{{runId}}\", \"description\": \"newman custom-role create probe\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}, {\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"read\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"custom_reader_{{runId}}\", \"description\": \"newman custom-role create probe\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}, {\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -345,7 +345,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"bad-role-name-{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"bad-role-name-{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -562,7 +562,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"permrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}], \"permissions\": [\"iam.user.*.read\"]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"permrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}], \"permissions\": [\"iam.user.*.read\"]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -637,7 +637,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"acc00000000000notfnd\", \"name\": \"badaccrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}]}",
+              "raw": "{\"accountId\": \"acc00000000000notfnd\", \"name\": \"badaccrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -706,7 +706,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"anonrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"anonrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -767,7 +767,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"nonadminrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"nonadminrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3185,7 +3185,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lsop_role_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"lsop_role_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4991,7 +4991,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"f52permrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"read\"]}], \"permissions\": [\"iam.user.*.read\"]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"f52permrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\"], \"verbs\": [\"get\"]}], \"permissions\": [\"iam.user.*.read\"]}",
               "options": {
                 "raw": {
                   "language": "json"

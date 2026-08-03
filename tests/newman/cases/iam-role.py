@@ -102,8 +102,8 @@ CASES.append(Case(
                 "name": "custom_reader_{{runId}}",
                 "description": "newman custom-role create probe",
                 "rules": [
-                    {"module": "iam", "resources": ["user"], "verbs": ["read"]},
-                    {"module": "vpc", "resources": ["network"], "verbs": ["read"]},
+                    {"module": "iam", "resources": ["user"], "verbs": ["get"]},
+                    {"module": "vpc", "resources": ["network"], "verbs": ["get"]},
                 ],
             },
             auth="jwtAccountAdminA",
@@ -202,7 +202,7 @@ CASES.append(Case(
             name="create-bad-name",
             method="POST",
             path="/iam/v1/roles",
-            body={"accountId": "{{accountAId}}", "name": "bad-role-name-{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}]},
+            body={"accountId": "{{accountAId}}", "name": "bad-role-name-{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
@@ -310,7 +310,7 @@ CASES.append(Case(
             body={
                 "accountId": "{{accountAId}}",
                 "name": "permrole_{{runId}}",
-                "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}],
+                "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}],
                 "permissions": ["iam.user.*.read"],
             },
             auth="jwtAccountAdminA",
@@ -366,7 +366,7 @@ CASES.append(Case(
             name="create-foreign-account",
             method="POST",
             path="/iam/v1/roles",
-            body={"accountId": "acc00000000000notfnd", "name": "badaccrole_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}]},
+            body={"accountId": "acc00000000000notfnd", "name": "badaccrole_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]},
             auth="jwtAccountAdminA",
             test_script=[
                 "pm.test('FOREIGN-ACCOUNT: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
@@ -392,7 +392,7 @@ CASES.append(Case(
             name="create-anon",
             method="POST",
             path="/iam/v1/roles",
-            body={"accountId": "{{accountAId}}", "name": "anonrole_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}]},
+            body={"accountId": "{{accountAId}}", "name": "anonrole_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]},
             auth="anonymous",
             test_script=[
                 "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
@@ -419,7 +419,7 @@ CASES.append(Case(
             name="create-nonadmin",
             method="POST",
             path="/iam/v1/roles",
-            body={"accountId": "{{accountAId}}", "name": "nonadminrole_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}]},
+            body={"accountId": "{{accountAId}}", "name": "nonadminrole_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]},
             auth="jwtNoBindings",
             test_script=[
                 "pm.test('NONADMIN: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
@@ -1243,7 +1243,7 @@ CASES.append(Case(
             name="create-for-lsop",
             method="POST",
             path="/iam/v1/roles",
-            body={"accountId": "{{accountAId}}", "name": "lsop_role_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}]},
+            body={"accountId": "{{accountAId}}", "name": "lsop_role_{{runId}}", "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1752,7 +1752,7 @@ CASES.append(Case(
             body={
                 "accountId": "{{accountAId}}",
                 "name": "f52permrole_{{runId}}",
-                "rules": [{"module": "iam", "resources": ["user"], "verbs": ["read"]}],
+                "rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}],
                 "permissions": ["iam.user.*.read"],
             },
             auth="jwtAccountAdminA",
