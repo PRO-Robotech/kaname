@@ -201,5 +201,21 @@ var Profile = listfiltergate.Profile{
 				"narrow to, and the caller must be authenticated to reach it. The exclusion " +
 				"expires with its method: retire the RPC and this entry becomes a finding.",
 		},
+
+		// ---- admin-only internal surface ----
+		"interactive_client.List": {
+			Shape: listfiltergate.ClusterScoped,
+			Reason: "an interactive-login client is a CLUSTER-level OAuth2 client registration: " +
+				"the table carries no project_id, account_id or owner column, so there is no " +
+				"per-object grant to narrow the page to — RowFilter here would state a check " +
+				"whose subject does not exist. What bounds the caller instead is the surface " +
+				"itself: the RPC lives ONLY on InternalInteractiveClientService, is registered " +
+				"ONLY on the cluster-internal listener, and its catalog entry demands " +
+				"`system_admin` on `cluster` — a relation defined `[user, service_account]` with " +
+				"NO `user:*` member, so unlike `viewer` it is not satisfiable by a wildcard tuple " +
+				"and does narrow. The exclusion expires with its subject twice over: retire the " +
+				"RPC and this entry becomes a finding, and give the resource an owner column and " +
+				"the reason above stops being true — at which point this must become RowFilter.",
+		},
 	},
 }

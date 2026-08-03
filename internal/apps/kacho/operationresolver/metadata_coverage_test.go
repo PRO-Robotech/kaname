@@ -61,6 +61,19 @@ var unresolvedMetadata = []string{
 	"DeleteUserMetadata",
 	"ForceLogoutMetadata",
 	"GrantClusterAdminMetadata",
+	// InteractiveClient{Create,Update,Delete}Metadata — то же основание, что у
+	// пары ClusterAdmin рядом, и по той же причине: у этих операций НЕТ воркера.
+	// Строка операции создаётся и переводится в терминальное состояние внутри
+	// одного вызова RPC, поэтому осиротеть ей негде, кроме гибели процесса между
+	// двумя соседними стейтментами. Ветку резолвера сюда не добавили не «потому
+	// что забыли»: она потребовала бы внести ресурс в CQRS-корень Reader, тогда
+	// как ресурс намеренно живёт отдельными адаптерами (кластерная админ-
+	// поверхность, не тенантная). Это ДОЛГ С ЧИСЛОМ — три записи, — а не
+	// прощение; закрывается вместе с парой ClusterAdmin, когда у админ-
+	// поверхности появится общий путь разрешения.
+	"CreateInteractiveClientMetadata",
+	"UpdateInteractiveClientMetadata",
+	"DeleteInteractiveClientMetadata",
 	"InviteUserMetadata",
 	"IssueSAKeyMetadata",
 	"IssueUserTokenMetadata",
