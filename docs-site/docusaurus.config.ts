@@ -9,6 +9,11 @@ const config: Config = {
   url: 'https://iam.kacho.cloud',
   baseUrl: '/',
   onBrokenLinks: 'throw',
+  // Якорь, который никуда не ведёт, — такая же битая ссылка, как несуществующий
+  // путь: читатель приходит на страницу и не находит раздела. По умолчанию
+  // Docusaurus лишь предупреждает, из-за чего переименование заголовка проезжает
+  // сборку молча — гейт обязан на этом падать.
+  onBrokenAnchors: 'throw',
 
   organizationName: 'PRO-Robotech',
   projectName: 'kacho-iam',

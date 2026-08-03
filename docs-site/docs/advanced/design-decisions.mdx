@@ -32,8 +32,8 @@ Kachō IAM — собственный продукт со своими треб�
       <td>Роль читаема и грантабельна из одной структуры; клиенты рендерят её напрямую. Сужение по id (<code>resourceNames</code>) или меткам (<code>matchLabels</code>) даёт как pin-by-id, так и динамический отбор по меткам</td>
     </tr>
     <tr>
-      <td><strong>List — scope-filter, а не default-deny 403</strong></td>
-      <td>У списка нет единого объекта для <code>Check</code>; фильтрация в handler'е возвращает 200 и только видимое (<code>viewer ∪ v_list</code>). Пользователь не получает 403 просто за вызов List — он видит ровно свой срез</td>
+      <td><strong>List — фильтр страницы, а не default-deny 403</strong></td>
+      <td>У списка нет единого объекта для <code>Check</code>; фильтрация в handler'е возвращает 200 и только видимое. Пользователь не получает 403 просто за вызов List — он видит ровно свой срез</td>
     </tr>
     <tr>
       <td><strong>Мутации асинхронны (<code>Operation</code>)</strong></td>
@@ -76,8 +76,6 @@ Kachō IAM — собственный продукт со своими треб�
 
 ## Границы текущей фазы
 
-- **`AuthorizeService.ListObjects`** — skeleton-интеграция; по умолчанию (`KACHO_AUTHZ_LISTOBJECTS=off`)
-  отдаёт `Unimplemented`, полное per-handler-подключение планируется.
 - **PENDING-статус AccessBinding** зарезервирован под JIT-approval workflow; в текущей фазе
   привязки создаются сразу `ACTIVE`.
 - Composite-роли (aggregationRule) — не реализованы; будут добавлены append-only.

@@ -68,9 +68,43 @@ flowchart LR
 Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **нельзя** гейтить
 одним `Check`: у списка нет единого объекта, а `Check` на `project:*` выдал бы default-deny (403)
 всем. Поэтому такие `List` **освобождены** от per-RPC Check на gateway и default-deny реализован
-**scope-filter'ом в handler'е**: возвращается `200` и только те ресурсы, что видит субъект —
-объединение `viewer ∪ v_list`. Пустой список, если ничего не видно — **никогда 403**. Handler —
-авторитетный гейт видимости.
+**фильтром страницы в handler'е**: возвращается `200` и только те ресурсы, что видит субъект.
+Пустой список, если ничего не видно — **никогда 403**. Handler — авторитетный гейт видимости.
+
+### Предикат страницы = отношение чтения
+
+Строка попадает в страницу `List` **тогда и только тогда, когда вызывающий вправе прочитать этот
+объект одиночным `Get`**. Предикат страницы и отношение, которым gateway гейтит `<Service>/Get`, —
+одно и то же: **`v_get`**.
+
+Это не сужение выданного доступа, а совпадение двух поверхностей. Ярусные отношения
+(`viewer`/`editor`/`admin`) и глагольные (`v_*`) в модели **развязаны** — ни одно не выводится из
+другого, — поэтому предикат, собранный из ярусных отношений, и `v_get` описывали бы разные
+множества, и список расходился бы с чтением по id в обе стороны. Все три каскадных супер-уровня и
+владелец аккаунта резолвят `v_get` структурно (`or super_admin`, у `account` — ещё `or owner`), а
+реконсайлер эмитит `v_get` для каждой роли, объявляющей глагол `get`.
+
+<table>
+  <thead><tr><th>Тип объекта</th><th>Предикат страницы</th></tr></thead>
+  <tbody>
+    <tr><td><code>account</code> / <code>project</code> / <code>iam&#95;user</code> / <code>iam&#95;group</code> / <code>iam&#95;service&#95;account</code> / <code>iam&#95;access&#95;binding</code></td><td><code>v&#95;get</code></td></tr>
+    <tr><td><code>iam&#95;role</code></td><td><code>viewer</code> ∪ <code>v&#95;list</code> — см. ниже</td></tr>
+  </tbody>
+</table>
+
+`iam_role` — единственный тип, чьё чтение по id каталог прав не гейтит отношением вовсе
+(`<exempt>`): одиночное чтение кастомной роли энфорсится **в сервисе** той же функцией, что
+фильтрует страницу. Обе поверхности задают один вопрос и разойтись не могут.
+
+### Стоимость страницы
+
+Видимость резолвится **прямым вопросом про объекты страницы**, а не перечислением всего, что
+доступно субъекту. Перечисление в хранилище отношений ограничено серверным потолком и не имеет
+продолжения, поэтому на долгоживущем сторе объект сверх потолка стал бы невидим владельцу при
+живых правах. Вопросы про объекты страницы группируются в батчи (до 50 проверок на запрос,
+партиции — параллельно), поэтому стоимость масштабируется **страницей**, а не населением типа:
+`pageSize=1000` укладывается в десятки обращений, а не в тысячу. Ошибка любого вопроса прерывает
+резолюцию целиком (fail-closed) — частично отфильтрованная страница не отдаётся никогда.
 
 :::warning Освобождение снимает authz, но не authN
 `<exempt>`-RPC (List'ы, `Role.Get`, `WhoAmI`, `Account.Create`, `AccessBinding.Create`,
@@ -91,32 +125,51 @@ anti-anonymous интерсептор IAM (`UNAUTHENTICATED`). Освобожд�
 
 ## Step-up (ACR floor)
 
-Большинство пользовательских RPC несут `required_acr_min=2` — **минимальный уровень свежести
-аутентификации** (second-factor). Это защищает чувствительные действия от stale-сессий: если ACR
+`required_acr_min=2` — **минимальный уровень свежести аутентификации** (second-factor): если ACR
 токена ниже требуемого, запрос отклоняется независимо от наличия отношения. Service→service-вызовы
 (SA-principal) освобождены от ACR-floor.
 
-## Условия ABAC
+Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком: из 289 записей
+каталога прав его несут 24, из них 22 — в IAM. Критерий — операция меняет posture безопасности:
+выдача учётных данных (`UserTokenService.Issue`/`Revoke`, `SAKeyService.Issue`/`Revoke`), выдача и
+отзыв прав (`AccessBindingService.Create`/`Update`/`Delete`/`Revoke`, `InternalClusterService.
+GrantAdmin`/`RevokeAdmin`, `RoleService.Update`/`Delete`, `GroupService.AddMember`/`RemoveMember`),
+блокировка и приглашение пользователя, включение/выключение ServiceAccount, необратимое удаление
+(`AccountService`/`ProjectService`/`GroupService`.`Delete`).
 
-Привязка может нести **условие** (`conditionId` — кастомное, либо `builtinCondition` — из
-well-known каталога, logical-oneof — не более одного). Условие — ABAC-overlay поверх ReBAC:
-доступ разрешается, только если условие истинно для контекста запроса
-(`AuthorizeCheckRequest.context`). Well-known каталог:
+Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
+повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.
+
+## Условия на кортежах
+
+Условие — предикат, который обязан быть истинным, чтобы кортеж считался действующим. Условия
+объявлены в модели авторизации и вычисляются OpenFGA по контексту запроса:
 
 <table>
   <thead><tr><th>Условие</th><th>Семантика</th></tr></thead>
   <tbody>
-    <tr><td><code>MFA_FRESH</code></td><td>acr=3 (passkey/FIDO2) + <code>webauthn</code> в amr + MFA не старше 15 минут</td></tr>
-    <tr><td><code>NON_EXPIRED</code></td><td>Нет <code>expiresAt</code> ИЛИ <code>now() &lt; expiresAt</code></td></tr>
-    <tr><td><code>SOURCE_IP_IN_RANGE</code></td><td>Source IP входит в один из настроенных CIDR</td></tr>
-    <tr><td><code>JIT_WINDOW</code></td><td>Разрешено в течение <code>ttl_seconds</code> после self-elevation</td></tr>
-    <tr><td><code>BUSINESS_HOURS</code></td><td>Пн–Пт в интервале <code>[start_h, end_h)</code> в настроенном TZ</td></tr>
-    <tr><td><code>DEVICE_COMPLIANT</code></td><td>WebAuthn device-attestation в списке одобренных AAGUID</td></tr>
+    <tr><td><code>mfa&#95;fresh</code></td><td>acr=3 (passkey/FIDO2) + <code>webauthn</code> в amr + MFA не старше 15 минут</td></tr>
+    <tr><td><code>non&#95;expired</code></td><td><code>now() &lt; valid&#95;until</code></td></tr>
+    <tr><td><code>source&#95;ip&#95;in&#95;range</code></td><td>Source IP входит в один из настроенных CIDR</td></tr>
+    <tr><td><code>jit&#95;window</code></td><td>Разрешено в течение <code>ttl&#95;seconds</code> после активации</td></tr>
+    <tr><td><code>business&#95;hours</code></td><td>Пн–Пт в интервале <code>[start&#95;h, end&#95;h)</code> в настроенном TZ</td></tr>
+    <tr><td><code>device&#95;compliant</code></td><td>WebAuthn device-attestation в списке одобренных AAGUID</td></tr>
   </tbody>
 </table>
 
-Условия компилируются в OpenFGA Authorization Model на этапе установки. При отказе из-за условия
-`AuthorizeCheckResponse.denyReasons` содержит причину (`["mfa_fresh: acr=2 (need 3)"]`).
+**Условие задаёт сервер, а не тенант.** Оно навешивается там, где его объявляет сама модель: тип
+`cluster` принимает субъекта в отношение `console` только `with mfa_fresh`, тип
+`compute_instance` — так же для `ssh`/`console`. Ключ условия выбирает платформа при написании
+модели; в запросе на выдачу прав условие не передаётся.
+
+:::warning Привязка условия не несёт
+`AccessBinding` **не имеет** полей условия. Теги `9`/`14` и имена `condition_id` /
+`builtin_condition` в контракте зарезервированы (`reserved`), тенантского ресурса условия и его
+REST-поверхности не существует. Ни один путь принятия решения эти поля не читал, поэтому они сняты
+с контракта целиком, а не оставлены «на будущее»: поле, которое принимают и не читают, обещает
+возможность, за которую никто не отвечает. Будущий дизайн условий на выдаче начнётся с чистого
+номера поля.
+:::
 
 ## Материализация: tuple-outbox
 

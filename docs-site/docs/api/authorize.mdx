@@ -64,8 +64,9 @@ per-subject/per-resource решение принимает handler.
 </CodeBlock>
 
 `action` — строка `<domain>.<resource>.<verb>`; сервер резолвит её в FGA-отношение. Опциональный
-`context` (`google.protobuf.Struct`) несёт данные условий — `acr_value`, `amr_claims`, `mfa_at`,
-`client_ip`, `device_attestation` (см. [условия ABAC](/architecture/authz#условия-abac)).
+`context` (`google.protobuf.Struct`) несёт данные для вычисления условий на кортежах — `acr_value`,
+`amr_claims`, `mfa_at`, `client_ip`, `device_attestation` (см.
+[Условия на кортежах](/architecture/authz#условия-на-кортежах)).
 
 </ApiOperation>
 
