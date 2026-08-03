@@ -580,6 +580,27 @@ def require_env_url(var: str, path: str, why: str = "") -> List[str]:
 
     exec-coverage.py enforces this shape statically: a `skipRequest()` guard that
     reads a *BaseUrl variable and carries no `pm.test(` fails the gate.
+
+    WHY THE PATH IS RESOLVED EXPLICITLY (`pm.variables.replaceIn`)
+    -------------------------------------------------------------
+    Assigning `pm.request.url` REPLACES the parsed Url with whatever string this
+    block builds. Every earlier caller passed a constant path, so nothing in it
+    ever needed substituting and the question never came up. A path naming a
+    resource — `/iam/v1/internal/interactiveClients/{{icId}}` — does need it, and
+    relying on newman to substitute a template inside a URL the pre-request script
+    just overwrote is relying on ordering nobody here has pinned. If it did NOT
+    substitute, the request would travel with the literal `{{icId}}` in it and the
+    service would answer a perfectly correct refusal about an id nobody named —
+    the same shape as the unresolved-address class the collection-level guard was
+    written for, one level further in.
+
+    So the path is resolved HERE, before the assignment, by the documented
+    primitive. On a path with no `{{…}}` this is the identity function, which is
+    why every existing caller is byte-unchanged in behaviour. The collection-level
+    `_URL_VAR_GUARD` still runs FIRST and still refuses to send a request whose
+    original URL names a variable that is undefined in every scope, so "the
+    variable was never captured" remains a reported failure and not a silent
+    substitution of the empty string.
     """
     reason = f" — {why}" if why else ""
     return [
@@ -587,7 +608,8 @@ def require_env_url(var: str, path: str, why: str = "") -> List[str]:
         "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
         f"const __cfgUrl = pm.environment.get('{var}') || pm.variables.get('{var}') || '';",
         "if (__cfgUrl) {",
-        f"  pm.request.url = __cfgUrl + '{path}';",
+        # replaceIn is identity on a template-free path; see the docstring above.
+        f"  pm.request.url = __cfgUrl + pm.variables.replaceIn('{path}');",
         "} else {",
         f"  pm.test('harness config: {var} is set{reason}', () => {{",
         f"    pm.expect.fail('{var} is not set — the newman runner "

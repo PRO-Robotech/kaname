@@ -109,7 +109,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/geo/v1/regions';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/geo/v1/regions');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -203,7 +203,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users:upsertFromIdentity';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/users:upsertFromIdentity');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -312,7 +312,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:lookupSubject';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:lookupSubject');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -421,7 +421,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:check';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:check');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -518,7 +518,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/kacho-no-such-route-{{runId}}';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho-no-such-route-{{runId}}');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -603,7 +603,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -688,7 +688,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -773,7 +773,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -858,7 +858,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/kacho.cloud.iam.v1.InternalIAMService/ForceLogout';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho.cloud.iam.v1.InternalIAMService/ForceLogout');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -937,7 +937,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users/usr00000000000000abc';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/users/usr00000000000000abc');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1031,7 +1031,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users:upsertFromIdentity';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/users:upsertFromIdentity');",
                   "} else {",
                   "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1199,7 +1199,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/users:upsertFromIdentity';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/users:upsertFromIdentity');",
                   "} else {",
                   "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1288,7 +1288,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:lookupSubject';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:lookupSubject');",
                   "} else {",
                   "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1376,7 +1376,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:lookupSubject';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:lookupSubject');",
                   "} else {",
                   "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1457,7 +1457,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + '/iam/v1/internal/iam:check';",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:check');",
                   "} else {",
                   "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -1478,6 +1478,293 @@
                   "pm.test('INT-IAM-CHECK: status 200 (PDP answered)', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('INT-IAM-CHECK: allowed is a boolean verdict', () => pm.expect(j.allowed, JSON.stringify(j)).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-INT-NEG-EXT-IC-LIST — InternalInteractiveClientService.List on the external TLS listener → 404 mux miss (internal-only, ban #6) — refused even to the principal authorised for it",
+      "description": "class:NEG | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-NEG-EXT-IC-LIST :: ic-list-on-external",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/interactiveClients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "interactiveClients"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/interactiveClients');",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"EXT-IC-LIST: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-IC-LIST: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss. An unrouted path is answered by",
+                  "// grpc-gateway's ROUTING error — the bare {code:5, message:'Not Found'}, the same",
+                  "// answer a nonsense path gets on this listener. iam's own NOT_FOUND always names",
+                  "// the resource and the id ('<Resource> <id> not found', contract tone), so any",
+                  "// other message here would mean the request REACHED the service.",
+                  "//",
+                  "// This used to ask whether the body was JSON AT ALL, because the hidden route was",
+                  "// answered by a second producer in plain text. That difference was itself an",
+                  "// existence-oracle for the admin surface and has been removed; the discriminator",
+                  "// is the message, not the content type.",
+                  "pm.test('EXT-IC-LIST: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).message, 'any other message here would mean the request REACHED the service')",
+                  "    .to.eql('Not Found');",
+                  "});",
+                  "pm.test('EXT-IC-LIST: no interactiveClients page in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).interactiveClients, 'interactiveClients page must not be in the response').to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-INT-NEG-EXT-IC-CREATE — InternalInteractiveClientService.Create on the external TLS listener → 404 mux miss (internal-only, ban #6) — no client is registered at the provider from the outside",
+      "description": "class:NEG | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-NEG-EXT-IC-CREATE :: ic-create-on-external",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/interactiveClients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "interactiveClients"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"iaclient-ext-{{runId}}\", \"redirectUris\": [\"https://api.kacho.local/auth/callback\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/interactiveClients');",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"EXT-IC-CREATE: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-IC-CREATE: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss. An unrouted path is answered by",
+                  "// grpc-gateway's ROUTING error — the bare {code:5, message:'Not Found'}, the same",
+                  "// answer a nonsense path gets on this listener. iam's own NOT_FOUND always names",
+                  "// the resource and the id ('<Resource> <id> not found', contract tone), so any",
+                  "// other message here would mean the request REACHED the service.",
+                  "//",
+                  "// This used to ask whether the body was JSON AT ALL, because the hidden route was",
+                  "// answered by a second producer in plain text. That difference was itself an",
+                  "// existence-oracle for the admin surface and has been removed; the discriminator",
+                  "// is the message, not the content type.",
+                  "pm.test('EXT-IC-CREATE: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).message, 'any other message here would mean the request REACHED the service')",
+                  "    .to.eql('Not Found');",
+                  "});",
+                  "pm.test('EXT-IC-CREATE: no Operation metadata (a client was registered) in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).metadata, 'Operation metadata (a client was registered) must not be in the response').to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-INT-OK-INT-IC-LIST — InternalInteractiveClientService.List on the cluster-internal listener → 200 with a page (positive control: the two 404s above mean 'not routed here', not 'nowhere at all')",
+      "description": "class:CRUD | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-OK-INT-IC-LIST :: ic-list-on-internal",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/interactiveClients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "interactiveClients"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — internalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/interactiveClients');",
+                  "} else {",
+                  "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
+                  "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('INT-IC-LIST: the internal listener serves the page', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j, JSON.stringify(j)).to.be.an('object');",
+                  "  // An empty cluster is a legal page: the assertion is that the ROUTE",
+                  "  // answers with the response message, not that anything was created.",
+                  "  const items = j.interactiveClients === undefined ? [] : j.interactiveClients;",
+                  "  pm.expect(items, 'interactiveClients must be a page, absent meaning empty').to.be.an('array');",
+                  "});"
                 ]
               }
             }
