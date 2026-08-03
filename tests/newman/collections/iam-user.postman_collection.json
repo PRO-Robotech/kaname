@@ -1245,7 +1245,7 @@
       ]
     },
     {
-      "name": "IAM-USR-INV-NEG-ROLE-MISSING — Invite with non-existent roleId → Operation.error FAILED_PRECONDITION (9) \"Role <id> not found\"",
+      "name": "IAM-USR-INV-NEG-ROLE-MISSING — Invite with non-existent roleId → sync FAILED_PRECONDITION (9) \"Role <id> not found\"",
       "description": "class:NEG | priority:P1",
       "item": [
         {
@@ -1303,77 +1303,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('200 — это конверт операции', () => pm.expect(pm.response.json().id, pm.response.text()).to.be.a('string').and.not.empty);",
-                  "pm.environment.set('badRoleInvOpId', pm.response.json().id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-USR-INV-NEG-ROLE-MISSING :: poll-bad-role",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{badRoleInvOpId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{badRoleInvOpId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}",
-                  "if (pm.environment.get('_badRoleStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_badRolePolls', '0');",
-                  "  pm.environment.set('_badRoleStarted', pm.info.requestName);",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "const j = pm.response.json();",
-                  "const pc = parseInt(pm.environment.get('_badRolePolls') || '0', 10);",
-                  "if (!j.done && pc < 30) {",
-                  "  pm.environment.set('_badRolePolls', String(pc + 1));",
-                  "  const _bp = Date.now(); while (Date.now() - _bp < 500) void 0;",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_badRolePolls');",
-                  "pm.environment.unset('_badRoleStarted');",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "pm.test('error code 9 (FAILED_PRECONDITION — role not found)', () =>   pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('текст — контрактный тон FK по роли (Role … not found)', () =>   pm.expect(((j.error||{}).message||'')).to.match(/^Role .* not found$/));"
+                  "pm.test('code 9 (FAILED_PRECONDITION — роли нет)', () =>   pm.expect(j.code, pm.response.text()).to.eql(9));",
+                  "pm.test('контрактный текст называет саму роль', () =>   pm.expect(j.message, pm.response.text())    .to.eql('Role rol00000000000notfnd not found'));",
+                  "pm.test('операции не создано (полоса синхронная)', () =>   pm.expect(j.id, pm.response.text()).to.be.undefined);"
                 ]
               }
             }

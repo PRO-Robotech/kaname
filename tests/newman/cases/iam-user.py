@@ -595,31 +595,43 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-USR-INV-NEG-ROLE-MISSING — Invite with non-existent roleId → async FailedPrecondition
+# IAM-USR-INV-NEG-ROLE-MISSING — Invite с несуществующим roleId → СИНХРОННЫЙ
+# FailedPrecondition «Role <id> not found».
 #
-# ЧЕГО КЕЙС НЕ ДЕЛАЛ. Тело несло `roleId` БЕЗ `projectId`, а проект обязателен всегда,
-# когда задана роль (`invite.go`, проверка стоит до создания операции). Поэтому приглашение
-# отвергалось синхронным 400 «Illegal argument project_id: required when role_id is set»
-# на КАЖДОМ прогоне: операции не возникало, поллинг себя пропускал, и полоса, ради которой
-# кейс существует — несуществующая роль на вставке выдачи, — не выполнялась НИ РАЗУ.
-# Утверждение `oneOf([200, 400])` это и скрывало: оно проходило и на том отказе, и на
-# другом, и на отсутствии отказа вовсе.
+# ЧЕГО КЕЙС НЕ ДЕЛАЛ (первая редакция). Тело несло `roleId` БЕЗ `projectId`, а проект
+# обязателен всегда, когда задана роль. Приглашение отвергалось синхронным 400 «Illegal
+# argument project_id: required when role_id is set» на КАЖДОМ прогоне, и полоса, ради
+# которой кейс существует, не выполнялась НИ РАЗУ. Утверждение `oneOf([200, 400])` это
+# и скрывало.
 #
-# Это ТОТ ЖЕ дефект авторства, который сосед `IAM-USR-INV-IDEM-REINVITE` уже разобрал и
-# починил у себя (см. его шапку). Здесь он остался жив — потому что правку применили к
-# одному кейсу, а не к классу.
+# ПОЧЕМУ ОН ОСТАВАЛСЯ КРАСНЫМ ПОСЛЕ ТОЙ ПРАВКИ. Проект назвали — и предсказали, что
+# вставка выдачи дойдёт до БД и упрётся в FK на роль, то есть полоса АСИНХРОННАЯ (конверт
+# операции, отказ внутри неё). На момент правки (30.07, 03:26) это было верно. В 20:00
+# того же дня продукт это изменил: проверка «роль назначаема на область» встала у КАЖДОГО
+# писателя привязок, и на пути приглашения она стоит ДО создания операции. Полоса стала
+# СИНХРОННОЙ, а кейс остался прежним — форма ответа сменилась, проверка нет.
 #
-# ЧТО ТЕПЕРЬ. Проект назван, поэтому вставка выдачи действительно доходит до БД и
-# упирается в FK на роль (`access_bindings_role_fk`) — полоса АСИНХРОННАЯ: вызывающий
-# получает конверт операции, а отказ живёт в самой операции. Заявлены код и контрактный
-# текст: `FAILED_PRECONDITION` + «Role <id> not found» (pgmaperr, direction-sensitive —
-# на вставке это «роли нет», на удалении роли текст другой). Текст пинит, КАКОЙ это
-# отказ, иначе кейс прошёл бы на любом постороннем.
+# Цена была не в одном утверждении. `invite-bad-role` получал 400 вместо 200, поэтому
+# `badRoleInvOpId` не захватывался, и следующий шаг тридцать раз опрашивал
+# `/operations/{{badRoleInvOpId}}` по НЕРАЗРЕШЁННОЙ подстановке. Один устаревший
+# прогноз полосы давал ~36 упавших утверждений.
+#
+# ЧТО ПРОВЕРЯЕТСЯ ТЕПЕРЬ — ровно то, что продукт производит, и строже прежнего:
+# синхронный 400, `code` 9 (FAILED_PRECONDITION) и ТОЧНЫЙ контрактный текст. Прежняя
+# редакция пинила лишь ФОРМУ текста (`/^Role .* not found$/`), потому что на полосе FK в
+# слот роли попадала составная строка, а не `rol…`. Синхронная проверка сообщает
+# НАСТОЯЩИЙ идентификатор роли, поэтому здесь утверждается сам текст целиком — это
+# отличает отказ по роли и от общей заглушки FK, и от «уже существует», и от отказа по
+# любому другому полю.
+#
+# Полоса FK остаётся DB-уровневым backstop'ом (ban #10) для гонки «роль удалили между
+# проверкой и вставкой» — она недетерминируема из newman и здесь не утверждается.
+# verifies https://github.com/PRO-Robotech/kacho/issues/105
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-INV-NEG-ROLE-MISSING",
-    title="Invite with non-existent roleId → Operation.error FAILED_PRECONDITION (9) \"Role <id> not found\"",
+    title="Invite with non-existent roleId → sync FAILED_PRECONDITION (9) \"Role <id> not found\"",
     classes=["NEG"],
     priority="P1",
     steps=[
@@ -631,55 +643,21 @@ CASES.append(Case(
                   "email": "badrole-{{runId}}@kacho.local", "roleId": "rol00000000000notfnd"},
             auth="jwtAccountAdminA",
             test_script=[
-                # Полоса одна: форма id роли валидна (узнаваемый префикс), поэтому
-                # синхронного отказа по формату нет, и приглашение принимается конвертом
-                # операции. Отказ выносит операция — шагом ниже.
-                *assert_status(200),
-                "pm.test('200 — это конверт операции', () => pm.expect(pm.response.json().id, pm.response.text()).to.be.a('string').and.not.empty);",
-                "pm.environment.set('badRoleInvOpId', pm.response.json().id);",
-            ],
-        ),
-        Step(
-            name="poll-bad-role",
-            method="GET",
-            path="/operations/{{badRoleInvOpId}}",
-            auth="jwtAccountAdminA",
-            pre_script=[
-                # Реальная пауза между поллами: newman исполняет test-script синхронно и
-                # вызывает setNextRequest ДО любого setTimeout, поэтому busy-wait —
-                # единственный способ действительно разнести опросы (testing.md).
-                "if (pm.environment.get('_badRoleStarted') !== pm.info.requestName) {",
-                "  pm.environment.set('_badRolePolls', '0');",
-                "  pm.environment.set('_badRoleStarted', pm.info.requestName);",
-                "}",
-            ],
-            test_script=[
-                *assert_status(200),
+                # 400, а не 200: форма id роли валидна (узнаваемый префикс), поэтому
+                # отказа по ФОРМАТУ нет — отказ выносит проверка назначаемости роли,
+                # и она стоит до создания операции. Конверта операции здесь не будет.
+                *assert_status(400),
                 "const j = pm.response.json();",
-                "const pc = parseInt(pm.environment.get('_badRolePolls') || '0', 10);",
-                "if (!j.done && pc < 30) {",
-                "  pm.environment.set('_badRolePolls', String(pc + 1));",
-                "  const _bp = Date.now(); while (Date.now() - _bp < 500) void 0;",
-                "  pm.execution.setNextRequest(pm.info.requestName);",
-                "  return;",
-                "}",
-                "pm.environment.unset('_badRolePolls');",
-                "pm.environment.unset('_badRoleStarted');",
-                "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "pm.test('error code 9 (FAILED_PRECONDITION — role not found)', () => "
-                "  pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                # Пиним ФОРМУ контрактного текста, а не сам идентификатор роли, и на это
-                # есть причина в коде: подсказка идентификатора, которую вставка выдачи
-                # передаёт мапперу, собрана под текст про ЗАНЯТЫЙ слот
-                # («<субъект>|<тип области>:<область>») и переиспользуется ветвью FK по
-                # роли как есть. Поэтому в слот роли попадает составная строка, а не
-                # `rol…`. Утверждать здесь `Role rol… not found` значило бы утверждать
-                # то, чего продукт не производит; утверждать просто «not found» — не
-                # отличать эту причину от общей заглушки FK и от «уже существует».
-                # Форма `Role … not found` отличает, и она — то, что реально доходит.
-                # verifies https://github.com/PRO-Robotech/kacho/issues/105
-                "pm.test('текст — контрактный тон FK по роли (Role … not found)', () => "
-                "  pm.expect(((j.error||{}).message||'')).to.match(/^Role .* not found$/));",
+                "pm.test('code 9 (FAILED_PRECONDITION — роли нет)', () => "
+                "  pm.expect(j.code, pm.response.text()).to.eql(9));",
+                "pm.test('контрактный текст называет саму роль', () => "
+                "  pm.expect(j.message, pm.response.text())"
+                "    .to.eql('Role rol00000000000notfnd not found'));",
+                # Отказ синхронный ⇒ операции не возникает. Утверждается явно: иначе
+                # возврат к асинхронной полосе прошёл бы незамеченным, а вместе с ним
+                # вернулся бы и поллинг по неразрешённой подстановке.
+                "pm.test('операции не создано (полоса синхронная)', () => "
+                "  pm.expect(j.id, pm.response.text()).to.be.undefined);",
             ],
         ),
     ],
