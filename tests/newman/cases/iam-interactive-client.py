@@ -42,29 +42,32 @@ Two independent reasons, and BOTH are needed:
   "the floor held" from "the subject was never presented". It belongs to the
   ceremony wave (S2), where a human bearer is produced by the ceremony itself.
 
-Coverage (acceptance sub-phase-IAM-INT-1, §3 / §8):
+Coverage (acceptance sub-phase-IAM-INT-1, §3 / §8). The scenario ID is carried in
+the text so the trace runs both ways — §3 states it must appear in the names of
+the integration and newman cases that lock each scenario:
 
-  IAM-IC-CR-CRUD-OK          — sc. 01 (+ sc. 12 positive): create → Operation, resource shape
-  IAM-IC-CR-CONF-DUP-NAME    — sc. 02: the name is taken → ALREADY_EXISTS, and NO second row
-  IAM-IC-CR-VAL-REDIRECT-URIS— sc. 03: redirect targets required and https-only (+ positive pair)
-  IAM-IC-GT-NEG-ABSENT       — sc. 04: well-formed absent id → NOT_FOUND, contract tone (+ positive pair)
-  IAM-IC-GT-VAL-MALFORMED-ID — sc. 05: malformed id → INVALID_ARGUMENT, named resource (+ positive pair)
-  IAM-IC-UP-VAL-IMMUTABLE-MASK — sc. 06: an immutable field in the mask is refused BY NAME (+ positive pair)
-  IAM-IC-UP-VAL-UNKNOWN-MASK — sc. 07: an unknown field in the mask is refused; empty mask is a full PATCH
-  IAM-IC-DL-IDM-REPEAT       — sc. 09: delete is idempotent, and the row stays gone
+  IAM-IC-CR-CRUD-OK            — IAM-INT-1-01 (+ IAM-INT-1-12 positive half):
+                                 create → Operation, then the resource's shape
+  IAM-IC-CR-CONF-DUP-NAME      — IAM-INT-1-02: the name is taken → ALREADY_EXISTS, and NO second row
+  IAM-IC-CR-VAL-REDIRECT-URIS  — IAM-INT-1-03: redirect targets required and https-only (+ positive pair)
+  IAM-IC-GT-NEG-ABSENT         — IAM-INT-1-04: well-formed absent id → NOT_FOUND, contract tone (+ positive pair)
+  IAM-IC-GT-VAL-MALFORMED-ID   — IAM-INT-1-05: malformed id → INVALID_ARGUMENT, named resource (+ positive pair)
+  IAM-IC-UP-VAL-IMMUTABLE-MASK — IAM-INT-1-06: an immutable field in the mask is refused BY NAME (+ positive pair)
+  IAM-IC-UP-VAL-UNKNOWN-MASK   — IAM-INT-1-07: an unknown field in the mask is refused; empty mask is a full PATCH
+  IAM-IC-DL-IDM-REPEAT         — IAM-INT-1-09: delete is idempotent, and the row stays gone
 
 Not here, and each with its reason rather than a silence:
 
-  sc. 08 (provider unreachable → UNAVAILABLE, no row left behind) — §8 assigns it
+  IAM-INT-1-08 (provider unreachable → UNAVAILABLE, no row left behind) — §8 assigns it
     "integration + newman happy". Making the provider's administrative hop
     unreachable is not expressible through the edge, so the black-box half of 08
     IS the happy path (IAM-IC-CR-CRUD-OK); the fail-closed half is pinned by the
     integration test, which can substitute a failing provider port.
-  sc. 11 (not reachable on the outside) — a pair belongs in the EXISTING census,
+  IAM-INT-1-11 (not reachable on the outside) — a pair belongs in the EXISTING census,
     `iam-internal-only-check.py`, not in a second one beside it. It is added
     there: a negative on the advertised external listener plus the positive
     control on the internal one.
-  the `ErrorInfo.reason` tokens named by sc. 04/05 (`RESOURCE_NOT_FOUND`,
+  the `ErrorInfo.reason` tokens named by IAM-INT-1-04/05 (`RESOURCE_NOT_FOUND`,
     `INVALID_RESOURCE_ID`) — the product emits NO such token anywhere in the
     tree today (measured: zero non-test occurrences outside registry comments).
     Asserting one here would be asserting a capability that does not exist, and

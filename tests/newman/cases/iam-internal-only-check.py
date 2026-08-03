@@ -735,8 +735,7 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# InternalInteractiveClientService — the interactive-login client (IAM-INT-1,
-# scenario 11).
+# InternalInteractiveClientService — the interactive-login client, IAM-INT-1-11.
 #
 # WHAT KEEPS IT OFF THE OUTSIDE, STATED PRECISELY. The route IS mounted on both
 # multiplexers: registration walks the pair in ONE loop, `Internal*` included.
