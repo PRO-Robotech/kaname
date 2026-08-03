@@ -1344,9 +1344,25 @@ CASES.append(Case(
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
                 # Pin the rejection to the token, so an authz/route regression that
                 # also 4xx-es cannot satisfy this negative.
-                "pm.test('rejection names the page token', () => {",
+                #
+                # Утверждается МАШИНОЧИТАЕМАЯ деталь, а не проза сообщения. Прежняя
+                # редакция искала подстроку `page_token` в `message` и падала на
+                # корректном отказе: сообщение приходит от общего построителя ошибок
+                # corelib (`coreerrors.InvalidArgument()` → «invalid argument»), а имя
+                # поля живёт там, где ему и положено, — в `google.rpc.BadRequest`.
+                # `api-conventions.md` прямо запрещает клиенту ключеваться на прозу
+                # («тон message стабилен, но не парсибелен»), так что проба требовала
+                # от продукта ровно того, чего конвенция от него не хочет.
+                #
+                # Замена строже, а не мягче: сверяется ТОЧНОЕ имя поля в детали, а не
+                # вхождение подстроки в текст, — отказ по другому полю (page_size) эту
+                # пробу больше не удовлетворяет.
+                "pm.test('деталь отказа называет именно page_token', () => {",
                 "  const j = pm.response.json();",
-                "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('page_token');",
+                "  const fields = (j.details || [])",
+                "    .flatMap(d => d.fieldViolations || [])",
+                "    .map(v => v.field);",
+                "  pm.expect(fields, JSON.stringify(j)).to.include('page_token');",
                 "});",
             ],
         ), retry_on=(403, 404)),

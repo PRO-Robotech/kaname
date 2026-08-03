@@ -573,9 +573,15 @@ for _case in CASES:
     ))
     # No binding of ours ⇒ no DELETE. Aiming at a garbage id purely to have something to
     # send is what made the outcome unreadable in the first place.
+    # `_abTeardownDelId` задаётся ВСЕГДА — пустой строкой, когда привязки нашей нет.
+    # Для стража адреса пустое значение — законный случай (его собственный комментарий
+    # это оговаривает: литерала в адресе не останется), тогда как «переменную не задал
+    # НИКТО» обязано оставаться находкой. Отправку по-прежнему снимает skipRequest, так
+    # что запрос с пустым id никуда не уходит; разница только в том, что шаг ЗАЯВЛЯЕТ
+    # «адресовать нечего», вместо того чтобы молчать и выглядеть как потерянный захват.
     _case.steps[-1].pre_script = [
+        f"pm.environment.set('_abTeardownDelId', pm.environment.get('{_idvar}') || '');",
         f"if (!pm.environment.get('{_idvar}')) {{ pm.execution.skipRequest(); }}",
-        f"pm.environment.set('_abTeardownDelId', pm.environment.get('{_idvar}'));",
     ] + list(_case.steps[-1].pre_script or [])
     # Step 4: poll THIS case's Delete Operation until done (best-effort cleanup).
     _case.steps.append(Step(
@@ -584,6 +590,9 @@ for _case in CASES:
         path="/operations/{{" + _delopvar + "}}",
         auth=_auth,
         pre_script=[
+            # Та же дисциплина: DELETE мог законно ответить 404 («уже нет»), и тогда
+            # идентификатора операции удаления не существует — опрашивать нечего.
+            f"pm.environment.set('{_delopvar}', pm.environment.get('{_delopvar}') || '');",
             f"if (!pm.environment.get('{_delopvar}')) {{ pm.execution.skipRequest(); }}",
         ],
         test_script=[
