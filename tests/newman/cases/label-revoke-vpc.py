@@ -3,6 +3,34 @@
 
 """Cross-service ARM_LABELS revoke-on-label-change, vpc resources (e2e, black-box).
 
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║ READ THIS BEFORE CALLING A RED HERE A FLAKE — IT WAS MEASURED, NOT GUESSED.        ║
+║                                                                                   ║
+║ The revoke-side probes exhaust their budget on this stand. That is NOT             ║
+║ eventual-consistency noise, NOT a drainer backlog and NOT a wrong probe. Measured  ║
+║ 2026-08-04 on a production-posture stand with no competing load:                   ║
+║                                                                                   ║
+║   * the drainer is CAUGHT UP — zero unsent rows out of 3 544 498; a delete row     ║
+║     goes out in 0.03-0.15 s, mean lag 2.3 s and worst 31.5 s over 90 minutes;      ║
+║   * the ADD half materialises on the request path: its write row is created        ║
+║     within milliseconds of the granting call, and `add-post-add-allow` converges   ║
+║     in ~1 s (two polls);                                                           ║
+║   * the REMOVE half does not. For the three probes that failed, the delete rows    ║
+║     were created about two minutes after their own Update — and all three within   ║
+║     the SAME half-second, although the three Updates were 20 s and 80 s apart.     ║
+║     Rows arriving together for requests that did not is the signature of a later   ║
+║     sweep, not of the request that caused them. Across 4031 write→delete pairs in  ║
+║     one 35-minute window the median separation is 37.7 s, the largest 4 m 38 s.    ║
+║                                                                                   ║
+║ So the two halves of one contract are asymmetric: adding the label grants now,     ║
+║ removing it revokes when something later gets round to it. The probe budget here   ║
+║ is POLL_CAP × 500 ms = 15 s and is deliberately NOT raised to cover minutes: a     ║
+║ budget stretched until a red turns green states that the latency is accepted, and  ║
+║ nobody has accepted it. These assertions therefore stay RED as a finding ABOUT     ║
+║ THE PRODUCT — not masked, not skipped, not weakened — and the numbers above are    ║
+║ what a fix has to move.                                                            ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
 verifies: removing/changing the matching label on a vpc resource Update revokes
 the ARM_LABELS grant (Check v_list flips True→False); adding the label
 materializes it; non-label Update is a no-op; an empty-mask full-PATCH that zeroes
