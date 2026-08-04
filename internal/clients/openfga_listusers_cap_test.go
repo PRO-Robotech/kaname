@@ -27,6 +27,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kacho/internal/treecorpus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -108,24 +109,29 @@ func TestListUsersServerCap_DeploymentDoesNotOverrideIt(t *testing.T) {
 		t.Fatalf("premise unverifiable: %s not readable (%v) — this gate must not pass by seeing nothing", deploy, err)
 	}
 
+	// The corpus is the git index, not the disk. `deploy/` carries git-ignored
+	// content on any machine that has run the stand: the cluster secrets overlay
+	// (**/values.*-ory.yaml) and the vendored subchart .tgz archives that
+	// `helm dep update` unpacks there. Neither is the deployment this gate judges
+	// — the deployment is what the commit declares — and reading them made the
+	// verdict a property of the working directory, in both directions: red on a
+	// file that will never be in the repository, and silent in a fresh checkout
+	// where a locally-only declaration cannot be seen at all.
+	files, err := treecorpus.Under(deploy)
+	require.NoError(t, err, "the deploy corpus must come from the index; refusing beats walking the disk")
+
 	var hits []string
 	scanned := 0
-	err := filepath.Walk(deploy, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err //nolint:wrapcheck // walk-control error, surfaced verbatim below
-		}
+	for _, path := range files {
 		b, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return rerr //nolint:wrapcheck // walk-control error, surfaced verbatim below
-		}
+		require.NoError(t, rerr)
 		scanned++
 		if strings.Contains(string(b), "OPENFGA_LIST_USERS_MAX_RESULTS") {
 			hits = append(hits, path)
 		}
-		return nil
-	})
-	require.NoError(t, err)
+	}
 	require.Positive(t, scanned, "zero files read is not zero findings — the premise was never checked")
+	t.Logf("scanned: %d tracked file(s) under %s", scanned, deploy)
 	assert.Empty(t, hits,
 		"the deployment now declares the store's list-users ceiling; clients.ListUsersServerCap "+
 			"must be reconciled with it, otherwise a lowered ceiling is reported as a complete answer")
