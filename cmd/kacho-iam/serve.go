@@ -967,7 +967,21 @@ func runServe(cfg config.Config) error {
 	// строки, число отравленных. Скан не мутирует таблицу и не может уронить
 	// под — ошибки логируются.
 	tasks = append(tasks, func() error {
-		runProviderCompensationMetrics(ctx, pool, metricsReg.CompensationRecorder(), logger)
+		runProviderCompensationMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		return nil
+	})
+	// Состояние двух остальных очередей сервиса. Дренаж у обеих был поднят, а
+	// скана состояния не было ни у одной: «в очереди лежит N строк, старейшей M
+	// секунд» не производил никто, и застрявшая очередь молчала ровно так же, как
+	// пустая. Для очереди tuple'ов дополнительно снимается разложение по
+	// направлению — иначе полностью мёртвое снятие прав неотличимо от «снимать
+	// было нечего» (см. outbox_metrics_wiring.go).
+	tasks = append(tasks, func() error {
+		runFGAOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		return nil
+	})
+	tasks = append(tasks, func() error {
+		runSubjectChangeOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
 

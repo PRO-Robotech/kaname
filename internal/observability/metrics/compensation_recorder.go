@@ -8,8 +8,13 @@ import (
 )
 
 // CompensationRecorder — счётчики компенсаций частично исполненной саги
-// «зарегистрировать клиента у провайдера → закоммитить свою строку», плюс
-// глубина и возраст очереди этих компенсаций.
+// «зарегистрировать клиента у провайдера → закоммитить свою строку».
+//
+// Состояние самой очереди (глубина, возраст головы, отравленные) здесь БОЛЬШЕ НЕ
+// живёт: гейджи размечены лейблом `table` и годятся любой очереди сервиса, а
+// очередей у kacho-iam три — держать их в типе с именем «компенсация» значило бы
+// объявлять областью действия одну. Они переехали в OutboxRecorder
+// (outbox_recorder.go), который наблюдает все три.
 //
 // ЗАЧЕМ СЧЁТЧИК, А НЕ ТОЛЬКО ЛОГ. Компенсация срабатывает редко и только на
 // неудачном пути, поэтому «ноль компенсаций за всю жизнь» — нормальное
@@ -20,9 +25,10 @@ import (
 // расхождение записанных и исполненных — на «доезжает ли». То же требование,
 // что и «ноль доставленных строк за всю жизнь очереди обязано быть заметно».
 //
-// Возраст самой старой недоставленной строки отвечает на второй обязательный
-// вопрос — «висит ли строка дольше N»: без него застрявшая компенсация тиха,
-// а занятое у провайдера остаётся занятым.
+// На второй обязательный вопрос — «висит ли ЭТА строка дольше N» — отвечает
+// возраст головы очереди из OutboxRecorder. Обе величины нужны, ни одна не
+// заменяет другую: расхождение записанных и исполненных говорит «доезжает ли
+// вообще», возраст — «застряла ли конкретная».
 //
 // Набор меток ЗАКРЫТ: origin приходит из констант use-case'ов
 // (sa_key|user_token|interactive_client), никогда из запроса, поэтому
@@ -30,9 +36,6 @@ import (
 type CompensationRecorder struct {
 	emitted *prometheus.CounterVec
 	applied *prometheus.CounterVec
-	backlog *prometheus.GaugeVec
-	oldest  *prometheus.GaugeVec
-	poison  *prometheus.GaugeVec
 }
 
 // NewCompensationRecorder регистрирует коллекторы в этом реестре. Звать один раз на старте.
@@ -49,21 +52,8 @@ func (r *Registry) NewCompensationRecorder() *CompensationRecorder {
 			Help: "Компенсации, исполненные дренажом (клиент снят у провайдера либо его уже не было), " +
 				"по саге-инициатору. Расхождение с emitted — то, что ещё не доехало.",
 		}, []string{"origin"}),
-		backlog: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_backlog_depth",
-			Help: "Недоставленные строки outbox-таблицы.",
-		}, []string{"table"}),
-		oldest: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_oldest_pending_age_seconds",
-			Help: "Возраст самой старой недоставленной строки outbox-таблицы. " +
-				"Отвечает на «висит ли строка дольше N».",
-		}, []string{"table"}),
-		poison: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_poisoned_count",
-			Help: "Отравленные (исчерпавшие попытки) строки outbox-таблицы.",
-		}, []string{"table"}),
 	}
-	r.reg.MustRegister(rec.emitted, rec.applied, rec.backlog, rec.oldest, rec.poison)
+	r.reg.MustRegister(rec.emitted, rec.applied)
 	return rec
 }
 
@@ -79,34 +69,11 @@ func (rec *CompensationRecorder) IncCompensationApplied(origin string) {
 	rec.applied.WithLabelValues(origin).Inc()
 }
 
-// SetBacklogDepth реализует outbox/metrics.Recorder.
-func (rec *CompensationRecorder) SetBacklogDepth(table string, depth float64) {
-	rec.backlog.WithLabelValues(table).Set(depth)
-}
-
-// SetOldestPendingAgeSeconds реализует outbox/metrics.Recorder.
-func (rec *CompensationRecorder) SetOldestPendingAgeSeconds(table string, age float64) {
-	rec.oldest.WithLabelValues(table).Set(age)
-}
-
-// SetPoisonedCount реализует outbox/metrics.Recorder.
-func (rec *CompensationRecorder) SetPoisonedCount(table string, count float64) {
-	rec.poison.WithLabelValues(table).Set(count)
-}
-
-// IncPoisoned реализует outbox/metrics.Recorder.
-func (rec *CompensationRecorder) IncPoisoned(table string) {
-	// Отравленные строки уже отражены SetPoisonedCount по скану таблицы;
-	// отдельного монотонного счётчика здесь не заводим, чтобы не держать две
-	// величины об одном предмете, из которых расходиться будет одна.
-	_ = table
-}
-
 // CompensationRecorder возвращает ЕДИНСТВЕННЫЙ экземпляр коллекторов
 // компенсации этого реестра, создавая его при первом обращении.
 //
 // Потребителей двое и собираются они в разных местах: writer намерений (внутри
-// buildServices) и дренаж с метрик-сканером (в runServe). Два независимых
+// buildServices) и применитель компенсаций (в runServe). Два независимых
 // вызова NewCompensationRecorder уронили бы старт на duplicate-register — и
 // уронили бы именно тогда, когда механизм наконец провязали целиком.
 func (r *Registry) CompensationRecorder() *CompensationRecorder {

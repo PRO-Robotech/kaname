@@ -65,6 +65,16 @@ const (
 	envGatewayInternalServerName = "KACHO_IAM_GATEWAY_INTERNAL_TLS_SERVER_NAME"
 )
 
+// Координаты очереди инвалидаций и её порог отравления. Названы константами, а
+// не повторены литералом в каждом месте: дренаж и сканер состояния обязаны
+// говорить об ОДНОЙ таблице с ОДНИМ порогом, иначе гейдж отравленных строк
+// считал бы не то, что дренаж отравляет.
+const (
+	subjectChangeOutboxTable   = "kacho_iam.subject_change_outbox"
+	subjectChangeOutboxChannel = "kacho_iam_subject_outbox_added"
+	subjectChangeMaxAttempts   = 10
+)
+
 // buildSubjectChangeDrainer — wires the subject-change push-drainer. The
 // gateway-internal address is REQUIRED; a missing address or a transport
 // misconfiguration returns an error that halts startup. Runtime errors from
@@ -93,11 +103,11 @@ func buildSubjectChangeDrainer(
 	d, err := drainer.New[clients.SubjectChangeEvent](
 		pool,
 		drainer.Config{
-			Table:        "kacho_iam.subject_change_outbox",
-			Channel:      "kacho_iam_subject_outbox_added",
+			Table:        subjectChangeOutboxTable,
+			Channel:      subjectChangeOutboxChannel,
 			BatchSize:    64,
 			PollFallback: 30 * time.Second,
-			MaxAttempts:  10,
+			MaxAttempts:  subjectChangeMaxAttempts,
 			BackoffMin:   200 * time.Millisecond,
 			BackoffMax:   10 * time.Second,
 			ApplyTimeout: 3 * time.Second,
@@ -113,7 +123,7 @@ func buildSubjectChangeDrainer(
 
 	logger.Info("subject_change drainer enabled",
 		"gateway_internal_addr", addr,
-		"channel", "kacho_iam_subject_outbox_added",
+		"channel", subjectChangeOutboxChannel,
 		"latency_target", "≤1s (push) / ≤30s (poll-fallback)")
 
 	return func() error {

@@ -9,6 +9,15 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 )
 
+// Coordinates of the tuple outbox. Named once so the drainer that empties it and
+// the scanner that reports its state cannot end up talking about different tables
+// — the failure mode of two literals is a gauge that looks healthy because it is
+// measuring something else.
+const (
+	fgaOutboxTable   = "kacho_iam.fga_outbox"
+	fgaOutboxChannel = "kacho_iam_fga_outbox"
+)
+
 // fgaOutboxTupleKeyColumn is the ORDERING PARTITION key of kacho_iam.fga_outbox:
 // the full tuple identity (user, relation, object), materialised into a column by
 // migration 0067's BEFORE INSERT trigger and indexed by
@@ -68,8 +77,8 @@ const fgaOutboxApplyConcurrency = 16
 // alone leaves the drain single-file.
 func fgaOutboxDrainerConfig() drainer.Config {
 	return drainer.Config{
-		Table:   "kacho_iam.fga_outbox",
-		Channel: "kacho_iam_fga_outbox",
+		Table:   fgaOutboxTable,
+		Channel: fgaOutboxChannel,
 		// Matches ApplyConcurrency: with ApplyConcurrency>1 the claim batch is sized
 		// EXACTLY to the concurrency, so a differing BatchSize would only mislead.
 		BatchSize:    fgaOutboxApplyConcurrency,

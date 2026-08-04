@@ -84,6 +84,12 @@ func buildProviderCompensationDrainer(
 // Без него застрявшая компенсация тиха: счётчики записанных и исполненных
 // намерений отвечают на «доезжает ли вообще», а возраст — на «висит ли ЭТА
 // строка дольше N». Обе величины нужны, ни одна не заменяет другую.
+//
+// Разложения по направлению здесь нет и не может быть: событие ровно одного вида
+// — «снять клиента у провайдера». Второй половины у этой очереди не существует
+// by construction, поэтому разложение разложило бы её на неё саму и на пустоту.
+// Это зафиксировано записью исключения в гейте
+// repohygiene.TestEveryDrainedOutboxIsSplitByDirection.
 func runProviderCompensationMetrics(
 	ctx context.Context, pool *pgxpool.Pool, rec outboxmetrics.Recorder, logger *slog.Logger,
 ) {

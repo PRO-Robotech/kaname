@@ -60,6 +60,14 @@ type Registry struct {
 	// CompensationRecorder(), а не создаётся каждым потребителем.
 	compensationOnce sync.Once
 	compensation     *CompensationRecorder
+
+	// outboxOnce/outbox — единственный экземпляр коллекторов состояния очередей.
+	// Очередей у kacho-iam три (fga_outbox, subject_change_outbox,
+	// provider_compensation_outbox), их сканеры собираются в разных местах
+	// композиционного корня, а серии у них ОБЩИЕ и различаются лейблом `table`.
+	// Второй конструктор уронил бы старт на duplicate-register.
+	outboxOnce sync.Once
+	outbox     *OutboxRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime
