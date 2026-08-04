@@ -74,6 +74,21 @@ fi
 # run_one — прогон одной коллекции. Пишет out/<res>.json|.cli|.rc.
 run_one() {
   local res="$1"
+  # Второй аргумент `explicit` — прямая просьба человека (`--service <stem>`), и она
+  # ВЫИГРЫВАЕТ: отлаживать делегированную коллекцию отсюда по-прежнему можно, просто
+  # с предупреждением, что условие её волны здесь не создано.
+  #
+  # Без второго аргумента делегированная коллекция не запускается: её гоняет своя
+  # волна. Проверка стоит ЗДЕСЬ, а не у каждого из двадцати пяти вызовов, потому что
+  # список вызовов рукописный — и следующий добавленный вызов иначе снова обошёл бы
+  # вычитание молча.
+  if [[ "${2:-}" != "explicit" ]] && _is_delegated "$res"; then
+    echo "[delegated] ${res} — условие создаёт своя волна (run-failclosed.sh / run-ceremony.sh); здесь НЕ гоняется, вердикт по нему выносит assert-suites-green.sh"
+    return 0
+  fi
+  if [[ "${2:-}" == "explicit" ]] && _is_delegated "$res"; then
+    echo "[delegated] ${res} запрошен ЯВНО — гоню, хотя условие его волны здесь не создано; часть шагов ответит не тем принципалом" >&2
+  fi
   local col="collections/${res}.postman_collection.json"
   if [[ ! -f "$col" ]]; then
     # Ожидаемая коллекция не сгенерирована = молчаливая потеря покрытия, не skip:
@@ -178,9 +193,41 @@ aggregate_verdict() {
 mkdir -p out
 rm -f out/*.json out/*.cli out/*.rc out/summary.txt out/coverage.txt 2>/dev/null || true
 
+# ─── Кого этот прогон НЕ гоняет ─────────────────────────────────────────────
+# Набор считается ЗДЕСЬ, ДО единственного места, где коллекции запускаются, — и
+# это не оформление. Раньше он считался ниже, между последним `run_one` и
+# сводкой, поэтому вычитание доставалось ТОЛЬКО вердикту: коллекции волны
+# успевали отработать под машинным принципалом, а строка «делегировано
+# коллекций: 5» печаталась после того, как все пять уже прошли. Со стороны
+# механизм выглядел исполненным, и он даже называл верное число — просто ничего
+# из названного не делал.
+#
+# Цена была двойной: пять коллекций гонялись ДВАЖДЫ за прогон (здесь под чужим
+# предъявителем, где их человеческие шаги честно падают на своём страже, и потом
+# в своей волне), а сводка этой суиты краснела на шагах, условие которых на этом
+# этапе ещё не создано, — то есть вердикт прогонщика и вердикт гейта расходились
+# по построению.
+DELEGATED=(authz-failclosed)
+_CEREMONY_ROOT="$(cd ../../../.. && pwd)"
+_CEREMONY_DECL="$_CEREMONY_ROOT/tests/authz-fixtures/ceremony_credentials.py"
+if [[ -f "$_CEREMONY_DECL" ]] && command -v python3 >/dev/null 2>&1 \
+   && python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" --seed-exists 2>/dev/null; then
+  _n_before="${#DELEGATED[@]}"
+  while IFS= read -r _cs; do
+    [[ -n "$_cs" ]] && DELEGATED+=("$_cs")
+  done < <(python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" \
+             --suite services/iam/tests/newman --stems 2>/dev/null)
+  echo "[ceremony] волна церемонии активна — делегировано коллекций: $(( ${#DELEGATED[@]} - _n_before ))"
+fi
+_is_delegated() {
+  local s
+  for s in "${DELEGATED[@]}"; do [[ "$1" == "$s" ]] && return 0; done
+  return 1
+}
+
 if [[ -n "$SERVICE" ]]; then
   # Pre-run reseed for jit-pending suite to ensure seed rows are PENDING.
-  run_one "$SERVICE"
+  run_one "$SERVICE" explicit
 else
   # authz matrices + the IAM resource suites (Case/Step format).
   # NB: the legacy iam-access-binding suite is RETIRED — superseded by
@@ -352,24 +399,6 @@ fi
 #     здесь, как и раньше, а долг называется ЧИСЛОМ там, где планируются волны
 #     (`ceremony_credentials.py --debt`). Предикат внешний: его выполняет чужая
 #     стадия, а не эта правка, — поэтому он не может быть отменён ею же.
-DELEGATED=(authz-failclosed)
-_CEREMONY_ROOT="$(cd ../../../.. && pwd)"
-_CEREMONY_DECL="$_CEREMONY_ROOT/tests/authz-fixtures/ceremony_credentials.py"
-if [[ -f "$_CEREMONY_DECL" ]] && command -v python3 >/dev/null 2>&1 \
-   && python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" --seed-exists 2>/dev/null; then
-  _n_before="${#DELEGATED[@]}"
-  while IFS= read -r _cs; do
-    [[ -n "$_cs" ]] && DELEGATED+=("$_cs")
-  done < <(python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" \
-             --suite services/iam/tests/newman --stems 2>/dev/null)
-  echo "[ceremony] волна церемонии активна — делегировано коллекций: $(( ${#DELEGATED[@]} - _n_before ))"
-fi
-_is_delegated() {
-  local s
-  for s in "${DELEGATED[@]}"; do [[ "$1" == "$s" ]] && return 0; done
-  return 1
-}
-
 stems=()
 if [[ -n "$SERVICE" ]]; then
   stems=("$SERVICE")
@@ -377,7 +406,7 @@ else
   while IFS= read -r s; do
     [[ -n "$s" ]] || continue
     if _is_delegated "$s"; then
-      echo "[delegated] ${s} — гоняется отдельной волной (scripts/run-failclosed.sh); вердикт по нему выносит assert-suites-green.sh"
+      echo "[verdict-skip] ${s} — вне набора вердикта ЭТОГО прогонщика: отчёт по нему пишет своя волна, а грейдит assert-suites-green.sh"
       continue
     fi
     stems+=("$s")
