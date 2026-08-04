@@ -1538,6 +1538,104 @@
           ]
         },
         {
+          "name": "AUTHZGCP-BIND-DELETE-BY-STRANGER-DENY :: resolve-stranger-del-abId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings:listByScope?resourceType=account&resourceId={{accountAId}}&pageSize=1000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_resolve_stranger_del_abId_started') !== pm.info.requestName) {",
+                  "  pm.environment.set('_resolve_stranger_del_abId_tok', '');",
+                  "  pm.environment.set('_resolve_stranger_del_abId_page', '0');",
+                  "  pm.environment.set('_resolve_stranger_del_abId_started', pm.info.requestName);",
+                  "  pm.environment.unset('_strangerDel_abId');",
+                  "}",
+                  "const _base = pm.environment.get('baseUrl') || pm.variables.get('baseUrl') || '';",
+                  "const _rid = pm.variables.replaceIn('{{accountAId}}');",
+                  "const _tok = pm.environment.get('_resolve_stranger_del_abId_tok') || '';",
+                  "pm.request.url = _base + '/iam/v1/accessBindings:listByScope?resourceType=account'",
+                  "  + '&resourceId=' + encodeURIComponent(_rid)",
+                  "  + '&pageSize=1000'",
+                  "  + (_tok ? '&pageToken=' + encodeURIComponent(_tok) : '');",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('listByScope → 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const want = pm.environment.get('userNOBId');",
+                  "const rows = (j.accessBindings || []).filter(b => b.subjectId === want && b.deletionProtection !== true && b.roleId === 'rol1bda80f2be4d3658e');",
+                  "const _pg = parseInt(pm.environment.get('_resolve_stranger_del_abId_page') || '0', 10);",
+                  "if (rows.length === 0 && pm.response.code === 200 && j.nextPageToken && _pg < 25) {",
+                  "  pm.environment.set('_resolve_stranger_del_abId_tok', j.nextPageToken);",
+                  "  pm.environment.set('_resolve_stranger_del_abId_page', String(_pg + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_resolve_stranger_del_abId_tok');",
+                  "pm.environment.unset('_resolve_stranger_del_abId_page');",
+                  "pm.environment.unset('_resolve_stranger_del_abId_started');",
+                  "pm.test('deletable persisted binding for subject found', () => pm.expect(rows.length, JSON.stringify({pagesWalked: _pg, lastPage: j})).to.be.greaterThan(0));",
+                  "if (rows.length > 0) {",
+                  "  pm.environment.set('_strangerDel_abId', rows[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "AUTHZGCP-BIND-DELETE-BY-STRANGER-DENY :: stranger-inv-deletes",
           "request": {
             "method": "DELETE",

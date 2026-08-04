@@ -64,6 +64,41 @@ def assert_iam_operation_envelope():
     ]
 
 
+def _revoke_key_steps(name, key_var):
+    """Revoke one issued SA key and ASSERT the revocation landed.
+
+    Two steps, not one: the mutation returns an Operation, and an Operation that
+    finished WITH an error is indistinguishable from success at the HTTP layer.
+    The id is read from a variable the issuing step captured out of the operation
+    metadata; an empty variable is a broken case, so the guard says so instead of
+    firing a DELETE at an unresolved template."""
+    return [
+        Step(
+            name=name,
+            method="DELETE",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}/keys/{{" + key_var + "}}",
+            auth="jwtAccountAdminAStepUp",
+            pre_script=[
+                f"if (!pm.environment.get('{key_var}')) {{",
+                f"  pm.test('{name}: {key_var} captured by the issuing step', "
+                f"() => pm.expect.fail('{key_var} is empty — the Issue operation did "
+                f"not name its key, so there is nothing to revoke and the teardown "
+                f"below would fail on RESTRICT'));",
+                "  pm.execution.skipRequest();",
+                "}",
+            ],
+            test_script=[
+                *assert_answered(name),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # IAM-SVA-CR-CRUD-OK — Create SA → Operation done → Get confirms
 # ---------------------------------------------------------------------------
@@ -961,7 +996,20 @@ CASES.append(Case(
             ],
         ), budget=20, interval_ms=500, retry_on=(403,)),
         poll_operation_until_done(auth="jwtAccountAdminA"),
-        assert_op_success(auth="jwtAccountAdminA"),
+        Step(
+            name="assert-op-success-key-while-enabled",
+            method="GET", path="/operations/{{opId}}", auth="jwtAccountAdminA",
+            op_var="opId",
+            test_script=[
+                "const j = pm.response.json();",
+                "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));",
+                "pm.test('issue metadata names the key it minted', () => {",
+                "  pm.expect(j.metadata && j.metadata.keyId, JSON.stringify(j)).to.be.a('string').and.not.empty;",
+                "});",
+                "if (j.metadata && j.metadata.keyId) { pm.environment.set('disKeyBeforeId', j.metadata.keyId); }",
+            ],
+        ),
 
         # ── 2. Disable — an ACTION with no field mask to forget.
         retry_until_authorized(Step(
@@ -1063,7 +1111,28 @@ CASES.append(Case(
             ],
         ), budget=20, interval_ms=500, retry_on=(403,)),
         poll_operation_until_done(auth="jwtAccountAdminA"),
-        assert_op_success(auth="jwtAccountAdminA"),
+        # Both issued keys are captured from the operation metadata, because the
+        # teardown below CANNOT succeed while they live: the OAuth-client row that
+        # backs a key references the service account `ON DELETE RESTRICT`, so the
+        # platform refuses to delete a machine identity whose credentials are still
+        # valid. That refusal is the product being right — deleting the identity while
+        # its credentials keep working is exactly what RESTRICT is there to prevent.
+        # The case used to issue two keys and then delete the account, so the teardown
+        # came back as an async code-9 and the leaked account stayed in the listing.
+        Step(
+            name="assert-op-success-key-after-enable",
+            method="GET", path="/operations/{{opId}}", auth="jwtAccountAdminA",
+            op_var="opId",
+            test_script=[
+                "const j = pm.response.json();",
+                "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));",
+                "pm.test('issue metadata names the key it minted', () => {",
+                "  pm.expect(j.metadata && j.metadata.keyId, JSON.stringify(j)).to.be.a('string').and.not.empty;",
+                "});",
+                "if (j.metadata && j.metadata.keyId) { pm.environment.set('disKeyAfterId', j.metadata.keyId); }",
+            ],
+        ),
 
         Step(
             name="get-confirms-enabled-again",
@@ -1082,6 +1151,13 @@ CASES.append(Case(
 
         # Cleanup: the suite's own fixture does not outlive it (a leaked SA grows
         # the account listing and moves other cases' list contracts).
+        #
+        # The credentials go FIRST, and they are asserted rather than merely attempted:
+        # revocation is the documented way past the RESTRICT above, so a revoke that
+        # silently failed would resurface one step later as the same opaque teardown
+        # error this ordering exists to remove.
+        *_revoke_key_steps("revoke-key-before", "disKeyBeforeId"),
+        *_revoke_key_steps("revoke-key-after", "disKeyAfterId"),
         Step(
             name="cleanup-delete-sa",
             method="DELETE",

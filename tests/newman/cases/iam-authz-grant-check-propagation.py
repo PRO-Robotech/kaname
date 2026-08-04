@@ -846,6 +846,22 @@ CASES.append(Case(
                 "}",
             ],
         ),
+        # Resolve the PERSISTED binding id — same reason as in
+        # AUTHZGCP-BIND-DELETE-BY-ADMIN-ALLOW above, where this already stood. The
+        # fix had simply not reached this half. The scope is a long-lived shared
+        # fixture, so on every run after the first this create takes the
+        # ALREADY_EXISTS path: the operation then carries an error, the id in its
+        # metadata is a phantom the collection-level guard drops, and the DELETE
+        # below is left with an unresolved template — a case about AUTHORITY
+        # reporting a harness fault instead. Resolving from the listing holds on
+        # BOTH paths, just-created and already-there.
+        resolve_binding_id_step(
+            name="resolve-stranger-del-abId",
+            resource_id_tmpl="{{accountAId}}",
+            subject_env_key="userNOBId",
+            out_env_key="_strangerDel_abId",
+            role_id=ROLE_VIEW,
+        ),
         # INV is admin only of accountB; deleting an accountA binding must fail.
         Step(
             name="stranger-inv-deletes",
