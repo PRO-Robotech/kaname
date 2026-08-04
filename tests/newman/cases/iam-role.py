@@ -1035,6 +1035,20 @@ CASES.append(Case(
             test_script=[
                 "const j = pm.response.json();",
                 "if (pm.environment.get('opId')) {",
+                # Ограниченный поллинг, а не однократное чтение. Гарантия здесь живёт в
+                # АСИНХРОННОМ воркере (шаг выше это и говорит: «200 + Operation»), поэтому
+                # утверждение `done === true` на ПЕРВОМ же чтении — гонка по построению:
+                # оно проходило, только пока воркер успевал раньше поллера, и краснело под
+                # нагрузкой на предмете, к которому отношения не имеет (2026-08-05: op
+                # вернулся `done:false`, и все три утверждения кейса упали разом).
+                # Утверждения НЕ ослаблены: бюджет конечен (30 x 500ms ~= 15s), и по его
+                # исчерпании `done` остаётся false — кейс краснеет ровно как прежде.
+                # Идиома — та же, что у соседних поллеров этого файла; задержка настоящая
+                # (busy-wait), потому что newman вызывает setNextRequest до setTimeout.
+                "  if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                "  const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                "  if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
+                "  pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
                 "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                 "  pm.test('error code 9 (FAILED_PRECONDITION — system role)', () => {",
                 "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9);",
