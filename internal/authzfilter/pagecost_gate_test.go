@@ -221,11 +221,27 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 	"SubjectIsClusterAdmin": {relationGuardRoot, 2, -1, -1},
 }
 
-// useCaseTreeRoot — the volume this gate inspects; relationClientRoot /
+// useCaseTreeRoot — the volume THIS gate inspects; relationClientRoot /
 // relationGuardRoot — the packages whose names it keys on. Relative to this
 // package's directory.
+//
+// The volume is the use-case tree and not the whole service ON PURPOSE, and the
+// difference is load-bearing: widening it to `..` turns this gate red on six
+// legitimate sites, every one of them an IMPLEMENTATION of the measured path
+// itself (this package's own VisibleSet, the cascade's batch resolver, the
+// authorize use-case's own per-item loop). Those are the thing being measured,
+// not surfaces evading measurement.
+//
+// Its neighbour in batchgate_test.go needs the opposite and takes
+// serviceTreeRoot: a surface that calls VisibleSet with a checker of the wrong
+// capability is a finding wherever it lives, so restricting THAT census to the
+// use-case tree left the rest of the service unexamined. Two questions, two
+// volumes; sharing one constant made the narrower answer look like it covered
+// the wider question, and a report once cited this gate as proof about a file
+// that lay outside it.
 const (
 	useCaseTreeRoot    = "../apps/kacho/api"
+	serviceTreeRoot    = ".."
 	relationClientRoot = "../clients"
 	relationGuardRoot  = "../authzguard"
 )

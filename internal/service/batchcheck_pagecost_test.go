@@ -129,6 +129,20 @@ func TestBatchCheck_ResolvesItsItemsConcurrently(t *testing.T) {
 			batchCheckParallelism)
 	}
 
+	// What this double is, and what its number therefore means.
+	//
+	// It answers ONE store question per item and nothing else: no structural
+	// facts, no contextual re-ask, no deny-reason enrichment. Production pays
+	// MORE than that per item on the deny path. The wall time printed below is
+	// therefore a LOWER bound on what the sequential version cost, not an
+	// estimate of it — the double understates the problem, which is the safe
+	// direction for a number that argues a fix was needed.
+	//
+	// It is deliberately minimal for that same reason: the property asserted here
+	// is "the items do not wait on each other", and every extra store interaction
+	// would add cost that is not this property, making the observed concurrency
+	// harder to attribute. The MAGNITUDE of the win belongs to a measurement
+	// against a real store; the PROPERTY belongs here.
 	fga := &latencyRelations{perCheck: perCheck}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: fga, ModelID: "m1"})
 
@@ -247,5 +261,137 @@ func TestBatchCheck_ClusterAdminMemoStaysDedupedUnderConcurrency(t *testing.T) {
 	if cl.calls > 1 {
 		t.Fatalf("super-gate asked %d times for ONE subject; the per-pass memo must dedupe it to 1 "+
 			"even when the pass is resolved concurrently", cl.calls)
+	}
+}
+
+// latencyClusterChecker — a cluster-admin checker that TAKES TIME and records
+// how many of its questions were ever in flight at once.
+//
+// The existing double counts calls only, which cannot see the property below: a
+// memo that serialises every subject and a memo that resolves subjects in
+// parallel issue the SAME number of super-gate questions and differ only in how
+// long the pass takes.
+type latencyClusterChecker struct {
+	perCheck time.Duration
+	admins   map[string]bool
+
+	mu       sync.Mutex
+	calls    int
+	bySubj   map[string]int
+	inFlight int
+	maxInFly int
+}
+
+func (c *latencyClusterChecker) Check(_ context.Context, subject, _, _ string) (bool, error) {
+	c.mu.Lock()
+	c.calls++
+	if c.bySubj == nil {
+		c.bySubj = map[string]int{}
+	}
+	c.bySubj[subject]++
+	c.inFlight++
+	if c.inFlight > c.maxInFly {
+		c.maxInFly = c.inFlight
+	}
+	c.mu.Unlock()
+
+	if c.perCheck > 0 {
+		time.Sleep(c.perCheck)
+	}
+
+	c.mu.Lock()
+	c.inFlight--
+	allowed := c.admins[subject]
+	c.mu.Unlock()
+	return allowed, nil
+}
+
+func (c *latencyClusterChecker) snapshot() (calls, maxInFly, maxPerSubject int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, n := range c.bySubj {
+		if n > maxPerSubject {
+			maxPerSubject = n
+		}
+	}
+	return c.calls, c.maxInFly, maxPerSubject
+}
+
+// batchOfDistinctSubjects — a slice whose items name DIFFERENT subjects. The
+// method supports this shape explicitly (its own comment says a mixed-subject
+// batch stays correct), so it is not a hypothetical.
+func batchOfDistinctSubjects(n int) []CheckRequest {
+	reqs := make([]CheckRequest, n)
+	for i := range reqs {
+		reqs[i] = CheckRequest{
+			Subject:          "user:usr_" + string(rune('a'+i%26)) + string(rune('a'+(i/26)%26)),
+			Resource:         ResourceRef{Type: "vpc_network", ID: "net_shared"},
+			Action:           "vpc.networks.get",
+			RequiredRelation: "v_get",
+		}
+	}
+	return reqs
+}
+
+// TestBatchCheck_SuperGateDoesNotSerialiseDistinctSubjects — the pool survives a
+// slice whose items name different subjects.
+//
+// The memo exists to ask the cluster-admin super-gate at most once per SUBJECT,
+// and to do that it must hold its guard across the question — otherwise every
+// worker that arrives before the first answer misses and asks again. Held as ONE
+// guard for the whole pass, that correct requirement had a consequence its
+// comment denied: on a mixed-subject slice the single lock was taken across a
+// network call for every item in turn, so the bounded pool this method was given
+// was defeated completely and the pass ran at parallelism one — the very failure
+// the pool was added to remove, reintroduced one layer in.
+//
+// Two things are asserted together, because either alone is satisfiable by a
+// broken implementation: the super-gate is still asked AT MOST ONCE PER SUBJECT
+// (drop the memo and this fails), and questions for DIFFERENT subjects overlap
+// (serialise the memo and this fails).
+func TestBatchCheck_SuperGateDoesNotSerialiseDistinctSubjects(t *testing.T) {
+	const slice = 100
+
+	fga := &latencyRelations{}
+	cl := &latencyClusterChecker{perCheck: 5 * time.Millisecond, admins: map[string]bool{}}
+	svc := NewAuthorizeService(AuthorizeServiceConfig{
+		Relations:           fga,
+		ModelID:             "m1",
+		ClusterAdminChecker: cl,
+	})
+
+	start := time.Now()
+	if _, err := svc.BatchCheck(context.Background(), batchOfDistinctSubjects(slice)); err != nil {
+		t.Fatalf("BatchCheck: %v", err)
+	}
+	wall := time.Since(start)
+
+	calls, maxInFly, maxPerSubject := cl.snapshot()
+	storeCalls, _ := fga.snapshot()
+	t.Logf("slice=%d distinct subjects | store round-trips=%d | super-gate questions=%d "+
+		"| max in flight=%d | max per subject=%d | wall=%s",
+		slice, storeCalls, calls, maxInFly, maxPerSubject, wall.Round(time.Millisecond))
+
+	// Volume examined: the super-gate is reached only after a per-object deny, so
+	// a pass that asked nothing would satisfy every bound below for the wrong
+	// reason.
+	if storeCalls != slice {
+		t.Fatalf("probe asked the store %d times for a %d-item slice — the measurement below "+
+			"would be vacuous", storeCalls, slice)
+	}
+	if calls == 0 {
+		t.Fatalf("super-gate was never asked: nothing about its concurrency can be shown")
+	}
+	if maxPerSubject > 1 {
+		t.Errorf("super-gate asked %d times for ONE subject — the per-subject memo is gone, and "+
+			"a same-subject slice would pay one super-gate question per item", maxPerSubject)
+	}
+	if maxInFly < 2 {
+		t.Errorf("super-gate questions for %d DIFFERENT subjects never overlapped (max in flight=%d).\n"+
+			"  The memo is serialising the whole pass across a network call, so the bounded pool "+
+			"given to this method is defeated and the slice resolves at parallelism one — exactly "+
+			"the wall-time failure the pool was added to remove.\n"+
+			"  Guard per SUBJECT, not per pass: the dedup is a property of one subject's question.",
+			slice, maxInFly)
 	}
 }

@@ -198,10 +198,22 @@ type CheckResult struct {
 // BatchCheck is the door every sibling service's List filter walks through:
 // vpc/compute/nlb/storage each read a page from their own database, cut it into
 // slices of at most 100 ids (the published cap enforced below) and hand each slice
-// to this method. The predicate is per-object, so the number of store questions is
-// one per item and that is inherent — it is not what this bound is about.
+// to this method.
 //
-// What it is about is that the caller's deadline is per REQUEST: a sibling gives
+// The predicate is per-object, so there is one store QUESTION per item. The number
+// of store ROUND-TRIPS is a different quantity and is NOT inherent: the store
+// answers one relation about many objects in a single request (cap
+// MaxBatchChecksPerRequest), and authzfilter already uses that to turn a
+// contract-sized page into tens of requests instead of a thousand. A sibling's
+// slice is uniform by construction — same subject, resource type, action and
+// relation, only the id varies — so a 100-item slice is answerable here in a
+// couple of round-trips rather than a hundred. That it still costs a hundred is an
+// OPEN REMAINDER, not physics; whoever closes it starts from
+// authzcascade.Client.BatchCheckWithContext, which already carries the cascade.
+// This bound does not close that remainder and is not meant to: the bound is about
+// WAITING, the remainder is about round-trips.
+//
+// What the bound is about is that the caller's deadline is per REQUEST: a sibling gives
 // one slice one second (their authzfilter.DefaultConfig().Timeout). Resolving the
 // slice one item after another makes its wall time 100 × the store's answer time,
 // so a store answering in 10ms consumes that entire budget and anything slower
@@ -213,9 +225,15 @@ type CheckResult struct {
 // store's own internal concurrency and against concurrent Lists from other
 // callers, so an unbounded burst trades one caller's latency for everyone's. At 8
 // a full 100-item slice is 13 waves instead of 100, which is the difference between
-// "fits in the caller's budget with room" and "is the caller's budget". It matches
-// authzfilter.BatchParallelism, which bounds the same pressure from iam's own
-// pages, so the two doors to the same store do not each pick a number.
+// "fits in the caller's budget with room" and "is the caller's budget".
+//
+// The numeral 8 is also authzfilter.BatchParallelism, and the two are NOT the same
+// quantity — do not "unify" them on the strength of the digit. There, 8 bounds
+// in-flight PARTITIONS, each already carrying MaxBatchChecksPerRequest questions,
+// which its own godoc counts as hundreds of questions the store may be resolving
+// at once. Here, 8 bounds in-flight single questions. Same numeral, units apart by
+// the batch cap; an earlier revision of this comment claimed the two "bound the
+// same pressure", which was wrong by that factor.
 //
 // Locked, with both directions, by TestBatchCheck_ResolvesItsItemsConcurrently and
 // TestBatchCheck_ConcurrencyIsBounded.
@@ -229,37 +247,60 @@ const batchCheckParallelism = 8
 // caching it is correct and preserves fail-closed (the Check is still performed,
 // just deduped).
 //
-// The mutex is not decoration. A BatchCheck pass resolves its items concurrently
-// (batchCheckParallelism), so this memo is read and written from several goroutines
-// at once; and it is held ACROSS the super-gate resolution rather than only around
-// the field writes, which is what makes the dedup survive concurrency. Guarding
-// only the fields would let every worker that arrives before the first one finishes
-// miss the memo and ask again — the batch would be race-free and would still issue
-// one super-gate question per item, which is the very cost this type exists to
-// remove. Serialising here costs nothing that matters: it serialises at most one
-// question per subject, never the per-object checks.
+// The single-flight is not decoration. A BatchCheck pass resolves its items
+// concurrently (batchCheckParallelism), so this memo is read and written from
+// several goroutines at once; and the resolution itself must be inside the guard,
+// not merely the field writes. Guarding only the fields would let every worker that
+// arrives before the first one finishes miss the memo and ask again — the batch
+// would be race-free and would still issue one super-gate question per item, which
+// is the very cost this type exists to remove.
+//
+// The guard is PER SUBJECT, and that is the whole point of the map. An earlier
+// revision held one mutex across the resolution and claimed serialising "costs
+// nothing that matters: at most one question per subject". The first half was
+// false whenever the second half's premise did not hold: on a slice whose items
+// name different subjects — a shape this method explicitly supports — the single
+// lock was held across a network call for every item in turn, so the pool was
+// defeated entirely and the pass ran at parallelism one. Keyed per subject, the
+// claim is now true as written: same-subject workers wait for the one question
+// that is being asked on their behalf, different subjects never wait for each
+// other, and the per-object checks are never serialised.
 type clusterAdminMemo struct {
-	mu      sync.Mutex
-	subject string
-	done    bool
+	mu sync.Mutex
+	by map[string]*clusterAdminVerdict
+}
+
+// clusterAdminVerdict — the single-flight slot for ONE subject.
+type clusterAdminVerdict struct {
+	once    sync.Once
 	allowed bool
 }
 
 // isClusterAdmin returns the (memoized) cluster-admin verdict for subject. The
-// first call performs the flat super-gate Check; subsequent calls for the SAME
-// subject reuse it. A different subject re-resolves (and overwrites the memo).
+// first call for a subject performs the flat super-gate Check; concurrent and
+// subsequent calls for the SAME subject reuse it. Different subjects resolve
+// independently and in parallel.
 func (s *AuthorizeService) isClusterAdmin(ctx context.Context, m *clusterAdminMemo, subject string) bool {
 	if m == nil {
 		return authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, subject)
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.done && m.subject == subject {
-		return m.allowed
+	if m.by == nil {
+		m.by = make(map[string]*clusterAdminVerdict, 1)
 	}
-	allowed := authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, subject)
-	m.subject, m.done, m.allowed = subject, true, allowed
-	return allowed
+	slot := m.by[subject]
+	if slot == nil {
+		slot = &clusterAdminVerdict{}
+		m.by[subject] = slot
+	}
+	m.mu.Unlock()
+
+	// Only the map lookup is under the shared lock; the question itself is under
+	// this subject's own slot, so subjects do not block one another.
+	slot.once.Do(func() {
+		slot.allowed = authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, subject)
+	})
+	return slot.allowed
 }
 
 // Check — single-tuple authorization check (with Conditions + OPA overlay).

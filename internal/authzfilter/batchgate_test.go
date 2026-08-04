@@ -88,18 +88,18 @@ func TestVisibilityCallSitesAllHoldABatchCapableChecker(t *testing.T) {
 				"for a name that cannot appear", short)
 	}
 
-	sites, files, ports := scanVisibilityCallSites(t, useCaseTreeRoot)
+	sites, files, ports := scanVisibilityCallSites(t, serviceTreeRoot)
 
 	require.NotZero(t, files,
 		"premise (volume): nothing was read under %s — 'no findings' would mean 'nothing was "+
-			"looked at'", useCaseTreeRoot)
+			"looked at'", serviceTreeRoot)
 	require.NotZero(t, len(sites),
 		"premise (positive control): no visibility call site was recognised anywhere under %s; "+
-			"the gate must SEE the legitimate ones before its silence means anything", useCaseTreeRoot)
+			"the gate must SEE the legitimate ones before its silence means anything", serviceTreeRoot)
 
 	t.Logf("read %d non-test files under %s; visibility call sites=%d (expected %d); "+
 		"names declared as %s in those packages=%d",
-		files, useCaseTreeRoot, len(sites), wantVisibilityCallSites, batchCapablePortType, len(ports))
+		files, serviceTreeRoot, len(sites), wantVisibilityCallSites, batchCapablePortType, len(ports))
 
 	var uncertain []string
 	for _, s := range sites {

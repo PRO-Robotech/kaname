@@ -213,9 +213,9 @@ func TestInteractiveClient_03_DatabaseRefusesIllFormedTargets(t *testing.T) {
 	require.NoError(t, err, "a well-formed https target must be accepted")
 
 	for name, uris := range map[string][]string{
-		"plaintext": {"http://api.example/cb"},
-		"fragment":  {"https://api.example/cb#x"},
-		"relative":  {"/cb"},
+		"plaintext":  {"http://api.example/cb"},
+		"fragment":   {"https://api.example/cb#x"},
+		"relative":   {"/cb"},
 		"empty list": {},
 	} {
 		t.Run(name, func(t *testing.T) {
