@@ -303,6 +303,17 @@ else
   # `rbac-visibility-set(no-report)`. Env deps (jwtAccountAdminA / accountAId / userINVId /
   # jwtInvitee) are seeded by the shared fixtures.
   run_one "rbac-visibility-set"
+  # iam-interactive-client — CRUD/валидация клиента интерактивного входа на
+  # cluster-internal листенере (ic-id, ровно один https-audience, grant
+  # authorization_code; повтор имени → ALREADY_EXISTS; redirect_uris; malformed-id
+  # → INVALID_ARGUMENT, а НЕ NOT_FOUND; immutable-vs-unknown в маске; повторное
+  # удаление идемпотентно). Условия ЧЕЛОВЕКА не требует и в DELEGATED-набор
+  # (authz-failclosed + волна церемонии) не входит — значит место ему здесь.
+  # gen.py ВСЕГДА эмитит collections/iam-interactive-client.json, а авторитетный
+  # гейт разбирает КАЖДУЮ collections/*.json, поэтому без этого вызова коллекция
+  # не отрабатывает вовсе и докладывается `iam-interactive-client(no-report)`:
+  # восемь кейсов, которые не могут упасть, потому что не исполняются.
+  run_one "iam-interactive-client"
 fi
 
 # ─── Verdict ──────────────────────────────────────────────────────────────
