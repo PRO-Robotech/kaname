@@ -195,10 +195,10 @@ curl -X PATCH http://localhost:18080/iam/v1/roles/rol_custom_xxx \
 
 | Сценарий                                  | gRPC code             | HTTP | Текст                                          |
 |-------------------------------------------|------------------------|------|------------------------------------------------|
-| Update / Delete system-role               | `FAILED_PRECONDITION`  | 412  | `system role is read-only`                     |
+| Update / Delete system-role               | `FAILED_PRECONDITION`  | 400  | `system role is read-only`                     |
 | Invalid permission format                 | `INVALID_ARGUMENT`     | 400  | `Illegal argument permissions: invalid format` |
 | name занят в scope                        | `ALREADY_EXISTS`       | 409  | `Role with name billing_viewer already exists` |
-| Delete при active AccessBinding           | `FAILED_PRECONDITION`  | 412  | `role is referenced by access_bindings`        |
+| Delete при active AccessBinding           | `FAILED_PRECONDITION`  | 400  | `role is referenced by access_bindings`        |
 | Permissions empty                         | `INVALID_ARGUMENT`     | 400  | `permissions: must contain at least 1`         |
 
 ## Как воспроизвести локально

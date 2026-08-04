@@ -182,8 +182,8 @@ grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
 | Сценарий                                          | gRPC code             | HTTP | Текст                                                    |
 |---------------------------------------------------|------------------------|------|----------------------------------------------------------|
 | Имя занято в Account                              | `ALREADY_EXISTS`       | 409  | `ServiceAccount with name ci-pipeline already exists`    |
-| Delete при active key                             | `FAILED_PRECONDITION`  | 412  | `service_account has active oauth clients`               |
-| Delete при active AccessBinding                   | `FAILED_PRECONDITION`  | 412  | `service_account is referenced by access_bindings`       |
+| Delete при active key                             | `FAILED_PRECONDITION`  | 400  | `service_account has active oauth clients`               |
+| Delete при active AccessBinding                   | `FAILED_PRECONDITION`  | 400  | `service_account is referenced by access_bindings`       |
 
 ## Как воспроизвести локально
 

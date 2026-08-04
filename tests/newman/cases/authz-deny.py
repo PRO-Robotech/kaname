@@ -824,7 +824,7 @@ CASES.append(Case(
             },
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('grant create accepted', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
+                "pm.test('grant create accepted (200; мутация возвращает Operation, 202 краем не производится)', () => pm.expect(pm.response.code).to.eql(200));",
                 "const j = pm.response.json();",
                 # Clear FIRST — a rejected create mints no Operation and must not
                 # inherit a previous case's id (the poll below would confirm it).
@@ -918,7 +918,7 @@ CASES.append(Case(
                 "  return;",
                 "}",
                 "pm.environment.unset('_w12RevokeRetry');",
-                "pm.test('revoke accepted (200/202)', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
+                "pm.test('revoke accepted (200; 202 краем не производится)', () => pm.expect(pm.response.code).to.eql(200));",
                 "const j = pm.response.json();",
                 # Clear FIRST — see the grant step above.
                 "pm.environment.unset('opId');",

@@ -190,8 +190,8 @@ Account.Create **не** идемпотентен — повторный вызо
 | Сценарий                                              | gRPC code             | HTTP | Текст                                              |
 |-------------------------------------------------------|-----------------------|------|----------------------------------------------------|
 | Имя занято                                            | `ALREADY_EXISTS`      | 409  | `Account with name acme already exists`            |
-| `owner_user_id` не существует                         | `FAILED_PRECONDITION` | 412  | `owner_user_id usr_xxx not found`                  |
-| Удаление при наличии Project                          | `FAILED_PRECONDITION` | 412  | `account is not empty (projects/...)`              |
+| `owner_user_id` не существует                         | `FAILED_PRECONDITION` | 400  | `owner_user_id usr_xxx not found`                  |
+| Удаление при наличии Project                          | `FAILED_PRECONDITION` | 400  | `account is not empty (projects/...)`              |
 | Невалидное имя                                        | `INVALID_ARGUMENT`    | 400  | `Illegal argument name: must match ^[a-z]...`      |
 | Update с `ownerUserId` в mask                         | `INVALID_ARGUMENT`    | 400  | `ownerUserId is immutable after Account.Create`    |
 | Account не найден                                     | `NOT_FOUND`           | 404  | `Account acc_xxx not found`                        |

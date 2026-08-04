@@ -45,7 +45,7 @@
   ],
   "item": [
     {
-      "name": "IAM-USR-GT-CRUD-OK — Get userNOBId as jwtNoBindings (self) → 200 + id prefix usr, externalId present",
+      "name": "IAM-USR-GT-CRUD-OK — Get ceremonyUserId as jwtHumanCeremony (self) → 200 + id prefix usr, externalId present",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -59,7 +59,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userNOBId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{ceremonyUserId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -67,7 +67,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userNOBId}}"
+                "{{ceremonyUserId}}"
               ]
             }
           },
@@ -77,13 +77,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -116,9 +116,9 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.id, 'id must start with usr').to.match(/^usr[a-z0-9]+$/);",
                   "});",
-                  "pm.test('User.id matches userNOBId', () => {",
+                  "pm.test('User.id matches ceremonyUserId', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.id).to.eql(pm.environment.get('userNOBId'));",
+                  "  pm.expect(j.id).to.eql(pm.environment.get('ceremonyUserId'));",
                   "});",
                   "pm.test('User.email present', () => {",
                   "  const j = pm.response.json();",
@@ -3445,7 +3445,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{userINVId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{ceremonyUserId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -3453,7 +3453,7 @@
                 "iam",
                 "v1",
                 "users",
-                "{{userINVId}}"
+                "{{ceremonyUserId}}"
               ]
             }
           },
@@ -3463,13 +3463,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -3541,13 +3541,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4187,7 +4187,7 @@
       ]
     },
     {
-      "name": "IAM-USR-BLK-NEG-PENDING — Block a PENDING invitation → 412 FAILED_PRECONDITION \"is not active\" (route proven live)",
+      "name": "IAM-USR-BLK-NEG-PENDING — Block a PENDING invitation → 400 FAILED_PRECONDITION \"is not active\" (route proven live)",
       "description": "class:NEG | class:VAL | priority:P0",
       "item": [
         {
@@ -4559,7 +4559,7 @@
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
                   "});",
-                  "pm.test('status 412', () => pm.expect(pm.response.code).to.eql(412));",
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "pm.test('grpc code 9 (FAILED_PRECONDITION)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(9);",
@@ -4654,7 +4654,7 @@
       ]
     },
     {
-      "name": "IAM-USR-UBK-NEG-PENDING — Unblock a PENDING invitation → 412 FAILED_PRECONDITION (activation is a different path)",
+      "name": "IAM-USR-UBK-NEG-PENDING — Unblock a PENDING invitation → 400 FAILED_PRECONDITION (activation is a different path)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -5026,7 +5026,7 @@
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
                   "});",
-                  "pm.test('status 412', () => pm.expect(pm.response.code).to.eql(412));",
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "pm.test('grpc code 9 (FAILED_PRECONDITION)', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(9);",

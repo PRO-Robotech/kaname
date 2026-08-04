@@ -262,10 +262,10 @@ grpcurl -plaintext -d '{
 |-------------------------------------------|------------------------|------|------------------------------------------------|
 | Email занят в Account (PENDING)           | `ALREADY_EXISTS`       | 409  | `User with email already invited`              |
 | Email невалиден                           | `INVALID_ARGUMENT`     | 400  | `Illegal argument email: invalid format`       |
-| Delete user, на которого ссылается binding| `FAILED_PRECONDITION`  | 412  | `user is referenced by access_bindings`        |
+| Delete user, на которого ссылается binding| `FAILED_PRECONDITION`  | 400  | `user is referenced by access_bindings`        |
 | Update с `externalId` (через internal)    | `INVALID_ARGUMENT`     | 400  | `externalId is immutable after User.Create`    |
 | Update с `inviteStatus` в маске           | `INVALID_ARGUMENT`     | 400  | `inviteStatus is not updatable; use UserService.Block / UserService.Unblock` |
-| Block/Unblock на PENDING-приглашении      | `FAILED_PRECONDITION`  | 412  | `User <id> is not active`                      |
+| Block/Unblock на PENDING-приглашении      | `FAILED_PRECONDITION`  | 400  | `User <id> is not active`                      |
 | Block/Unblock по отсутствующему id        | `NOT_FOUND`            | 404  | `User <id> not found`                          |
 | Unblock, когда у личности уже есть ACTIVE | `ALREADY_EXISTS`       | 409  | `User with external_id already exists`         |
 

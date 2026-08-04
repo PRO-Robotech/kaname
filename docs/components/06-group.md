@@ -198,9 +198,9 @@ member_id) → `23505` → GREEN handling, возвращает existing).
 | Сценарий                                  | gRPC code             | HTTP | Текст                                          |
 |-------------------------------------------|------------------------|------|------------------------------------------------|
 | Group name занят                          | `ALREADY_EXISTS`       | 409  | `Group with name devops already exists`        |
-| AddMember для не-существующего user/SA    | `FAILED_PRECONDITION`  | 412  | `member not found (user usr_zzz)`              |
+| AddMember для не-существующего user/SA    | `FAILED_PRECONDITION`  | 400  | `member not found (user usr_zzz)`              |
 | AddMember с `member_type=group`           | `INVALID_ARGUMENT`     | 400  | `member_type 'group' is not allowed`           |
-| Delete Group при active AccessBinding     | `FAILED_PRECONDITION`  | 412  | `group is referenced by access_bindings`       |
+| Delete Group при active AccessBinding     | `FAILED_PRECONDITION`  | 400  | `group is referenced by access_bindings`       |
 
 ## Как воспроизвести локально
 

@@ -84,24 +84,24 @@ def assert_iam_operation_envelope():
 
 CASES.append(Case(
     id="IAM-USR-GT-CRUD-OK",
-    title="Get userNOBId as jwtNoBindings (self) → 200 + id prefix usr, externalId present",
+    title="Get ceremonyUserId as jwtHumanCeremony (self) → 200 + id prefix usr, externalId present",
     classes=["CRUD"],
     priority="P0",
     steps=[
         Step(
             name="get-self",
             method="GET",
-            path="/iam/v1/users/{{userNOBId}}",
-            auth="jwtNoBindings",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200),
                 "pm.test('User.id prefix usr', () => {",
                 "  const j = pm.response.json();",
                 "  pm.expect(j.id, 'id must start with usr').to.match(/^usr[a-z0-9]+$/);",
                 "});",
-                "pm.test('User.id matches userNOBId', () => {",
+                "pm.test('User.id matches ceremonyUserId', () => {",
                 "  const j = pm.response.json();",
-                "  pm.expect(j.id).to.eql(pm.environment.get('userNOBId'));",
+                "  pm.expect(j.id).to.eql(pm.environment.get('ceremonyUserId'));",
                 "});",
                 "pm.test('User.email present', () => {",
                 "  const j = pm.response.json();",
@@ -1006,18 +1006,20 @@ CASES.append(Case(
         Step(
             name="delete-bound-user",
             method="DELETE",
-            # Self-delete: jwtInvitee always holds bindings (own personal account
-            # owner grant + the account-B admin grant from the fixture seed), so the
-            # RESTRICT guard is reached rather than the authz gate.
-            path="/iam/v1/users/{{userINVId}}",
-            auth="jwtInvitee",
+            # Self-delete: the ceremony human always holds bindings — the ceremony seed
+            # creates an account HE owns (`ceremonyAccountId`, stage 8б) before any
+            # collection runs — so the RESTRICT guard is reached rather than the authz
+            # gate. Deliberately not left to accumulate from other collections: that
+            # would make the precondition depend on collection order.
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "boundDelOpId"),
             ],
         ),
-        # Polls as jwtInvitee — inherited from the step that minted the operation.
+        # Polls as jwtHumanCeremony — inherited from the step that minted the operation.
         assert_op_error(9, "FAILED_PRECONDITION",
                         msg_substr="has active access bindings and cannot be deleted",
                         op_var="boundDelOpId"),
@@ -1250,7 +1252,7 @@ def _invite_block_probe(var: str, email_tag: str):
 
 CASES.append(Case(
     id="IAM-USR-BLK-NEG-PENDING",
-    title="Block a PENDING invitation → 412 FAILED_PRECONDITION \"is not active\" (route proven live)",
+    title="Block a PENDING invitation → 400 FAILED_PRECONDITION \"is not active\" (route proven live)",
     classes=["NEG", "VAL"],
     priority="P0",
     steps=[
@@ -1263,9 +1265,18 @@ CASES.append(Case(
             auth="jwtAccountAdminAStepUp",
             test_script=[
                 *assert_answered("block-pending"),
-                # 412/9 — единственный исход, который НЕЛЬЗЯ получить ни промахом
+                # 400/9 — единственный исход, который НЕЛЬЗЯ получить ни промахом
                 # маршрута, ни промахом каталога, ни authz-отказом.
-                *assert_status(412),
+                #
+                # Статус 400, а НЕ 412: край своего отображения ошибок не несёт
+                # (mux собран без WithErrorHandler), поэтому статус выбирает
+                # runtime.HTTPStatusFromCode, а она FAILED_PRECONDITION отдаёт
+                # как 400 — намеренно, о чём говорит её собственный комментарий
+                # в этой же ветке. 412 не производится краем ни для одного кода.
+                # Различает валидацию и состояние здесь ПАРА (статус + code=9):
+                # 400 сам по себе приходит и от INVALID_ARGUMENT.
+                # Таблица целиком — api-conventions.md §«gRPC-код → HTTP-статус».
+                *assert_status(400),
                 *assert_grpc_code(9, "FAILED_PRECONDITION"),
                 "pm.test('reason is the state, named in words', () => {",
                 "  const j = pm.response.json();",
@@ -1300,7 +1311,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-USR-UBK-NEG-PENDING",
-    title="Unblock a PENDING invitation → 412 FAILED_PRECONDITION (activation is a different path)",
+    title="Unblock a PENDING invitation → 400 FAILED_PRECONDITION (activation is a different path)",
     classes=["NEG", "VAL"],
     priority="P1",
     steps=[
@@ -1313,7 +1324,10 @@ CASES.append(Case(
             auth="jwtAccountAdminAStepUp",
             test_script=[
                 *assert_answered("unblock-pending"),
-                *assert_status(412),
+                # 400, не 412 — см. парный кейс выше и таблицу отображения в
+                # api-conventions.md §«gRPC-код → HTTP-статус». Пара (статус,
+                # code=9) — то, что отличает состояние от валидации.
+                *assert_status(400),
                 *assert_grpc_code(9, "FAILED_PRECONDITION"),
                 "pm.test('reason is the state, named in words', () => {",
                 "  const j = pm.response.json();",

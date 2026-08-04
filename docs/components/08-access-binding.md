@@ -214,12 +214,12 @@ curl -X DELETE http://localhost:18080/iam/v1/accessBindings/$ACB_ID \
 
 | Сценарий                                  | gRPC code             | HTTP | Текст                                                |
 |-------------------------------------------|------------------------|------|------------------------------------------------------|
-| role_id не существует                     | `FAILED_PRECONDITION`  | 412  | `role_id rol_zzz not found`                          |
+| role_id не существует                     | `FAILED_PRECONDITION`  | 400  | `role_id rol_zzz not found`                          |
 | Caller не имеет grant authority           | `PERMISSION_DENIED`    | 403  | `permission denied`                                  |
 | Anonymous                                 | `PERMISSION_DENIED`    | 403  | `permission denied`                                  |
 | resource_type вне whitelist               | `INVALID_ARGUMENT`     | 400  | `Illegal argument resource_type "foobar"`            |
 | subject_type 'group' с member_id user'а   | `INVALID_ARGUMENT`     | 400  | `subject_id usr_xxx does not match subject_type group` |
-| Delete на REVOKED binding                 | `FAILED_PRECONDITION`  | 412  | `access_binding already revoked`                     |
+| Delete на REVOKED binding                 | `FAILED_PRECONDITION`  | 400  | `access_binding already revoked`                     |
 
 > [!warning] Отказ по правам НЕ РАЗЛИЧИМ по ответу — и это стоило целого разбора
 >
