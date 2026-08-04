@@ -35,11 +35,17 @@ const (
 	ProviderCompensationTable = "kacho_iam.provider_compensation_outbox"
 	// ProviderCompensationChannel — LISTEN-канал (триггер миграции 0079).
 	ProviderCompensationChannel = "kacho_iam_provider_compensation_outbox"
-	// EventProviderOAuthClientDelete — единственный вид компенсации на сегодня.
+	// EventProviderOAuthClientDelete — снять OAuth-клиента у провайдера.
 	// Словарь закрыт CHECK'ом в миграции: расширение требует и кода, и миграции.
 	EventProviderOAuthClientDelete = "provider.oauth_client.delete"
+	// EventProviderTrustGrantDelete — снять доверительный грант у провайдера
+	// (миграция 0080). Отдельный вид, а не поле первого: у него другой предмет,
+	// другая координата снятия и другой вызов к провайдеру.
+	EventProviderTrustGrantDelete = "provider.trust_grant.delete"
 	// providerCompensationKind — resource_kind денормализованной колонки.
 	providerCompensationKind = "ProviderOAuthClient"
+	// providerTrustGrantKind — resource_kind для компенсации доверия.
+	providerTrustGrantKind = "ProviderTrustGrant"
 )
 
 // ProviderCompensationEvent — расшифрованный payload одной строки очереди.
@@ -50,6 +56,11 @@ type ProviderCompensationEvent struct {
 	// Origin — какая сага его заняла (sa_key / user_token / interactive_client).
 	// Только атрибуция: применение от него не зависит.
 	Origin string `json:"origin"`
+	// GrantID — идентификатор ДОВЕРИТЕЛЬНОГО ГРАНТА у провайдера. Заполнен
+	// ровно у компенсаций вида EventProviderTrustGrantDelete и взаимно
+	// исключается с ClientID (проверка миграции 0080 отвергает строку, где оба
+	// непусты либо оба пусты: у намерения обязан быть ровно один предмет).
+	GrantID string `json:"grant_id,omitempty"`
 	// Reason — почему компенсируем. Короткая своя строка, НЕ текст ошибки
 	// провайдера (тот мог бы утащить в очередь его внутренние подробности).
 	Reason string `json:"reason"`
@@ -147,24 +158,76 @@ func (o *ProviderCompensationOutbox) EmitHydraClientDelete(ctx context.Context, 
 	return o.observe(origin, nil)
 }
 
-// DecodeProviderCompensation — drainer.Decoder. Строка без client_id
-// нерастолковываема и не станет таковой при повторе → это ПОСТОЯННАЯ ошибка
-// (дренаж отравляет строку и показывает её оператору), а не вечный ретрай.
+// DecodeProviderCompensation — drainer.Decoder. Строка, у которой предмет не
+// назван РОВНО ОДИН раз, нерастолковываема и не станет таковой при повторе →
+// это ПОСТОЯННАЯ ошибка (дренаж отравляет строку и показывает её оператору), а
+// не вечный ретрай.
+//
+// Требуется именно «ровно один», а не «хотя бы один»: строка с двумя предметами
+// не даёт применителю выбрать вызов, и любой выбор был бы догадкой. Проверка
+// миграции 0080 держит то же свойство на записи — здесь оно повторено потому,
+// что декодер обязан оставаться верным и для строк, записанных до неё.
 func DecodeProviderCompensation(payload []byte) (ProviderCompensationEvent, error) {
 	var ev ProviderCompensationEvent
 	if err := json.Unmarshal(payload, &ev); err != nil {
 		return ProviderCompensationEvent{}, fmt.Errorf("%w: decode provider compensation payload: %w", drainer.ErrPermanent, err)
 	}
-	if ev.ClientID == "" {
-		return ProviderCompensationEvent{}, fmt.Errorf("%w: provider compensation payload without client_id", drainer.ErrPermanent)
+	switch {
+	case ev.ClientID == "" && ev.GrantID == "":
+		return ProviderCompensationEvent{}, fmt.Errorf(
+			"%w: provider compensation payload names no subject (neither client_id nor grant_id)", drainer.ErrPermanent)
+	case ev.ClientID != "" && ev.GrantID != "":
+		return ProviderCompensationEvent{}, fmt.Errorf(
+			"%w: provider compensation payload names two subjects (client_id and grant_id)", drainer.ErrPermanent)
 	}
 	return ev, nil
 }
 
-// ProviderClientReleaser — то, что умеет снять клиента у провайдера.
-// Реализуется clients.HydraAdminClient (DeleteOAuthClient: 404 → nil).
+// EmitTrustGrantDelete записывает намерение снять доверительный грант.
+//
+// Зачем это durable, а не вызов на месте: веер доверительных грантов не
+// транзакционен у провайдера, отказ на k-м оставляет k-1 стоять, а процесс
+// может умереть между этим отказом и уборкой. Оставшийся грант — выданное
+// доверие: провайдер продолжает принимать внешнее утверждение субъекта, хотя
+// ключа, ради которого доверие выдавалось, у нас нет.
+//
+// Собственная транзакция и собственный commit — по тому же доводу, что и у
+// EmitHydraClientDelete: компенсируется та транзакция, которая откатилась.
+func (o *ProviderCompensationOutbox) EmitTrustGrantDelete(ctx context.Context, grantID, origin, reason string) error {
+	if o == nil || o.pool == nil {
+		return errors.New("provider compensation outbox: no pool")
+	}
+	if grantID == "" {
+		return o.observe(origin, errors.New("provider compensation outbox: grant_id required"))
+	}
+	tx, err := o.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return o.observe(origin, fmt.Errorf("provider compensation outbox: begin: %w", err))
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+	if err := outbox.Emit(ctx, tx, ProviderCompensationTable,
+		providerTrustGrantKind, grantID, EventProviderTrustGrantDelete,
+		map[string]any{"grant_id": grantID, "origin": origin, "reason": reason},
+	); err != nil {
+		return o.observe(origin, fmt.Errorf("provider compensation outbox: emit: %w", err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return o.observe(origin, fmt.Errorf("provider compensation outbox: commit: %w", err))
+	}
+	committed = true
+	return o.observe(origin, nil)
+}
+
+// ProviderClientReleaser — то, что умеет снять у провайдера занятое сагой.
+// Реализуется clients.HydraAdminClient; обе операции идемпотентны (404 → nil).
 type ProviderClientReleaser interface {
 	DeleteOAuthClient(ctx context.Context, clientID string) error
+	DeleteJWTBearerTrustGrant(ctx context.Context, grantID string) error
 }
 
 // CompensationObserver — счётчики исполненных компенсаций. Нужны, чтобы «ноль
@@ -190,9 +253,23 @@ type CompensationObserver interface {
 func NewProviderCompensationApplier(
 	releaser ProviderClientReleaser, obs CompensationObserver,
 ) drainer.Applier[ProviderCompensationEvent] {
-	return func(ctx context.Context, _ string, ev ProviderCompensationEvent) error {
-		if err := releaser.DeleteOAuthClient(ctx, ev.ClientID); err != nil {
-			return fmt.Errorf("release provider oauth client: %w", err)
+	return func(ctx context.Context, eventType string, ev ProviderCompensationEvent) error {
+		// Развилка идёт по ВИДУ события, а не по «какое поле непусто»: вид —
+		// то, что записал автор намерения, а вывод из формы payload был бы
+		// догадкой применителя о чужом решении. Неизвестный вид — ПОСТОЯННЫЙ
+		// отказ: повтор его не растолкует, и корзины «прочее» здесь нет.
+		switch eventType {
+		case EventProviderOAuthClientDelete:
+			if err := releaser.DeleteOAuthClient(ctx, ev.ClientID); err != nil {
+				return fmt.Errorf("release provider oauth client: %w", err)
+			}
+		case EventProviderTrustGrantDelete:
+			if err := releaser.DeleteJWTBearerTrustGrant(ctx, ev.GrantID); err != nil {
+				return fmt.Errorf("release provider trust grant: %w", err)
+			}
+		default:
+			return fmt.Errorf("%w: unknown provider compensation event type %q",
+				drainer.ErrPermanent, eventType)
 		}
 		if obs != nil {
 			obs.IncCompensationApplied(ev.Origin)

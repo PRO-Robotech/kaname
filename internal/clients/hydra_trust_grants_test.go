@@ -29,7 +29,7 @@ func TestHydraAdminClient_CreateJWTBearerTrustGrant_ExactSubject(t *testing.T) {
 
 	c := NewHydraAdminClient(srv.URL, "")
 	exp := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := c.CreateJWTBearerTrustGrant(context.Background(), JWTBearerTrustGrant{
+	grantID, err := c.CreateJWTBearerTrustGrant(context.Background(), JWTBearerTrustGrant{
 		Issuer:    "https://kube.cluster.local",
 		Subject:   "system:serviceaccount:ci:deployer",
 		Scope:     []string{"reg"},
@@ -37,6 +37,11 @@ func TestHydraAdminClient_CreateJWTBearerTrustGrant_ExactSubject(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateJWTBearerTrustGrant: %v", err)
+	}
+	// Идентификатор — единственная координата снятия: веер грантов не
+	// транзакционен, и без него оставшееся доверие убрать нечем.
+	if grantID != "grant-1" {
+		t.Errorf("идентификатор гранта обязан быть возвращён, получено %q", grantID)
 	}
 	if gotPath != "/admin/trust/grants/jwt-bearer/issuers" {
 		t.Errorf("path = %q", gotPath)
@@ -61,7 +66,7 @@ func TestHydraAdminClient_CreateJWTBearerTrustGrant_Error(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := NewHydraAdminClient(srv.URL, "").CreateJWTBearerTrustGrant(context.Background(), JWTBearerTrustGrant{
+	_, err := NewHydraAdminClient(srv.URL, "").CreateJWTBearerTrustGrant(context.Background(), JWTBearerTrustGrant{
 		Issuer:  "https://kube.cluster.local",
 		Subject: "system:serviceaccount:ci:deployer",
 	})

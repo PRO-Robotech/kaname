@@ -9,6 +9,7 @@ package sa_keys
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -19,11 +20,25 @@ import (
 type fakeTrustGrants struct {
 	calls []clients.JWTBearerTrustGrant
 	err   error
+	// failAfter — сколько грантов выдать успешно до отказа. 0 с непустым err
+	// означает «отказать сразу» (прежнее поведение).
+	failAfter int
+	// deleted — гранты, СНЯТЫЕ у провайдера. Именно исход, а не факт вызова:
+	// утечка доверия наблюдаема только тем, что осталось стоять.
+	deleted []string
 }
 
-func (f *fakeTrustGrants) CreateJWTBearerTrustGrant(_ context.Context, g clients.JWTBearerTrustGrant) error {
+func (f *fakeTrustGrants) CreateJWTBearerTrustGrant(_ context.Context, g clients.JWTBearerTrustGrant) (string, error) {
+	if f.err != nil && len(f.calls) >= f.failAfter {
+		return "", f.err
+	}
 	f.calls = append(f.calls, g)
-	return f.err
+	return fmt.Sprintf("grant-%d", len(f.calls)), nil
+}
+
+func (f *fakeTrustGrants) DeleteJWTBearerTrustGrant(_ context.Context, grantID string) error {
+	f.deleted = append(f.deleted, grantID)
+	return nil
 }
 
 // recordingHydra — an OAuthClientAdmin that records DeleteOAuthClient (rollback).

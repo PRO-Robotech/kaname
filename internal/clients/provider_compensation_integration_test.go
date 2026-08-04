@@ -48,6 +48,19 @@ func (r *recordingReleaser) DeleteOAuthClient(_ context.Context, clientID string
 	return nil
 }
 
+// DeleteJWTBearerTrustGrant — вторая операция снятия у провайдера. Снятое
+// доверие пишется в тот же список: предмет каждой записи называет её же
+// идентификатор, а пробам важно, что снятие ДОЕХАЛО.
+func (r *recordingReleaser) DeleteJWTBearerTrustGrant(_ context.Context, grantID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail != nil {
+		return r.fail
+	}
+	r.calls = append(r.calls, grantID)
+	return nil
+}
+
 func (r *recordingReleaser) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

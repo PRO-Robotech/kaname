@@ -87,7 +87,13 @@ type OAuthClientAdmin interface {
 // grant (allow_any_subject=false) so Hydra accepts an external assertion only when
 // its `sub` matches the granted subject verbatim.
 type TrustGrantAdmin interface {
-	CreateJWTBearerTrustGrant(ctx context.Context, g clients.JWTBearerTrustGrant) error
+	// CreateJWTBearerTrustGrant возвращает идентификатор, который провайдер
+	// присвоил гранту. Он и есть ЕДИНСТВЕННАЯ координата снятия: веер грантов
+	// не транзакционен, отказ на k-м оставляет k-1 стоять, и без этого
+	// идентификатора убрать их нечем.
+	CreateJWTBearerTrustGrant(ctx context.Context, g clients.JWTBearerTrustGrant) (string, error)
+	// DeleteJWTBearerTrustGrant снимает грант. Идемпотентно (нет гранта → успех).
+	DeleteJWTBearerTrustGrant(ctx context.Context, grantID string) error
 }
 
 // OpsResponseRedactor clears a named field in the proto-marshalled success
@@ -108,6 +114,10 @@ type OpsResponseRedactor interface {
 // почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
 type providerCompensationEmitter interface {
 	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
+	// EmitTrustGrantDelete — то же для доверительного гранта. Отдельный метод, а
+	// не флаг: у него другой предмет и другой вызов к провайдеру, и намерение
+	// обязано называть ровно один из них.
+	EmitTrustGrantDelete(ctx context.Context, grantID, origin, reason string) error
 }
 
 // IssueSAKeyUseCase mints a new Hydra OAuth2 client + persists the mapping.
@@ -742,10 +752,13 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	// literal-anchored, so LiteralSubject always resolves here. On failure the
 	// just-created Hydra client (external side-effect) is released and the call
 	// fails closed.
+	var grantIDs []string
 	if u.trustGrants != nil {
-		if err := u.registerTrustGrants(ctx, in); err != nil {
+		var terr error
+		grantIDs, terr = u.registerTrustGrants(ctx, in)
+		if terr != nil {
 			u.releaseProviderClient(ctx, hydraClient.ClientID, "trust-grant registration failed")
-			return nil, err
+			return nil, terr
 		}
 	}
 
@@ -767,6 +780,12 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	// Federated rows carry no kacho-held key material — key_algorithm is "".
 	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, "")
 	if err != nil {
+		// commitMapping снимает КЛИЕНТА, но не выданное доверие: гранты — это
+		// отдельные объекты у провайдера, о которых наша откаченная строка не
+		// знает. Оставь их — и провайдер продолжит принимать внешнее
+		// утверждение субъекта при том, что ключа, ради которого доверие
+		// выдавалось, у нас нет.
+		u.releaseTrustGrants(ctx, grantIDs, "mapping row was not committed")
 		return nil, err
 	}
 
@@ -792,17 +811,32 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 }
 
 // registerTrustGrants registers one EXACT-subject jwt-bearer trust-grant per
-// trusted subject. allow_any_subject is always false — trusting an issuer must not
-// mean trusting an arbitrary subject from it. On the first failure the caller
-// rolls back the Hydra client and fails closed.
-func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInput) error {
+// trusted subject and returns the identifiers the provider assigned to them.
+// allow_any_subject is always false — trusting an issuer must not mean trusting
+// an arbitrary subject from it.
+//
+// ПОЧЕМУ ИДЕНТИФИКАТОРЫ ВОЗВРАЩАЮТСЯ. Это веер из N независимых обращений;
+// понятия «группа» у провайдера нет, отката веера — тоже. Отказ на k-м оставляет
+// k-1 гранта стоять, и снять их можно ТОЛЬКО по идентификатору, который
+// присвоил провайдер. Прежняя редакция его выбрасывала, а метода снятия не
+// существовало вовсе — то есть утечка была необратима by construction, и
+// комментарий рядом обещал откат, который касался лишь клиента.
+//
+// Оставшийся грант — не висящая строка, а выданное доверие: провайдер
+// продолжает принимать внешнее утверждение этого субъекта.
+//
+// На собственном отказе метод снимает то, что успел выдать, — до возврата
+// ошибки. Порядок обратный выдаче: последний выданный снимается первым.
+func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInput) ([]string, error) {
 	expiresAt := u.trustGrantExpiry(in)
 	scope := strings.Fields(u.DefaultScope)
+	granted := make([]string, 0, len(in.TrustedSubjects))
 	for i, ts := range in.TrustedSubjects {
 		subject, ok := ts.LiteralSubject()
 		if !ok {
 			// Defensive: Validate() already rejects non-literal patterns.
-			return status.Errorf(codes.InvalidArgument,
+			u.releaseTrustGrants(ctx, granted, "trust-grant fan-out aborted")
+			return nil, status.Errorf(codes.InvalidArgument,
 				"trusted_subjects[%d].subject_pattern must be a literal anchored subject", i)
 		}
 		grant := clients.JWTBearerTrustGrant{
@@ -812,11 +846,59 @@ func (u *IssueSAKeyUseCase) registerTrustGrants(ctx context.Context, in IssueInp
 			Scope:           scope,
 			ExpiresAt:       expiresAt,
 		}
-		if err := u.trustGrants.CreateJWTBearerTrustGrant(ctx, grant); err != nil {
-			return u.hydraUnavailable(ctx, "create-trust-grant", err)
+		grantID, err := u.trustGrants.CreateJWTBearerTrustGrant(ctx, grant)
+		if err != nil {
+			u.releaseTrustGrants(ctx, granted, "trust-grant fan-out failed")
+			return nil, u.hydraUnavailable(ctx, "create-trust-grant", err)
+		}
+		granted = append(granted, grantID)
+	}
+	return granted, nil
+}
+
+// releaseTrustGrants снимает выданное доверие через durable-намерение, с прямым
+// вызовом как запасным путём.
+//
+// Тот же порядок доводов, что у releaseProviderClient: прямой вызов гарантией не
+// является — он сам может отказать (лежит тот же провайдер), а процесс может
+// умереть между отказом и уборкой. Пережившее рестарт намерение доставит дренаж.
+//
+// Обратный порядок снятия (последний выданный — первым) не влияет на исход, но
+// делает журнал читаемым: снятие идёт зеркально выдаче.
+func (u *IssueSAKeyUseCase) releaseTrustGrants(ctx context.Context, grantIDs []string, reason string) {
+	if len(grantIDs) == 0 {
+		return
+	}
+	// Отвязано от отмены вызывающего, baggage (trace/request-id) сохранено.
+	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
+	defer cancel()
+
+	for i := len(grantIDs) - 1; i >= 0; i-- {
+		grantID := grantIDs[i]
+		if grantID == "" {
+			continue
+		}
+		if u.compensation != nil {
+			if err := u.compensation.EmitTrustGrantDelete(
+				relCtx, grantID, compensationOriginSAKey, reason); err == nil {
+				continue
+			} else if u.logger != nil {
+				u.logger.ErrorContext(relCtx,
+					"sa key: durable trust-grant compensation intent could not be recorded, falling back to a direct release",
+					"provider_trust_grant_id", grantID, "reason", reason, "err", err.Error())
+			}
+		}
+		if u.trustGrants == nil {
+			continue
+		}
+		if err := u.trustGrants.DeleteJWTBearerTrustGrant(relCtx, grantID); err != nil && u.logger != nil {
+			// Ни намерения, ни снятия — доверие осталось выданным, и назвать
+			// его потом можно только по этой строке лога.
+			u.logger.ErrorContext(relCtx,
+				"sa key: provider trust grant left behind after a failed issue",
+				"provider_trust_grant_id", grantID, "reason", reason, "err", err.Error())
 		}
 	}
-	return nil
 }
 
 // trustGrantExpiry — the trust-grant lifetime tracks the SA-key's own expiry:

@@ -87,6 +87,21 @@ func (c *recordingCompensation) EmitHydraClientDelete(
 	return nil
 }
 
+// EmitTrustGrantDelete — вторая половина порта: намерение снять выданное
+// доверие. Записывается в тот же список: пробам важно, ЧТО намерение
+// зафиксировано, а предмет каждого называет его же идентификатор.
+func (c *recordingCompensation) EmitTrustGrantDelete(
+	_ context.Context, grantID, _, _ string,
+) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return c.err
+	}
+	c.emitted = append(c.emitted, grantID)
+	return nil
+}
+
 func (c *recordingCompensation) snapshot() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
