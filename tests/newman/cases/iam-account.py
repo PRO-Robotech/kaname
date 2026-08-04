@@ -455,7 +455,6 @@ def _bva_name_script(var: str, length: int) -> list:
     """Собрать имя ровно `length` символов с энтропией прогона и проверить длину."""
     return [
         "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
-        "pm.test('fixture: runId is seeded (name entropy source)', () => pm.expect(_rid.length, 'runId').to.be.above(0));",
         # Первый символ обязан быть буквой (^[a-z]), остальные — [-a-z0-9].
         "const _A = 'abcdefghijklmnopqrstuvwxyz';",
         "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
@@ -469,8 +468,25 @@ def _bva_name_script(var: str, length: int) -> list:
         f"pm.environment.set('{var}', _n);",
         # Фикстура не снисходительнее продукта: если имя не той длины или не той
         # формы, граничного кейса больше нет — и об этом обязано быть сказано ЗДЕСЬ.
-        f"pm.test('fixture: BVA name is exactly {length} chars', () => pm.expect(_n.length, _n).to.eql(_len));",
-        "pm.test('fixture: BVA name matches the product regex', () => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
+        #
+        # ФОРМА: утвердить (назвав переменную), ЗАТЕМ снять шаг. Эталон —
+        # gen.py::require_env_url, правило объявлено в exec-coverage.py (STATIC BANS).
+        # Прежняя редакция утверждала ВНЕ ветки и шаг всё равно отправляла: сломанная
+        # фикстура уезжала на сервер, ответ приходил, и падение читалось как дефект
+        # продукта на границе имени — тогда как граничного случая в запросе уже не было.
+        # Отправленный шаг со сломанной фикстурой хуже неотправленного: он даёт
+        # утверждению предмет, которого тот не описывает.
+        "const _bvaOk = _rid.length > 0 && _n.length === _len "
+        "&& /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
+        "if (!_bvaOk) {",
+        f"  pm.test('fixture: runId is seeded (name entropy source for {var})', "
+        "() => pm.expect(_rid.length, 'runId').to.be.above(0));",
+        f"  pm.test('fixture: BVA name is exactly {length} chars', "
+        "() => pm.expect(_n.length, _n).to.eql(_len));",
+        f"  pm.test('fixture: BVA name matches the product regex ({var})', "
+        "() => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
+        "  pm.execution.skipRequest();",
+        "}",
     ]
 
 
