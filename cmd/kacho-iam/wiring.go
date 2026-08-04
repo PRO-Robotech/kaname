@@ -503,7 +503,19 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// standing access to a resource that already answers 404, since that tier
 		// reaches objects THROUGH the pointer rather than through any per-object grant.
 		// nil-safe + non-fatal: the durable outbox drain remains the backstop.
-		WithTupleApplier(clients.NewHierarchyTupleApplier(relationStore), logger)
+		WithTupleApplier(clients.NewHierarchyTupleApplier(relationStore), logger).
+		// A teardown must take away EVERY relationship this proxy could have written on
+		// the object, not only the one the consumer was able to name. The consumer names
+		// the scope pointer because that is all it holds; the creator's own `owner` was
+		// written from an identity nobody stores afterwards, so the store is the only
+		// side that can still name it. Without this reader that relationship outlived its
+		// object silently — the withdrawal was emitted, delivered and marked sent with no
+		// error, while the model went on deriving all five verbs from what it left behind.
+		//
+		// The bare transport is used deliberately: this needs the STRONG object listing,
+		// and it must not travel the cascade wrapper, whose job is to widen answers to
+		// questions rather than to enumerate what is physically there.
+		WithResidualTupleReader(clients.NewResidualTupleReader(fgaTransport))
 	// Both post-commit steps above are best-effort: they front a durable queue, so a
 	// failure costs latency and never the change. That is what makes a permanently broken
 	// one invisible — one WARN and a product that keeps working, slower, forever. The

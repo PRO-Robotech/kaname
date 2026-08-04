@@ -143,6 +143,21 @@ var askingSites = map[string]lane{
 	// delivery, and it reads at HIGHER_CONSISTENCY for exactly that reason — a replica-lagged
 	// answer would leave the delta unchanged round after round. No access decision turns on it.
 	"internal/repo/kacho/pg/reconcile_adapter.go:readExisting": laneDelivery,
+	// The read half of a WITHDRAWAL: what is still standing on an object whose registration
+	// is being withdrawn, so the teardown takes away all of what this proxy could have
+	// written rather than only the tuple the consumer was able to name. Same lane and same
+	// reason as readExisting above — the subject of the question is DELIVERY, it reads at
+	// HIGHER_CONSISTENCY because a lagged answer would under-remove, and nothing is granted
+	// or refused on it.
+	//
+	// It is emphatically NOT laneEnumeration: that lane's premise is that a flat read may
+	// under-report what the cascade would admit, and the cost is a less complete report. Here
+	// the answer decides what to DELETE, so under-reporting is a relationship that outlives
+	// its object — which is the defect this site was added to close (measured 2026-08-04: the
+	// creator's `owner` survived a delivered withdrawal in 180 of 180 registry registrations).
+	// The cascade has no bearing either way: it widens answers about named objects, and this
+	// asks what is physically present.
+	"internal/clients/residual_tuple_reader.go:ObjectTuples": laneDelivery,
 	// The denial message's hint: which direct relations the subject does hold on the object.
 	// It is diagnostic prose, not the decision — the decision was already taken above it, and
 	// this returns nil on any error. Being a flat read it sees only DIRECT tuples, so the hint
