@@ -96,12 +96,18 @@ func (u *ListGroupsUseCase) Execute(ctx context.Context, f repogroup.ListFilter)
 	return filtered, next, nil
 }
 
-// visibleGroupIDs — UNION FGA viewer ∪ v_list на iam_group, спрашиваемый ПРЯМО
-// по каждому объекту СТРАНИЦЫ. Прежняя форма (ListObjects — «перечисли все
-// видимые группы») молча резалась server-side пределом OpenFGA (1000 объектов
-// типа в сторе, без continuation-token), из-за чего собственная группа тенанта
-// выпадала из выдачи навсегда; предикат тот же, изменилась только форма вопроса
-// (см. package-doc internal/authzfilter).
+// visibleGroupIDs — отношение ЧТЕНИЯ на iam_group (предикат страницы берётся у
+// authzfilter.RelationsFor), спрашиваемое ПРЯМО по каждому объекту СТРАНИЦЫ:
+// строка попадает в страницу ровно тогда, когда вызывающий вправе прочитать её
+// одиночным Get.
+//
+// Здесь менялись ДВЕ независимые вещи, обе уже применены. Форма: прежний
+// ListObjects («перечисли все видимые группы») молча резался server-side
+// пределом OpenFGA (1000 объектов типа в сторе, без continuation-token), из-за
+// чего собственная группа тенанта выпадала из выдачи навсегда. Предикат: здесь
+// стоял союз `viewer ∪ v_list` — снят, потому что ярусные и глагольные
+// отношения развязаны намеренно и союз расходился с гейтом чтения в обе
+// стороны. См. package-doc internal/authzfilter.
 //
 // Fail-closed: nil-порт или FGA-ошибка на любом объекте → Unavailable.
 func (u *ListGroupsUseCase) visibleGroupIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {

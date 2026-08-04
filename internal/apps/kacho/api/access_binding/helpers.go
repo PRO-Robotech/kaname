@@ -67,16 +67,20 @@ func labelsFromProto(m map[string]string) domain.Labels {
 const fgaBindingObjectType = "iam_access_binding"
 
 // bindingVisibleToCaller answers the DIRECT per-object question "may the ctx
-// principal read iam_access_binding:<id>?" — the `viewer ∪ v_list` union (D-6
-// label-selectable binding visibility), evaluated on the ONE object being read.
+// principal read iam_access_binding:<id>?", evaluated on the ONE object being
+// read. The predicate is NOT spelled here: it is whatever authzfilter answers
+// for this type, which is the relation the catalog gates a single-object Get on.
 //
-// It replaces the previous "enumerate every visible binding, then look for this
-// id in the result" shape: OpenFGA caps ListObjects server-side at
+// Two independent things changed here, both already applied. Shape: this
+// replaces the previous "enumerate every visible binding, then look for this id
+// in the result", because OpenFGA caps ListObjects server-side at
 // OPENFGA_LIST_OBJECTS_MAX_RESULTS (default 1000) with no continuation token, so
 // past that population a caller's OWN granted binding fell outside the returned
-// prefix and Get answered 403 forever (see internal/authzfilter package doc).
-// The predicate is unchanged — same two relations, same subject — only the shape
-// of the question is bounded.
+// prefix and Get answered 403 forever. Predicate: this used to ask the
+// `viewer ∪ v_list` union (D-6 label-selectable binding visibility); the union
+// was dropped because tier and verb relations are deliberately decoupled, so it
+// diverged from the read gate in both directions. See the internal/authzfilter
+// package doc for both.
 //
 // Fail-closed: the resolver unwired (nil port) or an unresolvable / anonymous
 // principal → (false, nil) = deny; an FGA error → UNAVAILABLE.
@@ -95,7 +99,9 @@ func bindingVisibleToCaller(ctx context.Context, rq clients.RelationQueries, id 
 	return visible, nil
 }
 
-// visibleBindingIDsOnPage resolves the principal's `viewer ∪ v_list` visibility
+// visibleBindingIDsOnPage resolves the principal's READ visibility (the relation
+// authzfilter reports for this type — the one gating a single-object Get, no
+// longer the former `viewer ∪ v_list` union)
 // for the bindings ON THE PAGE the caller already read from the iam database.
 // Returns (set, ok): ok=false when the resolver is unwired (no RelationQueries) —
 // callers then rely solely on the self/granted floor.

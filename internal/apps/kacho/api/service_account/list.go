@@ -98,12 +98,18 @@ func (u *ListServiceAccountsUseCase) Execute(ctx context.Context, f reposa.ListF
 	return filtered, next, nil
 }
 
-// visibleServiceAccountIDs — UNION FGA viewer ∪ v_list на iam_service_account,
-// спрашиваемый ПРЯМО по каждому объекту СТРАНИЦЫ. Прежняя форма (ListObjects —
-// «перечисли все видимые SA») молча резалась server-side пределом OpenFGA (1000
-// объектов типа в сторе, без continuation-token), из-за чего собственный SA
-// тенанта выпадал из выдачи навсегда; предикат тот же, изменилась только форма
-// вопроса (см. package-doc internal/authzfilter).
+// visibleServiceAccountIDs — отношение ЧТЕНИЯ на iam_service_account (предикат
+// страницы берётся у authzfilter.RelationsFor), спрашиваемое ПРЯМО по каждому
+// объекту СТРАНИЦЫ: строка попадает в страницу ровно тогда, когда вызывающий
+// вправе прочитать её одиночным Get.
+//
+// Здесь менялись ДВЕ независимые вещи, обе уже применены. Форма: прежний
+// ListObjects («перечисли все видимые SA») молча резался server-side пределом
+// OpenFGA (1000 объектов типа в сторе, без continuation-token), из-за чего
+// собственный SA тенанта выпадал из выдачи навсегда. Предикат: здесь стоял союз
+// `viewer ∪ v_list` — снят, потому что ярусные и глагольные отношения развязаны
+// намеренно и союз расходился с гейтом чтения в обе стороны. См. package-doc
+// internal/authzfilter.
 //
 // Fail-closed: nil-порт или FGA-ошибка на любом объекте → Unavailable.
 func (u *ListServiceAccountsUseCase) visibleServiceAccountIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
