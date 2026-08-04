@@ -32,6 +32,10 @@ import (
 // the thing an operator edits, in both the YAML and the ENV spelling.
 const (
 	adminHopCASetting = "authn.hydra-admin-ca-file (env KACHO_IAM_HYDRA_ADMIN_CA_FILE)"
+	// #nosec G101 -- the name of a setting an operator edits, not a credential.
+	// The value is a CA *file path* setting for the token-exchange hop; the rule
+	// matches on the identifier containing "token". Same class, and same treatment,
+	// as the header/metadata key names in gateway/internal/principalmeta/keys.go.
 	tokenHopCASetting = "authn.hydra-token-ca-file (env KACHO_IAM_HYDRA_TOKEN_CA_FILE)"
 	// JWKSHopCASetting is exported because the JWKS upstream client is assembled
 	// at the composition root (the mirror handler takes an injected client), so
