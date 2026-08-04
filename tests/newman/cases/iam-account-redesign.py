@@ -28,9 +28,16 @@ status на ПЕРВЫЙ доступ к своему свежему ресур�
 НЕ оборачиваются; per-case self-seed (свежий account per {{runId}}) + best-effort
 cleanup; {{runId}}-уникальные имена (UNIQUE(name) — коллизия на повторном прогоне).
 
-Фикстуры (authz-fixtures/setup.sh): jwtAccountAdminA (principal == userAAAId),
-accountAId (owned by userAAAId), accountBId, jwtAccountAdminB. Свежий account сага-
-создаётся jwtAccountAdminA → caller становится owner° (derive-from-caller).
+Фикстуры (authz-fixtures/setup.sh): jwtAccountAdminA (СЛУЖЕБНАЯ учётка, admin @ accountAId
+— для проектных кейсов и чтения посеянного аккаунта), accountAId (owned by userAAAId),
+accountBId, jwtAccountAdminB.
+
+СВЕЖИЙ АККАУНТ САГА-СОЗДАЁТСЯ ЧЕЛОВЕКОМ ЦЕРЕМОНИИ (`jwtHumanCeremony`), и иначе нельзя:
+`owner_user_id` ссылается на `users(id)`, владелец выводится из принципала, поэтому
+служебная учётка получает синхронный отказ первым стейтментом. Ожидаемый владелец —
+`ceremonyUserId`. Условие создаёт волна церемонии (`scripts/run-ceremony.sh`).
+Необратимое удаление дополнительно требует ПОДНЯТОГО уровня входа
+(`jwtHumanCeremonyStepUp`, см. `_HUMAN_STEPUP`).
 
 Grounded в landed-коде (services/iam/internal/apps/kacho/api/{account,project}):
   create.go:167 owner-in-body reject · update.go:57 owner immutable · create.go:255
@@ -39,6 +46,11 @@ Grounded в landed-коде (services/iam/internal/apps/kacho/api/{account,proje
 """
 
 CASES = []
+
+# Поднятый уровень входа: `AccountService/Delete` объявлен чувствительным
+# (`required_acr_min = "2"`). Машинный предъявитель от порога освобождён, поэтому под
+# ним этот порог не проверялся ни разу.
+_HUMAN_STEPUP = "jwtHumanCeremonyStepUp"
 
 # ---------------------------------------------------------------------------
 # Helpers: IAM Operation envelope (prefix `iop`, gen.py's assert_operation_envelope
@@ -62,7 +74,7 @@ def assert_iam_op():
 CASES.append(Case(
     id="IAM-ACC-RD-CR-OWNER-DERIVE-OK",
     title="IAM-1-01: Account.Create БЕЗ ownerUserId → op(iop) done → Get: ownerUserId° == caller "
-          "(derive-from-caller, principal userAAAId), createdAt truncate (Account has NO status field)",
+          "(derive-from-caller, человек церемонии), createdAt truncate (Account has NO status field)",
     classes=["CRUD", "CONF"],
     priority="P0",
     steps=[
@@ -72,7 +84,10 @@ CASES.append(Case(
             path="/iam/v1/accounts",
             # NB: NO ownerUserId in body — owner° is derived from the authenticated caller.
             body={"name": "rdown{{runId}}", "description": "iam-1 owner-derive probe"},
-            auth="jwtAccountAdminA",
+            # Владельцем аккаунта может быть только ПОЛЬЗОВАТЕЛЬ (`owner_user_id` →
+            # `users(id)`), поэтому вызывающий — человек церемонии, а не служебная
+            # учётка матрицы: у неё запрос отвергается первым стейтментом.
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200),
                 *assert_iam_op(),
@@ -86,12 +101,15 @@ CASES.append(Case(
             name="get-owner-derived",
             method="GET",
             path="/iam/v1/accounts/{{rdAccId}}",
-            auth="jwtAccountAdminA",
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200),
-                "pm.test('ownerUserId° derived from caller (== userAAAId)', () => {",
+                "pm.test('ownerUserId° derived from caller (== the ceremony human)', () => {",
                 "  const j = pm.response.json();",
-                "  pm.expect(j.ownerUserId, JSON.stringify(j)).to.eql(pm.environment.get('userAAAId'));",
+                "  const expected = pm.environment.get('ceremonyUserId');",
+                # Пустое ожидаемое превратило бы сверку в тождество — проверяем его форму.
+                "  pm.expect(expected, 'ceremonyUserId must be seeded by the ceremony wave').to.be.a('string').and.to.match(/^usr[a-z0-9]+$/);",
+                "  pm.expect(j.ownerUserId, JSON.stringify(j)).to.eql(expected);",
                 "});",
                 *assert_created_at_seconds(),
             ],
@@ -112,7 +130,9 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             body={"name": "rdatk{{runId}}", "ownerUserId": "usr00000000000000bad"},
-            auth="jwtAccountAdminA",
+            # Вызывающий обязан быть способен создать аккаунт — иначе отказ придёт про
+            # род принципала, и кейс останется зелёным даже если проверку поля снимут.
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
@@ -139,8 +159,10 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             # ownerUserId == the caller's OWN id — still rejected (output-only by construction).
-            body={"name": "rdself{{runId}}", "ownerUserId": "{{userAAAId}}"},
-            auth="jwtAccountAdminA",
+            # «Своим» это значение стало только теперь: прежде здесь стоял userAAAId при
+            # вызывающем-служебной-учётке, то есть кейс никогда не проверял то, что называл.
+            body={"name": "rdself{{runId}}", "ownerUserId": "{{ceremonyUserId}}"},
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
@@ -208,7 +230,7 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             body={"name": "rdsaga{{runId}}", "description": "iam-1 saga two-id metadata"},
-            auth="jwtAccountAdminA",
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200),
                 *assert_iam_op(),
@@ -227,7 +249,7 @@ CASES.append(Case(
             name="get-default-project",
             method="GET",
             path="/iam/v1/projects/{{sagaDefProjId}}",
-            auth="jwtAccountAdminA",
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200),
                 "pm.test('default project name==default', () => pm.expect(pm.response.json().name).to.eql('default'));",
@@ -239,8 +261,10 @@ CASES.append(Case(
         poll_request_until_status(
             name="list-owner-binding",
             method="GET",
-            path="/iam/v1/accessBindings?filter=subject%3D%22{{userAAAId}}%22&pageSize=1000",
-            auth="jwtAccountAdminA",
+            # Владельческая привязка заводится сагой на СОЗДАТЕЛЯ аккаунта, значит
+            # искать её надо по человеку церемонии, а не по владельцу посеянного acctA.
+            path="/iam/v1/accessBindings?filter=subject%3D%22{{ceremonyUserId}}%22&pageSize=1000",
+            auth="jwtHumanCeremony",
             retry_predicate="(() => { const j = pm.response.json(); const acc = pm.environment.get('sagaAccId'); "
                             "return !((j.accessBindings)||[]).some(b => b.scopeId === acc); })()",
             test_script=[
@@ -273,7 +297,7 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             body={"name": "rdrst{{runId}}", "description": "iam-1 delete-restrict probe"},
-            auth="jwtAccountAdminA",
+            auth="jwtHumanCeremony",
             test_script=[
                 *assert_status(200), *assert_iam_op(),
                 *save_from_response("j.id", "opId"),
@@ -287,7 +311,8 @@ CASES.append(Case(
             name="delete-nonempty",
             method="DELETE",
             path="/iam/v1/accounts/{{rstAccId}}",
-            auth="jwtAccountAdminA",
+            # Необратимое удаление → поднятый уровень входа (acr>=2).
+            auth=_HUMAN_STEPUP,
             test_script=[
                 *assert_status(200), *assert_iam_op(),
                 *save_from_response("j.id", "opId"),

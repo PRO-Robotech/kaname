@@ -810,8 +810,13 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accessBindings",
             body={
-                "subjectType": "user",
-                "subjectId": "{{userINVId}}",
+                # Читает шаг ниже `jwtInvitee` — предъявитель СЛУЖЕБНОЙ УЧЁТКИ
+                # (`svaInviteeId`, объявленная пара в principal_pairings.py). Выдача на
+                # `userINVId` называла бы субъектом ряд, которым ни один запрос не
+                # аутентифицируется: отношение не резолвится ни при каком бюджете, и шаг
+                # прогорал по времени, сообщая о материализации вместо неверного субъекта.
+                "subjectType": "service_account",
+                "subjectId": "{{svaInviteeId}}",
                 "roleId": ROLE_ADMIN,
                 "scopeType": "iam.account",
                 "scopeId": "{{accountAId}}",

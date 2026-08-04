@@ -77,9 +77,19 @@ detail-404 and the non-matching-hidden checks run on the CONVERGED terminal
 response — a genuine never-converging materialization or a real over-grant fails honestly,
 never masked.
 
-Fixture deps (crud-fixture/setup.sh): jwtAccountAdminA (owner/grant-authority on accountAId),
-accountAId, userINVId/jwtInvitee (non-owner reader). AccessBinding subject is soft-ref;
-userINVId is a real user.
+Fixture deps (crud-fixture/setup.sh): jwtAccountAdminA (grant-authority on accountAId),
+accountAId, svaInviteeId/jwtInvitee (non-owner reader).
+
+СУБЪЕКТ ВЫДАЧИ — `svaInviteeId`, А НЕ `userINVId`. Читает набор `jwtInvitee`, и это
+предъявитель СЛУЖЕБНОЙ УЧЁТКИ; объявленная пара «id ↔ токен» живёт в
+tests/authz-fixtures/principal_pairings.py, где прямо сказано, что `userINVId` — только
+ЦЕЛЬ привязки, и ни один выдаваемый токен ею не аутентифицируется. Выдача на такой
+субъект не резолвится ни при каком бюджете и выглядит изнутри кейса как незаехавшая
+материализация — то есть отказ сообщает не о том месте.
+
+ПРЕДЪЯВИТЕЛЬ, СОЗДАЮЩИЙ АККАУНТ, — ЧЕЛОВЕК. Аккаунт принадлежит пользователю by
+construction, поэтому приватный аккаунт суиты заводит человек церемонии (см.
+create_suite_account), и он же владеет всем, что суита в нём создаёт.
 
 Test-design techniques: ECP (label equivalence classes — matching foo / no-label / other-label
 baz), exact-set comparison (visible ≡ M+), decision-table (verb {get,list} vs {list} × read
@@ -90,6 +100,22 @@ path {List, single-Get}), state-transition (grant → materialize → visible), 
 CASES = []
 
 POLL_CAP = 50
+
+# Предъявитель, ПРИНАДЛЕЖАЩИЙ ЧЕЛОВЕКУ, — его производит волна церемонии
+# (`scripts/run-ceremony.sh` → `tests/authz-fixtures/prodseed_ceremony.py`).
+# Имя вынесено в константу, потому что оно называется здесь в тринадцати местах
+# одного кейса, и разъехавшаяся половина означала бы отказ в правах посреди
+# фикстуры — симптом, неотличимый на вид от продуктового дефекта видимости.
+_HUMAN = "jwtHumanCeremony"
+
+# ПОДНЯТЫЙ УРОВЕНЬ ВХОДА — ТОТ ЖЕ ЧЕЛОВЕК, ДРУГОЙ УРОВЕНЬ АУТЕНТИФИКАЦИИ.
+# Часть ручек объявлена чувствительной (`required_acr_min = "2"`): необратимое
+# удаление и выдача прав. Служебная учётка от этого порога ОСВОБОЖДЕНА, поэтому,
+# пока эти шаги шли машинным предъявителем, порог не проверялся ни разу — он
+# впервые начал действовать вместе с человеческим вызывающим.
+# Уровень берётся у КАТАЛОГА, а не по догадке: сверка шагов с
+# `gateway/internal/middleware/embed/permission_catalog.json` — часть приёмки этой правки.
+_HUMAN_STEPUP = "jwtHumanCeremonyStepUp"
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +183,7 @@ PRECLEAN_LIST_CAP = 12
 
 
 def preclean_account_loop(tag, next_step):
-    """Bounded list→delete→await loop removing EVERY active account-A binding for userINVId
+    """Bounded list→delete→await loop removing EVERY active account-A binding for svaInviteeId
     (any role) so the by-label visibility starts from a clean slate, then jumps to `next_step`.
 
     CRITICAL flow discipline (the loop must TERMINATE FORWARD, never fall through into the
@@ -210,7 +236,7 @@ def preclean_account_loop(tag, next_step):
                 # остаточную выдачу в проверку набора видимости.
                 *assert_status(200),
                 f"const c = parseInt(pm.environment.get('_{tag}Count') || '0', 10);",
-                "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('userINVId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
+                "const arr = ((pm.response.json() || {}).accessBindings || []).filter(b => b.subjectId === pm.environment.get('svaInviteeId') && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                 f"if (arr.length > 0 && c < {PRECLEAN_LIST_CAP}) {{",
                 f"  pm.environment.set('{dup}', arr[0].id);",
                 f"  pm.environment.set('_{tag}Count', String(c + 1));",
@@ -258,10 +284,17 @@ def preclean_account_loop(tag, next_step):
     ]
 
 
-def create_suite_account(acc_var, op_var):
-    """Create a FRESH, suite-private account per run (owner = userAAAId / jwtAccountAdminA) so
-    the by-label PROJECT exact-set reads an account in which the subject (userINVId) is NOT a
-    member.
+def create_suite_account(acc_var, op_var, auth="jwtHumanCeremony"):
+    """Create a FRESH, suite-private account per run so the by-label PROJECT exact-set reads
+    an account in which the reading subject (svaInviteeId) is NOT a member.
+
+    ВЛАДЕЛЕЦ — ЧЕЛОВЕК, И ИНАЧЕ БЫТЬ НЕ МОЖЕТ. `owner_user_id` ссылается на `users(id)`, а
+    владелец выводится из принципала. Все предъявители матричного посева — служебные учётки,
+    поэтому создание аккаунта ими отвергается синхронно, первым стейтментом. Условие
+    «предъявитель принадлежит человеку» создаёт волна церемонии (`scripts/run-ceremony.sh`).
+    Следствие, важное для ВСЕГО кейса: раз аккаунт принадлежит человеку церемонии, то и
+    проекты/роль/выдачу внутри него заводит он же — служебная учётка матрицы прав в этом
+    аккаунте не имеет и получила бы отказ.
 
     ROOT CAUSE of the persistent red this fixes (diagnosed, NOT a product over-emit): userINVId
     is seeded by authz-fixtures/setup.sh (KAC-125 invite-flow → editor@projectA1) as a MEMBER of
@@ -279,22 +312,27 @@ def create_suite_account(acc_var, op_var):
     assertion.)"""
     return [
         Step(name="create-suite-account", method="POST", path="/iam/v1/accounts",
-             # IAM-1 F1: ownerUserId° derived-from-caller (jwtAccountAdminA == userAAAId) — not sent.
+             # IAM-1 F1: ownerUserId° derived-from-caller — not sent in the body.
              body={"name": "rbacvis-{{runId}}",
                    "description": "rbac-visibility-set per-run private account"},
-             auth="jwtAccountAdminA",
+             auth=auth,
              test_script=[*assert_status(200),
                           *save_from_response("j.metadata && j.metadata.accountId", acc_var),
                           *save_from_response("j.id", op_var)]),
-        poll_op(op_var, out_id_var=acc_var),
+        poll_op(op_var, out_id_var=acc_var, auth=auth),
     ]
 
 
-def mk_project(short, label_key, id_var, op_var, acct_var="accountAId"):
+def mk_project(short, label_key, id_var, op_var, acct_var="accountAId", auth="jwtAccountAdminA"):
     """ProjectService.Create (+ op-poll) capturing the new project id. label_key None → no
     labels (M−); 'foo'/'baz' → labels={key: <runId>} (per-run unique value). acct_var selects the
     parent account (default shared accountAId; the exact-set case passes a fresh suite-private
-    account — see create_suite_account)."""
+    account — see create_suite_account).
+
+    `auth` ОБЯЗАН СООТВЕТСТВОВАТЬ `acct_var`: права выдаются в конкретном аккаунте, поэтому
+    предъявитель, законный для общего accountAId, в приватном аккаунте суиты не имеет ничего.
+    Пара «чужой аккаунт + прежний предъявитель» дала бы отказ в правах, неотличимый на вид от
+    продуктового дефекта видимости — ровно того, что этот набор и проверяет."""
     body = {"accountId": "{{" + acct_var + "}}", "name": short + "-{{runId}}", "description": "newman exact-set project"}
     if label_key:
         body["labels"] = {label_key: "{{runId}}"}
@@ -304,23 +342,30 @@ def mk_project(short, label_key, id_var, op_var, acct_var="accountAId"):
             method="POST",
             path="/iam/v1/projects",
             body=body,
-            auth="jwtAccountAdminA",
+            auth=auth,
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.metadata && j.metadata.projectId", id_var),
                 *save_from_response("j.id", op_var),
             ],
         ),
-        poll_op(op_var, out_id_var=id_var),
+        poll_op(op_var, out_id_var=id_var, auth=auth),
     ]
 
 
-def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, acct_var="accountAId"):
+def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, acct_var="accountAId",
+                       auth="jwtAccountAdminA", auth_stepup=None):
     """RoleService.Create(rule {iam.project verbs matchLabels:{foo:runId}}) + AccessBinding
-    bound to user:userINVId @ ACCOUNT:<acct_var>. Fresh role id per run → unique active 5-tuple
+    bound to service_account:svaInviteeId @ ACCOUNT:<acct_var>. Fresh role id per run → unique active 5-tuple
     → no strict-create dup → no pre-clean of THIS binding needed. acct_var selects the account
     the role lives in AND the binding scope (default shared accountAId; the exact-set case passes
-    a fresh suite-private account — see create_suite_account)."""
+    a fresh suite-private account — see create_suite_account).
+
+    ДВА ПРЕДЪЯВИТЕЛЯ, А НЕ ОДИН: создание роли — обычная ручка, а ВЫДАЧА ПРАВ объявлена
+    чувствительной (`AccessBindingService/Create`, `required_acr_min = "2"`). Один
+    предъявитель на оба шага пришлось бы брать по самому высокому порогу — и тогда
+    обычный шаг перестал бы проверять, что поднятого уровня ему НЕ требуется."""
+    auth_stepup = auth_stepup or auth
     return [
         Step(
             name="create-role",
@@ -341,26 +386,36 @@ def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, ac
                      "matchLabels": {"foo": "{{runId}}"}},
                 ],
             },
-            auth="jwtAccountAdminA",
+            auth=auth,
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.metadata && j.metadata.roleId", role_var),
                 *save_from_response("j.id", role_op),
             ],
         ),
-        poll_op(role_op, out_id_var=role_var),
+        poll_op(role_op, out_id_var=role_var, auth=auth),
         Step(
             name="grant-bylabel",
             method="POST",
             path="/iam/v1/accessBindings",
             body={
-                "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}],
+                # СУБЪЕКТ ВЫДАЧИ ОБЯЗАН БЫТЬ ТЕМ, ЧЕМ АУТЕНТИФИЦИРУЕТСЯ ЧИТАТЕЛЬ.
+                # Читает этот набор `jwtInvitee`, а это предъявитель СЛУЖЕБНОЙ УЧЁТКИ
+                # (`svaInviteeId` — объявленная пара, tests/authz-fixtures/principal_pairings.py).
+                # Прежняя выдача называла субъектом `userINVId` — ряд пользователя, которым
+                # НИ ОДИН запрос не аутентифицируется, поэтому отношение не резолвилось ни при
+                # каком бюджете. Изнутри кейса это неотличимо от «материализация не доехала»:
+                # предъявлялось как истечение ожидания на шаге чтения, а не как ошибка выдачи.
+                # Замер на стенде (2026-08-04): выдача на служебную учётку → чтение видит
+                # объект за 2 с; та же выдача на `userINVId` → 404 и через 26 с (50 попыток).
+                "subjects": [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": "{{svaInviteeId}}"}],
                 "roleId": "{{" + role_var + "}}",
                 "scopeType": "iam.account",
                 "scopeId": "{{" + acct_var + "}}",
                 "target": {"allInScope": {}},
             },
-            auth="jwtAccountAdminA",
+            # Выдача прав — чувствительная ручка (acr≥2): нужен поднятый вход.
+            auth=auth_stepup,
             test_script=[
                 "const j = pm.response.json();",
                 "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
@@ -369,20 +424,22 @@ def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, ac
                 *save_from_response("j.metadata && j.metadata.accessBindingId", acb_var),
             ],
         ),
-        poll_op(bind_op),
+        poll_op(bind_op, auth=auth),
     ]
 
 
-def teardown(name, path):
+def teardown(name, path, auth="jwtAccountAdminA"):
     """RELIABLE teardown — общий помощник gen.py (403 не терминален).
 
     Ресурс здесь не выдача, а роль/проект, но класс тот же: принятый отказ в правах
     оставляет ресурс в ОБЩЕМ аккаунте, и следующий прогон стартует с чужим мусором.
+
+    `auth` — тот же, что создавал ресурс: снести его вправе тот, кто им владеет.
     """
-    return reliable_delete(name, path)
+    return reliable_delete(name, path, auth=auth)
 
 
-def robust_revoke_binding(name, acb_var):
+def robust_revoke_binding(name, acb_var, auth="jwtAccountAdminA"):
     """Revoke the by-label binding, polling the DELETE PAST the creator-tuple 403 window so the
     grant is GUARANTEED gone before the SAME-TYPE v_list-only case runs.
 
@@ -405,7 +462,7 @@ def robust_revoke_binding(name, acb_var):
     активной»."""
     return Step(
         name=name, method="DELETE", path="/iam/v1/accessBindings/{{" + acb_var + "}}",
-        auth="jwtAccountAdminA",
+        auth=auth,
         pre_script=[
             f"if (pm.environment.get('_rv{acb_var}Started') !== pm.info.requestName) {{ pm.environment.set('_rv{acb_var}Count', '0'); pm.environment.set('_rv{acb_var}Started', pm.info.requestName); }}",
         ],
@@ -444,24 +501,30 @@ CASES.append(Case(
         # structurally defeating the by-label narrowing (M−/baz + other suites' projects leak
         # in). In this fresh account userINVId is NOT a member (only the by-label binding below),
         # so the List is narrowed to exactly the foo-matched set.
-        *create_suite_account("visSetAcct", "visSetAcctOp"),
+        # ПРЕДЪЯВИТЕЛЬ ЭТОГО КЕЙСА — ЧЕЛОВЕК ЦЕРЕМОНИИ, И ЭТО ОДНО РЕШЕНИЕ, А НЕ ДВА.
+        # Аккаунт может принадлежать только пользователю, значит приватный аккаунт суиты
+        # заводит человек; а раз владелец он, то и всё, что внутри (проекты, роль, выдача,
+        # уборка), делает он же. Разделить эти два выбора нельзя: служебная учётка матрицы
+        # в чужом приватном аккаунте прав не имеет.
+        *create_suite_account("visSetAcct", "visSetAcctOp", auth=_HUMAN),
         # M+ (foo=runId) — 3 projects.
-        *mk_project("setpp1", "foo", "visPP1", "visPP1Op", acct_var="visSetAcct"),
-        *mk_project("setpp2", "foo", "visPP2", "visPP2Op", acct_var="visSetAcct"),
-        *mk_project("setpp3", "foo", "visPP3", "visPP3Op", acct_var="visSetAcct"),
+        *mk_project("setpp1", "foo", "visPP1", "visPP1Op", acct_var="visSetAcct", auth=_HUMAN),
+        *mk_project("setpp2", "foo", "visPP2", "visPP2Op", acct_var="visSetAcct", auth=_HUMAN),
+        *mk_project("setpp3", "foo", "visPP3", "visPP3Op", acct_var="visSetAcct", auth=_HUMAN),
         # M− (no labels) — 3 projects.
-        *mk_project("setpm1", None, "visPM1", "visPM1Op", acct_var="visSetAcct"),
-        *mk_project("setpm2", None, "visPM2", "visPM2Op", acct_var="visSetAcct"),
-        *mk_project("setpm3", None, "visPM3", "visPM3Op", acct_var="visSetAcct"),
+        *mk_project("setpm1", None, "visPM1", "visPM1Op", acct_var="visSetAcct", auth=_HUMAN),
+        *mk_project("setpm2", None, "visPM2", "visPM2Op", acct_var="visSetAcct", auth=_HUMAN),
+        *mk_project("setpm3", None, "visPM3", "visPM3Op", acct_var="visSetAcct", auth=_HUMAN),
         # other-label (baz=runId) — 2 projects.
-        *mk_project("setbq1", "baz", "visBQ1", "visBQ1Op", acct_var="visSetAcct"),
-        *mk_project("setbq2", "baz", "visBQ2", "visBQ2Op", acct_var="visSetAcct"),
+        *mk_project("setbq1", "baz", "visBQ1", "visBQ1Op", acct_var="visSetAcct", auth=_HUMAN),
+        *mk_project("setbq2", "baz", "visBQ2", "visBQ2Op", acct_var="visSetAcct", auth=_HUMAN),
         # No preclean loop: a fresh per-run account has ZERO residual bindings for userINVId by
         # construction (no other suite touches it), so the clean-slate the preclean used to
         # enforce on shared accountA is guaranteed here.
-        # Grant the by-label role (get+list) to userINVId on ACCOUNT:visSetAcct.
+        # Grant the by-label role (get+list) to svaInviteeId on ACCOUNT:visSetAcct.
         *grant_bylabel_role("visSetRole", "visSetAcb", "visSetRoleOp", "visSetBindOp",
-                            ["get", "list"], "setlblrole", acct_var="visSetAcct"),
+                            ["get", "list"], "setlblrole", acct_var="visSetAcct", auth=_HUMAN,
+                            auth_stepup=_HUMAN_STEPUP),
         # The subject lists projects: poll until the exact set is FULLY CONVERGED (all M+ present
         # AND no M− AND no baz), then assert it. Waiting for the whole set (not just M+ present)
         # rides out any transient half-materialized over-visibility during by-label reconcile; a
@@ -495,23 +558,23 @@ CASES.append(Case(
         # run's projects, then the suite-private account (bound growth). Account delete may 409
         # while its projects are still async-deleting — tolerated (a leaked per-run rbacvis-<runId>
         # account is harmless: unique name, not pool-constrained, never asserted).
-        robust_revoke_binding("teardown-binding", "visSetAcb"),
-        *teardown("teardown-role", "/iam/v1/roles/{{visSetRole}}"),
-        *teardown("teardown-pp1", "/iam/v1/projects/{{visPP1}}"),
-        *teardown("teardown-pp2", "/iam/v1/projects/{{visPP2}}"),
-        *teardown("teardown-pp3", "/iam/v1/projects/{{visPP3}}"),
-        *teardown("teardown-pm1", "/iam/v1/projects/{{visPM1}}"),
-        *teardown("teardown-pm2", "/iam/v1/projects/{{visPM2}}"),
-        *teardown("teardown-pm3", "/iam/v1/projects/{{visPM3}}"),
-        *teardown("teardown-bq1", "/iam/v1/projects/{{visBQ1}}"),
-        *teardown("teardown-bq2", "/iam/v1/projects/{{visBQ2}}"),
+        robust_revoke_binding("teardown-binding", "visSetAcb", auth=_HUMAN_STEPUP),
+        *teardown("teardown-role", "/iam/v1/roles/{{visSetRole}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-pp1", "/iam/v1/projects/{{visPP1}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-pp2", "/iam/v1/projects/{{visPP2}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-pp3", "/iam/v1/projects/{{visPP3}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-pm1", "/iam/v1/projects/{{visPM1}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-pm2", "/iam/v1/projects/{{visPM2}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-pm3", "/iam/v1/projects/{{visPM3}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-bq1", "/iam/v1/projects/{{visBQ1}}", auth=_HUMAN_STEPUP),
+        *teardown("teardown-bq2", "/iam/v1/projects/{{visBQ2}}", auth=_HUMAN_STEPUP),
         # Снос аккаунта суиты: 403 НЕ принимается — он значит, что аккаунт остаётся, а
         # вместе с ним всё, что суита в нём насоздавала. Отказ retry'ится через окно
         # материализации; терминально допустимы снятие (200), «его уже нет» (404) и
         # «ещё не пуст» (400/409 — дочерние ресурсы сносятся шагами выше, и если один из
         # них не доехал, это видно ИМЕННО здесь, а не растворяется в общем «best-effort»).
         *reliable_delete("teardown-suite-account", "/iam/v1/accounts/{{visSetAcct}}",
-                         terminal_codes=(200, 400, 404, 409)),
+                         auth=_HUMAN_STEPUP, terminal_codes=(200, 400, 404, 409)),
     ],
 ))
 
