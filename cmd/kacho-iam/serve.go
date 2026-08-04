@@ -928,6 +928,49 @@ func runServe(cfg config.Config) error {
 	}
 	tasks = append(tasks, subjectChangeDrainerTask)
 
+	// Дренаж очереди компенсаций частично исполненной саги регистрации у
+	// провайдера. Намерение записывается собственной транзакцией на неудачном
+	// пути (компенсируемая транзакция откачена и нести его не может), а
+	// исполняется ЗДЕСЬ — at-least-once, поэтому оно переживает и смерть
+	// процесса, и недоступность самого провайдера.
+	compensationDrainerTask, cerr := buildProviderCompensationDrainer(
+		pool, cfg, metricsReg.CompensationRecorder(), logger)
+	if cerr != nil {
+		_ = listener.Close()
+		_ = internalListener.Close()
+		if hooksListener != nil {
+			_ = hooksListener.Close()
+		}
+		if registryTokenListener != nil {
+			_ = registryTokenListener.Close()
+		}
+		if jwksProxyListener != nil {
+			_ = jwksProxyListener.Close()
+		}
+		return fmt.Errorf("provider compensation drainer wiring: %w", cerr)
+	}
+	tasks = append(tasks, func() (err error) {
+		// Мёртвый дренаж не должен оставлять под тихо работающим: очередь без
+		// исполнителя копит намерения, а занятое у провайдера не освобождается.
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("provider compensation drainer panicked", "panic", r)
+				err = fmt.Errorf("provider compensation drainer panic: %v", r)
+			}
+			if err != nil {
+				triggerShutdown()
+			}
+		}()
+		return compensationDrainerTask()
+	})
+	// Наблюдаемость очереди: глубина, возраст самой старой недоставленной
+	// строки, число отравленных. Скан не мутирует таблицу и не может уронить
+	// под — ошибки логируются.
+	tasks = append(tasks, func() error {
+		runProviderCompensationMetrics(ctx, pool, metricsReg.CompensationRecorder(), logger)
+		return nil
+	})
+
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_kacho_root` to
 	// the user identified by KACHO_IAM_BOOTSTRAP_ROOT_EMAIL and enqueues the
 	// FGA tuple into the transactional fga_outbox (drained above). The user

@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -51,6 +52,14 @@ type Registry struct {
 
 	grpcHandled  *prometheus.CounterVec
 	grpcDuration *prometheus.HistogramVec
+
+	// compensationOnce/compensation — единственный экземпляр коллекторов
+	// компенсации. Их потребители (writer намерений и дренаж) собираются в
+	// разных местах композиционного корня, а prometheus.MustRegister падает на
+	// повторной регистрации — поэтому экземпляр один и берётся через
+	// CompensationRecorder(), а не создаётся каждым потребителем.
+	compensationOnce sync.Once
+	compensation     *CompensationRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

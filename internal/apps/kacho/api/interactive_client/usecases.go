@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/status"
 
@@ -130,6 +131,14 @@ func (uc *ListUseCase) Execute(ctx context.Context, pageSize int64, pageToken, f
 
 // ── Create ───────────────────────────────────────────────────────────────────
 
+// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
+// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
+// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
+// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
+type providerCompensationEmitter interface {
+	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
+}
+
 // CreateUseCase — registers the client at the identity provider, then records it.
 type CreateUseCase struct {
 	repo      clientRepo
@@ -137,6 +146,56 @@ type CreateUseCase struct {
 	opsRepo   operations.Repo
 	audiences []string
 	logger    *slog.Logger
+	// compensation — durable sink for the compensating intent when the row is
+	// not committed after the provider registration. nil → direct best-effort
+	// deregistration only (see clients.ProviderCompensationOutbox).
+	compensation providerCompensationEmitter
+}
+
+// WithCompensationEmitter wires the durable sink for compensating intents.
+// Composition-root only.
+func (uc *CreateUseCase) WithCompensationEmitter(c providerCompensationEmitter) *CreateUseCase {
+	uc.compensation = c
+	return uc
+}
+
+// compensationOriginInteractiveClient — saga attribution in the intent.
+const compensationOriginInteractiveClient = "interactive_client"
+
+// providerReleaseTimeout — upper bound on the release (recording the intent OR
+// the direct call). Detached from the caller's cancellation: the release must
+// run even when the request is already gone.
+const providerReleaseTimeout = 5 * time.Second
+
+// releaseProviderClient removes a registration made before the row was
+// committed. The DURABLE intent is the primary path — it survives both a dead
+// process and a failing release call; the direct deregistration stays as the
+// FALLBACK for when the intent cannot be recorded. Both are idempotent.
+func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
+	if clientID == "" {
+		return
+	}
+	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
+	defer cancel()
+
+	if uc.compensation != nil {
+		if err := uc.compensation.EmitHydraClientDelete(
+			relCtx, clientID, compensationOriginInteractiveClient, reason,
+		); err == nil {
+			return
+		} else if uc.logger != nil {
+			uc.logger.ErrorContext(relCtx,
+				"interactive client: durable compensation intent could not be recorded, falling back to a direct release",
+				"provider_client_id", clientID, "reason", reason, "err", err.Error())
+		}
+	}
+	if err := uc.provider.Deregister(relCtx, clientID); err != nil && uc.logger != nil {
+		// Neither an intent nor a release: the registration stays at the
+		// provider, and this line is the only handle left to remove it by hand.
+		uc.logger.ErrorContext(relCtx,
+			"interactive client: provider registration left behind after a failed insert",
+			"provider_client_id", clientID, "reason", reason, "err", err.Error())
+	}
 }
 
 // NewCreateUseCase — constructor. `audiences` comes from iam's own configuration
@@ -208,16 +267,12 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 
 	created, err := uc.repo.Insert(ctx, c)
 	if err != nil {
-		// Compensate the half-done registration. The deregistration is
-		// best-effort by necessity — the provider may be the very thing that is
-		// failing — but it is never silent: an orphan nobody knows about is the
-		// worst outcome here, so it is logged at error level with the handle
-		// needed to remove it by hand.
-		if derr := uc.provider.Deregister(ctx, pc.ClientID); derr != nil && uc.logger != nil {
-			uc.logger.ErrorContext(ctx,
-				"interactive client: provider registration left behind after a failed insert",
-				"provider_client_id", pc.ClientID, "err", derr.Error())
-		}
+		// Compensate the half-done registration. The compensating intent cannot
+		// ride the insert's transaction — that transaction is precisely the one
+		// that failed — so it is committed on its own and delivered
+		// at-least-once, which is what makes it survive both a dead process and
+		// a provider that is itself the thing failing.
+		uc.releaseProviderClient(ctx, pc.ClientID, "client row was not inserted")
 		return fail(err)
 	}
 

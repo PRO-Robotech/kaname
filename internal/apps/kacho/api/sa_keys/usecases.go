@@ -102,6 +102,14 @@ type OpsResponseRedactor interface {
 
 // ───────────────── Issue use-case ─────────────────
 
+// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
+// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
+// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
+// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
+type providerCompensationEmitter interface {
+	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
+}
+
 // IssueSAKeyUseCase mints a new Hydra OAuth2 client + persists the mapping.
 type IssueSAKeyUseCase struct {
 	repo    SAClientRepo
@@ -122,7 +130,11 @@ type IssueSAKeyUseCase struct {
 	// audit — durable audit_outbox emitter. nil → no audit row
 	// (purely-additive; mutation contract unchanged). See WithAuditEmitter.
 	audit auditEmitter
-	now   func() time.Time
+	// compensation — durable-приёмник компенсирующих намерений для клиента,
+	// зарегистрированного у провайдера до того, как своя строка закоммичена.
+	// nil → компенсация деградирует в прямой (best-effort) вызов снятия.
+	compensation providerCompensationEmitter
+	now          func() time.Time
 	// graceTimer — injectable grace-window timer (defaults to time.After).
 	// Tests substitute a channel they control so the grace expiry is driven
 	// deterministically instead of racing wall-clock; production leaves it nil.
@@ -198,6 +210,14 @@ func (u *IssueSAKeyUseCase) WithAuditEmitter(a auditEmitter) *IssueSAKeyUseCase 
 // trust-grant registration.
 func (u *IssueSAKeyUseCase) WithTrustGrantAdmin(t TrustGrantAdmin) *IssueSAKeyUseCase {
 	u.trustGrants = t
+	return u
+}
+
+// WithCompensationEmitter wires the durable sink for compensating intents.
+// Composition-root only. nil → the half-done registration is compensated by a
+// direct best-effort release only (см. clients.ProviderCompensationOutbox).
+func (u *IssueSAKeyUseCase) WithCompensationEmitter(c providerCompensationEmitter) *IssueSAKeyUseCase {
+	u.compensation = c
 	return u
 }
 
@@ -719,11 +739,12 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	// Register an EXACT-subject jwt-bearer trust-grant per trusted subject: Hydra
 	// accepts an external assertion only when its `sub` equals the granted subject
 	// verbatim (allow_any_subject=false). The subject_pattern is already validated
-	// literal-anchored, so LiteralSubject always resolves here. On failure roll
-	// back the just-created Hydra client (external side-effect) and fail closed.
+	// literal-anchored, so LiteralSubject always resolves here. On failure the
+	// just-created Hydra client (external side-effect) is released and the call
+	// fails closed.
 	if u.trustGrants != nil {
 		if err := u.registerTrustGrants(ctx, in); err != nil {
-			_ = u.hydra.DeleteOAuthClient(ctx, hydraClient.ClientID)
+			u.releaseProviderClient(ctx, hydraClient.ClientID, "trust-grant registration failed")
 			return nil, err
 		}
 	}
@@ -842,34 +863,73 @@ func (u *IssueSAKeyUseCase) accessTokenLifespan() string {
 	return u.AccessTokenLifespan.String()
 }
 
+// compensationOriginSAKey — атрибуция саги в компенсирующем намерении.
+const compensationOriginSAKey = "sa_key"
+
+// providerReleaseTimeout — верхняя граница на снятие уже созданного клиента
+// (запись намерения ИЛИ прямой вызов). Отвязан от отмены вызывающего: снятие
+// обязано исполниться, даже если запрос уже отменён.
+const providerReleaseTimeout = 5 * time.Second
+
+// releaseProviderClient снимает OAuth-клиента, созданного у провайдера до того,
+// как своя строка была закоммичена.
+//
+// Порядок обратный порядку захвата и ровно из одного шага: клиент — последнее и
+// единственное, что сага заняла у провайдера к этому моменту.
+//
+// Первичный путь — DURABLE намерение (переживает смерть процесса и провал
+// самого снятия, доставляется дренажом at-least-once). Прямой вызов остаётся
+// ЗАПАСНЫМ и срабатывает только если намерение записать не удалось: тогда мы не
+// хуже прежнего, и это видно в логе. Оба пути идемпотентны — повторное снятие
+// уже снятого клиента провайдер отдаёт как исполненное.
+func (u *IssueSAKeyUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
+	if clientID == "" {
+		return
+	}
+	// Отвязано от отмены вызывающего, baggage (trace/request-id) сохранено.
+	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
+	defer cancel()
+
+	if u.compensation != nil {
+		if err := u.compensation.EmitHydraClientDelete(relCtx, clientID, compensationOriginSAKey, reason); err == nil {
+			return
+		} else if u.logger != nil {
+			u.logger.ErrorContext(relCtx,
+				"sa key: durable compensation intent could not be recorded, falling back to a direct release",
+				"provider_client_id", clientID, "reason", reason, "err", err.Error())
+		}
+	}
+	if err := u.hydra.DeleteOAuthClient(relCtx, clientID); err != nil && u.logger != nil {
+		// Ни намерения, ни снятия — клиент остался у провайдера, и назвать его
+		// потом можно только по этой строке лога.
+		u.logger.ErrorContext(relCtx,
+			"sa key: provider registration left behind after a failed issue",
+			"provider_client_id", clientID, "reason", reason, "err", err.Error())
+	}
+}
+
 // commitMapping persists the SA-OAuth-client mapping row in a fresh tx and
-// rolls back + deletes the Hydra client on failure. Shared by both the
+// rolls back + releases the Hydra client on failure. Shared by both the
 // private_key_jwt and federated paths.
 //
 // The durable iam.sa_key.issued audit_outbox row is emitted in the SAME tx as
 // the Insert (atomic, запрет #10): the audit row commits iff the mapping
 // commits, so a rolled-back Insert (e.g. sva_unique 23505) leaves no orphan
 // compliance row. The Hydra client is created BEFORE this tx (external side-
-// effect) and rolled back on failure via DeleteOAuthClient; the audit row
-// records only the DB-committed fact.
+// effect); on failure it is released through releaseProviderClient (durable
+// intent, direct call as fallback) — the compensating intent CANNOT ride this
+// tx, because this tx is precisely the one that rolls back.
 func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, hydraClientID, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
-	// cleanupCtx — detached from the caller's cancellation (the Hydra-client
-	// rollback must run even if the request ctx is cancelled) but PRESERVES the
-	// caller's trace/request-id/slog baggage. Bounded so a slow Hydra
-	// admin can't hang the rollback.
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cleanupCancel()
-
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		_ = u.hydra.DeleteOAuthClient(cleanupCtx, hydraClientID)
+		u.releaseProviderClient(ctx, hydraClientID, "mapping tx could not be started")
 		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
 			_ = tx.Rollback(ctx)
-			_ = u.hydra.DeleteOAuthClient(cleanupCtx, hydraClientID)
+			u.releaseProviderClient(ctx, hydraClientID, "mapping row was not committed")
 		}
 	}()
 	persisted, err := u.repo.Insert(ctx, tx, row)

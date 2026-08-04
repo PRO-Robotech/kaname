@@ -88,6 +88,14 @@ type OpsResponseRedactor interface {
 
 // ───────────────── Issue use-case ─────────────────
 
+// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
+// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
+// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
+// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
+type providerCompensationEmitter interface {
+	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
+}
+
 // IssueUserTokenUseCase выпускает новый Hydra OAuth2-клиент + персистит маппинг.
 type IssueUserTokenUseCase struct {
 	repo    UserClientRepo
@@ -100,7 +108,11 @@ type IssueUserTokenUseCase struct {
 	redactor OpsResponseRedactor
 	// audit — durable audit_outbox emitter. nil → без audit-строки.
 	audit auditEmitter
-	now   func() time.Time
+	// compensation — durable-приёмник компенсирующих намерений для клиента,
+	// зарегистрированного у провайдера до коммита своей строки. nil →
+	// компенсация деградирует в прямой (best-effort) вызов снятия.
+	compensation providerCompensationEmitter
+	now          func() time.Time
 	// logger — поверхность для сбоев detached redaction-goroutine.
 	logger *slog.Logger
 	// redactGrace — задержка между тем как Operation стал Done, и затиранием
@@ -125,6 +137,14 @@ func (u *IssueUserTokenUseCase) WithResponseRedactor(r OpsResponseRedactor) *Iss
 // WithAuditEmitter проводит durable audit_outbox emitter. Composition-root only.
 func (u *IssueUserTokenUseCase) WithAuditEmitter(a auditEmitter) *IssueUserTokenUseCase {
 	u.audit = a
+	return u
+}
+
+// WithCompensationEmitter проводит durable-приёмник компенсирующих намерений.
+// Composition-root only. nil → полусделанная регистрация компенсируется только
+// прямым (best-effort) снятием (см. clients.ProviderCompensationOutbox).
+func (u *IssueUserTokenUseCase) WithCompensationEmitter(c providerCompensationEmitter) *IssueUserTokenUseCase {
+	u.compensation = c
 	return u
 }
 
@@ -432,27 +452,58 @@ func (u *IssueUserTokenUseCase) resolveAudience(in IssueInput) []string {
 	return nil
 }
 
-// commitMapping персистит маппинг-строку в свежей tx, откатывает + удаляет
+// compensationOriginUserToken — атрибуция саги в компенсирующем намерении.
+const compensationOriginUserToken = "user_token"
+
+// providerReleaseTimeout — верхняя граница на снятие уже созданного клиента
+// (запись намерения ИЛИ прямой вызов). Отвязан от отмены вызывающего.
+const providerReleaseTimeout = 5 * time.Second
+
+// releaseProviderClient снимает OAuth-клиента, созданного у провайдера до того,
+// как своя строка была закоммичена. Первичный путь — DURABLE намерение
+// (переживает смерть процесса и провал самого снятия); прямой вызов — ЗАПАСНОЙ,
+// на случай, если намерение записать не удалось. Оба идемпотентны.
+// См. clients.ProviderCompensationOutbox.
+func (u *IssueUserTokenUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
+	if clientID == "" {
+		return
+	}
+	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
+	defer cancel()
+
+	if u.compensation != nil {
+		if err := u.compensation.EmitHydraClientDelete(relCtx, clientID, compensationOriginUserToken, reason); err == nil {
+			return
+		} else if u.logger != nil {
+			u.logger.ErrorContext(relCtx,
+				"user token: durable compensation intent could not be recorded, falling back to a direct release",
+				"provider_client_id", clientID, "reason", reason, "err", err.Error())
+		}
+	}
+	if err := u.hydra.DeleteOAuthClient(relCtx, clientID); err != nil && u.logger != nil {
+		u.logger.ErrorContext(relCtx,
+			"user token: provider registration left behind after a failed issue",
+			"provider_client_id", clientID, "reason", reason, "err", err.Error())
+	}
+}
+
+// commitMapping персистит маппинг-строку в свежей tx, откатывает + снимает
 // Hydra-клиент на сбое. Durable iam.user_token.issued audit_outbox-строка эмитится в
 // ТОЙ ЖЕ tx, что Insert (атомарно, запрет #10): audit-строка коммитится iff маппинг
-// коммитится. Hydra-клиент создан ДО этой tx (external side-effect) и откатывается
-// через DeleteOAuthClient.
+// коммитится. Hydra-клиент создан ДО этой tx (external side-effect); на сбое он
+// снимается через releaseProviderClient — компенсирующее намерение НЕ может ехать
+// в этой tx, потому что именно она и откатывается.
 func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, hydraClientID, actor, keyAlgorithm string) (domain.UserOAuthClient, error) {
-	// cleanupCtx — detached от cancellation вызывающего (Hydra-rollback обязан
-	// исполниться даже при отменённом request ctx), но СОХРАНЯЕТ baggage. Bounded.
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cleanupCancel()
-
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		_ = u.hydra.DeleteOAuthClient(cleanupCtx, hydraClientID)
+		u.releaseProviderClient(ctx, hydraClientID, "mapping tx could not be started")
 		return domain.UserOAuthClient{}, mapPGErr(err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
 			_ = tx.Rollback(ctx)
-			_ = u.hydra.DeleteOAuthClient(cleanupCtx, hydraClientID)
+			u.releaseProviderClient(ctx, hydraClientID, "mapping row was not committed")
 		}
 	}()
 	persisted, err := u.repo.Insert(ctx, tx, row)

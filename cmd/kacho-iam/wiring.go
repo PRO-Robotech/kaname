@@ -581,10 +581,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	).WithRelationStore(relationStore)
 
 	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
-	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
+	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, metricsReg.CompensationRecorder(), logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
-	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
+	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, metricsReg.CompensationRecorder(), logger)
 
 	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
 	// The requested token audience is the gateway audience (https://{API_DOMAIN});
@@ -657,8 +657,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	interactiveClientHandler := interactiveclientapp.NewHandler(
 		interactiveclientapp.NewGetUseCase(interactiveRepo),
 		interactiveclientapp.NewListUseCase(interactiveRepo),
+		// Компенсация полусделанной регистрации — durable намерение, прямое
+		// снятие как запасной путь (см. buildSAKeysHandler).
 		interactiveclientapp.NewCreateUseCase(interactiveRepo, interactiveProvider, opsRepo,
-			[]string{interactiveAudience}, logger),
+			[]string{interactiveAudience}, logger).
+			WithCompensationEmitter(clients.NewProviderCompensationOutbox(pool).
+				WithEmitObserver(metricsReg.CompensationRecorder())),
 		interactiveclientapp.NewUpdateUseCase(interactiveRepo, opsRepo, logger),
 		interactiveclientapp.NewDeleteUseCase(interactiveRepo, interactiveProvider, opsRepo, logger),
 	)
@@ -745,7 +749,8 @@ func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 
 // buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
 // via Hydra OAuth2 client_credentials.
-func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config, logger *slog.Logger) *sakeysapp.Handler {
+func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
+	compObs clients.CompensationEmitObserver, logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kachopg.NewSAOAuthClientRepo(pool)
 
 	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
@@ -793,6 +798,12 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// Surface redaction failures (error / give-up / recovered panic) of the
 	// detached redaction goroutine — the only place a key can stay un-redacted.
 	issueUC.WithLogger(logger)
+	// Durable-приёмник компенсирующих намерений. Клиент у провайдера создаётся ДО
+	// коммита нашей строки (строка обязана нести назначенный провайдером
+	// client_id), поэтому провал коммита обязан снять созданное. Прямой вызов
+	// снятия остаётся ЗАПАСНЫМ путём: он сам может отказать, а процесс — умереть
+	// между провалом и уборкой; durable намерение доставит дренаж.
+	issueUC.WithCompensationEmitter(clients.NewProviderCompensationOutbox(pool).WithEmitObserver(compObs))
 	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
 	// Surface the post-commit Hydra orphan-cleanup warning (eventual-consistency).
@@ -807,7 +818,8 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 // buildUserTokensHandler wires the UserTokenService handler — персональные
 // access-токены пользователя via Hydra OAuth2 client_credentials + private_key_jwt.
 // Зеркалит buildSAKeysHandler, подставляя User вместо ServiceAccount.
-func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config, logger *slog.Logger) *usertokensapp.Handler {
+func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
+	compObs clients.CompensationEmitObserver, logger *slog.Logger) *usertokensapp.Handler {
 	userClientRepo := kachopg.NewUserOAuthClientRepo(pool)
 
 	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
@@ -828,6 +840,9 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	issueUC.WithRedactGrace(cfg.AuthN.UserTokenRedactGrace)
 	// Surface redaction-сбоев detached redaction-goroutine.
 	issueUC.WithLogger(logger)
+	// Durable-приёмник компенсирующих намерений — см. buildSAKeysHandler:
+	// та же сага, тот же провайдер, тот же повод.
+	issueUC.WithCompensationEmitter(clients.NewProviderCompensationOutbox(pool).WithEmitObserver(compObs))
 	revokeUC := usertokensapp.NewRevokeUserTokenUseCase(userClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
 	// Surface the post-commit Hydra orphan-cleanup warning (eventual-consistency).
