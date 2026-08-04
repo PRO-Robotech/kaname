@@ -8,6 +8,7 @@ import (
 	"context"
 	stderrors "errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -20,18 +21,32 @@ import (
 )
 
 // stubFGA — minimal RelationQueries mock for handler tests.
+//
+// Mutex-guarded: BatchCheck resolves its items concurrently, so a fixture safe
+// only for a sequential caller reports its OWN unsafety under -race as if it were
+// the handler's.
 type stubFGA struct {
 	check bool
-	// lastRelation records the relation of the most recent CheckWithContext
-	// call so tests can assert the resolved/override relation reached FGA.
-	lastRelation string
-	// relations records every relation seen (batch fan-out order).
+
+	mu sync.Mutex
+	// relations records every relation seen. Under a concurrent batch this is
+	// COMPLETION order, not request order, so it answers "which relations reached
+	// the store" and must NOT carry a per-item ordering assertion. The ordering
+	// that is contractual is the order of RESPONSES, asserted from the response
+	// itself in TestHandler_BatchCheck_OrderPreserved.
+	//
+	// A `lastRelation` field stood here recording the most recent relation "so
+	// tests can assert the resolved/override relation reached FGA". No test ever
+	// read it, and a concurrent batch makes "most recent" mean an arbitrary item,
+	// so it is removed rather than left as a field whose doc describes a use it
+	// does not have.
 	relations []string
 }
 
 func (s *stubFGA) CheckWithContext(ctx context.Context, subject, relation, object string, ctxMap map[string]any) (bool, error) {
-	s.lastRelation = relation
+	s.mu.Lock()
 	s.relations = append(s.relations, relation)
+	s.mu.Unlock()
 	return s.check, nil
 }
 func (s *stubFGA) ListObjects(ctx context.Context, subject, relation, objectType string, ctxMap map[string]any, max int) ([]string, error) {

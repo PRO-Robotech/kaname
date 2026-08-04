@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -15,7 +16,22 @@ import (
 )
 
 // mockRelations — minimal Authorizer for unit tests.
+//
+// The counters and captures are mutex-guarded because BatchCheck resolves its
+// items concurrently: a fixture that is only safe for a sequential caller cannot
+// stand in for a store the production code calls from several goroutines, and
+// under -race it reports the FIXTURE's unsafety as if it were the subject's.
+// Recording sites take the lock; tests read the fields after the call under test
+// has returned, which is ordered by that return, so no read site needs changing.
+//
+// Deliberately NOT extended to scClusterChecker (authorize_shortcircuit_test.go):
+// its counter is serialised by clusterAdminMemo's single-flight, so leaving it
+// unguarded makes -race the detector for that single-flight being lost — a
+// regression that would otherwise only show up as a quiet extra super-gate
+// question per item.
 type mockRelations struct {
+	mu sync.Mutex
+
 	checkResp    bool
 	checkErr     error
 	checkCalls   int
@@ -37,12 +53,16 @@ type mockRelations struct {
 }
 
 func (m *mockRelations) CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
+	m.mu.Lock()
 	m.checkCalls++
 	m.lastCondCtx = condCtx
+	m.mu.Unlock()
 	return m.checkResp, m.checkErr
 }
 func (m *mockRelations) ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error) {
+	m.mu.Lock()
 	m.lastCondCtx = condCtx
+	m.mu.Unlock()
 	return m.listResp, m.listErr
 }
 func (m *mockRelations) ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error) {
