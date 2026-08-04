@@ -504,6 +504,17 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// reaches objects THROUGH the pointer rather than through any per-object grant.
 		// nil-safe + non-fatal: the durable outbox drain remains the backstop.
 		WithTupleApplier(clients.NewHierarchyTupleApplier(relationStore), logger)
+	// Both post-commit steps above are best-effort: they front a durable queue, so a
+	// failure costs latency and never the change. That is what makes a permanently broken
+	// one invisible — one WARN and a product that keeps working, slower, forever. The
+	// recorder counts RUNS as well as FAILURES, so "never refused" stays distinguishable
+	// from "never reached", and it labels WHICH materialization path each registration
+	// took, so a regression back onto the EXCLUSIVE recompute is a visible shift between
+	// two series instead of latency somebody has to notice. nil-safe: without a metrics
+	// registry the steps still run and still log, they are just not counted.
+	if metricsReg != nil {
+		registerResourceUC = registerResourceUC.WithMetrics(metricsReg.NewRegisterPostCommitRecorder())
+	}
 	regGate := authzguard.NewRelationWriteGate(relationStore).
 		WithProductionMode(cfg.AuthN.Mode.IsProduction())
 	// Session-revocation writer. Pool-scoped adapter over

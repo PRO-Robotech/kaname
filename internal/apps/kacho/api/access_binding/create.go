@@ -75,13 +75,13 @@ type SelectorReconciler interface {
 	// ReconcileBinding is the FULL EXCLUSIVE path (Role.Update fan-out + sweep backstop);
 	// still consumed by the reconcile machinery, not by the create hot-path.
 	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
-	// ReconcileObjectForwardNew is the ADDITIVE forward fast-path for the freshly-created
+	// ReconcileObjectForwardNoStale is the ADDITIVE forward fast-path for the freshly-created
 	// binding-AS-OBJECT (iam.accessBinding): it materializes ONLY that new object's
 	// per-object owner/admin tuples across the matching bindings under a SHARE advisory
 	// lock (no EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
 	// materialization lag under a parallel create burst.
 	//
-	// The …New variant asserts what only this call site knows: the object id was minted
+	// The …NoStale variant asserts what only this call site knows: the object id was minted
 	// in the writer-tx that has just committed, so it never existed before and carries
 	// nothing stale. That matters because the SIBLING pass above
 	// (ReconcileBindingForward) may already have written a member row ON THIS VERY
@@ -90,7 +90,7 @@ type SelectorReconciler interface {
 	// existed before" and falls back to the FULL EXCLUSIVE ReconcileObject, the very
 	// serialization this fast-path exists to avoid (measured: account-admin verbs ~67s
 	// after create). The delete-stale guard is untouched for every other caller.
-	ReconcileObjectForwardNew(ctx context.Context, objectType, objectID string) error
+	ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error
 	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
 	// delete-stale / audit / sweep); still driven by the reconcile worker off the
 	// co-committed reconcile-outbox event, not by the create hot-path.
@@ -468,11 +468,11 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 // Distinct from ReconcileBindingForward (which materializes THIS binding's own grant
 // membership). Best-effort/non-fatal.
 //
-// IAM-FMB throughput fix: it takes the ADDITIVE forward with the PROVEN-NEW signal
-// (ReconcileObjectForwardNew, SHARE advisory lock, single-object) instead of the FULL
+// IAM-FMB throughput fix: it takes the ADDITIVE forward with the nothing-stale proof
+// (ReconcileObjectForwardNoStale, SHARE advisory lock, single-object) instead of the FULL
 // EXCLUSIVE ReconcileObject, whose per-binding advisory lock + O(scope) recompute
 // serialized on the SINGLE owner/account binding every access_binding of an account
-// shares. The …New variant matters because the sibling ReconcileBindingForward has,
+// shares. The …NoStale variant matters because the sibling ReconcileBindingForward has,
 // moments earlier, written a member row ON THIS VERY OBJECT (an anchor/`*.*` role in
 // scope covers iam.accessBinding — the row just created), which the plain forward's
 // delete-stale guard reads as "already existed" and bounces onto the FULL path:
@@ -486,7 +486,7 @@ func (u *CreateAccessBindingUseCase) reconcileNewBindingObject(ctx context.Conte
 	if u.reconciler == nil {
 		return
 	}
-	if rerr := u.reconciler.ReconcileObjectForwardNew(ctx, "iam.accessBinding", string(bindingID)); rerr != nil && u.logger != nil {
+	if rerr := u.reconciler.ReconcileObjectForwardNoStale(ctx, "iam.accessBinding", string(bindingID)); rerr != nil && u.logger != nil {
 		u.logger.Error("access_binding create: object forward reconcile failed (event/sweep will retry)",
 			"binding_id", string(bindingID), "err", rerr)
 	}

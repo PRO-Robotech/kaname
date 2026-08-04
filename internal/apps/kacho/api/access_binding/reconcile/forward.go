@@ -206,8 +206,9 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 	return nil
 }
 
-// ReconcileObjectForward is the ADDITIVE forward fast-path used by the register
-// create-path (RegisterResource syncReconcile): it materializes ONLY the freshly-
+// ReconcileObjectForward is the ADDITIVE forward fast-path WITH the delete-stale guard
+// (the entry point for a caller that cannot prove the object carries nothing stale — a
+// re-registration that replaced the projection, and every withdrawal). It materializes ONLY the freshly-
 // registered object's per-object tuples for each binding whose selector NOW matches it,
 // holding only a SHARE advisory lock (never the EXCLUSIVE full-path lock) and no FOR
 // UPDATE row-lock, and doing NO full O(scope) desired recompute (see the file-level doc
@@ -245,45 +246,59 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 // (delete-stale / REJECTED-containment audit / PENDING / sweep), driven by the co-committed
 // reconcile-outbox event; forward is purely the happy-path accelerator.
 func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, objectID string) error {
-	return r.reconcileObjectForward(ctx, objectType, objectID, false /* newness not proven — keep the delete-stale guard */)
+	return r.reconcileObjectForward(ctx, objectType, objectID, false /* not proven — keep the delete-stale guard */)
 }
 
-// ReconcileObjectForwardNew is ReconcileObjectForward for an object the caller can PROVE
-// is brand-new: its id was minted in the caller's writer-tx and that tx has just
-// committed, so the object never existed before this call.
+// ReconcileObjectForwardNoStale is ReconcileObjectForward for an object whose caller can
+// PROVE that nothing materialized on it can have gone stale. It is the SAME pass in every
+// other respect (same object projection, same fan-out, same per-object verdict, same
+// additive materialization, same async backstop); the ONLY difference is that the
+// delete-stale guard below is skipped.
 //
-// WHAT IT CHANGES — exactly one thing: the delete-stale guard below is skipped. Nothing
-// else differs (same object projection, same fan-out, same per-object verdict, same
-// additive materialization, same async backstop).
+// TWO ADMISSIBLE PROOFS, BOTH ESTABLISHED BY THE CALLER'S OWN DATABASE — never by a flag
+// on an incoming request:
 //
-// WHY IT IS NEEDED (create-path starvation, measured against the Read API). A create can
-// materialize members ON ITS OWN OBJECT before this pass runs — AccessBinding.Create's
-// ReconcileBindingForward materializes the new binding's own grant, and an anchor/`*.*`
-// role in scope covers iam.accessBinding, i.e. the very row just created. The guard then
-// finds a non-empty member set and routes the object to the FULL EXCLUSIVE
-// ReconcileObject. Since every access_binding of an account shares the single
-// account-admin binding, those full passes queue on one advisory lock and the
-// account-admin's per-object verbs arrived ~67s after the create — far past a client's
-// read-your-writes budget. Reordering the two passes only moves the starvation to the
-// other one; the guard needs the fact only the create-path holds: the object is NEW.
+//  1. THE ID IS BRAND-NEW: it was minted in the caller's writer-tx and that tx has just
+//     committed, so the object never existed before this call (AccessBinding.Create).
+//  2. THE REGISTRATION REPLACED NOTHING: the object's stored projection — parent-scope and
+//     labels, the only things a selector reads — was already byte-identical to the one
+//     just written, and only its source_version advanced (the cross-service
+//     RegisterResource path, where the mirror UPSERT decides this in SQL).
 //
-// WHY IT IS SAFE. The guard exists so a RE-REGISTER / label-UPDATE revokes a
-// now-unmatched grant (delete-stale, the T31 label-revoke regression) — it protects
-// against STALE state. A never-before-existing id has none by construction: every member
-// row on it was written seconds earlier by this same create, from the same role/selector
-// facts this pass re-derives. The FULL ReconcileObject remains the at-least-once backstop
-// (co-committed reconcile event + sweep) for delete-stale, REJECTED-containment audit and
-// PENDING re-verify, exactly as for the ordinary forward.
+// A member can only become stale when the facts that justified it change. Under (1) there
+// are no earlier facts at all; under (2) the facts this pass re-derives are the same ones
+// the earlier delivery derived, so the desired set it computes is the same set — an
+// additive pass over it removes nothing because there is nothing to remove.
 //
-// It does NOT gate Operation.done on tuple visibility (ban #9): materialization stays
-// eventually-consistent, this only keeps it on the fast path.
-func (r *Reconciler) ReconcileObjectForwardNew(ctx context.Context, objectType, objectID string) error {
-	return r.reconcileObjectForward(ctx, objectType, objectID, true /* proven-new — nothing stale can exist */)
+// WHY IT IS NEEDED (create-path starvation, measured against the Read API). Members can
+// exist on the object before this pass runs — either written seconds earlier by the same
+// create, or written by the FIRST of the two deliveries every consumer performs. The
+// guard then finds a non-empty member set and routes the object to the FULL EXCLUSIVE
+// ReconcileObject. Since every object of an account shares the single account-admin
+// binding, those full passes queue on one advisory lock, and the account-admin's
+// per-object verbs arrived ~67s after the create — far past a client's read-your-writes
+// budget. Reordering the passes only moves the starvation; what the guard needs is the
+// fact only the caller holds.
+//
+// WHAT IT DOES NOT LICENSE. The guard exists so a RE-REGISTER / label-UPDATE revokes a
+// now-unmatched grant (delete-stale, the T31 label-revoke regression). A registration
+// that REPLACED a different projection — a label flipped off, a move to another parent —
+// is exactly that case and must NOT come through here: an additive pass on it would add
+// the new grants and leave the old ones standing, i.e. an UNAPPLIED REVOKE. Neither may
+// a withdrawal: stripping an object's tuples IS the full pass's delete-stale diff.
+//
+// The FULL ReconcileObject remains the at-least-once backstop (co-committed reconcile
+// event + sweep) for delete-stale, REJECTED-containment audit and PENDING re-verify,
+// exactly as for the ordinary forward. It does NOT gate Operation.done on tuple
+// visibility (ban #9): materialization stays eventually-consistent, this only keeps it
+// on the fast path.
+func (r *Reconciler) ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error {
+	return r.reconcileObjectForward(ctx, objectType, objectID, true /* proven — nothing stale can exist */)
 }
 
 // reconcileObjectForward is the shared implementation of the two entry points above;
-// knownNew lifts the delete-stale guard (see ReconcileObjectForwardNew).
-func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, objectID string, knownNew bool) error {
+// noStale lifts the delete-stale guard (see ReconcileObjectForwardNoStale).
+func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, objectID string, noStale bool) error {
 	// Feed classifier: an iam.* object lives in ITS OWN table (iam-direct, never PENDING);
 	// every other selectable family (compute/vpc/loadbalancer/...) is mirror-fed. The
 	// object getter + the fast-path fan-out differ per feed; everything else is shared.
@@ -307,12 +322,14 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 		// The check is one indexed read (target_members by object); on the create hot-path
 		// it is empty, so the extra cost is a single cheap SELECT in the same forward tx.
 		//
-		// SKIPPED for a PROVEN-NEW object (ReconcileObjectForwardNew): a never-before-
-		// existing id can carry nothing stale, and the members it DOES carry were written
-		// seconds ago by the same create — reading them would bounce the create-path onto
-		// the FULL EXCLUSIVE recompute it is trying to avoid (see the doc above). The
-		// query is skipped rather than its result ignored: it is a pure cost then.
-		if !knownNew {
+		// SKIPPED when the caller PROVED nothing stale can exist (ReconcileObjectForwardNoStale):
+		// either the id never existed before, or the registration replaced nothing — see the
+		// two admissible proofs in that method's doc. The members such an object DOES carry
+		// were written by the same create, or by the first of the two deliveries of the very
+		// same registration; reading them would bounce the hot path onto the FULL EXCLUSIVE
+		// recompute it is trying to avoid. The query is skipped rather than its result
+		// ignored: it is a pure cost then.
+		if !noStale {
 			existing, err := s.BindingsForObject(ctx, objectType, objectID)
 			if err != nil {
 				return fmt.Errorf("forward: bindings for object %s:%s: %w", objectType, objectID, err)

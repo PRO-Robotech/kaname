@@ -50,16 +50,18 @@ func newMirrorSpy() *mirrorSpy {
 	return &mirrorSpy{rows: map[string]service.ResourceMirrorRow{}}
 }
 
-func (m *mirrorSpy) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, error) {
+func (m *mirrorSpy) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.upserts++
 	key := row.ObjectType + ":" + row.ObjectID
 	if prev, ok := m.rows[key]; ok && !row.SourceVersion.After(prev.SourceVersion) {
-		return false, nil
+		return false, false, nil
 	}
 	m.rows[key] = row
-	return true, nil
+	// These cases are about the wildcard grant, which writes no projection at all; they
+	// never claim staleness-freedom, so the guarded entry point stays in force.
+	return true, false, nil
 }
 
 func (m *mirrorSpy) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {

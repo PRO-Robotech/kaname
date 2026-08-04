@@ -61,15 +61,25 @@ type ResourceMirrorRow struct {
 // neither the mirror row nor the tuple intent. The mirror-fill path only FILLS
 // the mirror; the reconciler reads it. UPSERT-on-PK gives idempotency under the
 // at-least-once drainer.
-// UpsertTx reports whether the statement actually CHANGED a row (`changed`). The
-// monotonic guard means a register whose SourceVersion is not strictly newer than the
-// stored one updates ZERO rows — a redelivery of a registration already applied. Every
-// consumer delivers each registration TWICE (a synchronous post-commit call plus the
-// at-least-once register-drainer replaying the same durable intent), so this flag is
-// what lets the second delivery skip the materialisation the first already performed.
-// Reporting it costs nothing: the statement already evaluates the guard.
+// UpsertTx reports TWO independent DB-decided facts about the write, because the
+// duplicate delivery every consumer performs cannot be recognised by one of them alone.
+//
+//   - `applied` — the statement CHANGED a row. The monotonic guard means a register
+//     whose SourceVersion is not strictly newer than the stored one updates ZERO rows —
+//     a redelivery whose work was already done, so the second delivery skips it.
+//   - `projectionUnchanged` — the write advanced ONLY SourceVersion: parent-scope and
+//     labels were already byte-identical. This is the case `applied` CANNOT see. The
+//     two deliveries of one registration carry DIFFERENT versions (the synchronous
+//     registrar stamps wall-clock after the commit; the drainer replays the version the
+//     DB stamped inside the writer-tx, i.e. earlier), and their arrival order is not
+//     fixed — so when the drainer arrives first, the synchronous call applies with the
+//     NEWER version while changing nothing about the object. Only a registration that
+//     REPLACED a different projection can have made an earlier materialization stale,
+//     and only that one needs the delete-stale-capable reconcile pass.
+//
+// Reporting both costs nothing: the statements already evaluate the conditions.
 type ResourceMirrorEmitter interface {
-	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) (changed bool, err error)
+	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
 	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) error
 }
 

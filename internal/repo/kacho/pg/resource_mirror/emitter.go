@@ -65,6 +65,24 @@ func versionOr(t time.Time) any {
 	return t.UTC()
 }
 
+// Outcome — the verdict of one conditional mirror write. Two INDEPENDENT facts, both
+// decided by the database, neither taken on the caller's word:
+//
+//   - Applied — a row was written. False means the monotonic guard rejected the write
+//     as not-newer (a redelivery of a registration already stored).
+//   - ProjectionUnchanged — the write advanced ONLY source_version: the stored
+//     parent-scope and labels were already byte-identical to the incoming ones. This is
+//     the fact the register path needs, and it is NOT the same question as Applied: the
+//     duplicate delivery that arrives SECOND may still carry the NEWER version (the
+//     synchronous registrar stamps wall-clock after the commit, the drainer replays the
+//     version the DB stamped inside the writer-tx), so it applies — while changing
+//     nothing about the object. Only a registration that REPLACED a different projection
+//     can have invalidated an earlier materialization.
+type Outcome struct {
+	Applied             bool
+	ProjectionUnchanged bool
+}
+
 // UpsertTx INSERTs-or-conditionally-UPDATEs the mirror row for (ObjectType,
 // ObjectID) using the caller-supplied transaction. UPSERT-on-PK ⇒ idempotent on
 // drainer retry; the UPDATE branch is gated `WHERE source_version <
@@ -75,11 +93,26 @@ func versionOr(t time.Time) any {
 // SAME source_version is likewise a no-op (`<` is strict). Equal/newer in-order
 // register applies and advances source_version.
 //
+// TWO STATEMENTS, ONE TRANSACTION, NO CHECK-THEN-ACT. The version-only bump is tried
+// FIRST as a conditional UPDATE whose WHERE also demands that every selector-relevant
+// column already equal the incoming value. Postgres re-evaluates that WHERE after
+// waiting on a concurrent writer's row lock (READ COMMITTED), so the comparison is made
+// against the row as actually committed — not against a snapshot read earlier and acted
+// on later (ban #10). Only when it matches nothing does the ordinary UPSERT run. Both
+// statements are atomic in themselves and commit with the caller's tx.
+//
+// The two cannot be folded into one statement: two data-modifying CTEs over the same
+// table would either see a pre-UPDATE snapshot or touch the same row twice.
+//
+// A concurrent delivery that inserts the row between the two statements makes the second
+// take its UPSERT branch and report ProjectionUnchanged = false — a CONSERVATIVE answer
+// (the caller then keeps its delete-stale-capable path), never a permissive one.
+//
 // MUST run in the same pgx.Tx as the owner-tuple fga_outbox emit; tx rollback ⇒
 // the row is not visible (atomic co-commit, ban #10).
-func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (bool, error) {
+func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	if tx == nil {
-		return false, fmt.Errorf("resource_mirror: tx must not be nil")
+		return Outcome{}, fmt.Errorf("resource_mirror: tx must not be nil")
 	}
 	labels := row.Labels
 	if labels == nil {
@@ -87,9 +120,35 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (bool, error) {
 	}
 	payload, err := json.Marshal(labels)
 	if err != nil {
-		return false, fmt.Errorf("resource_mirror: marshal labels: %w", err)
+		return Outcome{}, fmt.Errorf("resource_mirror: marshal labels: %w", err)
 	}
+	version := versionOr(row.SourceVersion)
+	// (1) VERSION-ONLY BUMP. Matches exactly when a row already exists, the incoming
+	// version is strictly newer, AND nothing a selector reads has changed. `labels =
+	// $5::jsonb` is jsonb equality — key order and whitespace do not make a projection
+	// "different". An unversioned producer ('-infinity') never satisfies `< $6` and so
+	// never reaches this branch: it supplies no proof and gets no exemption.
 	tag, err := tx.Exec(ctx,
+		`UPDATE kacho_iam.resource_mirror
+		    SET source_version = $6, updated_at = now()
+		  WHERE object_type       = $1
+		    AND object_id         = $2
+		    AND parent_project_id = $3
+		    AND parent_account_id = $4
+		    AND labels            = $5::jsonb
+		    AND source_version    < $6`,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
+	)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("resource_mirror: bump source version: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return Outcome{Applied: true, ProjectionUnchanged: true}, nil
+	}
+	// (2) INSERT-OR-SUPERSEDE. Either the row is new, or the incoming projection differs
+	// from the stored one, or the version is not newer (0 rows — a redelivery the
+	// monotonic guard already recognised).
+	tag, err = tx.Exec(ctx,
 		`INSERT INTO kacho_iam.resource_mirror
 		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
 		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
@@ -100,15 +159,12 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (bool, error) {
 		        source_version    = EXCLUDED.source_version,
 		        updated_at        = now()
 		  WHERE resource_mirror.source_version < EXCLUDED.source_version`,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, versionOr(row.SourceVersion),
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
 	)
 	if err != nil {
-		return false, fmt.Errorf("resource_mirror: upsert: %w", err)
+		return Outcome{}, fmt.Errorf("resource_mirror: upsert: %w", err)
 	}
-	// The monotonic guard already decides this; reporting it is free. 0 rows means the
-	// stored version is at least as new as the incoming one — a redelivery of a
-	// registration that was already applied, so the caller can skip re-materialising it.
-	return tag.RowsAffected() > 0, nil
+	return Outcome{Applied: tag.RowsAffected() > 0}, nil
 }
 
 // DeleteTx conditionally removes the mirror row for (objectType, objectID). The

@@ -52,10 +52,13 @@ func (smEmitter) EmitDeleteTx(context.Context, service.Tx, []service.RelationTup
 
 type mirrorAdapter struct{}
 
-// UpsertTx always reports `changed` — these slices exercise the materialisation path,
-// not the redelivery gate (which register_resource_redelivery_test.go owns).
-func (mirrorAdapter) UpsertTx(context.Context, service.Tx, service.ResourceMirrorRow) (bool, error) {
-	return true, nil
+// UpsertTx always reports `applied` and never `projectionUnchanged` — these cases
+// exercise the materialisation path, not the redelivery gate (which
+// register_resource_redelivery_test.go owns) and not the routing verdict (which
+// register_resource_forward_route_test.go owns). Reporting no proof of staleness-freedom
+// keeps them on the guarded entry point, i.e. on the pre-existing behaviour.
+func (mirrorAdapter) UpsertTx(context.Context, service.Tx, service.ResourceMirrorRow) (bool, bool, error) {
+	return true, false, nil
 }
 func (mirrorAdapter) DeleteTx(context.Context, service.Tx, string, string, time.Time) error {
 	return nil
@@ -77,8 +80,9 @@ func (r *regReq) GetLabels() map[string]string             { return nil }
 func (r *regReq) GetParentProjectId() string               { return "" }
 func (r *regReq) GetParentAccountId() string               { return "" }
 
-// smObjectReconciler records ReconcileObjectForward calls (the create-path additive
-// fast-path the register use-case now drives post-commit).
+// smObjectReconciler records post-commit forward calls (the create-path additive
+// fast-path the register use-case drives post-commit), regardless of which entry point
+// the use-case picked — these cases assert THAT a pass ran, not which one.
 type smObjectReconciler struct {
 	mu    sync.Mutex
 	calls [][2]string // (objectType, objectID)
@@ -91,6 +95,13 @@ func (r *smObjectReconciler) ReconcileObjectForward(_ context.Context, objectTyp
 	r.calls = append(r.calls, [2]string{objectType, objectID})
 	return r.err
 }
+func (r *smObjectReconciler) ReconcileObjectForwardNoStale(_ context.Context, objectType, objectID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, [2]string{objectType, objectID})
+	return r.err
+}
+
 func (r *smObjectReconciler) snapshot() [][2]string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

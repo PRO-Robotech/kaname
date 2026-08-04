@@ -94,7 +94,7 @@ func (r *recordingReconciler) ReconcileObjectForward(_ context.Context, objectTy
 	return nil
 }
 
-func (r *recordingReconciler) ReconcileObjectForwardNew(_ context.Context, objectType, objectID string) error {
+func (r *recordingReconciler) ReconcileObjectForwardNoStale(_ context.Context, objectType, objectID string) error {
 	r.record("object_forward_new:" + objectType + ":" + objectID)
 	return nil
 }

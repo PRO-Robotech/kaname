@@ -62,19 +62,36 @@ func newVersionedMirror() *versionedMirror {
 	return &versionedMirror{stored: map[string]time.Time{}, labelsOf: map[string]map[string]string{}}
 }
 
-func (m *versionedMirror) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, error) {
+func (m *versionedMirror) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.upserts++
 	key := row.ObjectType + ":" + row.ObjectID
 	prev, exists := m.stored[key]
 	if exists && !row.SourceVersion.After(prev) {
-		return false, nil // stale/equal replay — 0 rows updated
+		return false, false, nil // stale/equal replay — 0 rows updated
 	}
+	// projectionUnchanged: the write advanced only the version. These cases vary labels
+	// and nothing else, so labels are what the fake compares (the SQL statement compares
+	// parent-scope too — see resource_mirror.UpsertTx).
+	unchanged := exists && sameStringMap(m.labelsOf[key], row.Labels)
 	m.stored[key] = row.SourceVersion
 	m.labelsOf[key] = row.Labels
 	m.mutated++
-	return true, nil
+	return true, unchanged, nil
+}
+
+// sameStringMap — set equality of two label maps.
+func sameStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {

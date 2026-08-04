@@ -54,12 +54,14 @@ type relationOutboxEmitter interface {
 // caller-owned tx (atomic co-commit with the owner-tuple emit, ban #10).
 // Implemented by *repo/kacho/pg.ResourceMirrorEmitter.
 //
-// UpsertTx reports whether it actually CHANGED a row. The mirror's monotonic guard
-// applies a register only when its source_version is strictly newer than the stored one,
-// so a redelivery of an already-applied registration updates zero rows — the signal the
-// register path uses to skip re-materialising work the first delivery already did.
+// UpsertTx reports TWO verdicts the statements already compute: whether a row was
+// written at all (the monotonic guard — a redelivery carrying an OLDER version updates
+// zero rows), and whether the write left the selector-relevant projection byte-identical
+// (a redelivery carrying the NEWER version — it applies, but nothing about the object
+// changed). The register path needs both: the first tells it there is nothing to do, the
+// second tells it that what it must do cannot involve removing anything.
 type resourceMirrorEmitter interface {
-	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (changed bool, err error)
+	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
 	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) error
 }
 
@@ -119,8 +121,46 @@ type hierarchyTupleApplier interface {
 }
 
 type objectReconciler interface {
+	// ReconcileObjectForward — the GUARDED entry point: it first reads the object's
+	// materialized members and, finding any, delegates to the FULL EXCLUSIVE
+	// ReconcileObject whose delete-stale diff revokes a now-unmatched grant.
 	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
+	// ReconcileObjectForwardNoStale — the same pass WITHOUT that guard, for an object the
+	// caller has PROVED carries nothing stale. On this path the proof is the mirror's own
+	// SQL verdict: the registration advanced only source_version and replaced no part of
+	// the projection a selector reads.
+	ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error
 }
+
+// materializationRecorder — narrow observability port for the POST-COMMIT accelerators
+// this use-case drives (the forward reconcile and the direct tuple apply). Optional,
+// nil-safe.
+//
+// WHY IT IS PART OF THE CONTRACT AND NOT A NICETY. Both accelerators are best-effort by
+// design: they are fronting a durable queue, so a failure costs latency, not the change.
+// That is exactly what makes a permanently broken one invisible — it logs one WARN and
+// the product keeps working, more slowly, forever. A counter that records BOTH runs and
+// outcomes makes "never failed" distinguishable from "never ran", which a log line alone
+// cannot do (security.md §Hardening-инвариант 8: «ноль отказов за всю жизнь контроля»
+// обязано быть заметно). The `step` label additionally exposes which materialization
+// path was taken, so a regression that silently pushes every registration back onto the
+// EXCLUSIVE recompute shows up as a shift between two counters rather than as latency
+// somebody has to notice.
+type materializationRecorder interface {
+	ObserveRegisterPostCommit(step, outcome string)
+}
+
+// Post-commit steps + outcomes reported through materializationRecorder. Kept as
+// constants so the metric's label set is closed and greppable from both sides.
+const (
+	stepForwardAdditive = "forward_additive" // proven no-stale → guard skipped
+	stepForwardGuarded  = "forward_guarded"  // guard kept → may escalate to the full pass
+	stepTupleWrite      = "tuple_write"
+	stepTupleDelete     = "tuple_delete"
+
+	outcomeOK    = "ok"
+	outcomeError = "error"
+)
 
 // RegisterResourceRequest / UnregisterResourceRequest fields the use-case
 // consumes. We accept the proto messages directly at the handler boundary and
@@ -170,6 +210,7 @@ type RegisterResourceUseCase struct {
 	accounts  accountResolver       // optional, nil-safe
 	objRecon  objectReconciler      // sync post-commit — optional, nil-safe
 	tuples    hierarchyTupleApplier // sync post-commit containment pointer — optional, nil-safe
+	metrics   materializationRecorder
 	logger    *slog.Logger
 }
 
@@ -214,6 +255,25 @@ func (uc *RegisterResourceUseCase) WithTupleApplier(a hierarchyTupleApplier, log
 	return uc
 }
 
+// WithMetrics wires the OPTIONAL post-commit observability recorder. nil-safe: without
+// it the accelerators still run and still log, they are just not counted.
+func (uc *RegisterResourceUseCase) WithMetrics(m materializationRecorder) *RegisterResourceUseCase {
+	uc.metrics = m
+	return uc
+}
+
+// observe reports one post-commit step outcome when a recorder is wired.
+func (uc *RegisterResourceUseCase) observe(step string, err error) {
+	if uc.metrics == nil {
+		return
+	}
+	outcome := outcomeOK
+	if err != nil {
+		outcome = outcomeError
+	}
+	uc.metrics.ObserveRegisterPostCommit(step, outcome)
+}
+
 // Register validates the tuple + labels, then UPSERTs the mirror row AND enqueues
 // an fga.tuple.write row in ONE writer-tx (atomic co-commit, ban #10).
 func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInput) error {
@@ -236,7 +296,7 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		_, err = uc.emitGrant(ctx, t, true)
 		return err
 	}
-	changed, err := uc.emit(ctx, t, service.ResourceMirrorRow{
+	changed, projectionUnchanged, err := uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:      objType,
 		ObjectID:        objID,
 		ParentProjectID: in.GetParentProjectId(),
@@ -287,20 +347,65 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	// (from the co-committed reconcile event) + the periodic sweep are the at-least-once
 	// backstop, so a forward error here is logged, not propagated (Register stays
 	// successful).
-	uc.syncReconcile(ctx, objType, objID)
+	//
+	// WHICH ENTRY POINT, AND WHY THE GATE ABOVE IS NOT ENOUGH. The gate above recognises
+	// only the duplicate that arrives with an OLDER version. Which of the two deliveries
+	// arrives first is not fixed, and when the drainer wins, the synchronous registrar's
+	// call carries the NEWER version — it applies, so the gate lets it through, and the
+	// GUARDED forward then finds the members the first delivery just wrote and routes the
+	// object to the FULL EXCLUSIVE recompute, on the single binding every object of the
+	// account shares — one avoidable EXCLUSIVE pass per registered object, on the single
+	// binding every object of the account contends for.
+	//
+	// WHAT THIS IS AND IS NOT MEASURED TO FIX. The escalation is real and this removes it,
+	// but do NOT read it as the whole of the materialization window: on a kind stand
+	// (2026-08-04) the race was reproduced only in unit form, because the SYNCHRONOUS
+	// delivery won every time — across 367 registrations `forward_additive` fired ZERO
+	// times, so this branch never ran and the before/after window was identical within
+	// run-to-run noise. In the same measurement the window that DID blow past the client
+	// budget came from a different place: under concurrency the synchronous forward is
+	// cancelled on the caller's per-call deadline (`context canceled`), materialization
+	// falls back to the async drain, and the objects left invisible were exactly the
+	// cancelled ones. That term is NOT addressed here. The step counter below is what
+	// makes which-path-ran observable instead of inferred — it is how the above was
+	// established at all.
+	//
+	// `projectionUnchanged` is the mirror's own SQL verdict that the write advanced only
+	// source_version: parent-scope and labels — everything a selector reads — were
+	// already byte-identical. Nothing an earlier pass materialized from those facts can
+	// have gone stale, so the delete-stale-capable pass has no work to do and the
+	// registration stays additive. It is NOT the caller's word: iam derives it from the
+	// row it already holds, so a consumer cannot ask to skip the guard.
+	//
+	// A registration that DID replace the projection (label flipped off, moved to another
+	// parent) keeps the guarded entry point — that is precisely the revoke-on-update the
+	// guard exists for.
+	uc.syncReconcile(ctx, objType, objID, projectionUnchanged)
 	return nil
 }
 
-// syncReconcile drives the optional post-commit ADDITIVE forward materialization
-// (ReconcileObjectForward). nil-safe; a reconcile error is non-fatal (logged when a
-// logger is wired) — the async full ReconcileObject backstop re-converges.
-func (uc *RegisterResourceUseCase) syncReconcile(ctx context.Context, objType, objID string) {
+// syncReconcile drives the optional post-commit forward materialization. `noStale` picks
+// the entry point WITHOUT the delete-stale guard, and may only be set when iam itself has
+// established that nothing materialized on the object can have gone stale (see Register).
+// nil-safe; a reconcile error is non-fatal (logged when a logger is wired, and counted
+// when a recorder is wired) — the async full ReconcileObject backstop re-converges.
+func (uc *RegisterResourceUseCase) syncReconcile(ctx context.Context, objType, objID string, noStale bool) {
 	if uc.objRecon == nil {
 		return
 	}
-	if err := uc.objRecon.ReconcileObjectForward(ctx, objType, objID); err != nil && uc.logger != nil {
+	step := stepForwardGuarded
+	var err error
+	if noStale {
+		step = stepForwardAdditive
+		err = uc.objRecon.ReconcileObjectForwardNoStale(ctx, objType, objID)
+	} else {
+		err = uc.objRecon.ReconcileObjectForward(ctx, objType, objID)
+	}
+	uc.observe(step, err)
+	if err != nil && uc.logger != nil {
 		uc.logger.WarnContext(ctx, "register resource: post-commit forward reconcile failed (drain/sweep will retry)",
-			slog.String("object_type", objType), slog.String("object_id", objID), slog.Any("err", err))
+			slog.String("object_type", objType), slog.String("object_id", objID),
+			slog.String("step", step), slog.Any("err", err))
 	}
 }
 
@@ -338,7 +443,7 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// standing over-grant, so the tuple-delete and the reconcile event are enqueued
 	// unconditionally (fail-closed). The producer-cost saving is taken only on the grant
 	// path, where a no-op is provably a redelivery of work already done.
-	if _, err = uc.emit(ctx, t, service.ResourceMirrorRow{
+	if _, _, err = uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:    objType,
 		ObjectID:      objID,
 		SourceVersion: sourceVersion(in),
@@ -359,7 +464,11 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// pass derives an empty desired set and strips the object's tuples — which is exactly
 	// the withdrawal. The co-committed reconcile event stays the at-least-once backstop,
 	// so a failure here degrades to the previous latency rather than losing the revoke.
-	uc.syncReconcile(ctx, objType, objID)
+	//
+	// The guard is NEVER lifted here (noStale = false), and that is not caution but
+	// mechanism: the removal IS the delete-stale diff, so an additive pass would strip
+	// nothing at all.
+	uc.syncReconcile(ctx, objType, objID, false)
 	return nil
 }
 
@@ -496,11 +605,14 @@ func (uc *RegisterResourceUseCase) applyTuplesAfterCommit(ctx context.Context, t
 		return
 	}
 	var err error
+	step := stepTupleDelete
 	if write {
+		step = stepTupleWrite
 		err = uc.tuples.WriteTuples(ctx, tuples)
 	} else {
 		err = uc.tuples.DeleteTuples(ctx, tuples)
 	}
+	uc.observe(step, err)
 	if err != nil && uc.logger != nil {
 		uc.logger.WarnContext(ctx,
 			"register resource: post-commit tuple apply failed (drain will backstop)",
@@ -518,19 +630,19 @@ func (uc *RegisterResourceUseCase) applyTuplesAfterCommit(ctx context.Context, t
 // SKIPPED with it (they were performed by the delivery that did write the row). The
 // unregister path always enqueues (a swallowed revoke would be an over-grant), so its
 // flag is informational only.
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool) (bool, error) {
+func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool) (changed bool, projectionUnchanged bool, err error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		// Backend-down at connection acquisition → retriable Unavailable (the
 		// handler maps ErrUnavailable → codes.Unavailable; the caller's
 		// transactional-outbox drainer then re-delivers). Fixed opaque message —
 		// never surface the raw pgx driver text (host/port/user/db).
-		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
 	tuples := []service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}
-	changed := true
+	changed = true
 	if write {
 		// Backfill parent_account_id SAME-DB from projects.account_id when the
 		// owner supplied only parent_project_id (IAM owns Project — no peer-call, no
@@ -539,7 +651,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if uc.accounts != nil && row.ParentAccountID == "" && row.ParentProjectID != "" {
 			accID, ok, rerr := uc.accounts.AccountForProjectTx(ctx, tx, row.ParentProjectID)
 			if rerr != nil {
-				return false, fmt.Errorf("resolve account for project: %w", rerr)
+				return false, false, fmt.Errorf("resolve account for project: %w", rerr)
 			}
 			if ok {
 				row.ParentAccountID = accID
@@ -548,26 +660,29 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// The mirror UPSERT runs FIRST so its monotonic verdict can gate the two
 		// enqueues below. Ordering within the tx is otherwise irrelevant — all three
 		// statements still commit together or roll back together (ban #10).
-		if changed, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
-			return false, fmt.Errorf("upsert resource mirror: %w", err)
+		if changed, projectionUnchanged, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
+			return false, false, fmt.Errorf("upsert resource mirror: %w", err)
 		}
 		// An UNVERSIONED producer ('-infinity') loses every monotonic comparison, so its
 		// `changed = false` proves nothing about redelivery — treat it as changed so a
-		// real registration is never suppressed (see the gate note in Register).
+		// real registration is never suppressed (see the gate note in Register). For the
+		// same reason it can prove nothing about staleness either: the version-only bump
+		// it never satisfies is what would have established that, so it keeps the guard.
 		if row.SourceVersion.IsZero() {
 			changed = true
+			projectionUnchanged = false
 		}
 		if changed {
 			if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
-				return false, fmt.Errorf("emit fga outbox: %w", err)
+				return false, false, fmt.Errorf("emit fga outbox: %w", err)
 			}
 		}
 	} else {
 		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
-			return false, fmt.Errorf("emit fga outbox: %w", err)
+			return false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
 		if err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion); err != nil {
-			return false, fmt.Errorf("delete resource mirror: %w", err)
+			return false, false, fmt.Errorf("delete resource mirror: %w", err)
 		}
 	}
 	// Enqueue a reconcile event in the SAME writer-tx as the mirror
@@ -589,14 +704,14 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			eventType = "mirror.delete"
 		}
 		if err = uc.reconcile.EmitTx(ctx, tx, eventType, row.ObjectType, row.ObjectID); err != nil {
-			return false, fmt.Errorf("emit reconcile event: %w", err)
+			return false, false, fmt.Errorf("emit reconcile event: %w", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
 		// contract as Begin). The row/tuple did not durably land; the caller's
 		// drainer re-delivers.
-		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	// The register direction applies only what was actually enqueued: a redelivery the
 	// monotonic guard rejected (changed == false) enqueued nothing, so there is nothing
@@ -604,5 +719,5 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	if changed || !write {
 		uc.applyTuplesAfterCommit(ctx, tuples, write)
 	}
-	return changed, nil
+	return changed, projectionUnchanged, nil
 }

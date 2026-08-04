@@ -72,7 +72,7 @@ func (b *blockingReconciler) ReconcileObjectForward(context.Context, string, str
 	return nil
 }
 
-func (b *blockingReconciler) ReconcileObjectForwardNew(context.Context, string, string) error {
+func (b *blockingReconciler) ReconcileObjectForwardNoStale(context.Context, string, string) error {
 	b.block()
 	return nil
 }

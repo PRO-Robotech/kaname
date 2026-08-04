@@ -78,7 +78,7 @@ var abImmutableFields = map[string]string{
 // access of ONE iam-native object across the bindings whose selectors match it.
 //
 // Deliberately NOT the package's SelectorReconciler (create.go): that port carries the
-// binding-membership passes and the proven-new object entry point, none of which this
+// binding-membership passes and the nothing-stale object entry point, none of which this
 // path may use — a label-clear on an EXISTING binding must go through the guard-bearing
 // forward (see doUpdate). It declares only the one method this path calls; the FULL
 // ReconcileObject is driven by the reconcile worker off the co-committed event, never
@@ -213,7 +213,7 @@ func (u *UpdateAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 // drained at 20:06:49.82 (7m30s); the tuple survived until the 30s periodic sweep reached
 // that binding at 20:00:23, 65s after the clear, long past any client budget.
 //
-// NOT the create-path's entry point. create.go deliberately uses ReconcileObjectForwardNew,
+// NOT the create-path's entry point. create.go deliberately uses ReconcileObjectForwardNoStale,
 // which SKIPS the delete-stale guard because the id was minted in the tx that just
 // committed — precisely the branch that cannot revoke. An existing binding must take the
 // guard-bearing ReconcileObjectForward.

@@ -390,7 +390,7 @@ func countMirror(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType,
 // upsertErr drops UpsertTx's `changed` flag so these slices — which assert the ROW state
 // the statement leaves behind — read as before. The flag itself is contracted by
 // TestResourceMirror_UpsertTx_ReportsWhetherRowChanged below.
-func upsertErr(_ bool, err error) error { return err }
+func upsertErr(_ resource_mirror.Outcome, err error) error { return err }
 
 // TestResourceMirror_UpsertTx_ReportsWhetherRowChanged pins the redelivery signal the
 // register use-case gates on: the monotonic guard's verdict, surfaced as `changed`.
@@ -415,10 +415,10 @@ func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
 	exec := func(r resource_mirror.Row) bool {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
-		changed, err := resource_mirror.UpsertTx(ctx, tx, r)
+		out, err := resource_mirror.UpsertTx(ctx, tx, r)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))
-		return changed
+		return out.Applied
 	}
 
 	require.True(t, exec(row(base, map[string]string{"tier": "gold"})),
@@ -429,4 +429,97 @@ func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
 		"a STALE source_version updates zero rows")
 	require.True(t, exec(row(base.Add(time.Second), map[string]string{"tier": "bronze"})),
 		"a strictly-NEWER source_version applies — a real label update must never be gated away")
+}
+
+// TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced pins the SECOND verdict
+// — the one `Applied` cannot express.
+//
+// Every consumer delivers each registration twice and the two deliveries carry DIFFERENT
+// source_versions (the synchronous registrar stamps wall-clock after the commit, the
+// drainer replays the version stamped inside the writer-tx). Their arrival order is not
+// fixed, so the duplicate that arrives SECOND may be the NEWER one: it applies, and
+// `Applied` alone therefore cannot tell it from a genuine label update. Only the second
+// verdict can: did this write REPLACE part of the projection a selector reads
+// (parent-scope, labels), or did it only advance the version?
+//
+// The distinction is not a saving — it decides whether the caller may take the additive
+// materialization path or must take the delete-stale one, i.e. whether a revoke gets
+// applied. So both directions are pinned here: a version-only redelivery reports
+// unchanged, and EVERY projection edit reports replaced.
+func TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	require.NoError(t, err)
+	defer pool.Close()
+
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	exec := func(r resource_mirror.Row) resource_mirror.Outcome {
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		out, err := resource_mirror.UpsertTx(ctx, tx, r)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(ctx))
+		return out
+	}
+	row := func(v time.Time, prj, acc string, labels map[string]string) resource_mirror.Row {
+		return resource_mirror.Row{
+			ObjectType: "vpc.network", ObjectID: "net-projection",
+			ParentProjectID: prj, ParentAccountID: acc, Labels: labels, SourceVersion: v,
+		}
+	}
+	gold := map[string]string{"tier": "gold", "env": "dev"}
+
+	// A fresh INSERT replaced nothing, but it is not the "only the version moved" case
+	// either — there was no stored projection to compare with. It reports Applied without
+	// the exemption, so the caller keeps its guarded path (conservative by construction).
+	out := exec(row(base, "prj-P", "acc-A", gold))
+	require.True(t, out.Applied, "a fresh INSERT applies")
+	require.False(t, out.ProjectionUnchanged, "there was no stored projection to leave unchanged")
+
+	// THE RACE. Same registration, newer version, identical projection — including the
+	// same labels written in a DIFFERENT key order, which jsonb equality must not treat
+	// as a different projection.
+	out = exec(row(base.Add(time.Second), "prj-P", "acc-A", map[string]string{"env": "dev", "tier": "gold"}))
+	require.True(t, out.Applied, "a strictly-newer version applies")
+	require.True(t, out.ProjectionUnchanged,
+		"a redelivery that only advanced the version replaced nothing — nothing materialized "+
+			"from these facts can have gone stale")
+
+	// A LABEL EDIT — the grant-matching label is dropped. This is the case whose revoke
+	// must reach the delete-stale pass.
+	out = exec(row(base.Add(2*time.Second), "prj-P", "acc-A", map[string]string{"tier": "bronze", "env": "dev"}))
+	require.True(t, out.Applied)
+	require.False(t, out.ProjectionUnchanged, "a label edit REPLACED the projection")
+
+	// A MOVE to another parent — the second axis a selector reads.
+	out = exec(row(base.Add(3*time.Second), "prj-Q", "acc-A", map[string]string{"tier": "bronze", "env": "dev"}))
+	require.True(t, out.Applied)
+	require.False(t, out.ProjectionUnchanged, "a parent-project move REPLACED the projection")
+
+	out = exec(row(base.Add(4*time.Second), "prj-Q", "acc-B", map[string]string{"tier": "bronze", "env": "dev"}))
+	require.True(t, out.Applied)
+	require.False(t, out.ProjectionUnchanged, "a parent-account move REPLACED the projection")
+
+	// A NOT-NEWER redelivery is not applied at all, and claims no exemption with it.
+	out = exec(row(base.Add(4*time.Second), "prj-Q", "acc-B", map[string]string{"tier": "bronze", "env": "dev"}))
+	require.False(t, out.Applied, "an equal source_version updates zero rows")
+	require.False(t, out.ProjectionUnchanged, "a write that did not happen exempts nothing")
+
+	// AN UNVERSIONED PRODUCER ('-infinity') can never satisfy `source_version < $6`, so it
+	// never earns the exemption — it supplies no proof and keeps the guarded path.
+	out = exec(resource_mirror.Row{
+		ObjectType: "vpc.network", ObjectID: "net-unversioned",
+		ParentProjectID: "prj-P", Labels: gold,
+	})
+	require.True(t, out.Applied, "a fresh unversioned INSERT applies")
+	require.False(t, out.ProjectionUnchanged)
+	out = exec(resource_mirror.Row{
+		ObjectType: "vpc.network", ObjectID: "net-unversioned",
+		ParentProjectID: "prj-P", Labels: gold,
+	})
+	require.False(t, out.ProjectionUnchanged,
+		"'-infinity' loses every monotonic comparison — an unversioned producer proves nothing")
 }

@@ -24,9 +24,11 @@ package reconcile
 // nothing stale on it by construction and every member row on it was written seconds
 // ago by this same create.
 //
-// The guard itself stays for every other caller (a RE-REGISTER / label-UPDATE must
-// still delete-stale — the T31 label-revoke regression); only the proven-new
-// create-path is exempt, and the FULL ReconcileObject remains the async backstop.
+// The guard itself stays for every caller that cannot prove otherwise (a RE-REGISTER /
+// label-UPDATE that REPLACED the object's projection must still delete-stale — the T31
+// label-revoke regression). Exempt is only a caller holding one of the two proofs named
+// on ReconcileObjectForwardNoStale — here, the create-path's brand-new id — and the FULL
+// ReconcileObject remains the async backstop either way.
 
 import (
 	"context"
@@ -67,19 +69,19 @@ func ownerAccessBindingStore(sameCreateMembers []domain.AccessBindingID) *fakeSt
 	}
 }
 
-// TestReconcileObjectForwardNew_MembersOfSameCreate_StayOnAdditivePath — a
+// TestReconcileObjectForwardNoStale_MembersOfSameCreate_StayOnAdditivePath — a
 // PROVEN-NEW object stays on the additive SHARE path even though it already carries
 // member rows: those rows were written by the same create, and a never-before-existing
 // id can have nothing stale on it.
 //
-// RED (before the known-new signal): the delete-stale guard saw len(members)>0 and
+// RED (before the nothing-stale signal): the delete-stale guard saw len(members)>0 and
 // delegated to the FULL ReconcileObject → f.locks>0, the EXCLUSIVE lock every
 // access_binding of the account queues on.
-func TestReconcileObjectForwardNew_MembersOfSameCreate_StayOnAdditivePath(t *testing.T) {
+func TestReconcileObjectForwardNoStale_MembersOfSameCreate_StayOnAdditivePath(t *testing.T) {
 	f := ownerAccessBindingStore([]domain.AccessBindingID{"acb-new"})
 	rec := New(fakeRunner{s: f}, nil)
 
-	require.NoError(t, rec.ReconcileObjectForwardNew(context.Background(), "iam.accessBinding", "acb-new"))
+	require.NoError(t, rec.ReconcileObjectForwardNoStale(context.Background(), "iam.accessBinding", "acb-new"))
 
 	assert.Equal(t, 0, f.locks,
 		"a PROVEN-NEW object must stay on the additive fast-path — members written by the same "+
@@ -102,18 +104,20 @@ func TestReconcileObjectForwardNew_MembersOfSameCreate_StayOnAdditivePath(t *tes
 	assert.Empty(t, f.audits, "the async full backstop still owns REJECTED-containment audit")
 }
 
-// TestReconcileObjectForward_NotKnownNew_KeepsDeleteStaleGuard — the exemption is
-// NARROW. The ordinary entry point (re-register / label-UPDATE — the caller cannot
-// prove the object is new) keeps routing to the FULL EXCLUSIVE path when the object
-// already has members, because only that path can revoke a now-unmatched grant.
-// Weakening this would re-introduce the T31 label-revoke `post-revoke-deny` defect.
-func TestReconcileObjectForward_NotKnownNew_KeepsDeleteStaleGuard(t *testing.T) {
+// TestReconcileObjectForward_WithoutProof_KeepsDeleteStaleGuard — the exemption is
+// NARROW, and this is its paired positive control. The ordinary entry point (a
+// re-register / label-UPDATE, where the caller holds neither proof) keeps routing to the
+// FULL EXCLUSIVE path when the object already has members, because only that path can
+// revoke a now-unmatched grant. Weakening this would re-introduce the T31 label-revoke
+// `post-revoke-deny` defect.
+func TestReconcileObjectForward_WithoutProof_KeepsDeleteStaleGuard(t *testing.T) {
 	f := ownerAccessBindingStore([]domain.AccessBindingID{"acb-owner"})
 	rec := New(fakeRunner{s: f}, nil)
 
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.accessBinding", "acb-new"))
 
 	assert.Greater(t, f.locks, 0,
-		"an object with pre-existing members and NO new-object proof must still take the FULL "+
-			"delete-stale path (EXCLUSIVE lock) — the guard is only lifted where newness is proven")
+		"an object with pre-existing members and NO proof must still take the FULL "+
+			"delete-stale path (EXCLUSIVE lock) — the guard is lifted only where the caller "+
+			"has established that nothing stale can exist")
 }
