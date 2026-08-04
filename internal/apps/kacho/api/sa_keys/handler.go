@@ -62,6 +62,18 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 			return nil, status.Error(codes.InvalidArgument,
 				"Illegal argument created_by_user_id: must match authenticated principal or be empty")
 		}
+	} else if req.GetCreatedByUserId() != "" {
+		// SA caller — the field is NOT honoured on this lane: created_by is resolved
+		// from the target SA's account owner (see the note above), never from the
+		// body. Accepting it in silence was the forbidden third outcome: the caller
+		// got 200 and believed its value had been applied, while the mismatch would
+		// surface only later, in someone else's audit trail, as a created_by nobody
+		// set. The lawful outcomes are implement / refuse explicitly / take off the
+		// contract — this is the second, refused synchronously so the caller sees it
+		// at once rather than in an async operation error.
+		return nil, status.Error(codes.InvalidArgument,
+			"Illegal argument created_by_user_id: must be empty for a service-account caller "+
+				"(created_by is resolved from the service account's account owner)")
 	}
 	// Phase 3b: federated trusted-subjects passthrough. nil/empty slice keeps
 	// Phase 3a private_key_jwt behaviour intact (no schema change for
