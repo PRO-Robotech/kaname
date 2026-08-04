@@ -120,6 +120,31 @@ type hierarchyTupleApplier interface {
 	DeleteTuples(ctx context.Context, tuples []service.RelationTuple) error
 }
 
+// residualTupleReader — narrow read port: name every relationship STILL standing on an
+// object, so a withdrawal can finish the job instead of removing only the one tuple it
+// happened to be handed.
+//
+// WHY THE WITHDRAWING SIDE CANNOT NAME THEM ITSELF. A registration writes three kinds of
+// relationship, and the consumer can name only one of them at teardown. The object→scope
+// pointer it holds. The per-object verbs are derived from grants and belong to the
+// reconciler. The third — the creator's own `owner` — is written through this proxy at
+// create time from the caller's identity, and NOTHING stores that identity afterwards:
+// neither the consumer's own row nor this mirror carries the subject. So the only side
+// that can still name that tuple when the resource is being destroyed is the side that
+// holds the store.
+//
+// Leaving it to the consumer is what produced the defect this port exists to close. The
+// withdrawal was emitted, delivered and marked sent with no error, and the creator kept a
+// relationship from which the model derives ALL FIVE verbs — an object answering ALLOW
+// for the rest of its existence to someone the product had already told it was gone. The
+// class is invisible to every assertion of the form "we called it": measured on the stand
+// 2026-08-04, the residue survived a delivered withdrawal in 180 of 180 registry
+// registrations and in 60 of 60 repository ones.
+type residualTupleReader interface {
+	// ObjectTuples returns the relationships currently standing on the object.
+	ObjectTuples(ctx context.Context, object string) ([]service.RelationTuple, error)
+}
+
 type objectReconciler interface {
 	// ReconcileObjectForward — the GUARDED entry point: it first reads the object's
 	// materialized members and, finding any, delegates to the FULL EXCLUSIVE
@@ -157,6 +182,16 @@ const (
 	stepForwardGuarded  = "forward_guarded"  // guard kept → may escalate to the full pass
 	stepTupleWrite      = "tuple_write"
 	stepTupleDelete     = "tuple_delete"
+	// stepResidualRead — the object-scoped listing a withdrawal performs to name what
+	// it must still take away. Counted for the same reason the two above are: this step
+	// can only fail by refusing the withdrawal, so "never failed" and "never ran" would
+	// otherwise look identical, and the second is how the residue survived unnoticed in
+	// the first place.
+	stepResidualRead = "residual_read"
+	// stepResidualWithdraw — recorded ONCE PER TUPLE the withdrawal took away beyond the
+	// one it was handed. A permanent zero on this series says the teardown path has
+	// stopped removing anything extra, which is precisely the defect state.
+	stepResidualWithdraw = "residual_withdraw"
 
 	outcomeOK    = "ok"
 	outcomeError = "error"
@@ -210,6 +245,7 @@ type RegisterResourceUseCase struct {
 	accounts  accountResolver       // optional, nil-safe
 	objRecon  objectReconciler      // sync post-commit — optional, nil-safe
 	tuples    hierarchyTupleApplier // sync post-commit containment pointer — optional, nil-safe
+	residual  residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
 	metrics   materializationRecorder
 	logger    *slog.Logger
 }
@@ -252,6 +288,14 @@ func (uc *RegisterResourceUseCase) WithTupleApplier(a hierarchyTupleApplier, log
 	if logger != nil {
 		uc.logger = logger
 	}
+	return uc
+}
+
+// WithResidualTupleReader wires the reader that names what is STILL standing on an object
+// whose registration is being withdrawn. nil-safe: without it the withdrawal removes only
+// the tuple it was handed, which is the pre-existing behaviour.
+func (uc *RegisterResourceUseCase) WithResidualTupleReader(r residualTupleReader) *RegisterResourceUseCase {
+	uc.residual = r
 	return uc
 }
 
@@ -467,6 +511,19 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 		return err
 	}
 	objType, objID := t.objectType()
+	// EVERY relationship THIS PROXY COULD HAVE WRITTEN ON THE OBJECT GOES WITH IT.
+	//
+	// Withdrawing a hierarchy tuple is not "remove one edge", it is "this object no
+	// longer exists". The request names one edge because that is all the consumer can
+	// name; the rest — the creator's `owner` above all — was written from an identity
+	// nobody stored, so only the side holding the store can still name it. Reading it
+	// here is what turns a withdrawal that was merely DELIVERED into one that took
+	// effect. Read BEFORE the tx: it is an external call and must not hold a DB
+	// connection open across it.
+	residual, err := uc.residualTuples(ctx, t)
+	if err != nil {
+		return err
+	}
 	// SourceVersion carries the unregister tombstone-version: the mirror DELETE
 	// fires only if it is >= the stored register (Delete-after-Update reorder
 	// cannot wipe a fresher row).
@@ -479,7 +536,7 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 		ObjectType:    objType,
 		ObjectID:      objID,
 		SourceVersion: sourceVersion(in),
-	}, false); err != nil {
+	}, false, residual...); err != nil {
 		return err
 	}
 	// SYMMETRY WITH Register. Registration drives its materialization in-process right
@@ -502,6 +559,55 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// nothing at all.
 	uc.syncReconcile(ctx, objType, objID, false)
 	return nil
+}
+
+// residualTuples names what a teardown must take away IN ADDITION to the tuple the
+// request carries: every relationship still standing on the object that this proxy is
+// permitted to write (`project`/`account`/`parent`/`owner`, plus the public-read
+// wildcard). Returns nil for a pure-grant withdrawal and when no reader is wired.
+//
+// WHY THE SET IS EXACTLY THE PROXY-WRITABLE ONE, AND NOT "EVERYTHING ON THE OBJECT".
+// The per-object verbs are NOT ours to remove: they are derived from grants and the
+// reconciler's delete-stale pass — already driven from here — is what takes them away.
+// Removing them here would race that pass and, worse, would make this the second place
+// deciding the same question. The proxy-writable set is precisely the complement: the
+// relationships nothing else can account for once the object is gone.
+//
+// WHY A READ FAILURE IS AN ERROR AND NOT A SHRUG. Passing silently would restore the
+// original defect and make it permanent AND quiet: the caller would be told the
+// withdrawal succeeded while the access stood. The withdrawal intent is durable in the
+// consumer's own outbox and a repeat is a no-op at the drainer, so refusing here costs a
+// redelivery and nothing else (security.md §Hardening-инвариант 8: a control that
+// degrades on failure must distinguish a blip from a standing misconfiguration — here we
+// refuse to take the risk at all, because the failure mode is a standing over-grant).
+func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIntent) ([]service.RelationTuple, error) {
+	if uc.residual == nil {
+		return nil, nil
+	}
+	standing, err := uc.residual.ObjectTuples(ctx, t.object)
+	uc.observe(stepResidualRead, err)
+	if err != nil {
+		// Retriable, opaque: the consumer's drainer redelivers the identical intent.
+		// Never echo the store's transport text (endpoint + store id leak).
+		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "authz backend unavailable")
+	}
+	out := make([]service.RelationTuple, 0, len(standing))
+	for _, have := range standing {
+		if have.Relation == t.relation && have.User == t.subject {
+			continue // the request already carries this one
+		}
+		if !authzguard.IsProxyWritable(have.User, have.Relation) {
+			continue // not ours to remove — see the doc above
+		}
+		out = append(out, have)
+	}
+	for range out {
+		uc.observe(stepResidualWithdraw, nil)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // tupleInput — the minimal transport-agnostic shape both RPCs share. Satisfied
@@ -662,7 +768,7 @@ func (uc *RegisterResourceUseCase) applyTuplesAfterCommit(ctx context.Context, t
 // SKIPPED with it (they were performed by the delivery that did write the row). The
 // unregister path always enqueues (a swallowed revoke would be an over-grant), so its
 // flag is informational only.
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool) (changed bool, projectionUnchanged bool, err error) {
+func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (changed bool, projectionUnchanged bool, err error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		// Backend-down at connection acquisition → retriable Unavailable (the
@@ -673,7 +779,10 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
-	tuples := []service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}
+	// The tuple named by the request, plus whatever the caller established must go with
+	// it (see residualTuples): one atomic enqueue, so a withdrawal cannot commit half of
+	// its own removal.
+	tuples := append([]service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}, extra...)
 	changed = true
 	if write {
 		// Backfill parent_account_id SAME-DB from projects.account_id when the
