@@ -113,7 +113,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('rdAuthzDupAcbId');",
                   "const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "const dup = arr.find(b => b.subjectId === pm.environment.get('userINVId')",
+                  "const dup = arr.find(b => b.subjectId === pm.environment.get('ceremonyUserId')",
                   "       && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account'",
                   "       && b.scopeId === pm.environment.get('accountAId'));",
                   "if (dup && dup.id) pm.environment.set('rdAuthzDupAcbId', dup.id);",
@@ -321,7 +321,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{ceremonyUserId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -590,13 +590,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -645,7 +645,7 @@
                   "const j = pm.response.json();",
                   "pm.test('GRANTED-NONOWNER: GET account 200 (was 404 owner-only gate)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('account id matches scope', () => pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('accountAId')));",
-                  "pm.test('owner is NOT the granted invitee (true non-owner read)', () => pm.expect(j.ownerUserId).to.not.eql(pm.environment.get('userINVId')));"
+                  "pm.test('owner is NOT the granted invitee (true non-owner read)', () => pm.expect(j.ownerUserId).to.not.eql(pm.environment.get('ceremonyUserId')));"
                 ]
               }
             }

@@ -45,7 +45,7 @@
   ],
   "item": [
     {
-      "name": "IAM-WAI-GT-CRUD-OK — GET /iam/v1/me as jwtAccountAdminA → 200, subject/userId/email/accounts populated",
+      "name": "IAM-WAI-GT-CRUD-OK — GET /iam/v1/me as jwtHumanCeremony → 200, subject/userId/email/accounts populated",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -76,13 +76,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -111,14 +111,14 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('WhoAmI: subject = user:<userAAAId>', () => {",
+                  "pm.test('WhoAmI: subject = user:<ceremonyUserId>', () => {",
                   "  const j = pm.response.json();",
-                  "  const want = 'user:' + pm.environment.get('userAAAId');",
+                  "  const want = 'user:' + pm.environment.get('ceremonyUserId');",
                   "  pm.expect(j.subject, JSON.stringify(j)).to.eql(want);",
                   "});",
-                  "pm.test('WhoAmI: userId matches userAAAId', () => {",
+                  "pm.test('WhoAmI: userId matches ceremonyUserId', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.userId, JSON.stringify(j)).to.eql(pm.environment.get('userAAAId'));",
+                  "  pm.expect(j.userId, JSON.stringify(j)).to.eql(pm.environment.get('ceremonyUserId'));",
                   "});",
                   "pm.test('WhoAmI: email non-empty', () => {",
                   "  const j = pm.response.json();",
@@ -136,11 +136,11 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.accounts, 'accounts field').to.be.an('array');",
                   "});",
-                  "pm.test('WhoAmI: accounts contains accountAId (owner)', () => {",
+                  "pm.test('WhoAmI: accounts contains ceremonyAccountId (owner)', () => {",
                   "  const j = pm.response.json();",
-                  "  const aid = pm.environment.get('accountAId');",
+                  "  const aid = pm.environment.get('ceremonyAccountId');",
                   "  const found = (j.accounts || []).find(m => m.accountId === aid);",
-                  "  pm.expect(found, 'accountAId membership entry').to.be.an('object');",
+                  "  pm.expect(found, 'ceremonyAccountId membership entry').to.be.an('object');",
                   "});",
                   "pm.test('createdAt truncated to seconds', () => {",
                   "  const ts = (pm.response.json().checkedAt);",
@@ -225,7 +225,7 @@
       ]
     },
     {
-      "name": "IAM-WAI-GT-CRUD-NOB — GET /iam/v1/me as jwtNoBindings → 200, accounts empty (exempt for any authenticated)",
+      "name": "IAM-WAI-GT-CRUD-NOB — GET /iam/v1/me as jwtHumanCeremonyNoBindings → 200, accounts empty (exempt for any authenticated)",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -256,13 +256,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremonyNoBindings'",
+                  "const __t = pm.environment.get('jwtHumanCeremonyNoBindings') || pm.variables.get('jwtHumanCeremonyNoBindings') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremonyNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremonyNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -291,9 +291,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('WhoAmI-NOB: subject = user:<userNOBId>', () => {",
+                  "pm.test('WhoAmI-NOB: subject = user:<ceremonyNoBindingsUserId>', () => {",
                   "  const j = pm.response.json();",
-                  "  const want = 'user:' + pm.environment.get('userNOBId');",
+                  "  const want = 'user:' + pm.environment.get('ceremonyNoBindingsUserId');",
                   "  pm.expect(j.subject, JSON.stringify(j)).to.eql(want);",
                   "});",
                   "pm.test('WhoAmI-NOB: accounts is array (possibly empty)', () => {",

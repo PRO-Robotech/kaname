@@ -45,7 +45,7 @@
   ],
   "item": [
     {
-      "name": "IAM-CH-USER-EQUIV-OK — user-direct: ROLE_VIEW@ACCOUNT bound to user:userINVId → jwtInvitee reads account-A (v_get) + sees project (visible-set); revoke → access gone",
+      "name": "IAM-CH-USER-EQUIV-OK — user-direct: ROLE_VIEW@ACCOUNT bound to user:ceremonyUserId → jwtHumanCeremony reads account-A (v_get) + sees project (visible-set); revoke → access gone",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:HAPPY | priority:P0",
       "item": [
         {
@@ -113,7 +113,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('chUserDupAcb');",
                   "const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "const want = pm.environment.get('userINVId');",
+                  "const want = pm.environment.get('ceremonyUserId');",
                   "const dup = arr.find(b => b.subjectId === want && b.subjectType === 'user' && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (dup && dup.id) pm.environment.set('chUserDupAcb', dup.id);",
                   "if (!pm.environment.get('chUserDupAcb')) { pm.execution.setNextRequest('IAM-CH-USER-EQUIV-OK :: grant-user'); }"
@@ -308,7 +308,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{ceremonyUserId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -489,13 +489,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -565,13 +565,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -796,7 +796,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{userINVId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -877,7 +877,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-EQUIV-OK — group-member: ROLE_VIEW@ACCOUNT bound to group:G (userINVId∈G) → member jwtInvitee reads account-A + sees project, identical to user-direct; revoke → gone",
+      "name": "IAM-CH-GRP-EQUIV-OK — group-member: ROLE_VIEW@ACCOUNT bound to group:G (ceremonyUserId∈G) → member jwtHumanCeremony reads account-A + sees project, identical to user-direct; revoke → gone",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:GROUP | class:HAPPY | priority:P0",
       "item": [
         {
@@ -1077,7 +1077,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1425,13 +1425,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -1501,13 +1501,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -1724,7 +1724,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{userINVId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1805,7 +1805,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK — group membership flip: addMember(userINVId)→jwtInvitee gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
+      "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK — group membership flip: addMember(ceremonyUserId)→jwtHumanCeremony gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV7 | class:GROUP | class:STATE | priority:P0",
       "item": [
         {
@@ -2180,7 +2180,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2353,13 +2353,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -2425,7 +2425,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2593,7 +2593,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{userINVId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2842,7 +2842,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-NONMEMBER-DENY — group grant scoped to members: member jwtInvitee reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
+      "name": "IAM-CH-GRP-NONMEMBER-DENY — group grant scoped to members: member jwtHumanCeremony reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV3 | class:GROUP | class:NEG | priority:P0",
       "item": [
         {
@@ -3042,7 +3042,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3390,13 +3390,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -3684,7 +3684,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{userINVId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3765,7 +3765,7 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-REVOKE-BINDING-OK — revoke group binding: member jwtInvitee has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
+      "name": "IAM-CH-GRP-REVOKE-BINDING-OK — revoke group binding: member jwtHumanCeremony has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV7 | class:GROUP | class:STATE | priority:P0",
       "item": [
         {
@@ -3965,7 +3965,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4313,13 +4313,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4536,7 +4536,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{userINVId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6276,7 +6276,7 @@
       ]
     },
     {
-      "name": "IAM-CH-USER-SA-ISOLATION-DENY — reverse principal isolation: a user-subject grant gives jwtInvitee access (200) but does NOT leak to an SA principal jwtSANoGrant (404)",
+      "name": "IAM-CH-USER-SA-ISOLATION-DENY — reverse principal isolation: a user-subject grant gives jwtHumanCeremony access (200) but does NOT leak to an SA principal jwtSANoGrant (404)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV3 | class:SA | class:NEG | priority:P0",
       "item": [
         {
@@ -6344,7 +6344,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.environment.unset('chUsrIsoDupAcb');",
                   "const arr = (pm.response.json() || {}).accessBindings || [];",
-                  "const want = pm.environment.get('userINVId');",
+                  "const want = pm.environment.get('ceremonyUserId');",
                   "const dup = arr.find(b => b.subjectId === want && b.subjectType === 'user' && b.roleId === 'rol1bda80f2be4d3658e' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                   "if (dup && dup.id) pm.environment.set('chUsrIsoDupAcb', dup.id);",
                   "if (!pm.environment.get('chUsrIsoDupAcb')) { pm.execution.setNextRequest('IAM-CH-USER-SA-ISOLATION-DENY :: grant-user'); }"
@@ -6539,7 +6539,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{ceremonyUserId}}\"}], \"roleId\": \"rol1bda80f2be4d3658e\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6720,13 +6720,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -7022,7 +7022,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{userINVId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"

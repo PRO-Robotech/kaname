@@ -4,35 +4,36 @@
 """RBAC explicit model — subject-channel equivalence black-box suite.
 
 ╔═══════════════════════════════════════════════════════════════════════════════════╗
-║ READ THIS FIRST — SIX OF THESE CASES ARE A COUNTED DEBT, NOT A FLAKE.             ║
+║ THE DEBT THAT STOOD HERE IS CLOSED (2026-08-04) — AND HOW MATTERS.                ║
 ║                                                                                   ║
-║ Measured 2026-08-03 over three stored reports (0 failed / 12 / 12). The two red   ║
-║ runs fail on the BYTE-IDENTICAL twelve assertions in the same six steps, two days ║
-║ apart and on two different seeds. That is not a wandering flake and it is not     ║
-║ eventual consistency:                                                             ║
+║ Six of these cases carried a counted open debt. Measured over three stored        ║
+║ reports (0 failed / 12 / 12): the red runs failed on the BYTE-IDENTICAL twelve    ║
+║ assertions in the same six steps, two days apart, on two different seeds. Not a   ║
+║ wandering flake and not eventual consistency — every failing step read as a       ║
+║ MACHINE principal while the binding under test named a USER row. The relation     ║
+║ named one principal and every request carried another, so it could not resolve    ║
+║ at ANY budget: all six exhausted the full poll cap and ended on the same 404.     ║
 ║                                                                                   ║
-║   every failing step reads as `jwtInvitee`, whose token authenticates as a        ║
-║   SERVICE ACCOUNT, while the binding under test names `user:{{userINVId}}` — an   ║
-║   unrelated user row. The relation names one principal, every request carries     ║
-║   another, so it cannot resolve at ANY budget. All six exhaust the full 300-poll  ║
-║   cap and end on the same 404. No `jwtSAA` step fails: that channel's id↔token    ║
-║   pairing holds, which is the control in the other direction inside one report.   ║
+║ The old note said the pairing COULD NOT be made: under production posture a       ║
+║ machine harness obtains only `client_credentials`, i.e. a service account, while  ║
+║ a user token needs an interactive Kratos→Hydra login. That was true of the        ║
+║ harness AS IT WAS, and it named its own remedy — «its own wave that CREATES the   ║
+║ condition». That wave now exists (`scripts/run-ceremony.sh`, seed                 ║
+║ `tests/authz-fixtures/prodseed_ceremony.py`), so the user channel here reads as   ║
+║ `jwtHumanCeremony`: a bearer obtained by a REAL password login, subject           ║
+║ `user:<id>`. «Здесь его не запустить» was a fact of scheduling, and the schedule  ║
+║ changed.                                                                          ║
 ║                                                                                   ║
-║ WHY IT COULD NOT BE PAIRED. Under production posture a machine harness obtains    ║
-║ only `client_credentials`, i.e. a service account: a user token needs interactive ║
-║ Kratos→Hydra login to carry `acr`, and the one iam issues is scoped to an         ║
-║ internal audience the edge rejects. So the USER-principal channel is not          ║
-║ something this harness can drive at all — «здесь его не запустить» is a fact of   ║
-║ scheduling, and it is recorded as an OPEN DEBT WITH A NUMBER (6 cases,            ║
-║ 12 assertions, ~1806 requests per run) rather than masked, skipped or weakened.   ║
-║ Driving it needs its own wave that CREATES the condition (an interactive login).  ║
+║ THE WRONG FIX, NAMED SO IT IS NOT ATTEMPTED AGAIN: rebinding these cases onto     ║
+║ the seed's `svaInviteeId` would ALSO have turned them green — while deleting the  ║
+║ distinction the suite exists to test (user channel vs SA channel). What was done  ║
+║ instead moves the channel onto a real human, so the distinction is preserved      ║
+║ rather than erased. The SA channel (`jwtSAA` / `svaAId`) is untouched and remains ║
+║ the control in the other direction inside one report.                             ║
 ║                                                                                   ║
-║ The seed no longer discards the invitee principal — it publishes `svaInviteeId`   ║
-║ and asserts its declared id↔token pairings at seed time                           ║
-║ (tests/authz-fixtures/principal_pairings.py), so this shape cannot be introduced  ║
-║ silently again. Rebinding THESE cases onto that id would make them green while    ║
-║ deleting the distinction they exist to test (user channel vs SA channel), so it   ║
-║ is deliberately NOT done here.                                                    ║
+║ Seed-time id↔token pairings are still asserted                                    ║
+║ (tests/authz-fixtures/principal_pairings.py), so a principal whose declared id    ║
+║ and token disagree cannot be introduced silently again.                           ║
 ╚═══════════════════════════════════════════════════════════════════════════════════╝
 
 WHAT THIS PROVES (black-box through api-gateway → IAM → OpenFGA, camelCase REST):
@@ -42,8 +43,8 @@ WHAT THIS PROVES (black-box through api-gateway → IAM → OpenFGA, camelCase R
   `AccessBinding.subjects[]`; the principal carrying the read differs; the effective
   access (account v_get content + project visible-set) MUST be the same:
 
-    user-direct  — subjects=[user:userINVId];          read as jwtInvitee  (the user)
-    group-member — subjects=[group:G], userINVId ∈ G;  read as jwtInvitee  (a member)
+    user-direct  — subjects=[user:ceremonyUserId];          read as jwtHumanCeremony  (the user)
+    group-member — subjects=[group:G], ceremonyUserId ∈ G;  read as jwtHumanCeremony  (a member)
     SA-token     — subjects=[service_account:svaAId];  read as jwtSAA      (the SA)
 
   Plus the channel-SPECIFIC delta cases (meaningful per-channel only):
@@ -75,7 +76,7 @@ TIMING DISCIPLINE (grant→FGA propagation window):
     principal is denied from the start; polling a must-DENY would mask a real leak.
 
 SELF-CONTAINED / RE-RUNNABLE: user-direct and SA bindings reuse a STABLE subject
-(userINVId / svaAId) + the stable ROLE_VIEW + accountAId → the active-grant 5-tuple can
+(ceremonyUserId / svaAId) + the stable ROLE_VIEW + accountAId → the active-grant 5-tuple can
 survive a prior run (DB persists) and trip strict-create (ALREADY_EXISTS); each such case
 PRE-CLEANS any stale active binding before the fresh create (list by ACCOUNT SCOPE →
 filter to the subject → delete → await), and revokes its own binding at the end (which
@@ -87,11 +88,11 @@ latter is a strict self-list by contract (no administrative override), so for th
 admin caller it refused every time and the pre-clean never ran at all.
 
 Fixture deps (crud-fixture/setup.sh + authz-fixtures): jwtAccountAdminA (owner/grant-authority
-on accountAId), accountAId, projectA1Id (an account-A project), userINVId/jwtInvitee
+on accountAId), accountAId, projectA1Id (an account-A project), ceremonyUserId/jwtHumanCeremony
 (non-owner user — granted only when this suite grants), jwtNoBindings (never-granted user,
 negative), svaAId/jwtSAA (service-account principal), svaNoGrantId/jwtSANoGrant (never-granted
 SA principal, negative). AccessBinding subjects are soft-ref; the group member-ref trigger
-requires a REAL user → userINVId is real.
+requires a REAL user → ceremonyUserId is real.
 
 Test-design techniques: decision-table (subject-channel × access-set), state-transition
 (addMember/removeMember/revoke flips done→access), ECP (subject type partitions:
@@ -232,7 +233,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 "const arr = (pm.response.json() || {}).accessBindings || [];",
                 # Имя переменной, а не подстановка: `{{…}}` раскрывается в полях
                 # запроса, но НЕ внутри test-script'а — сравнение с литералом
-                # «{{userINVId}}» не совпало бы никогда.
+                # «{{ceremonyUserId}}» не совпало бы никогда.
                 f"const want = {subject_ref};",
                 f"const dup = arr.find(b => b.subjectId === want && b.subjectType === '{subject_type}' && b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account' && b.scopeId === pm.environment.get('accountAId'));",
                 f"if (dup && dup.id) pm.environment.set('{dup_var}', dup.id);",
@@ -571,50 +572,50 @@ def member_op(name, verb, group_var, member_id_tmpl, op_var):
     ]
 
 
-USER_INV = [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}]
+USER_INV = [{"type": "SUBJECT_TYPE_USER", "id": "{{ceremonyUserId}}"}]
 SA_A = [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": "{{svaAId}}"}]
 
 
 # ===========================================================================
-# CHANNEL 1 — user-direct (baseline). subjects=[user:userINVId]; read as jwtInvitee.
+# CHANNEL 1 — user-direct (baseline). subjects=[user:ceremonyUserId]; read as jwtHumanCeremony.
 # Ends by revoking + confirming access gone (clean slate for the group cases that also
-# read as jwtInvitee; access-gone coverage).
+# read as jwtHumanCeremony; access-gone coverage).
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-USER-EQUIV-OK",
-    title="user-direct: ROLE_VIEW@ACCOUNT bound to user:userINVId → jwtInvitee reads account-A (v_get) + sees project (visible-set); revoke → access gone",
+    title="user-direct: ROLE_VIEW@ACCOUNT bound to user:ceremonyUserId → jwtHumanCeremony reads account-A (v_get) + sees project (visible-set); revoke → access gone",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "HAPPY"],
     priority="P0",
     steps=[
         # verifies (user-direct baseline)
-        *pre_clean("chUser", "user", "{{userINVId}}", "grant-user"),
+        *pre_clean("chUser", "user", "{{ceremonyUserId}}", "grant-user"),
         grant_view("grant-user", USER_INV, "chUserAcb", "chUserOp"),
         poll_op("chUserOp", allow_already_exists=True),
-        read_account_appears("read-acct-user", "jwtInvitee", "user-direct"),
-        read_projects_visible("read-prj-user", "jwtInvitee", "user-direct"),
-        *revoke_then_gone("teardown-user", "chUserAcb", "user:{{userINVId}}", "user-direct", "chUserRevOp", grant_op_var="chUserOp"),
+        read_account_appears("read-acct-user", "jwtHumanCeremony", "user-direct"),
+        read_projects_visible("read-prj-user", "jwtHumanCeremony", "user-direct"),
+        *revoke_then_gone("teardown-user", "chUserAcb", "user:{{ceremonyUserId}}", "user-direct", "chUserRevOp", grant_op_var="chUserOp"),
     ],
 ))
 
 
 # ===========================================================================
-# CHANNEL 2 — group-member. subjects=[group:G], userINVId ∈ G; read as jwtInvitee.
+# CHANNEL 2 — group-member. subjects=[group:G], ceremonyUserId ∈ G; read as jwtHumanCeremony.
 # The member's access-set must be IDENTICAL to the user-direct baseline.
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-EQUIV-OK",
-    title="group-member: ROLE_VIEW@ACCOUNT bound to group:G (userINVId∈G) → member jwtInvitee reads account-A + sees project, identical to user-direct; revoke → gone",
+    title="group-member: ROLE_VIEW@ACCOUNT bound to group:G (ceremonyUserId∈G) → member jwtHumanCeremony reads account-A + sees project, identical to user-direct; revoke → gone",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "GROUP", "HAPPY"],
     priority="P0",
     steps=[
         # verifies (group-member channel ≡ user-direct via group#member userset)
         *create_group("create-group", "chgrp-equiv-{{runId}}", "chgEquivGrp", "chgEquivGrpOp"),
-        *member_op("add-member", "addMember", "chgEquivGrp", "{{userINVId}}", "chgEquivAddOp"),
+        *member_op("add-member", "addMember", "chgEquivGrp", "{{ceremonyUserId}}", "chgEquivAddOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgEquivGrp}}"}], "chgEquivAcb", "chgEquivBindOp"),
         poll_op("chgEquivBindOp"),
-        read_account_appears("read-acct-grp", "jwtInvitee", "group-member"),
-        read_projects_visible("read-prj-grp", "jwtInvitee", "group-member"),
-        *revoke_then_gone("teardown-grp", "chgEquivAcb", "user:{{userINVId}}", "group-member", "chgEquivRevOp"),
+        read_account_appears("read-acct-grp", "jwtHumanCeremony", "group-member"),
+        read_projects_visible("read-prj-grp", "jwtHumanCeremony", "group-member"),
+        *revoke_then_gone("teardown-grp", "chgEquivAcb", "user:{{ceremonyUserId}}", "group-member", "chgEquivRevOp"),
     ],
 ))
 
@@ -622,11 +623,11 @@ CASES.append(Case(
 # ===========================================================================
 # CHANNEL 2 delta — membership FLIP: addMember grants access, removeMember removes it.
 # Self-contained: bind the group first, add the member (access appears), then remove the
-# member (access gone). Reads as jwtInvitee.
+# member (access gone). Reads as jwtHumanCeremony.
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-MEMBERSHIP-FLIP-OK",
-    title="group membership flip: addMember(userINVId)→jwtInvitee gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
+    title="group membership flip: addMember(ceremonyUserId)→jwtHumanCeremony gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "INV7", "GROUP", "STATE"],
     priority="P0",
     steps=[
@@ -638,12 +639,12 @@ CASES.append(Case(
         *create_group("create-group", "chgrp-flip-{{runId}}", "chgFlipGrp", "chgFlipGrpOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgFlipGrp}}"}], "chgFlipAcb", "chgFlipBindOp"),
         poll_op("chgFlipBindOp"),
-        *member_op("add-member", "addMember", "chgFlipGrp", "{{userINVId}}", "chgFlipAddOp"),
-        read_account_appears("read-after-add", "jwtInvitee", "group add-member"),
-        *member_op("remove-member", "removeMember", "chgFlipGrp", "{{userINVId}}", "chgFlipRmOp"),
+        *member_op("add-member", "addMember", "chgFlipGrp", "{{ceremonyUserId}}", "chgFlipAddOp"),
+        read_account_appears("read-after-add", "jwtHumanCeremony", "group add-member"),
+        *member_op("remove-member", "removeMember", "chgFlipGrp", "{{ceremonyUserId}}", "chgFlipRmOp"),
         # removeMember co-commits the member-tuple removal in its writer-tx (awaited above), so
         # the member's `v_get` resolution via group:G#member is gone — probe the FGA decision.
-        check_until_deny("flip-gone", "user:{{userINVId}}", "v_get", "account:{{accountAId}}",
+        check_until_deny("flip-gone", "user:{{ceremonyUserId}}", "v_get", "account:{{accountAId}}",
                          "group remove-member: access removed"),
         *teardown("teardown-flip", "chgFlipAcb"),
     ],
@@ -651,25 +652,25 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# CHANNEL 2 delta — group grant does NOT leak to a NON-member. A member (jwtInvitee) gains
+# CHANNEL 2 delta — group grant does NOT leak to a NON-member. A member (jwtHumanCeremony) gains
 # access (proves the grant is live); a never-member (jwtNoBindings) is denied (single-shot).
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-NONMEMBER-DENY",
-    title="group grant scoped to members: member jwtInvitee reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
+    title="group grant scoped to members: member jwtHumanCeremony reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "INV3", "GROUP", "NEG"],
     priority="P0",
     steps=[
         # verifies (group userset confers access only on members)
         *create_group("create-group", "chgrp-nonmem-{{runId}}", "chgNmGrp", "chgNmGrpOp"),
-        *member_op("add-member", "addMember", "chgNmGrp", "{{userINVId}}", "chgNmAddOp"),
+        *member_op("add-member", "addMember", "chgNmGrp", "{{ceremonyUserId}}", "chgNmAddOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgNmGrp}}"}], "chgNmAcb", "chgNmBindOp"),
         poll_op("chgNmBindOp"),
         # member gains access (poll — proves the group grant materialized).
-        read_account_appears("member-reads", "jwtInvitee", "group member"),
+        read_account_appears("member-reads", "jwtHumanCeremony", "group member"),
         # non-member is denied — single-shot (steady-state, never granted; polling would mask a leak).
         deny_account_singleshot("nonmember-denied", "jwtPureNoBindings", "group non-member"),
-        *revoke_then_gone("teardown-nonmem", "chgNmAcb", "user:{{userINVId}}", "group-nonmember-case", "chgNmRevOp"),
+        *revoke_then_gone("teardown-nonmem", "chgNmAcb", "user:{{ceremonyUserId}}", "group-nonmember-case", "chgNmRevOp"),
     ],
 ))
 
@@ -680,17 +681,17 @@ CASES.append(Case(
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-REVOKE-BINDING-OK",
-    title="revoke group binding: member jwtInvitee has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
+    title="revoke group binding: member jwtHumanCeremony has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV7", "GROUP", "STATE"],
     priority="P0",
     steps=[
         # verifies (revoke binding removes materialized tuples for all members)
         *create_group("create-group", "chgrp-revoke-{{runId}}", "chgRvGrp", "chgRvGrpOp"),
-        *member_op("add-member", "addMember", "chgRvGrp", "{{userINVId}}", "chgRvAddOp"),
+        *member_op("add-member", "addMember", "chgRvGrp", "{{ceremonyUserId}}", "chgRvAddOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgRvGrp}}"}], "chgRvAcb", "chgRvBindOp"),
         poll_op("chgRvBindOp"),
-        read_account_appears("member-reads", "jwtInvitee", "group member (pre-revoke)"),
-        *revoke_then_gone("revoke-binding", "chgRvAcb", "user:{{userINVId}}", "group binding revoked", "chgRvRevOp"),
+        read_account_appears("member-reads", "jwtHumanCeremony", "group member (pre-revoke)"),
+        *revoke_then_gone("revoke-binding", "chgRvAcb", "user:{{ceremonyUserId}}", "group binding revoked", "chgRvRevOp"),
     ],
 ))
 
@@ -743,21 +744,21 @@ CASES.append(Case(
 
 # ===========================================================================
 # CHANNEL delta — reverse principal isolation: a USER-direct grant does NOT leak to an SA
-# principal. Bind ROLE_VIEW@account to user:userINVId; the user (jwtInvitee) gains access;
+# principal. Bind ROLE_VIEW@account to user:ceremonyUserId; the user (jwtHumanCeremony) gains access;
 # a never-granted SA principal (jwtSANoGrant) is denied (single-shot).
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-USER-SA-ISOLATION-DENY",
-    title="reverse principal isolation: a user-subject grant gives jwtInvitee access (200) but does NOT leak to an SA principal jwtSANoGrant (404)",
+    title="reverse principal isolation: a user-subject grant gives jwtHumanCeremony access (200) but does NOT leak to an SA principal jwtSANoGrant (404)",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "INV3", "SA", "NEG"],
     priority="P0",
     steps=[
         # verifies (grant materializes for the user principal only, not an SA)
-        *pre_clean("chUsrIso", "user", "{{userINVId}}", "grant-user"),
+        *pre_clean("chUsrIso", "user", "{{ceremonyUserId}}", "grant-user"),
         grant_view("grant-user", USER_INV, "chUsrIsoAcb", "chUsrIsoOp"),
         poll_op("chUsrIsoOp", allow_already_exists=True),
-        read_account_appears("user-reads", "jwtInvitee", "user principal"),
+        read_account_appears("user-reads", "jwtHumanCeremony", "user principal"),
         deny_account_singleshot("sa-not-inherits", "jwtSANoGrant", "SA does not inherit user grant"),
-        *revoke_then_gone("teardown-usr-iso", "chUsrIsoAcb", "user:{{userINVId}}", "reverse-isolation-case", "chUsrIsoRevOp", grant_op_var="chUsrIsoOp"),
+        *revoke_then_gone("teardown-usr-iso", "chUsrIsoAcb", "user:{{ceremonyUserId}}", "reverse-isolation-case", "chUsrIsoRevOp", grant_op_var="chUsrIsoOp"),
     ],
 ))

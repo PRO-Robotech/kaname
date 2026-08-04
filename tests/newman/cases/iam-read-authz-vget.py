@@ -25,7 +25,7 @@ owner-only software-gate (authzguard.IsSelf). До фикса use-case пере�
 Happy (IAM-RDAUTHZ-ACC-GT-GRANTED-NONOWNER-OK):
   accountAdminA выдает invitee роль ROLE_VIEW (`*.* read/list/get` → v_get) на
   account:accountAId. invitee — НЕ owner accountA. После grant→FGA propagation
-  GET /iam/v1/accounts/{accountAId} как jwtInvitee → 200 (был 404).
+  GET /iam/v1/accounts/{accountAId} как jwtHumanCeremony → 200 (был 404).
 
 Negative (IAM-RDAUTHZ-ACC-GT-NONGRANTED-DENY):
   jwtPureNoBindings (никакого v_get на accountA) GET accountA → 404 NOT_FOUND (code 5,
@@ -39,7 +39,7 @@ No-leak (IAM-RDAUTHZ-ACC-GT-NONEXISTENT-EQ-DENIED):
 Fixture (crud-fixture/setup.sh):
   jwtAccountAdminA — owner+grant-authority на accountAId.
   accountAId       — scope гранта (ACCOUNT tier), owned by accountAdminA.
-  jwtInvitee / userINVId — НЕ-owner subject, которому выдается v_get.
+  jwtHumanCeremony / ceremonyUserId — НЕ-owner subject, которому выдается v_get.
   jwtPureNoBindings — выделенный НИКОГДА-не-гранченый subject (negative). jwtNoBindings
                      им не является: сюиты грантят userNOBId view на оба аккаунта.
 
@@ -78,7 +78,7 @@ CASES.append(Case(
     classes=["AUTHZ", "CRUD"],
     priority="P0",
     steps=[
-        # Pre-clean любой прежний active (userINVId, ROLE_VIEW, account/accountAId)
+        # Pre-clean любой прежний active (ceremonyUserId, ROLE_VIEW, account/accountAId)
         # binding, чтобы strict-create всегда поднял свежий (DB persists между прогонами).
         Step(
             name="pre-clean-list",
@@ -106,7 +106,7 @@ CASES.append(Case(
                 *assert_status(200),
                 "pm.environment.unset('rdAuthzDupAcbId');",
                 "const arr = (pm.response.json() || {}).accessBindings || [];",
-                f"const dup = arr.find(b => b.subjectId === pm.environment.get('userINVId')",
+                f"const dup = arr.find(b => b.subjectId === pm.environment.get('ceremonyUserId')",
                 f"       && b.roleId === '{ROLE_VIEW}' && b.scopeType === 'iam.account'",
                 "       && b.scopeId === pm.environment.get('accountAId'));",
                 "if (dup && dup.id) pm.environment.set('rdAuthzDupAcbId', dup.id);",
@@ -169,7 +169,7 @@ CASES.append(Case(
                 # the edge refuses an enum value outside the dictionary, and this is a
                 # PRECONDITION step — a 400 here would fail the case for a reason that
                 # has nothing to do with what it asserts.
-                "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}],
+                "subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{ceremonyUserId}}"}],
                 "roleId": ROLE_VIEW,
                 "scopeType": "iam.account",
                 "scopeId": "{{accountAId}}",
@@ -212,14 +212,14 @@ CASES.append(Case(
             name="get-account-as-granted-invitee",
             method="GET",
             path="/iam/v1/accounts/{{accountAId}}",
-            auth="jwtInvitee",
+            auth="jwtHumanCeremony",
             expect_code=200,
             retry_on=(403, 404),
             test_script=[
                 "const j = pm.response.json();",
                 "pm.test('GRANTED-NONOWNER: GET account 200 (was 404 owner-only gate)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                 "pm.test('account id matches scope', () => pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('accountAId')));",
-                "pm.test('owner is NOT the granted invitee (true non-owner read)', () => pm.expect(j.ownerUserId).to.not.eql(pm.environment.get('userINVId')));",
+                "pm.test('owner is NOT the granted invitee (true non-owner read)', () => pm.expect(j.ownerUserId).to.not.eql(pm.environment.get('ceremonyUserId')));",
             ],
         ),
         *_revoke_teardown("teardown-grant", "rdAuthzAcbId"),
