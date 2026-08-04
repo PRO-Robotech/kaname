@@ -389,10 +389,42 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 // established that nothing materialized on the object can have gone stale (see Register).
 // nil-safe; a reconcile error is non-fatal (logged when a logger is wired, and counted
 // when a recorder is wired) — the async full ReconcileObject backstop re-converges.
+// Бюджет пост-коммитного прохода. Отвязка снимает ОТМЕНУ вызывающего, но не время:
+// повисший на блокировке проход иначе держал бы горутину всю жизнь процесса
+// (architecture.md — per-call deadline на каждом внешнем вызове). Щедро относительно
+// здорового прохода (миллисекунды — низкие секунды) и конечно; исчерпание бюджета —
+// не потеря данных, дренаж и реконсайлер сходятся к тому же состоянию.
+const postCommitForwardBudget = 30 * time.Second
+
 func (uc *RegisterResourceUseCase) syncReconcile(ctx context.Context, objType, objID string, noStale bool) {
 	if uc.objRecon == nil {
 		return
 	}
+
+	// ПОЧЕМУ КОНТЕКСТ ОТВЯЗЫВАЕТСЯ ОТ ОТМЕНЫ ВЫЗЫВАЮЩЕГО.
+	//
+	// Этот проход исполняется ПОСЛЕ коммита writer-tx, и вызывающему он уже не нужен:
+	// его ответ не зависит от исхода (отказ здесь нефатален by design — VBC-15).
+	// Но контекст запроса несёт per-call deadline кросс-сервисного регистратора
+	// (services/<svc>/internal/clients/iam_sync_registrar.go, 5 с), и его истечение
+	// отменяло не ответ, а САМУ МАТЕРИАЛИЗАЦИЮ: под конкуренцией замер дал 121 отказ
+	// с `context canceled`, и невидимыми оставались ровно отменённые объекты —
+	// создатель не видел свой свежий ресурс до асинхронного дренажа (p95 окна 82.6 с
+	// при клиентском бюджете чтения-своих-записей 12.5 с).
+	//
+	// Отвязка законна ровно потому же, почему законна отвязка в shared/postcommit.go:
+	// проход — УСКОРИТЕЛЬ, а не источник истины. Всё, что он материализует, уже
+	// закоммичено в writer-tx выше (owner-tuple, строка зеркала, событие реконсайла),
+	// поэтому пропущенный, упавший или убитый проход сходится через дренаж и
+	// реконсайлер. Отвязка меняет, КОГДА работа наблюдается, а не ВЫПОЛНЯЕТСЯ ли она.
+	//
+	// Это НЕ барьер на видимость (ban #9): `Operation.done` у вызывающего по-прежнему
+	// не ждёт материализации, а Register остаётся нефатальным к отказу прохода.
+	//
+	// Значения контекста (trace / request-id / slog-handler) сохраняются — иначе проход
+	// потерял бы наблюдаемость ровно там, где она и нужна для разбора.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), postCommitForwardBudget)
+	defer cancel()
 	step := stepForwardGuarded
 	var err error
 	if noStale {
