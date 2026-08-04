@@ -10,32 +10,31 @@ label-selector materializes v_list/v_get only on matching objects.
 RESOURCE COVERAGE — under the unified label-scope model every iam content type is
 label-selectable. A custom role rule with `matchLabels` on an iam content type materializes
 per-object v_list/v_get on matching objects; the type's scope-filtered List then returns the
-matched set. Coverage here is PER-TYPE-SELECTED because the per-type Get authz still differs
-(role Get viewer-gates same-account → the v_list-only invariant is inapplicable to roles);
-the List authz is UNIFORM — all five account-scoped IAM List RPCs are `<exempt>`:
+matched set. Coverage here is PER-TYPE-SELECTED because the per-type PAGE PREDICATE differs
+(role's page predicate is `{viewer, v_list}`, everyone else's is the read relation `v_get`);
+the List CALL authz is UNIFORM — all five account-scoped IAM List RPCs are `<exempt>`:
 
-  - **project** (first two cases) and **serviceAccount**: exact-set AND v_list-only
-    both hold (List per-object-filters; Get gates on v_get).
-  - **role**: List per-object-filters → the exact-set holds; but RoleService.Get viewer-gates
-    (role/get.go) — a FOREIGN-account role 404s, but a SAME-account role is readable to any
-    account member via the viewer tier, and the v_list-only subject holds account access (the
-    binding), so it reads the same-account role → 200. The v_list-only → detail-404 invariant
-    is thus INAPPLICABLE to same-account roles — only the exact-set case is emitted.
-  - **group**: GroupService.List applies the per-object viewer∪v_list filter on iam_group AND
-    GroupService.Get gates on v_get → BOTH the exact-set AND v_list-only invariants hold (parity
-    with project/SA). GroupService.List is `<exempt>` — no account#v_list anchor needed; the
-    by-label grant narrows to exactly the matched set.
+  - **project** / **serviceAccount** / **group**: предикат страницы `v_get` — тот же,
+    чем гейтится одиночный Get. Осмысленны ОБА кейса: точный набор по метке и равенство
+    «в странице ⟺ читается по id».
+  - **role**: ЕДИНСТВЕННОЕ исключение — предикат страницы `{viewer, v_list}`, потому что
+    у чтения роли нет отношения в каталоге, а `RoleService.Get` пускает любого члена
+    аккаунта по ярусу viewer (чужой аккаунт по-прежнему 404). Равенство «страница ⟺
+    чтение» для роли неверно BY CONSTRUCTION, поэтому выпускается только точный набор.
 
 Remaining (a later chunk): **user** (global scope; a labelled user is produced via invite +
 Update) and **accessBinding** (bespoke listByScope, no flat List).
 
 LIST-CALL AUTHZ (unified): ALL five account-scoped IAM List RPCs (Project / Group /
 ServiceAccount / Role / User) are `<exempt>` — the gateway performs NO FGA pre-Check on the
-List call. The sole authz gate is the in-handler `viewer ∪ v_list` scope filter, so a
-per-object by-label `v_list` grant alone returns 200+filtered (never 403). The former
-`{iam.account list}` anchor rule (which emitted `account#v_list` to authorize the Project/Group
-List CALL) is therefore NO LONGER NEEDED and has been removed — the by-object listauthz filter
-narrows to the matched set on its own (for the types whose List filters).
+List call. Единственный гейт — пообъектный фильтр страницы в хендлере, поэтому выдача по
+метке даёт 200+отфильтровано (никогда 403). Прежнее якорное правило `{iam.account list}`
+(эмитировало `account#v_list`, чтобы авторизовать САМ ВЫЗОВ Project/Group List) больше не
+нужно и снято. ПРЕДИКАТ ЭТОГО ФИЛЬТРА — НЕ союз `viewer ∪ v_list`, а отношение чтения типа
+(`services/iam/internal/authzfilter/visibility.go` → `pageRelations`): `v_get` для
+account/project/iam_user/iam_group/iam_service_account/iam_access_binding и `{viewer,
+v_list}` для iam_role. Союз был убран решением
+`docs/architecture/list-page-membership-equals-read-relation.md`.
 
 WHAT THIS PROVES (black-box through api-gateway → IAM → OpenFGA, camelCase REST):
 
@@ -47,12 +46,24 @@ WHAT THIS PROVES (black-box through api-gateway → IAM → OpenFGA, camelCase R
     set visible. Per-run unique label value (`foo=<runId>`) makes the matched set exactly
     THIS run's M+ (immune to projects accumulated by prior runs / other suites).
 
-  v_list-only → content closed — IAM-SET-PRJ-VLIST-ONLY-DETAIL-404.
-    A `verbs:[list]`-only by-label grant materializes v_list (the project APPEARS in the
-    List) but NOT v_get → the single-resource detail Get is closed: 404 NOT_FOUND
-    (hide-existence). v_list ≠ v_get (the explicit-model decoupling): a list-only
-    grant must never open content. A 200 here would be a violation (content visible
-    without v_get).
+  Членство в странице равно чтению — IAM-SET-PRJ-LIST-READ-PARITY.
+    Выдача `verbs:[list]` БЕЗ `get` материализует `v_list` и ярусный кортеж, но НЕ
+    `v_get`. Предикат страницы `project`/`group`/`serviceAccount` — именно `v_get`
+    (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`), тот же, чем
+    гейтится одиночный Get. Значит такая выдача НЕ показывает объект в списке И не
+    открывает его по id: строка попадает в страницу тогда и только тогда, когда
+    вызывающий вправе прочитать её одиночным Get. Решение и его принятые следствия —
+    `docs/architecture/list-page-membership-equals-read-relation.md` (статус: принято,
+    гейт `internal/repohygiene/listreadrelationparity_test.go`).
+
+    ЗДЕСЬ БЫЛ ОБРАТНЫЙ ИНВАРИАНТ, И ОН СНЯТ. Прежняя редакция требовала «объект ВИДЕН
+    в списке, но Get 404». Он опирался на союз `viewer ∪ v_list` в предикате страницы;
+    союз убран, потому что `List` возвращает ТО ЖЕ сообщение ресурса, что и `Get`, —
+    «видеть в списке без содержимого» на такой выдаче нереализуемо, членство в
+    странице и есть содержимое. Кейс перенацелен на действующий контракт и проверяет
+    ОБЕ стороны равенства (отрицательное плечо + парный положительный контроль),
+    поэтому он по-прежнему способен упасть — и упадёт, если предикат страницы снова
+    разойдётся с отношением чтения в любую из двух сторон.
 
 CLEAN-SLATE PRE-CLEAN — both cases read as jwtInvitee. jwtInvitee can carry a residual
 account-A binding (a prior suite's best-effort, async-revoked teardown). A residual
@@ -354,8 +365,8 @@ def mk_project(short, label_key, id_var, op_var, acct_var="accountAId", auth="jw
 
 
 def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, acct_var="accountAId",
-                       auth="jwtAccountAdminA", auth_stepup=None):
-    """RoleService.Create(rule {iam.project verbs matchLabels:{foo:runId}}) + AccessBinding
+                       auth="jwtAccountAdminA", auth_stepup=None, match_key="foo"):
+    """RoleService.Create(rule {iam.project verbs matchLabels:{<match_key>:runId}}) + AccessBinding
     bound to service_account:svaInviteeId @ ACCOUNT:<acct_var>. Fresh role id per run → unique active 5-tuple
     → no strict-create dup → no pre-clean of THIS binding needed. acct_var selects the account
     the role lives in AND the binding scope (default shared accountAId; the exact-set case passes
@@ -378,12 +389,15 @@ def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, ac
                 "name": role_name + "_{{runId}}",
                 "description": "newman exact-set by-label role",
                 "rules": [
-                    # ProjectService.List = <exempt>: the gateway no
-                    # longer pre-Checks account:<id>#v_list — the in-handler viewer∪v_list filter
-                    # is the SOLE gate. No account-anchor rule needed: a per-object by-label
-                    # v_list grant alone now lists 200+filtered (was 403 under the old call-gate).
+                    # ProjectService.List = <exempt>: шлюз больше не делает pre-Check
+                    # `account:<id>#v_list` — единственный гейт это пообъектный фильтр
+                    # страницы в хендлере. Отдельное якорное правило не нужно.
+                    # Предикат страницы `project` — `v_get`
+                    # (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`),
+                    # то есть то же отношение, которым гейтится одиночный Get; решение —
+                    # `docs/architecture/list-page-membership-equals-read-relation.md`.
                     {"module": "iam", "resources": ["project"], "verbs": verbs,
-                     "matchLabels": {"foo": "{{runId}}"}},
+                     "matchLabels": {match_key: "{{runId}}"}},
                 ],
             },
             auth=auth,
@@ -583,50 +597,82 @@ CASES.append(Case(
 # v_list-only grant: project appears in the List but the detail Get is closed (404).
 # ===========================================================================
 CASES.append(Case(
-    id="IAM-SET-PRJ-VLIST-ONLY-DETAIL-404",
-    title="v_list-only: by-label grant {iam.project list ONLY matchLabels foo} → project visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+    id="IAM-SET-PRJ-LIST-READ-PARITY",
+    title="членство в странице равно чтению (project): грант {iam.project list БЕЗ get} → проекта НЕТ в списке И его Get 404; парный контроль {get,list} на другом ключе метки → в списке И Get 200",
     classes=["RBAC", "AUTHZ", "VISIBILITY", "INV1", "LABELS", "NEG"],
     priority="P0",
     steps=[
-        # verifies (v_list-only → content closed)
+        # verifies (docs/architecture/list-page-membership-equals-read-relation.md)
+        #
+        # Кейс ПЕРЕНАЦЕЛЕН, а не ослаблен. Он требовал снятого инварианта — «объект с
+        # выдачей на один лишь `list` виден в списке, но его Get 404». Предикат страницы
+        # `project` — `v_get` (`services/iam/internal/authzfilter/visibility.go`,
+        # `pageRelations`), то есть ровно то отношение, которым гейтится одиночный Get;
+        # принятое следствие «роль с одним лишь `list` больше не показывает объект»
+        # записано в решении. Разбор — в докстроке `list_read_parity_case_steps`.
         *mk_project("setvl", "foo", "visVlProj", "visVlProjOp"),
+        *mk_project("setvc", "ctl", "visVcProj", "visVcProjOp"),
         *preclean_account_loop("visVl", "create-role"),
-        # Grant LIST-ONLY (no 'get') → materializes v_list, NOT v_get.
+        # отрицательное плечо — только `list`
         *grant_bylabel_role("visVlRole", "visVlAcb", "visVlRoleOp", "visVlBindOp",
                             ["list"], "setvllistonly"),
-        # The project IS visible in the List (v_list materialized) — poll until it converges.
+        # положительный контроль — `get`+`list` на ДРУГОМ ключе метки (`ctl`), поэтому
+        # селекторы плеч не пересекаются. Без него «нет в списке» неотличимо от
+        # «фикстура не поднялась / выдача уехала не тому субъекту».
+        *grant_bylabel_role("visVcRole", "visVcAcb", "visVcRoleOp", "visVcBindOp",
+                            ["get", "list"], "setvcctl", match_key="ctl"),
         poll_request_until_status(
-            name="read-list-visible",
+            name="read-list-parity",
             method="GET",
             path="/iam/v1/projects?accountId={{accountAId}}&pageSize=1000",
             auth="jwtInvitee",
             expect_code=200,
             retry_on=(403, 404),
-            retry_predicate="(() => { try { const ids = (pm.response.json().projects || []).map(p => p.id); return ids.indexOf(pm.environment.get('visVlProj')) === -1; } catch (e) { return true; } })()",
+            # Ждём схождения КОНТРОЛЯ: пока он не виден, про отрицательное плечо
+            # утверждать нечего.
+            retry_predicate="(() => { try { const ids = (pm.response.json().projects || []).map(p => p.id); return ids.indexOf(pm.environment.get('visVcProj')) === -1; } catch (e) { return true; } })()",
             test_script=[
                 "const j = pm.response.json();",
-                "pm.test('v_list-only project IS visible in the List (v_list materialized)', () => {",
-                "  const ids = (j.projects || []).map(p => p.id);",
-                "  pm.expect(ids.indexOf(pm.environment.get('visVlProj')) !== -1, 'visible ids: ' + JSON.stringify(ids)).to.be.true;",
-                "});",
+                "const ids = (j.projects || []).map(p => p.id);",
+                "pm.test('ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — проект с грантом {get,list} ВИДЕН в списке "
+                "(страница не уже чтения; без этого отрицание ниже ничего не доказывает)', () => "
+                "pm.expect(ids.indexOf(pm.environment.get('visVcProj')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true);",
+                "pm.test('проект с грантом {list} БЕЗ {get} НЕ виден в списке "
+                "(членство в странице равно отношению чтения — docs/architecture/"
+                "list-page-membership-equals-read-relation.md)', () => "
+                "pm.expect(ids.indexOf(pm.environment.get('visVlProj')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.false);",
             ],
         ),
-        # The detail Get is CLOSED — single-shot (steady-state: v_get was never granted; a
-        # 200 here is a violation — content visible without v_get; polling would mask it).
+        # Одиночный кадр (установившееся состояние): `v_get` не выдавался никогда, а
+        # поллинг обязательного отказа маскировал бы настоящую утечку.
         Step(
-            name="detail-get-closed",
+            name="detail-get-listonly-closed",
             method="GET",
             path="/iam/v1/projects/{{visVlProj}}",
             auth="jwtInvitee",
             test_script=[
-                "pm.test('detail Get on a v_list-only project → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                "pm.test('Get проекта с грантом {list} без {get} → 404 (содержимое закрыто, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                 "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));",
+                "pm.test('grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));",
+            ],
+        ),
+        Step(
+            name="detail-get-control-open",
+            method="GET",
+            path="/iam/v1/projects/{{visVcProj}}",
+            auth="jwtInvitee",
+            test_script=[
+                "pm.test('ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — Get проекта с грантом {get,list} → 200 "
+                "(404 здесь означал бы, что 404 выше про сломанную фикстуру, а не про предикат)', "
+                "() => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
             ],
         ),
         robust_revoke_binding("teardown-binding", "visVlAcb"),
+        robust_revoke_binding("teardown-binding-ctl", "visVcAcb"),
         *teardown("teardown-role", "/iam/v1/roles/{{visVlRole}}"),
+        *teardown("teardown-role-ctl", "/iam/v1/roles/{{visVcRole}}"),
         *teardown("teardown-proj", "/iam/v1/projects/{{visVlProj}}"),
+        *teardown("teardown-proj-ctl", "/iam/v1/projects/{{visVcProj}}"),
     ],
 ))
 
@@ -667,7 +713,9 @@ TYPE_SPECS = {
 
 def mk_obj(spec, short, label_key, id_var, op_var):
     """Create one account-scoped object of the given type (+ op-poll capturing its id).
-    label_key None → no labels (M−); 'foo'/'baz' → labels={key:<runId>} (per-run unique)."""
+    label_key None → no labels (M−); any key → labels={key:<runId>} (per-run unique
+    value). Distinct KEYS keep a negative arm and its positive control disjoint: a
+    selector on `foo` cannot match an object labelled only `ctl`, and vice versa."""
     body = {"accountId": "{{accountAId}}", "name": short + spec["sep"] + "{{runId}}",
             "description": "newman exact-set obj"}
     if spec["extra"]:
@@ -684,27 +732,53 @@ def mk_obj(spec, short, label_key, id_var, op_var):
     ]
 
 
-def grant_bylabel_generic(spec, role_var, acb_var, role_op, bind_op, verbs, role_name):
-    """RoleService.Create(rule {iam.<type> verbs matchLabels:{foo:runId}}) + AccessBinding
-    bound to user:userINVId @ ACCOUNT:accountAId. Fresh role id per run → unique active
-    5-tuple → no strict-create dup → no pre-clean of THIS binding needed."""
+def grant_bylabel_generic(spec, role_var, acb_var, role_op, bind_op, verbs, role_name,
+                          match_key="foo"):
+    """RoleService.Create(rule {iam.<type> verbs matchLabels:{<match_key>:runId}}) +
+    AccessBinding bound to service_account:svaInviteeId @ ACCOUNT:accountAId. Fresh role
+    id per run → unique active 5-tuple → no strict-create dup → no pre-clean of THIS
+    binding needed.
+
+    СУБЪЕКТ ВЫДАЧИ ОБЯЗАН БЫТЬ ТЕМ, ЧЕМ АУТЕНТИФИЦИРУЕТСЯ ЧИТАТЕЛЬ — ровно то же
+    требование, что несёт `grant_bylabel_role` выше, и здесь оно было НЕ выполнено.
+    Набор читает `jwtInvitee`, а это предъявитель СЛУЖЕБНОЙ УЧЁТКИ (`svaInviteeId`);
+    выдача же называла субъектом `userINVId` — ряд пользователя, объявленный в
+    `tests/authz-fixtures/principal_pairings.py` как ТОЛЬКО цель привязки: ни один
+    выдаваемый предъявитель им не аутентифицируется и не может. Отношение называло
+    одного принципала, каждый запрос нёс другого — не резолвится ни при каком бюджете,
+    а изнутри кейса это неотличимо от незаехавшей материализации, то есть отказ
+    сообщал не о том месте.
+
+    РАЗДЕЛЕНО ЗАМЕРОМ, а не рассуждением (стенд, 2026-08-04): три клетки, в каждой
+    изменён ровно один признак; тип — group, читатель — `jwtInvitee`:
+      общий аккаунт  + user:userINVId             → не виден за 40 с (контроль);
+      общий аккаунт  + service_account:svaInvitee → виден за 0.0 с;
+      приватный аккаунт + user:userINVId          → не виден за 40 с.
+    В первой паре аккаунт держался постоянным, во второй — субъект. Значит причина в
+    СУБЪЕКТЕ выдачи, а не в остатке чужих данных общего аккаунта и не в типе ресурса
+    (те же клетки на serviceAccount и role сходятся за 0.0-0.1 с)."""
     return [
         Step(name="create-role", method="POST", path="/iam/v1/roles",
              body={"accountId": "{{accountAId}}", "name": role_name + "_{{runId}}",
                    "description": "newman exact-set by-label selector role",
                    # serviceAccount/role List have always been <exempt>; group/project List are
-                   # now <exempt> too — no account#v_list anchor
-                   # needed. The per-object by-label rule is the only grant; each type's
-                   # in-handler viewer∪v_list filter narrows the List to the matched set.
+                   # now <exempt> too — no account#v_list anchor needed. The per-object by-label
+                   # rule is the only grant; each type's in-handler page filter narrows the List
+                   # to the matched set. Предикат страницы — ОТНОШЕНИЕ ЧТЕНИЯ типа
+                   # (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`),
+                   # а не союз `viewer ∪ v_list`: см. решение
+                   # `docs/architecture/list-page-membership-equals-read-relation.md`.
                    "rules": [{"module": "iam", "resources": [spec["rule_res"]],
-                              "verbs": verbs, "matchLabels": {"foo": "{{runId}}"}}]},
+                              "verbs": verbs,
+                              "matchLabels": {match_key: "{{runId}}"}}]},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),
                           *save_from_response("j.metadata && j.metadata.roleId", role_var),
                           *save_from_response("j.id", role_op)]),
         poll_op(role_op, out_id_var=role_var),
         Step(name="grant-bylabel", method="POST", path="/iam/v1/accessBindings",
-             body={"subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{userINVId}}"}],
+             body={"subjects": [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT",
+                                 "id": "{{svaInviteeId}}"}],
                    "roleId": "{{" + role_var + "}}",
                    "scopeType": "iam.account",
                    "scopeId": "{{accountAId}}",
@@ -784,58 +858,114 @@ def exact_set_case_steps(kind, pfx, role_name):
     ]
 
 
-def vlist_only_case_steps(kind, pfx, role_name):
-    """v_list-only steps: one labeled object, list-only grant → object IS in the List
-    (v_list) but the single-resource Get is 404 (no v_get; v_list ≠ v_get)."""
+def list_read_parity_case_steps(kind, pfx, role_name):
+    """ЧЛЕНСТВО В СТРАНИЦЕ РАВНО ОТНОШЕНИЮ ЧТЕНИЯ — обе стороны, на одном субъекте.
+
+    ЧТО ЭТОТ КЕЙС УТВЕРЖДАЛ РАНЬШЕ И ПОЧЕМУ БОЛЬШЕ НЕ УТВЕРЖДАЕТ. Прежняя редакция
+    требовала «выдача с одним лишь глаголом `list` → объект ВИДЕН в списке, но его
+    одиночный Get отвечает 404». Этот инвариант СНЯТ осознанным решением
+    `docs/architecture/list-page-membership-equals-read-relation.md` (статус: принято):
+    `List` возвращает то же самое сообщение ресурса, что и `Get`, поэтому «видеть в
+    списке без содержимого» на такой выдаче нереализуемо — членство в странице и есть
+    содержимое. Предикат страницы приведён к ОТНОШЕНИЮ ЧТЕНИЯ типа
+    (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`; для
+    group/serviceAccount/project это `v_get`), и принятое следствие записано там же
+    дословно: «роль с одним лишь глаголом `list` больше не показывает объект».
+    Кейс, продолжающий требовать снятое, закрепляет прошлое поведение и краснеет на
+    исправном продукте — поэтому он ПЕРЕНАЦЕЛЕН на действующий контракт, а не ослаблен.
+
+    ЧТО УТВЕРЖДАЕТСЯ ТЕПЕРЬ — равенство двух множеств, наблюдаемое с обеих сторон:
+      отрицательное плечо: выдача {verbs:[list]} по метке `foo` → объект НЕ в списке И
+                           его Get отвечает 404 (страница не шире чтения);
+      положительный контроль: выдача {verbs:[get,list]} по метке `ctl` тому же субъекту
+                           в том же аккаунте → второй объект В списке И его Get 200
+                           (страница не уже чтения).
+    Плечи расцеплены по КЛЮЧУ метки (`foo` против `ctl`), поэтому ни один селектор не
+    может выбрать объект чужого плеча.
+
+    ЗАЧЕМ ОБЯЗАТЕЛЕН ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ. Одинокое «не виден» зеленеет сильнее всего
+    именно тогда, когда сломано ВСЁ: неверный субъект выдачи, неподнявшаяся фикстура,
+    непоехавшая материализация — любая из этих поломок даёт «не виден» и выдаёт себя за
+    исполненный инвариант. Контроль сходится в том же прогоне, тем же субъектом и в том
+    же аккаунте, поэтому отрицание доказывает СВОЙ предмет, а не общую неработоспособность.
+    (Ровно этот класс и стоил шести утверждений: выдача уезжала на ряд, которым ни один
+    предъявитель не аутентифицируется — см. `grant_bylabel_generic`.)"""
     spec = TYPE_SPECS[kind]
-    obj = pfx + "Vl"
+    neg = pfx + "Vl"          # плечо list-only: не должен быть виден и не должен читаться
+    ctl = pfx + "VlCtl"       # положительный контроль: get+list → виден и читается
     return [
-        *mk_obj(spec, f"{spec['stem']}vl", "foo", obj, obj + "Op"),
+        *mk_obj(spec, f"{spec['stem']}vl", "foo", neg, neg + "Op"),
+        *mk_obj(spec, f"{spec['stem']}vc", "ctl", ctl, ctl + "Op"),
         *preclean_account_loop(pfx + "Vl", "create-role"),
-        *grant_bylabel_generic(spec, pfx + "VlRole", pfx + "VlAcb", pfx + "VlRoleOp", pfx + "VlBindOp",
-                               ["list"], role_name),
+        # отрицательное плечо — только `list`
+        *grant_bylabel_generic(spec, pfx + "VlRole", pfx + "VlAcb", pfx + "VlRoleOp",
+                               pfx + "VlBindOp", ["list"], role_name, match_key="foo"),
+        # положительный контроль — `get` + `list` на ДРУГОМ ключе метки
+        *grant_bylabel_generic(spec, pfx + "VcRole", pfx + "VcAcb", pfx + "VcRoleOp",
+                               pfx + "VcBindOp", ["get", "list"], role_name + "c",
+                               match_key="ctl"),
+        # Ждём СХОЖДЕНИЯ контроля: пока он не виден, про отрицательное плечо ничего
+        # утверждать нельзя — «не виден» было бы неотличимо от «ещё не материализовано».
         poll_request_until_status(
-            name="read-list-visible", method="GET",
+            name="read-list-parity", method="GET",
             path=spec["path"] + "?accountId={{accountAId}}&pageSize=1000",
             auth="jwtInvitee", expect_code=200, retry_on=(403, 404),
             retry_predicate=("(() => { try { const ids = (pm.response.json()." + spec["key"]
-                             + " || []).map(o => o.id); return ids.indexOf(pm.environment.get('" + obj + "')) === -1; } catch (e) { return true; } })()"),
+                             + " || []).map(o => o.id); return ids.indexOf(pm.environment.get('"
+                             + ctl + "')) === -1; } catch (e) { return true; } })()"),
             test_script=[
                 "const j = pm.response.json();",
-                "pm.test('" + kind + ": v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j."
-                + spec["key"] + " || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('" + obj + "')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });",
+                "const ids = (j." + spec["key"] + " || []).map(o => o.id);",
+                "pm.test('" + kind + ": ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — объект с грантом {get,list} ВИДЕН в списке "
+                "(страница не уже чтения; без этого отрицание ниже ничего не доказывает)', () => "
+                "pm.expect(ids.indexOf(pm.environment.get('" + ctl + "')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true);",
+                "pm.test('" + kind + ": объект с грантом {list} БЕЗ {get} НЕ виден в списке "
+                "(членство в странице равно отношению чтения — docs/architecture/"
+                "list-page-membership-equals-read-relation.md)', () => "
+                "pm.expect(ids.indexOf(pm.environment.get('" + neg + "')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.false);",
             ],
         ),
-        Step(name="detail-get-closed", method="GET", path=spec["path"] + "/{{" + obj + "}}",
-             auth="jwtInvitee",
+        Step(name="detail-get-listonly-closed", method="GET",
+             path=spec["path"] + "/{{" + neg + "}}", auth="jwtInvitee",
              test_script=[
-                 "pm.test('" + kind + ": detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                 "pm.test('" + kind + ": Get объекта с грантом {list} без {get} → 404 (содержимое закрыто, hide-existence)', "
+                 "() => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                 "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));",
+                 "pm.test('grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));",
+             ]),
+        Step(name="detail-get-control-open", method="GET",
+             path=spec["path"] + "/{{" + ctl + "}}", auth="jwtInvitee",
+             test_script=[
+                 "pm.test('" + kind + ": ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — Get объекта с грантом {get,list} → 200 "
+                 "(404 здесь означал бы, что 404 выше про сломанную фикстуру, а не про предикат)', "
+                 "() => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
              ]),
         robust_revoke_binding("teardown-binding", pfx + "VlAcb"),
+        robust_revoke_binding("teardown-binding-ctl", pfx + "VcAcb"),
         *teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "VlRole}}"),
-        *teardown("teardown-obj", spec["path"] + "/{{" + obj + "}}"),
+        *teardown("teardown-role-ctl", "/iam/v1/roles/{{" + pfx + "VcRole}}"),
+        *teardown("teardown-obj", spec["path"] + "/{{" + neg + "}}"),
+        *teardown("teardown-obj-ctl", spec["path"] + "/{{" + ctl + "}}"),
     ]
 
 
-# Per-type case selection is NOT uniform — the per-type List/Get authz differs (confirmed on
-# the stand against the permission catalog + the iam read-authz handlers):
-#   - serviceAccount: List is <exempt> + per-object v_list-filtered, Get gates on v_get → BOTH
-#     the exact-set and the v_list-only detail-404 hold.
-#   - role: List filters per-object (exact-set holds) BUT RoleService.Get viewer-gates (role/get.go)
-#     — a foreign-account role 404s, but a SAME-account role is readable to any account member
-#     via the viewer tier; the v_list-only subject holds account access, so it reads the
-#     same-account role → 200. The v_list-only → detail-404 invariant is INAPPLICABLE to
-#     same-account roles, so only the exact-set case is emitted.
-#   - group: GroupService.List per-object-filters (viewer∪v_list on iam_group) AND
-#     GroupService.Get gates on v_get → BOTH the exact-set and the v_list-only
-#     detail-404 hold. GroupService.List is <exempt>, so no
-#     account#v_list anchor is needed; the by-label filter narrows to exactly the matched
-#     set just like project/SA.
+# Per-type case selection is NOT uniform, и решает это ПРЕДИКАТ СТРАНИЦЫ ТИПА —
+# `services/iam/internal/authzfilter/visibility.go` → `pageRelations` (сверено с деревом
+# и с гейтом `internal/repohygiene/listreadrelationparity_test.go`, который читает
+# отношение чтения из сгенерированного каталога прав):
+#   - serviceAccount / group / project — предикат страницы `v_get`, то есть ТОТ ЖЕ, чем
+#     гейтится одиночный Get. Значит осмысленны оба кейса: точный набор по метке и
+#     равенство «в списке ⟺ читается по id» (list-only не показывает и не читается).
+#   - role — ЕДИНСТВЕННОЕ исключение: предикат страницы `{viewer, v_list}`, потому что у
+#     чтения роли нет отношения в каталоге, а `RoleService.Get` пускает любого члена
+#     аккаунта по ярусу viewer. Поэтому для роли равенство «страница ⟺ чтение» неверно
+#     BY CONSTRUCTION и кейс паритета для неё НЕ выпускается — выпускается только точный
+#     набор. Это не пробел, а другой контракт: он объявлен в `pageRelations` рядом с
+#     остальными и там же объяснён.
 EXACT_SET_TYPES = [("serviceAccount", "setSva", "SVA"), ("role", "setRol", "ROL"),
                    ("group", "setGrp", "GRP")]
-VLIST_ONLY_TYPES = [("serviceAccount", "setSva", "SVA"), ("group", "setGrp", "GRP")]
+# Типы, чей предикат страницы РАВЕН отношению чтения (`v_get`) → паритет наблюдаем.
+LIST_READ_PARITY_TYPES = [("serviceAccount", "setSva", "SVA"), ("group", "setGrp", "GRP")]
 
 for _kind, _pfx, _abbr in EXACT_SET_TYPES:
     CASES.append(Case(
@@ -847,12 +977,12 @@ for _kind, _pfx, _abbr in EXACT_SET_TYPES:
         steps=exact_set_case_steps(_kind, _pfx, f"stlbl{_abbr.lower()}"),
     ))
 
-for _kind, _pfx, _abbr in VLIST_ONLY_TYPES:
+for _kind, _pfx, _abbr in LIST_READ_PARITY_TYPES:
     CASES.append(Case(
-        id=f"IAM-SET-{_abbr}-VLIST-ONLY-DETAIL-404",
-        title=f"v_list-only ({_kind}): by-label grant {{iam.{_kind} list ONLY matchLabels foo}} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+        id=f"IAM-SET-{_abbr}-LIST-READ-PARITY",
+        title=f"членство в странице равно чтению ({_kind}): грант {{iam.{_kind} list БЕЗ get}} → объекта НЕТ в списке И его Get 404; парный контроль {{get,list}} на другом ключе метки → в списке И Get 200",
         classes=["RBAC", "AUTHZ", "VISIBILITY", "INV1", "LABELS", "NEG"],
         priority="P0",
-        # verifies (v_list-only → content closed)
-        steps=vlist_only_case_steps(_kind, _pfx, f"stvl{_abbr.lower()}"),
+        # verifies (docs/architecture/list-page-membership-equals-read-relation.md)
+        steps=list_read_parity_case_steps(_kind, _pfx, f"stvl{_abbr.lower()}"),
     ))

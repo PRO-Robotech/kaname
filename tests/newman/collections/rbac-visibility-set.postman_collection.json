@@ -3812,11 +3812,11 @@
       ]
     },
     {
-      "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 — v_list-only: by-label grant {iam.project list ONLY matchLabels foo} → project visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+      "name": "IAM-SET-PRJ-LIST-READ-PARITY — членство в странице равно чтению (project): грант {iam.project list БЕЗ get} → проекта НЕТ в списке И его Get 404; парный контроль {get,list} на другом ключе метки → в списке И Get 200",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV1 | class:LABELS | class:NEG | priority:P0",
       "item": [
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: create-setvl",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: create-setvl",
           "request": {
             "method": "POST",
             "header": [
@@ -3908,7 +3908,7 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: poll-visVlProjOp",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: poll-visVlProjOp",
           "request": {
             "method": "GET",
             "header": [
@@ -3989,7 +3989,180 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: visVl-preclean-list",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: create-setvc",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setvc-{{runId}}\", \"description\": \"newman exact-set project\", \"labels\": {\"ctl\": \"{{runId}}\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.projectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visVcProj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('visVcProj') === -1) _pv.push('visVcProj');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visVcProjOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: poll-visVcProjOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{visVcProjOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{visVcProjOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.error) { pm.environment.unset('visVcProj'); } else if (j.response && j.response.id && !pm.environment.get('visVcProj')) { pm.environment.set('visVcProj', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: visVl-preclean-list",
           "request": {
             "method": "GET",
             "header": [
@@ -4057,19 +4230,19 @@
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('visVlDup', arr[0].id);",
                   "  pm.environment.set('_visVlCount', String(c + 1));",
-                  "  pm.execution.setNextRequest('IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: visVl-preclean-del');",
+                  "  pm.execution.setNextRequest('IAM-SET-PRJ-LIST-READ-PARITY :: visVl-preclean-del');",
                   "  return;",
                   "}",
                   "pm.environment.unset('_visVlCount'); pm.environment.unset('_visVlStarted'); pm.environment.unset('visVlDup');",
                   "pm.test('jwtInvitee has zero residual account-A bindings (clean slate for by-label visibility)', () => pm.expect(arr.length, JSON.stringify(arr.map(b => b.id))).to.eql(0));",
-                  "pm.execution.setNextRequest('IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: create-role');"
+                  "pm.execution.setNextRequest('IAM-SET-PRJ-LIST-READ-PARITY :: create-role');"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: visVl-preclean-del",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: visVl-preclean-del",
           "request": {
             "method": "DELETE",
             "header": [
@@ -4152,14 +4325,14 @@
                   "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('visVlDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('visVlDelOp', dj.id); }",
-                  "if (!pm.environment.get('visVlDelOp')) { pm.execution.setNextRequest('IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: visVl-preclean-list'); }"
+                  "if (!pm.environment.get('visVlDelOp')) { pm.execution.setNextRequest('IAM-SET-PRJ-LIST-READ-PARITY :: visVl-preclean-list'); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: visVl-preclean-await",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: visVl-preclean-await",
           "request": {
             "method": "GET",
             "header": [
@@ -4224,14 +4397,14 @@
                   "const c = parseInt(pm.environment.get('_visVlAwaitCount') || '0', 10);",
                   "if (!j.done && c < 50) { pm.environment.set('_visVlAwaitCount', String(c + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_visVlAwaitCount'); pm.environment.unset('_visVlAwaitStarted');",
-                  "pm.execution.setNextRequest('IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: visVl-preclean-list');"
+                  "pm.execution.setNextRequest('IAM-SET-PRJ-LIST-READ-PARITY :: visVl-preclean-list');"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: create-role",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: create-role",
           "request": {
             "method": "POST",
             "header": [
@@ -4323,7 +4496,7 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: poll-visVlRoleOp",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: poll-visVlRoleOp",
           "request": {
             "method": "GET",
             "header": [
@@ -4404,7 +4577,7 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: grant-bylabel",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: grant-bylabel",
           "request": {
             "method": "POST",
             "header": [
@@ -4498,7 +4671,7 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: poll-visVlBindOp",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: poll-visVlBindOp",
           "request": {
             "method": "GET",
             "header": [
@@ -4579,7 +4752,355 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: read-list-visible",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: create-role #2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"setvcctl_{{runId}}\", \"description\": \"newman exact-set by-label role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"project\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"ctl\": \"{{runId}}\"}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visVcRole', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('visVcRole') === -1) _pv.push('visVcRole');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visVcRoleOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: poll-visVcRoleOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{visVcRoleOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{visVcRoleOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.error) { pm.environment.unset('visVcRole'); } else if (j.response && j.response.id && !pm.environment.get('visVcRole')) { pm.environment.set('visVcRole', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: grant-bylabel #2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{visVcRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visVcBindOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accessBindingId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visVcAcb', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('visVcAcb') === -1) _pv.push('visVcAcb');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: poll-visVcBindOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{visVcBindOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{visVcBindOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: read-list-parity",
           "request": {
             "method": "GET",
             "header": [
@@ -4618,9 +5139,9 @@
                   "}",
                   "// poll-for-propagation counter reset on first entry (request-name-scoped);",
                   "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_read_list_visible') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_read_list_visible', '0');",
-                  "  pm.environment.set('_poll200_started_read_list_visible', pm.info.requestName);",
+                  "if (pm.environment.get('_poll200_started_read_list_parity') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_read_list_parity', '0');",
+                  "  pm.environment.set('_poll200_started_read_list_parity', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -4646,30 +5167,29 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_read_list_visible') || '0', 10);",
+                  "const _p200c = parseInt(pm.environment.get('_poll200_read_list_parity') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().projects || []).map(p => p.id); return ids.indexOf(pm.environment.get('visVlProj')) === -1; } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().projects || []).map(p => p.id); return ids.indexOf(pm.environment.get('visVcProj')) === -1; } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_read_list_visible', String(_p200c + 1));",
+                  "  pm.environment.set('_poll200_read_list_parity', String(_p200c + 1));",
                   "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_poll200_read_list_visible');",
-                  "pm.environment.unset('_poll200_started_read_list_visible');",
+                  "pm.environment.unset('_poll200_read_list_parity');",
+                  "pm.environment.unset('_poll200_started_read_list_parity');",
                   "const j = pm.response.json();",
-                  "pm.test('v_list-only project IS visible in the List (v_list materialized)', () => {",
-                  "  const ids = (j.projects || []).map(p => p.id);",
-                  "  pm.expect(ids.indexOf(pm.environment.get('visVlProj')) !== -1, 'visible ids: ' + JSON.stringify(ids)).to.be.true;",
-                  "});"
+                  "const ids = (j.projects || []).map(p => p.id);",
+                  "pm.test('ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — проект с грантом {get,list} ВИДЕН в списке (страница не уже чтения; без этого отрицание ниже ничего не доказывает)', () => pm.expect(ids.indexOf(pm.environment.get('visVcProj')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true);",
+                  "pm.test('проект с грантом {list} БЕЗ {get} НЕ виден в списке (членство в странице равно отношению чтения — docs/architecture/list-page-membership-equals-read-relation.md)', () => pm.expect(ids.indexOf(pm.environment.get('visVlProj')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.false);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: detail-get-closed",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: detail-get-listonly-closed",
           "request": {
             "method": "GET",
             "header": [
@@ -4731,16 +5251,85 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('detail Get on a v_list-only project → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "pm.test('Get проекта с грантом {list} без {get} → 404 (содержимое закрыто, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: teardown-binding",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: detail-get-control-open",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{visVcProj}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{visVcProj}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtInvitee'",
+                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — Get проекта с грантом {get,list} → 200 (404 здесь означал бы, что 404 выше про сломанную фикстуру, а не про предикат)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-binding",
           "request": {
             "method": "DELETE",
             "header": [
@@ -4817,7 +5406,84 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: teardown-role",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-binding-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{visVcAcb}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{visVcAcb}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_rvvisVcAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvvisVcAcbCount', '0'); pm.environment.set('_rvvisVcAcbStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _rc = parseInt(pm.environment.get('_rvvisVcAcbCount') || '0', 10);",
+                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvvisVcAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
+                  "pm.environment.unset('_rvvisVcAcbCount'); pm.environment.unset('_rvvisVcAcbStarted');",
+                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
+                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
+                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-role",
           "request": {
             "method": "DELETE",
             "header": [
@@ -4907,7 +5573,7 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: teardown-role-await",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-role-await",
           "request": {
             "method": "GET",
             "header": [
@@ -4985,7 +5651,175 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: teardown-proj",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-role-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{visVcRole}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{visVcRole}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_role_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_role_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_role_ctl', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_role_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_role_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_role_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_role_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownrolectlRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownrolectlRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-role-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownrolectlRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownrolectlRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownrolectlRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownrolectlRevOpCount', '0'); pm.environment.set('__teardownrolectlRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownrolectlRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownrolectlRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownrolectlRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownrolectlRevOpCount'); pm.environment.unset('__teardownrolectlRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-proj",
           "request": {
             "method": "DELETE",
             "header": [
@@ -5075,7 +5909,7 @@
           ]
         },
         {
-          "name": "IAM-SET-PRJ-VLIST-ONLY-DETAIL-404 :: teardown-proj-await",
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-proj-await",
           "request": {
             "method": "GET",
             "header": [
@@ -5146,6 +5980,174 @@
                   "  return;",
                   "}",
                   "pm.environment.unset('__teardownprojRevOpCount'); pm.environment.unset('__teardownprojRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-proj-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{visVcProj}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{visVcProj}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_proj_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_proj_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_proj_ctl', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_proj_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_proj_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_proj_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_proj_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownprojctlRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownprojctlRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-proj-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownprojctlRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownprojctlRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownprojctlRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownprojctlRevOpCount', '0'); pm.environment.set('__teardownprojctlRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownprojctlRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownprojctlRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownprojctlRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownprojctlRevOpCount'); pm.environment.unset('__teardownprojctlRevOpStarted');",
                   "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }
@@ -6980,7 +7982,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{setSvaRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setSvaRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10639,7 +11641,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{setRolRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setRolRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14298,7 +15300,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{setGrpRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setGrpRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16132,11 +17134,11 @@
       ]
     },
     {
-      "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 — v_list-only (serviceAccount): by-label grant {iam.serviceAccount list ONLY matchLabels foo} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+      "name": "IAM-SET-SVA-LIST-READ-PARITY — членство в странице равно чтению (serviceAccount): грант {iam.serviceAccount list БЕЗ get} → объекта НЕТ в списке И его Get 404; парный контроль {get,list} на другом ключе метки → в списке И Get 200",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV1 | class:LABELS | class:NEG | priority:P0",
       "item": [
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: create-stsavl",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: create-stsavl",
           "request": {
             "method": "POST",
             "header": [
@@ -16228,7 +17230,7 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: poll-setSvaVlOp",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: poll-setSvaVlOp",
           "request": {
             "method": "GET",
             "header": [
@@ -16309,7 +17311,180 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: setSvaVl-preclean-list",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: create-stsavc",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/serviceAccounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "serviceAccounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"stsavc-{{runId}}\", \"description\": \"newman exact-set obj\", \"labels\": {\"ctl\": \"{{runId}}\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.serviceAccountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setSvaVlCtl', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('setSvaVlCtl') === -1) _pv.push('setSvaVlCtl');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setSvaVlCtlOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: poll-setSvaVlCtlOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{setSvaVlCtlOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{setSvaVlCtlOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.error) { pm.environment.unset('setSvaVlCtl'); } else if (j.response && j.response.id && !pm.environment.get('setSvaVlCtl')) { pm.environment.set('setSvaVlCtl', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: setSvaVl-preclean-list",
           "request": {
             "method": "GET",
             "header": [
@@ -16377,19 +17552,19 @@
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setSvaVlDup', arr[0].id);",
                   "  pm.environment.set('_setSvaVlCount', String(c + 1));",
-                  "  pm.execution.setNextRequest('IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: setSvaVl-preclean-del');",
+                  "  pm.execution.setNextRequest('IAM-SET-SVA-LIST-READ-PARITY :: setSvaVl-preclean-del');",
                   "  return;",
                   "}",
                   "pm.environment.unset('_setSvaVlCount'); pm.environment.unset('_setSvaVlStarted'); pm.environment.unset('setSvaVlDup');",
                   "pm.test('jwtInvitee has zero residual account-A bindings (clean slate for by-label visibility)', () => pm.expect(arr.length, JSON.stringify(arr.map(b => b.id))).to.eql(0));",
-                  "pm.execution.setNextRequest('IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: create-role');"
+                  "pm.execution.setNextRequest('IAM-SET-SVA-LIST-READ-PARITY :: create-role');"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: setSvaVl-preclean-del",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: setSvaVl-preclean-del",
           "request": {
             "method": "DELETE",
             "header": [
@@ -16472,14 +17647,14 @@
                   "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('setSvaVlDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('setSvaVlDelOp', dj.id); }",
-                  "if (!pm.environment.get('setSvaVlDelOp')) { pm.execution.setNextRequest('IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: setSvaVl-preclean-list'); }"
+                  "if (!pm.environment.get('setSvaVlDelOp')) { pm.execution.setNextRequest('IAM-SET-SVA-LIST-READ-PARITY :: setSvaVl-preclean-list'); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: setSvaVl-preclean-await",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: setSvaVl-preclean-await",
           "request": {
             "method": "GET",
             "header": [
@@ -16544,14 +17719,14 @@
                   "const c = parseInt(pm.environment.get('_setSvaVlAwaitCount') || '0', 10);",
                   "if (!j.done && c < 50) { pm.environment.set('_setSvaVlAwaitCount', String(c + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_setSvaVlAwaitCount'); pm.environment.unset('_setSvaVlAwaitStarted');",
-                  "pm.execution.setNextRequest('IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: setSvaVl-preclean-list');"
+                  "pm.execution.setNextRequest('IAM-SET-SVA-LIST-READ-PARITY :: setSvaVl-preclean-list');"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: create-role",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: create-role",
           "request": {
             "method": "POST",
             "header": [
@@ -16643,7 +17818,7 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: poll-setSvaVlRoleOp",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: poll-setSvaVlRoleOp",
           "request": {
             "method": "GET",
             "header": [
@@ -16724,7 +17899,7 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: grant-bylabel",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: grant-bylabel",
           "request": {
             "method": "POST",
             "header": [
@@ -16746,7 +17921,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{setSvaVlRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setSvaVlRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16818,7 +17993,7 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: poll-setSvaVlBindOp",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: poll-setSvaVlBindOp",
           "request": {
             "method": "GET",
             "header": [
@@ -16899,7 +18074,355 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: read-list-visible",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: create-role #2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"stvlsvac_{{runId}}\", \"description\": \"newman exact-set by-label selector role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"serviceAccount\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"ctl\": \"{{runId}}\"}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setSvaVcRole', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('setSvaVcRole') === -1) _pv.push('setSvaVcRole');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setSvaVcRoleOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: poll-setSvaVcRoleOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{setSvaVcRoleOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{setSvaVcRoleOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.error) { pm.environment.unset('setSvaVcRole'); } else if (j.response && j.response.id && !pm.environment.get('setSvaVcRole')) { pm.environment.set('setSvaVcRole', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: grant-bylabel #2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setSvaVcRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setSvaVcBindOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accessBindingId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setSvaVcAcb', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('setSvaVcAcb') === -1) _pv.push('setSvaVcAcb');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: poll-setSvaVcBindOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{setSvaVcBindOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{setSvaVcBindOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: read-list-parity",
           "request": {
             "method": "GET",
             "header": [
@@ -16938,9 +18461,9 @@
                   "}",
                   "// poll-for-propagation counter reset on first entry (request-name-scoped);",
                   "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_read_list_visible') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_read_list_visible', '0');",
-                  "  pm.environment.set('_poll200_started_read_list_visible', pm.info.requestName);",
+                  "if (pm.environment.get('_poll200_started_read_list_parity') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_read_list_parity', '0');",
+                  "  pm.environment.set('_poll200_started_read_list_parity', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -16966,27 +18489,29 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_read_list_visible') || '0', 10);",
+                  "const _p200c = parseInt(pm.environment.get('_poll200_read_list_parity') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().serviceAccounts || []).map(o => o.id); return ids.indexOf(pm.environment.get('setSvaVl')) === -1; } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().serviceAccounts || []).map(o => o.id); return ids.indexOf(pm.environment.get('setSvaVlCtl')) === -1; } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_read_list_visible', String(_p200c + 1));",
+                  "  pm.environment.set('_poll200_read_list_parity', String(_p200c + 1));",
                   "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_poll200_read_list_visible');",
-                  "pm.environment.unset('_poll200_started_read_list_visible');",
+                  "pm.environment.unset('_poll200_read_list_parity');",
+                  "pm.environment.unset('_poll200_started_read_list_parity');",
                   "const j = pm.response.json();",
-                  "pm.test('serviceAccount: v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j.serviceAccounts || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('setSvaVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });"
+                  "const ids = (j.serviceAccounts || []).map(o => o.id);",
+                  "pm.test('serviceAccount: ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — объект с грантом {get,list} ВИДЕН в списке (страница не уже чтения; без этого отрицание ниже ничего не доказывает)', () => pm.expect(ids.indexOf(pm.environment.get('setSvaVlCtl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true);",
+                  "pm.test('serviceAccount: объект с грантом {list} БЕЗ {get} НЕ виден в списке (членство в странице равно отношению чтения — docs/architecture/list-page-membership-equals-read-relation.md)', () => pm.expect(ids.indexOf(pm.environment.get('setSvaVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.false);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: detail-get-closed",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: detail-get-listonly-closed",
           "request": {
             "method": "GET",
             "header": [
@@ -17048,16 +18573,85 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('serviceAccount: detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "pm.test('serviceAccount: Get объекта с грантом {list} без {get} → 404 (содержимое закрыто, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: teardown-binding",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: detail-get-control-open",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/serviceAccounts/{{setSvaVlCtl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "serviceAccounts",
+                "{{setSvaVlCtl}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtInvitee'",
+                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('serviceAccount: ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — Get объекта с грантом {get,list} → 200 (404 здесь означал бы, что 404 выше про сломанную фикстуру, а не про предикат)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-binding",
           "request": {
             "method": "DELETE",
             "header": [
@@ -17134,7 +18728,84 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: teardown-role",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-binding-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{setSvaVcAcb}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{setSvaVcAcb}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_rvsetSvaVcAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetSvaVcAcbCount', '0'); pm.environment.set('_rvsetSvaVcAcbStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _rc = parseInt(pm.environment.get('_rvsetSvaVcAcbCount') || '0', 10);",
+                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetSvaVcAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
+                  "pm.environment.unset('_rvsetSvaVcAcbCount'); pm.environment.unset('_rvsetSvaVcAcbStarted');",
+                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
+                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
+                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-role",
           "request": {
             "method": "DELETE",
             "header": [
@@ -17224,7 +18895,7 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: teardown-role-await",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-role-await",
           "request": {
             "method": "GET",
             "header": [
@@ -17302,7 +18973,175 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: teardown-obj",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-role-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{setSvaVcRole}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{setSvaVcRole}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_role_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_role_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_role_ctl', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_role_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_role_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_role_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_role_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownrolectlRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownrolectlRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-role-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownrolectlRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownrolectlRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownrolectlRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownrolectlRevOpCount', '0'); pm.environment.set('__teardownrolectlRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownrolectlRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownrolectlRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownrolectlRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownrolectlRevOpCount'); pm.environment.unset('__teardownrolectlRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-obj",
           "request": {
             "method": "DELETE",
             "header": [
@@ -17392,7 +19231,7 @@
           ]
         },
         {
-          "name": "IAM-SET-SVA-VLIST-ONLY-DETAIL-404 :: teardown-obj-await",
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-obj-await",
           "request": {
             "method": "GET",
             "header": [
@@ -17468,15 +19307,183 @@
               }
             }
           ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-obj-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/serviceAccounts/{{setSvaVlCtl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "serviceAccounts",
+                "{{setSvaVlCtl}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_obj_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_obj_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_obj_ctl', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_obj_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_obj_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_obj_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_obj_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownobjctlRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownobjctlRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-obj-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownobjctlRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownobjctlRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownobjctlRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownobjctlRevOpCount', '0'); pm.environment.set('__teardownobjctlRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownobjctlRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownobjctlRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownobjctlRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownobjctlRevOpCount'); pm.environment.unset('__teardownobjctlRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 — v_list-only (group): by-label grant {iam.group list ONLY matchLabels foo} → object visible in List (v_list) but single-resource Get is 404 (no v_get; v_list ≠ v_get)",
+      "name": "IAM-SET-GRP-LIST-READ-PARITY — членство в странице равно чтению (group): грант {iam.group list БЕЗ get} → объекта НЕТ в списке И его Get 404; парный контроль {get,list} на другом ключе метки → в списке И Get 200",
       "description": "class:RBAC | class:AUTHZ | class:VISIBILITY | class:INV1 | class:LABELS | class:NEG | priority:P0",
       "item": [
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: create-stgrvl",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: create-stgrvl",
           "request": {
             "method": "POST",
             "header": [
@@ -17568,7 +19575,7 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: poll-setGrpVlOp",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: poll-setGrpVlOp",
           "request": {
             "method": "GET",
             "header": [
@@ -17649,7 +19656,180 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: setGrpVl-preclean-list",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: create-stgrvc",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"stgrvc-{{runId}}\", \"description\": \"newman exact-set obj\", \"labels\": {\"ctl\": \"{{runId}}\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.groupId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setGrpVlCtl', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('setGrpVlCtl') === -1) _pv.push('setGrpVlCtl');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setGrpVlCtlOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: poll-setGrpVlCtlOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{setGrpVlCtlOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{setGrpVlCtlOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.error) { pm.environment.unset('setGrpVlCtl'); } else if (j.response && j.response.id && !pm.environment.get('setGrpVlCtl')) { pm.environment.set('setGrpVlCtl', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: setGrpVl-preclean-list",
           "request": {
             "method": "GET",
             "header": [
@@ -17717,19 +19897,19 @@
                   "if (arr.length > 0 && c < 12) {",
                   "  pm.environment.set('setGrpVlDup', arr[0].id);",
                   "  pm.environment.set('_setGrpVlCount', String(c + 1));",
-                  "  pm.execution.setNextRequest('IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: setGrpVl-preclean-del');",
+                  "  pm.execution.setNextRequest('IAM-SET-GRP-LIST-READ-PARITY :: setGrpVl-preclean-del');",
                   "  return;",
                   "}",
                   "pm.environment.unset('_setGrpVlCount'); pm.environment.unset('_setGrpVlStarted'); pm.environment.unset('setGrpVlDup');",
                   "pm.test('jwtInvitee has zero residual account-A bindings (clean slate for by-label visibility)', () => pm.expect(arr.length, JSON.stringify(arr.map(b => b.id))).to.eql(0));",
-                  "pm.execution.setNextRequest('IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: create-role');"
+                  "pm.execution.setNextRequest('IAM-SET-GRP-LIST-READ-PARITY :: create-role');"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: setGrpVl-preclean-del",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: setGrpVl-preclean-del",
           "request": {
             "method": "DELETE",
             "header": [
@@ -17812,14 +19992,14 @@
                   "pm.test('pre-clean: слот освобождён (200) или его и не было (404) — устойчивый 403 значит, что прежняя выдача ОСТАЛАСЬ активной и strict-create упрётся в UNIQUE', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));",
                   "pm.environment.unset('setGrpVlDelOp');",
                   "if (pm.response.code === 200) { const dj = pm.response.json() || {}; if (dj.id) pm.environment.set('setGrpVlDelOp', dj.id); }",
-                  "if (!pm.environment.get('setGrpVlDelOp')) { pm.execution.setNextRequest('IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: setGrpVl-preclean-list'); }"
+                  "if (!pm.environment.get('setGrpVlDelOp')) { pm.execution.setNextRequest('IAM-SET-GRP-LIST-READ-PARITY :: setGrpVl-preclean-list'); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: setGrpVl-preclean-await",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: setGrpVl-preclean-await",
           "request": {
             "method": "GET",
             "header": [
@@ -17884,14 +20064,14 @@
                   "const c = parseInt(pm.environment.get('_setGrpVlAwaitCount') || '0', 10);",
                   "if (!j.done && c < 50) { pm.environment.set('_setGrpVlAwaitCount', String(c + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_setGrpVlAwaitCount'); pm.environment.unset('_setGrpVlAwaitStarted');",
-                  "pm.execution.setNextRequest('IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: setGrpVl-preclean-list');"
+                  "pm.execution.setNextRequest('IAM-SET-GRP-LIST-READ-PARITY :: setGrpVl-preclean-list');"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: create-role",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: create-role",
           "request": {
             "method": "POST",
             "header": [
@@ -17983,7 +20163,7 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: poll-setGrpVlRoleOp",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: poll-setGrpVlRoleOp",
           "request": {
             "method": "GET",
             "header": [
@@ -18064,7 +20244,7 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: grant-bylabel",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: grant-bylabel",
           "request": {
             "method": "POST",
             "header": [
@@ -18086,7 +20266,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userINVId}}\"}], \"roleId\": \"{{setGrpVlRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setGrpVlRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -18158,7 +20338,7 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: poll-setGrpVlBindOp",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: poll-setGrpVlBindOp",
           "request": {
             "method": "GET",
             "header": [
@@ -18239,7 +20419,355 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: read-list-visible",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: create-role #2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"stvlgrpc_{{runId}}\", \"description\": \"newman exact-set by-label selector role\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"group\"], \"verbs\": [\"get\", \"list\"], \"matchLabels\": {\"ctl\": \"{{runId}}\"}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.roleId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setGrpVcRole', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('setGrpVcRole') === -1) _pv.push('setGrpVcRole');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setGrpVcRoleOp', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: poll-setGrpVcRoleOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{setGrpVcRoleOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{setGrpVcRoleOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "if (j.error) { pm.environment.unset('setGrpVcRole'); } else if (j.response && j.response.id && !pm.environment.get('setGrpVcRole')) { pm.environment.set('setGrpVcRole', j.response.id); }",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: grant-bylabel #2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_SERVICE_ACCOUNT\", \"id\": \"{{svaInviteeId}}\"}], \"roleId\": \"{{setGrpVcRole}}\", \"scopeType\": \"iam.account\", \"scopeId\": \"{{accountAId}}\", \"target\": {\"allInScope\": {}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                  "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setGrpVcBindOp', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accessBindingId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('setGrpVcAcb', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('setGrpVcAcb') === -1) _pv.push('setGrpVcAcb');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: poll-setGrpVcBindOp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{setGrpVcBindOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{setGrpVcBindOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _ipd1 = Date.now(); while (Date.now() - _ipd1 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: read-list-parity",
           "request": {
             "method": "GET",
             "header": [
@@ -18278,9 +20806,9 @@
                   "}",
                   "// poll-for-propagation counter reset on first entry (request-name-scoped);",
                   "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_read_list_visible') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_read_list_visible', '0');",
-                  "  pm.environment.set('_poll200_started_read_list_visible', pm.info.requestName);",
+                  "if (pm.environment.get('_poll200_started_read_list_parity') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_read_list_parity', '0');",
+                  "  pm.environment.set('_poll200_started_read_list_parity', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -18306,27 +20834,29 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_read_list_visible') || '0', 10);",
+                  "const _p200c = parseInt(pm.environment.get('_poll200_read_list_parity') || '0', 10);",
                   "const _p200retryCode = [403,404].includes(pm.response.code);",
-                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().groups || []).map(o => o.id); return ids.indexOf(pm.environment.get('setGrpVl')) === -1; } catch (e) { return true; } })());",
+                  "const _p200retryPred = (pm.response.code === 200) && ((() => { try { const ids = (pm.response.json().groups || []).map(o => o.id); return ids.indexOf(pm.environment.get('setGrpVlCtl')) === -1; } catch (e) { return true; } })());",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_read_list_visible', String(_p200c + 1));",
+                  "  pm.environment.set('_poll200_read_list_parity', String(_p200c + 1));",
                   "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_poll200_read_list_visible');",
-                  "pm.environment.unset('_poll200_started_read_list_visible');",
+                  "pm.environment.unset('_poll200_read_list_parity');",
+                  "pm.environment.unset('_poll200_started_read_list_parity');",
                   "const j = pm.response.json();",
-                  "pm.test('group: v_list-only object IS visible in the List (v_list materialized)', () => { const ids = (j.groups || []).map(o => o.id); pm.expect(ids.indexOf(pm.environment.get('setGrpVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true; });"
+                  "const ids = (j.groups || []).map(o => o.id);",
+                  "pm.test('group: ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — объект с грантом {get,list} ВИДЕН в списке (страница не уже чтения; без этого отрицание ниже ничего не доказывает)', () => pm.expect(ids.indexOf(pm.environment.get('setGrpVlCtl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.true);",
+                  "pm.test('group: объект с грантом {list} БЕЗ {get} НЕ виден в списке (членство в странице равно отношению чтения — docs/architecture/list-page-membership-equals-read-relation.md)', () => pm.expect(ids.indexOf(pm.environment.get('setGrpVl')) !== -1, 'ids: ' + JSON.stringify(ids)).to.be.false);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: detail-get-closed",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: detail-get-listonly-closed",
           "request": {
             "method": "GET",
             "header": [
@@ -18388,16 +20918,85 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('group: detail Get on a v_list-only object → 404 (content closed, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "pm.test('group: Get объекта с грантом {list} без {get} → 404 (содержимое закрыто, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('grpc code 5 (NOT_FOUND, not 200 — v_list ≠ v_get)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: teardown-binding",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: detail-get-control-open",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{setGrpVlCtl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{setGrpVlCtl}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtInvitee'",
+                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtInvitee is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtInvitee is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('group: ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — Get объекта с грантом {get,list} → 200 (404 здесь означал бы, что 404 выше про сломанную фикстуру, а не про предикат)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-binding",
           "request": {
             "method": "DELETE",
             "header": [
@@ -18474,7 +21073,84 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: teardown-role",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-binding-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{setGrpVcAcb}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{setGrpVcAcb}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_rvsetGrpVcAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetGrpVcAcbCount', '0'); pm.environment.set('_rvsetGrpVcAcbStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _rc = parseInt(pm.environment.get('_rvsetGrpVcAcbCount') || '0', 10);",
+                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetGrpVcAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
+                  "pm.environment.unset('_rvsetGrpVcAcbCount'); pm.environment.unset('_rvsetGrpVcAcbStarted');",
+                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
+                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
+                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
+                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-role",
           "request": {
             "method": "DELETE",
             "header": [
@@ -18564,7 +21240,7 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: teardown-role-await",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-role-await",
           "request": {
             "method": "GET",
             "header": [
@@ -18642,7 +21318,175 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: teardown-obj",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-role-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles/{{setGrpVcRole}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles",
+                "{{setGrpVcRole}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_role_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_role_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_role_ctl', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_role_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_role_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_role_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_role_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownrolectlRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownrolectlRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-role-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownrolectlRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownrolectlRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownrolectlRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownrolectlRevOpCount', '0'); pm.environment.set('__teardownrolectlRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownrolectlRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownrolectlRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownrolectlRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownrolectlRevOpCount'); pm.environment.unset('__teardownrolectlRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-obj",
           "request": {
             "method": "DELETE",
             "header": [
@@ -18732,7 +21576,7 @@
           ]
         },
         {
-          "name": "IAM-SET-GRP-VLIST-ONLY-DETAIL-404 :: teardown-obj-await",
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-obj-await",
           "request": {
             "method": "GET",
             "header": [
@@ -18803,6 +21647,174 @@
                   "  return;",
                   "}",
                   "pm.environment.unset('__teardownobjRevOpCount'); pm.environment.unset('__teardownobjRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-obj-ctl",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups/{{setGrpVlCtl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups",
+                "{{setGrpVlCtl}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_obj_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_obj_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_obj_ctl', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_obj_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_obj_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_obj_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_obj_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownobjctlRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownobjctlRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-obj-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownobjctlRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownobjctlRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownobjctlRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownobjctlRevOpCount', '0'); pm.environment.set('__teardownobjctlRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownobjctlRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownobjctlRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownobjctlRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownobjctlRevOpCount'); pm.environment.unset('__teardownobjctlRevOpStarted');",
                   "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
                 ]
               }

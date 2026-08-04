@@ -254,14 +254,25 @@ Triaged the clean-seed umbrella CI artifact (`na4/iam/.../out/*.json`). Findings
   a healthy seed" confirms). The documented replica-lag remedy (`iam replicaCount=1`) is
   **already** applied in `values.dev.yaml`; the residual is grant-materialisation THROUGHPUT
   under the full parallel run (see MEMORY "grant-materialization O(mirror) root"). Two
-  `rbac-visibility-set` sub-classes are **over-shows** (`IAM-SET-*-VLIST-ONLY-DETAIL-404`
-  detail-Get returned 200; `*-LABEL-EXACT-OK` List over-showed no-label/other-label objects)
-  — deliberately **left RED, NOT whitelisted** (whitelisting an over-show could mask a real
-  leak; the `GroupService.List` v_list-filter gap is a pre-existing product finding, above).
-  Budget-inflation would be an anti-fix (MEMORY "budget-raise = timeout-cancel"). Disposition:
-  re-run on a healthy/less-loaded stack to confirm convergence; a persistent over-show after a
-  clean re-run is a product finding for TDD, not a test change. **The account-redesign fix is
-  the only gate-blocker in this set that is a genuine test defect.**
+  `rbac-visibility-set` sub-classes were read as **over-shows** and deliberately left RED,
+  not whitelisted. **Оба объяснения оказались неверны — разобрано 2026-08-04, разделением,
+  а не рассуждением:**
+  - `*-LABEL-EXACT-OK` (serviceAccount / role / group) краснели не из-за пропускной
+    способности материализации и не из-за остатка чужих данных в общем аккаунте, а из-за
+    СУБЪЕКТА выдачи: она называла ряд пользователя, которым ни один выдаваемый предъявитель
+    не аутентифицируется, тогда как читал набор предъявитель служебной учётки. Три клетки,
+    в каждой изменён ровно один признак (см. докстроку `grant_bylabel_generic`): аккаунт
+    постоянен + субъект изменён → сходится за 0.0 с; субъект постоянен + аккаунт изменён →
+    не сходится за 40 с. Причина в субъекте; исправлено в фикстуре.
+  - `*-VLIST-ONLY-DETAIL-404` краснели не из-за over-show, а потому что требовали **снятого**
+    инварианта: предикат страницы приведён к отношению чтения
+    (`docs/architecture/list-page-membership-equals-read-relation.md`), поэтому выдача
+    `{list}` без `get` больше не показывает объект — это принятое следствие, а не дефект.
+    Кейсы перенацелены на действующий контракт и проверяют его в обе стороны
+    (`IAM-SET-*-LIST-READ-PARITY`).
+
+  Урок обеих строк один: «краснеет — значит продукт течёт» было ДОГАДКОЙ, а не замером, и
+  обе догадки оказались ложными. Прежде чем чинить, признаки разделяют по одному.
 
 - **Out of the artifact but NOT in scope**: `iam-internal-only-check` (8) fail with
   `getaddrinfo ENOTFOUND api.kacho.local` — the external endpoint is unresolvable in the
@@ -419,14 +430,30 @@ re-run the `newman-e2e` job.
 
 All five account-scoped IAM List RPCs (`User/ServiceAccount/Role/Project/Group`) carry
 `permission = "<exempt>"` — the List CALL itself is not authz-gated; the result set is filtered
-in-handler by `viewer ∪ v_list`. A non-member therefore gets **200 + empty**, not 403; an
+in-handler per object. A non-member therefore gets **200 + empty**, not 403; an
 anonymous caller (no token) still gets **401 UNAUTHENTICATED** (`<exempt>` removes authz-Check,
 not authN). This is exercised black-box by `AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY`
 (`jwtNoBindings` → Project & Group List → 200 + empty), the `*-LS-*` scope-filter rows in
 `authz-deny.py`, and the `IAM-SET-PRJ/GRP-LABEL-EXACT-OK` exact-set cases in `rbac-visibility-set.py`.
 
-Content stays closed independently of List visibility: `v_list ≠ v_get`, so a `v_list`-only
-subject sees a row in List but its detail Get returns 404 (`IAM-SET-*-VLIST-ONLY-DETAIL-404`).
+The page predicate is the type's READ relation, not the union `viewer ∪ v_list`:
+`services/iam/internal/authzfilter/visibility.go` → `pageRelations` gives `v_get` for
+account / project / iam_user / iam_group / iam_service_account / iam_access_binding, and
+`{viewer, v_list}` for iam_role alone (role reads have no catalog relation). A row is on the
+page **iff** its holder may read it by id — decision
+`docs/architecture/list-page-membership-equals-read-relation.md`, gate
+`internal/repohygiene/listreadrelationparity_test.go`.
+
+Следствие, принятое вместе с решением: выдача `{list}` БЕЗ `get` не показывает объект и не
+открывает его. Это проверяется чёрным ящиком в обе стороны — `IAM-SET-*-LIST-READ-PARITY`
+(отрицательное плечо + парный положительный контроль в том же прогоне и на том же субъекте).
+
+> [!warning] Здесь было записано ОБРАТНОЕ, и оно пережило своё решение
+> Прежняя редакция утверждала: «`v_list ≠ v_get`, поэтому субъект с одним лишь `v_list`
+> ВИДИТ строку в List, а её detail Get отвечает 404». После сужения предиката страницы
+> это стало ложным — такой субъект не видит строку вовсе. Утверждение ссылалось на
+> кейсы `IAM-SET-*-VLIST-ONLY-DETAIL-404`, которые ровно это и требовали и потому
+> краснели на исправном продукте; кейсы перенацелены, ссылки заменены.
 When OpenFGA is unavailable the List RPCs fail closed (Unavailable), verified by
 `project/list_*_test.go` / `group/list_*_test.go` (incl.
 `TestListProjects_NilRelationPort_Unavailable` / `TestListGroups_NilRelationPort_Unavailable`).
