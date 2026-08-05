@@ -2391,6 +2391,15 @@
     }
   },
   {
+    "fqn": "kacho.cloud.vpc.v1.InternalAddressService/CreateOwnedAddress",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    }
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressService/GetAddressReference",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
