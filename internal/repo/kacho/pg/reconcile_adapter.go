@@ -686,41 +686,60 @@ func (s *reconcileStore) SelectorBindingsMatchingObject(ctx context.Context, obj
 // IAMDirectSelectorBindingsMatchingObject is the iam-direct (D6) analogue of
 // SelectorBindingsMatchingObject: ACTIVE selector-binding ids whose selector now
 // matches the IAM-OWN object (objectType ∈ types AND the object's OWN-TABLE
-// labels @> match_labels). The own table is chosen by objectType
-// (iam.project→projects, iam.account→accounts); the labels @> probe is served by
-// the per-table GIN index. Same-DB, no mirror. Used by the Q2 label-change
-// trigger to pick up a freshly-matching iam-direct object.
+// labels @> match_labels). The own table and the object's containment parents come
+// from the SAME closed plan the projection uses (iamDirectScanSpecs), so this
+// fast-path and the reconciler's IsContainedIn re-verify agree by construction; the
+// labels @> probe is served by the per-table GIN index. Same-DB, no mirror. Used by
+// the Q2 label-change trigger to pick up a freshly-matching iam-direct object.
+//
+// SCOPE-NARROWING OF THE ANCHOR ARM (parity with the mirror-fed sibling). The anchor
+// arm matches every object of the type, so without a containment predicate a wildcard
+// `*.*` anchor role bound at N account/project scopes fanned out to ALL N bindings on
+// every object-change event — in EVERY account of the cluster, not just the object's
+// own. Correctness never rested on this: each candidate then went through the
+// per-binding IsContainedIn re-verify, which rejects the foreign-scope ones. The cost
+// did: the fan-out was O(anchor bindings of the type ACROSS ALL ACCOUNTS) on the
+// CREATE PATH of every iam-native object, and each surplus candidate is its own
+// binding load. Measured on a populated stand before this narrowing, one
+// iam.project / iam.accessBinding / iam.serviceAccount create produced ~1408
+// candidates, while the already-narrowed mirror-fed arm returned 13 for a comparable
+// object. It grew with every tenant the platform gained.
+//
+// The predicate below is the SAME one the mirror-fed branch pushes into its JOIN,
+// written with the per-type parent-scope expressions of iamDirectScanSpecs — i.e. the
+// expressions GetIAMDirectObject projects into ParentAccountID / ParentProjectID, the
+// very fields IsContainedIn compares. It is therefore a PROVEN SUPERSET of the
+// re-verify, never narrower:
+//
+//   - account scope → parentAccountExpr = b.resource_id  (IsContainedIn: ParentAccountID == scope.ID)
+//   - project scope → parentProjectExpr = b.resource_id  (IsContainedIn: ParentProjectID == scope.ID)
+//   - cluster AND ANY UNKNOWN scope type → kept UNFILTERED. `cluster` contains
+//     everything (IsContainedIn returns true), and an unrecognised scope type must
+//     reach the Go re-verify rather than be silently dropped here: over-broad is a
+//     cost, under-broad is an UNDER-GRANT. Hence `NOT IN ('account','project')`
+//     rather than an explicit `= 'cluster'`.
+//
+// The names arm stays UNFILTERED for the same reason it does on the mirror-fed side:
+// it is already narrow (specific ids) and a foreign-scope id-match is a WANTED
+// REJECTED-containment audit signal the reconciler must still see. The labels arm is
+// likewise left as it was.
 func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Context, objectType, objectID string) ([]domain.AccessBindingID, error) {
-	// ownTable is the iam-native source table for the object type. Под единой
-	// моделью видимости ВСЕ iam-native типы несут `labels`-колонку (migration 0041
-	// добавил ее на users/service_accounts/roles/access_bindings; projects/accounts/
-	// groups несли ее ранее) и все label-selectable — поэтому arm='labels'-ветка
-	// включается для каждого типа (hasLabels=true).
-	var ownTable string
-	switch objectType {
-	case "iam.project":
-		ownTable = "kacho_iam.projects"
-	case "iam.account":
-		ownTable = "kacho_iam.accounts"
-	case "iam.group":
-		ownTable = "kacho_iam.groups"
-	case "iam.role":
-		ownTable = "kacho_iam.roles"
-	case "iam.serviceAccount":
-		ownTable = "kacho_iam.service_accounts"
-	case "iam.user":
-		ownTable = "kacho_iam.users"
-	case "iam.accessBinding":
-		ownTable = "kacho_iam.access_bindings"
-	default:
+	// The read plan — own table, optional join, and the containment parent
+	// expressions — comes from the closed per-type spec map rather than a second,
+	// local copy of the same switch. Two tables of one fact drift; this one is the
+	// same source GetIAMDirectObject reads, so the WHERE below cannot disagree with
+	// the projection the re-verify consumes.
+	spec, ok := iamDirectScanSpecs[objectType]
+	if !ok {
 		// Not an iam-direct selectable type — no fast-path candidates.
 		return nil, nil
 	}
 	// Все iam-native типы под единой моделью видимости label-selectable и несут
 	// колонку labels, поэтому arm='labels'-ветка всегда активна.
 	hasLabels := true
-	// ownTable is a fixed literal chosen from the closed switch above (never user
-	// input), so the interpolation is injection-safe.
+	// Every interpolated fragment is a fixed literal from the closed spec map (never
+	// user input), so the interpolation is injection-safe; the two bound parameters
+	// carry the object type and id.
 	//
 	// Источник fast-path — селекторы role.rules (role_rule_selectors), несомые ROLE
 	// биндинга. Match по IAM-OWN-таблице arm-aware: anchor / names / labels
@@ -729,13 +748,17 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	if hasLabels {
 		labelsBranch = " OR (rrs.arm = 'labels' AND o.labels @> rrs.match_labels)"
 	}
+	anchorBranch := `(rrs.arm = 'anchor' AND (
+	                       b.resource_type NOT IN ('account','project')
+	                    OR (b.resource_type = 'account' AND b.resource_id = ` + spec.parentAccountExpr + `)
+	                    OR (b.resource_type = 'project' AND b.resource_id = ` + spec.parentProjectExpr + `)))`
 	q := `SELECT b.id
 	        FROM kacho_iam.role_rule_selectors rrs
 	        JOIN kacho_iam.access_bindings b ON b.role_id = rrs.role_id
-	        JOIN ` + ownTable + ` o ON o.id = $2
+	        JOIN ` + spec.table + ` o ON o.id = $2 ` + spec.join + `
 	       WHERE b.status = 'ACTIVE'
 	         AND $1 = ANY(rrs.object_types)
-	         AND ( (rrs.arm = 'anchor')
+	         AND ( ` + anchorBranch + `
 	            OR (rrs.arm = 'names'  AND $2 = ANY(rrs.resource_names))` + labelsBranch + ` )
 	       ORDER BY b.id ASC`
 	rows, err := s.tx.Query(ctx, q, objectType, objectID)
