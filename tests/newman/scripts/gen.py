@@ -1412,9 +1412,18 @@ def step_to_postman(step: Step) -> Dict:
 # Предикат ставит обёртку ПО СВОЙСТВУ шага, а не по списку имён, и потому
 # закрывает класс, а не перечисленные экземпляры. Четыре условия — все
 # обязательны:
-#   1. шаг УТВЕРЖДАЕТ УСПЕХ (`to.eql(200)`). Негатив, ждущий отказ, не
-#      оборачивается никогда: ретрай на 403/404 там маскировал бы настоящий
-#      отказ (`testing.md` — «НЕ оборачивать: negatives, cross-account deny»);
+#   1. шаг УТВЕРЖДАЕТ УСПЕХ — то есть 200 входит в набор исходов, которые он
+#      принимает, а 403 в него НЕ входит. Набор читается и из `to.eql(200)`, и
+#      из `to.be.oneOf([...])` над `pm.response.code`: уборка своего свежего
+#      ресурса сплошь записана вторым способом («удалилось 200 ЛИБО состояние
+#      не позволило 400»), и пока предикат смотрел на буквальное `to.eql(200)`,
+#      такие шаги были ему невидимы ПО ПОСТРОЕНИЮ — в суите vpc это 77 записей
+#      из 93. Шаг, принимающий 403 своим исходом (authz-first толерантность
+#      негатива), не оборачивается никогда: там отказ и есть проверяемое, а
+#      ретрай маскировал бы его (`testing.md` — «НЕ оборачивать: negatives,
+#      cross-account deny»). Пережидаются ТОЛЬКО те коды полосы видимости,
+#      которых шаг исходом не заявлял: если 404 заявлен («уже нет»), ретрай
+#      идёт лишь по 403, иначе обёртка жгла бы бюджет на принятом исходе;
 #   2. адрес шага ссылается на переменную, РОЖДЁННУЮ РАНЕЕ В ЭТОМ ЖЕ КЕЙСЕ
 #      (её published предыдущий шаг). Чужой/заранее известный id предикату
 #      неизвестен — значит absent-id-негативы остаются строгими;
@@ -1430,6 +1439,26 @@ _FRESH_VAR_SET_RE = re.compile(
     r"pm\.(?:environment|collectionVariables|globals)\.set\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]"
 )
 _VAR_REF_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
+
+# Набор HTTP-исходов, которые шаг ПРИНИМАЕТ. Оба выражения привязаны к
+# `pm.response.code`, поэтому набор gRPC-кодов (`pm.expect(j.code, …).to.be
+# .oneOf([5, 9])`) сюда не попадает: числа там из другого пространства и на
+# полосу видимости не отображаются. Границей служит `;` — конец стейтмента.
+_HTTP_EQ_RE = re.compile(r"pm\.response\.code[^;]*?\.to\.eql\((\d{3})\)")
+_HTTP_ONEOF_RE = re.compile(r"pm\.response\.code[^;]*?\.to\.be\.oneOf\(\[([0-9,\s]+)\]\)")
+
+
+def _accepted_http_codes(body: str) -> set:
+    """HTTP-коды, объявленные шагом как приемлемый исход."""
+    acc = set()
+    for m in _HTTP_EQ_RE.finditer(body):
+        acc.add(int(m.group(1)))
+    for m in _HTTP_ONEOF_RE.finditer(body):
+        for part in m.group(1).split(","):
+            part = part.strip()
+            if part:
+                acc.add(int(part))
+    return {c for c in acc if 100 <= c <= 599}
 
 
 def _wrap_own_fresh_reads(steps: List[Step], rename: bool = True) -> List[Step]:
@@ -1449,9 +1478,12 @@ def _wrap_own_fresh_reads(steps: List[Step], rename: bool = True) -> List[Step]:
         body = "\n".join(st.test_script)
         self_looped = "setNextRequest" in body
         already = "_authRetryCount" in body or "_absRetryCount" in body
-        if st.test_script and not self_looped and not already and "to.eql(200)" in body:
+        accepted = _accepted_http_codes(body) if st.test_script else set()
+        positive = 200 in accepted and 403 not in accepted
+        retry_on = tuple(c for c in (403, 404) if c not in accepted)
+        if st.test_script and not self_looped and not already and positive and retry_on:
             if _VAR_REF_RE.findall(st.path) and (set(_VAR_REF_RE.findall(st.path)) & fresh):
-                w = retry_until_authorized(st)
+                w = retry_until_authorized(st, retry_on=retry_on)
                 st = replace(w, name=st.name) if not rename else w
                 body = "\n".join(st.test_script)
         for name in _FRESH_VAR_SET_RE.findall(body):
