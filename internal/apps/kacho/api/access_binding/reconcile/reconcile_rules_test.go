@@ -52,7 +52,6 @@ type fakeStore struct {
 	audits        []string                 // objectID audited
 	ledger        []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
 	locks         int                      // AcquireBindingLock (EXCLUSIVE) call count
-	sharedLocks   int                      // AcquireBindingLockShared (SHARE) call count (forward path)
 	unlockedLoads int                      // LoadBindingUnlocked call count (forward path)
 
 	// Producer-cost counters. An object-triggered pass must recompute ONLY the changed
@@ -86,14 +85,6 @@ type fakeStore struct {
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
 	f.locks++
 	f.lockOrder = append(f.lockOrder, id)
-	return nil
-}
-
-// AcquireBindingLockShared records the SHARE-mode advisory lock the forward fast-path
-// takes. It is counted SEPARATELY from the EXCLUSIVE `locks` so a forward unit test can
-// assert f.locks==0 (never the serializing EXCLUSIVE lock) while f.sharedLocks>=1.
-func (f *fakeStore) AcquireBindingLockShared(ctx context.Context, id domain.AccessBindingID) error {
-	f.sharedLocks++
 	return nil
 }
 

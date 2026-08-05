@@ -23,7 +23,7 @@ package reconcile
 // for each scope-narrowed matching binding — WITHOUT MatchAllInScope, WITHOUT the full
 // desired-diff, WITHOUT the FOR UPDATE binding row-lock, and — critically for
 // throughput — WITHOUT the EXCLUSIVE per-binding advisory lock the full path takes. It
-// holds only a SHARE advisory lock on the binding (see "LOCK CHOICE" below).
+// holds NO advisory lock on the binding at all (see "LOCK CHOICE" below).
 //
 // WHY THE FULL PATH'S EXCLUSIVE LOCK SERIALIZES, AND WHY FORWARD DOES NOT NEED IT:
 //
@@ -47,31 +47,57 @@ package reconcile
 //     already_exists as applied, and the post-commit sync FGA writer reconciles by
 //     read-then-write-delta. An object materialized twice is a safe no-op.
 //
-// LOCK CHOICE — SHARE, not "no lock" (db-architect-review, empirically forced). A pure
-// no-lock forward DEADLOCKS against a concurrent FULL ReconcileObject of the same
-// binding (observed 40P01): the full path holds `SELECT … FOR UPDATE` on the
-// access_bindings row, while the forward path's INSERT into the FK-child tables
-// (access_binding_target_members / access_binding_emitted_tuples) needs a FOR KEY SHARE
-// lock on that SAME parent row — FOR UPDATE conflicts with FOR KEY SHARE, so the two
-// passes cross-wait. The forward path therefore takes the SHARE advisory lock
-// (AcquireBindingLockShared) FIRST:
+// LOCK CHOICE — НИКАКОЙ advisory-блокировки (ни EXCLUSIVE, ни SHARE).
 //
-//   - SHARE ∥ SHARE do NOT conflict → concurrent forwards of the same binding still run
-//     fully in parallel (the throughput property is preserved — forwards never serialize
-//     on each other, unlike the EXCLUSIVE full path).
-//   - SHARE conflicts with the EXCLUSIVE full-path lock → a forward and a full pass of
-//     the SAME binding take turns, so their row-locks never cross → no deadlock, and the
-//     full recompute never runs its delete-stale diff while a forward mid-writes.
-//   - Acquired in ASCENDING binding-id order (the fan-out is dedupSortBindingIDs-sorted,
-//     matching the full path) → no ABBA across multiple shared bindings (ordered locking).
+// Здесь стояла SHARE-блокировка, и она была введена не от избытка осторожности: без
+// неё форвард ловил перекрёстное ожидание с параллельным ПОЛНЫМ проходом того же
+// биндинга (наблюдалось 40P01). Причина ожидания была одна и она названа точно —
+// полный проход держал строку access_bindings в режиме `SELECT … FOR UPDATE`, а
+// вставки форварда в дочерние по внешнему ключу таблицы (access_binding_target_members /
+// access_binding_emitted_tuples) берут на той же строке `FOR KEY SHARE`; из всех
+// режимов блокировки строки `FOR UPDATE` — единственный, что с `FOR KEY SHARE`
+// конфликтует.
 //
-// NOTE (bounded, not a hang): PostgreSQL grants a fresh SHARE advisory even with an
-// EXCLUSIVE waiter queued, so a sustained burst of overlapping forwards on one binding can
-// DELAY that binding's async FULL recompute (the EXCLUSIVE waiter). This is throughput-
-// only, never a deadlock or lost update: the full path is the eventual backstop (sweep +
-// re-delivered reconcile events), registration bursts are bounded, and each forward pass
-// is short. It is the deliberate trade — forward latency is the create-path SLO; the full
-// recompute is background.
+// ПОЧЕМУ SHARE ВСЁ РАВНО БЫЛА НЕВЕРНЫМ ЛЕКАРСТВОМ. Она убирала перекрёстное
+// ожидание, ЗАМЕНЯЯ его прямым: SHARE конфликтует с EXCLUSIVE полного прохода,
+// поэтому форвард пути СОЗДАНИЯ вставал в очередь за фоновой работой. А форвард
+// существует ровно затем, чтобы созданный ресурс был виден создателю раньше
+// клиентского бюджета чтения-своих-записей: срок здесь и есть предмет. Замер
+// (тёплый 12-ядерный стенд, волна vpc+compute+nlb, выборка pg_stat_activity раз в
+// 5 с): 99 наблюдений бэкенда в ожидании `pg_advisory_xact_lock_shared` — среднее
+// 0.88 с, максимум 4.6 с; на ранере вчетверо меньшей мощности те же ожидания
+// растягиваются за бюджет, и создатель получает отказ на СВОЙ свежий ресурс.
+//
+// ЧТО СДЕЛАНО ВМЕСТО. Причина снята в корне: полный проход читает строку биндинга
+// как `FOR NO KEY UPDATE` (GetForNoKeyUpdate). Этот режим по-прежнему конфликтует с
+// `FOR UPDATE`, с самим собой и с UPDATE строки — то есть взаимное исключение полных
+// проходов, истечения срока, отзыва и удаления сохраняется дословно (ключ строки
+// реконсайлер не меняет никогда), — но НЕ конфликтует с `FOR KEY SHARE`. Поэтому
+// дочерние вставки форварда больше не пересекаются с полным проходом ни в какую
+// сторону, и блокировка форварду не нужна вовсе:
+//
+//   - форварды разных объектов одного биндинга по-прежнему идут параллельно (они
+//     пишут непересекающиеся строки: член ключуется объектом, fga_outbox — только
+//     append, реестр — по (binding,user,relation,object));
+//   - форвард и полный проход одного биндинга больше НЕ ждут друг друга ни в одну
+//     сторону: у форварда нет advisory, а их строковые режимы совместимы;
+//   - идемпотентность повторного прохода обеспечивается ниже по течению (UPSERT
+//     члена, INSERT … ON CONFLICT реестра, already_exists как «применено» у дренажа,
+//     read-delta синхронного писателя) — она никогда не держалась на блокировке.
+//
+// ПОЧЕМУ ОДНОВРЕМЕННЫЙ delete-stale ПОЛНОГО ПРОХОДА НЕ СНОСИТ ТО, ЧТО ПИШЕТ ФОРВАРД
+// (это же рассуждение стояло здесь и раньше, в разделе «CORRECTNESS ENVELOPE», и
+// перекрёстным ожиданием не обеспечивалось): форвард материализует объект, УЖЕ
+// лежащий в зеркале, поэтому желаемый набор параллельного полного пересчёта —
+// читаемый из того же зеркала — этот объект СОДЕРЖИТ, и «устаревшим» полный проход
+// его не признаёт. Свойство прибито интеграционной пробой Race (R переживает
+// параллельный полный проход, 40P01 не возникает).
+//
+// Свойство «форвард не стоит в очереди» прибито отдельной пробой
+// TestReconcileForward_07_DoesNotQueueBehindInFlightFullPass: она держит полный
+// проход в полёте ЕГО ЖЕ первыми стейтментами (AcquireBindingLock + LoadBinding) и
+// требует, чтобы форвард прошёл в пределах бюджета, — с парным положительным
+// контролем, что тот же форвард без держателя объект материализует.
 //
 // CORRECTNESS ENVELOPE. Forward is an OPTIMIZATION of the happy path, not a replacement:
 // the co-committed resource_reconcile_outbox event + the async worker's FULL
@@ -83,7 +109,7 @@ package reconcile
 // only materializes an object ALREADY in the mirror (GetMirrorObject succeeded), a
 // concurrent full recompute's desired set (read from the same mirror) ALSO contains that
 // object → the full pass never treats it as stale. The integration Race case pins this
-// (R survives a concurrent full recompute; no deadlock under the SHARE lock).
+// (R survives a concurrent full recompute; no deadlock without any advisory lock).
 
 import (
 	"context"
@@ -96,9 +122,9 @@ import (
 // create-path (post-commit membership materialization, sub-phase IAM-FMB). It is the
 // binding-side twin of ReconcileObjectForward: where the object-forward materializes ONE
 // freshly-registered object across every matching binding, this materializes ONE freshly-
-// CREATED binding's desired ACTIVE per-object members across the whole scope — holding only
-// a SHARE advisory lock (never the EXCLUSIVE full-path lock) and no FOR UPDATE row-lock, and
-// doing NO delete-stale diff.
+// CREATED binding's desired ACTIVE per-object members across the whole scope — holding NO
+// advisory lock (neither the EXCLUSIVE full-path lock nor a SHARE one) and no FOR UPDATE
+// row-lock, and doing NO delete-stale diff.
 //
 // WHY IT IS THE THROUGHPUT FIX. The create-path previously ran the FULL EXCLUSIVE
 // ReconcileBinding post-commit: it takes the per-binding EXCLUSIVE advisory lock + a
@@ -111,15 +137,13 @@ import (
 // the client read-your-writes retry budget (transient 403 «lacks relation» on one's OWN
 // fresh grant). A create is PURELY additive — the binding is brand-new, so there is NOTHING
 // stale to delete — so the create-forward drops the delete-stale diff, the FOR UPDATE
-// row-lock, and the EXCLUSIVE advisory lock, taking only the SHARE lock.
+// row-lock, and the advisory lock entirely.
 //
-// LOCK CHOICE — SHARE, not "no lock" (same rationale as ReconcileObjectForward, see the
-// file-level doc): SHARE ∥ SHARE do not conflict → N concurrent create-forwards never
-// serialize on each other (the throughput property), while SHARE ⊥ EXCLUSIVE → a create-
-// forward and a concurrent FULL pass of the SAME binding (Role.Update fan-out / sweep) take
-// turns, so the forward's FK-child `FOR KEY SHARE` INSERTs never cross the full path's
-// `SELECT … FOR UPDATE` on the parent access_bindings row (which would deadlock, 40P01),
-// and the full recompute never runs its delete-stale diff while a forward mid-writes.
+// LOCK CHOICE — без advisory-блокировки (то же обоснование, что у ReconcileObjectForward,
+// см. шапку файла): полный проход держит строку биндинга как `FOR NO KEY UPDATE`, что с
+// `FOR KEY SHARE` дочерних вставок форварда не конфликтует, — поэтому ни перекрёстного
+// ожидания (40P01), ни прямого ожидания создания за фоновым проходом больше нет, и
+// брать SHARE незачем.
 //
 // DELETE-STALE GUARD (create-only, D-4). The additive path only ADDS the binding's desired
 // ACTIVE members; it NEVER delete-stale. That is correct ONLY for a brand-NEW binding (a
@@ -156,13 +180,10 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 			needsFull = true
 			return nil // commit the read-only peek; run the FULL path below (fresh tx).
 		}
-		// SHARE advisory lock FIRST (never the EXCLUSIVE full-path lock). SHARE coexists with
-		// sibling create-forwards (throughput) but excludes a concurrent FULL recompute of
-		// the SAME binding — so the forward's FK `FOR KEY SHARE` child INSERTs never cross
-		// the full path's `SELECT … FOR UPDATE` on the parent access_bindings row (40P01).
-		if err := s.AcquireBindingLockShared(ctx, bindingID); err != nil {
-			return fmt.Errorf("forward binding: shared lock %s: %w", bindingID, err)
-		}
+		// БЕЗ advisory-блокировки — ни EXCLUSIVE, ни SHARE (см. «LOCK CHOICE» в шапке
+		// файла): аддитивный проход не удаляет ничего, а перекрёстного ожидания с полным
+		// проходом больше нет by construction — тот держит строку в режиме
+		// `FOR NO KEY UPDATE`, который с `FOR KEY SHARE` дочерних вставок не конфликтует.
 		bs, ok, err := s.LoadBindingUnlocked(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("forward binding: load %s: %w", bindingID, err)
@@ -210,8 +231,8 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 // (the entry point for a caller that cannot prove the object carries nothing stale — a
 // re-registration that replaced the projection, and every withdrawal). It materializes ONLY the freshly-
 // registered object's per-object tuples for each binding whose selector NOW matches it,
-// holding only a SHARE advisory lock (never the EXCLUSIVE full-path lock) and no FOR
-// UPDATE row-lock, and doing NO full O(scope) desired recompute (see the file-level doc
+// holding NO advisory lock (neither the EXCLUSIVE full-path lock nor a SHARE one) and no
+// FOR UPDATE row-lock, and doing NO full O(scope) desired recompute (see the file-level doc
 // for the lock choice and why it is the throughput fix).
 //
 // The full ReconcileObject REMAINS the backstop (delete-stale / audit / PENDING /
@@ -232,7 +253,7 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 // (Project/AccessBinding/Role/... Create emits a reconcile event for its OWN object).
 // The forward path is iam-direct-AWARE (sub-phase IAM-FMB, throughput fix for the
 // iam.accessBinding / iam.project owner materialization): a brand-NEW iam-direct object
-// is materialized ADDITIVELY (SHARE lock, single-object) EXACTLY like a mirror-fed one,
+// is materialized ADDITIVELY (lock-free, single-object) EXACTLY like a mirror-fed one,
 // reading its own-table projection (GetIAMDirectObject) and the matching bindings from
 // the iam-direct fan-out (IAMDirectSelectorBindingsMatchingObject). Before this the
 // create-path used the FULL EXCLUSIVE ReconcileObject, whose per-binding advisory lock +
@@ -412,21 +433,16 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 }
 
 // forwardObjectForBinding materializes the ONE object's ACTIVE per-object tuples for a
-// single matching binding. It takes the SHARE advisory lock (NOT the EXCLUSIVE lock the
-// full path takes) and NO FOR UPDATE row-lock (LoadBindingUnlocked): the pass is
+// single matching binding. It takes NO advisory lock (neither the EXCLUSIVE lock the full
+// path takes nor a SHARE one) and NO FOR UPDATE row-lock (LoadBindingUnlocked): the pass is
 // additive-only (see file-level doc). A binding that is gone / no longer ACTIVE / whose
 // (scope-aware) selectors do not match this object is a no-op. Non-ACTIVE per-object
 // verdicts (REJECTED containment) are LEFT to the async full backstop — the additive
 // path never writes a non-grant.
 func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, obj domain.MirrorObject, col *syncFGACollector) error {
-	// SHARE advisory lock FIRST (acquired in the ascending binding-id order the caller
-	// sorts the fan-out into). SHARE coexists with other forwards (throughput) but
-	// excludes a concurrent FULL recompute of the SAME binding — so the forward's FK
-	// `FOR KEY SHARE` child INSERTs never cross the full path's `SELECT … FOR UPDATE` on
-	// the parent access_bindings row (which would deadlock, 40P01).
-	if err := s.AcquireBindingLockShared(ctx, bindingID); err != nil {
-		return fmt.Errorf("forward: shared lock binding %s: %w", bindingID, err)
-	}
+	// БЕЗ advisory-блокировки (см. «LOCK CHOICE» в шапке файла): проход аддитивен, а
+	// перекрёстного ожидания с полным проходом больше нет — тот держит строку биндинга
+	// в режиме `FOR NO KEY UPDATE`, совместимом с `FOR KEY SHARE` дочерних вставок.
 	bs, ok, err := s.LoadBindingUnlocked(ctx, bindingID)
 	if err != nil {
 		return fmt.Errorf("forward: load binding %s: %w", bindingID, err)

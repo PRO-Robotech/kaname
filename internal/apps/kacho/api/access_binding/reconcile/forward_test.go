@@ -30,7 +30,8 @@ import (
 // TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock — the fast-path
 // materializes the freshly-registered object's ACTIVE member + per-object tuples for the
 // matching binding and takes NO EXCLUSIVE advisory lock (f.locks stays 0), only the SHARE
-// lock (f.sharedLocks>=1); it reads the binding via the unlocked load. This is the
+// lock — и никакой другой (форвард с 2026-08-05 не берёт advisory вовсе); it reads the
+// binding via the unlocked load. This is the
 // throughput-critical property: SHARE ∥ SHARE do not conflict, so N concurrent
 // registrations sharing one binding never serialize on each other (unlike the EXCLUSIVE
 // full path).
@@ -60,7 +61,7 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 	// NO EXCLUSIVE advisory lock — the additive forward path removes the serialization
 	// point; it takes only the SHARE lock (coexists with sibling forwards).
 	assert.Equal(t, 0, f.locks, "forward fast-path must NOT take the EXCLUSIVE advisory lock (throughput)")
-	assert.GreaterOrEqual(t, f.sharedLocks, 1, "forward takes the SHARE advisory lock (mutual-exclusion vs full only)")
+	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "форвард прошёл аддитивным путём (unlocked-load)")
 	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "forward reads the binding via the UNLOCKED load")
 
 	// Exactly the ONE registered object is materialized ACTIVE (no full-scope recompute).
@@ -126,7 +127,7 @@ func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLo
 
 	// (a) NO EXCLUSIVE advisory lock — additive iam-direct forward takes only SHARE.
 	assert.Equal(t, 0, f.locks, "iam-direct forward must NOT take the EXCLUSIVE advisory lock (throughput)")
-	assert.GreaterOrEqual(t, f.sharedLocks, 1, "iam-direct forward takes the SHARE advisory lock")
+	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "iam-direct форвард прошёл аддитивным путём (unlocked-load)")
 	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "iam-direct forward reads the binding via the UNLOCKED load")
 
 	// Exactly the ONE registered object is materialized ACTIVE.

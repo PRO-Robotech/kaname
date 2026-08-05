@@ -86,7 +86,7 @@ func TestReconcileObjectForwardNoStale_MembersOfSameCreate_StayOnAdditivePath(t 
 	assert.Equal(t, 0, f.locks,
 		"a PROVEN-NEW object must stay on the additive fast-path — members written by the same "+
 			"create must not push it onto the FULL EXCLUSIVE recompute (the create-path starvation)")
-	assert.GreaterOrEqual(t, f.sharedLocks, 1, "the additive path takes the SHARE advisory lock")
+	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "аддитивный путь исполнился (unlocked-load), и без advisory-блокировки")
 
 	// And it must actually MATERIALIZE: the account-owner's per-object verb-set on the
 	// new binding-object, byte-identical to what the full path would emit.

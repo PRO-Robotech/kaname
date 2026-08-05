@@ -82,17 +82,47 @@ func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.A
 	return out, nil
 }
 
-// GetForUpdate is Get with a `FOR UPDATE` row-lock on the binding row. The γ
-// reconciler calls it as the FIRST statement of its writer-tx (LoadBinding) so
-// two concurrent reconcile passes of the SAME binding are serialized on the row-
-// lock: the second pass blocks until the first commits its
-// membership diff, then re-reads CurrentMembers seeing the already-ACTIVE member
-// (no status change → idempotent skip) and emits ZERO duplicate fga_outbox
-// tuples. This is a parent-row-lock critical-section pattern. A missing row ⇒
-// ErrNotFound (the binding was deleted — the reconciler then does nothing).
-func (r *abReader) GetForUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+// GetForNoKeyUpdate is Get with a `FOR NO KEY UPDATE` row-lock on the binding row.
+// The γ reconciler calls it as the FIRST statement of its FULL writer-tx
+// (LoadBinding) so two concurrent full passes of the SAME binding are serialized on
+// the row-lock: the second pass blocks until the first commits its membership diff,
+// then re-reads CurrentMembers seeing the already-ACTIVE member (no status change ⇒
+// idempotent skip) and emits ZERO duplicate fga_outbox tuples. This is a parent-row-
+// lock critical-section pattern. A missing row ⇒ ErrNotFound (the binding was deleted
+// — the reconciler then does nothing).
+//
+// ПОЧЕМУ `FOR NO KEY UPDATE`, А НЕ `FOR UPDATE` — И ЧТО ЭТО НЕ ОСЛАБЛЯЕТ.
+//
+// Взаимное исключение полных проходов сохраняется дословно: `FOR NO KEY UPDATE`
+// конфликтует и с `FOR UPDATE`, и сам с собой, и с обычным UPDATE строки, — то есть
+// со всем, что меняет биндинг (истечение срока, отзыв, удаление). Ключ строки
+// (id) реконсайлер не меняет НИКОГДА, поэтому более сильный режим здесь ничего не
+// охранял.
+//
+// А охранял он лишнее — и это измерено. `FOR UPDATE` — единственный режим, который
+// конфликтует с `FOR KEY SHARE`, а именно `FOR KEY SHARE` берёт на этой же строке
+// КАЖДАЯ вставка в дочерние таблицы по внешнему ключу (access_binding_target_members
+// / access_binding_emitted_tuples). Из-за этого аддитивный форвард пути СОЗДАНИЯ — тот,
+// ради которого свежий ресурс виден создателю сразу, — не мог писать, пока фоновый
+// полный проход держит строку, и вынужден был брать SHARE-advisory, чтобы не словить
+// перекрёстное ожидание (40P01). То есть окно видимости своего свежего ресурса
+// определялось не работой форварда, а сроком чужой транзакции.
+//
+// Замер (тёплый 12-ядерный стенд, волна vpc+compute+nlb, выборка pg_stat_activity
+// раз в 5 с): 99 наблюдений бэкенда в ожидании `pg_advisory_xact_lock_shared` —
+// это и есть форвард — со средним 0.88 с и максимумом 4.6 с. На ранере вчетверо
+// меньшей мощности те же ожидания растягиваются за клиентский бюджет
+// чтения-своих-записей, и создатель получает отказ на СВОЙ ресурс.
+//
+// Сняв конфликт в его корне, форвард перестаёт брать advisory-блокировку вовсе
+// (reconcile/forward.go). Свойство держит проба
+// TestReconcileForward_07_DoesNotQueueBehindInFlightFullPass: она держит полный
+// проход в полёте ЕГО ЖЕ первыми стейтментами и требует, чтобы форвард прошёл, — с
+// парным положительным контролем, что тот же форвард без держателя материализует
+// объект (иначе «не ждёт» зеленело бы на проходе, который ничего не делает).
+func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR UPDATE`, abCols), string(id))
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR NO KEY UPDATE`, abCols), string(id))
 	out, err := scanAB(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

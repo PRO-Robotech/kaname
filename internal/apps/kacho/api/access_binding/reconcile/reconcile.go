@@ -107,34 +107,18 @@ type ReconcileStore interface {
 	// of a per-binding reconcile so concurrent passes of the SAME binding serialize
 	// on the xact-scoped lock (released automatically on commit/rollback — never
 	// pool-scoped). This makes the concurrent integration assertion
-	// deterministic and, together with the LoadBinding `SELECT … FOR UPDATE` row
-	// lock + the ledger partial-UNIQUE backstop, guarantees exactly-once
+	// deterministic and, together with the LoadBinding `SELECT … FOR NO KEY UPDATE`
+	// row lock + the ledger partial-UNIQUE backstop, guarantees exactly-once
 	// materialization under N replicas.
+	//
+	// SHARE-режима у этого порта НЕТ и он не нужен: аддитивный форвард не берёт
+	// advisory вовсе (reconcile/forward.go, «LOCK CHOICE»). Прежний
+	// AcquireBindingLockShared существовал ради одного — развести дочерние вставки
+	// форварда с `FOR UPDATE` полного прохода; режим строки ослаблен до
+	// `FOR NO KEY UPDATE`, конфликта нет, и метод снят, чтобы ожидание не завелось
+	// обратно «по аналогии».
 	AcquireBindingLock(ctx context.Context, bindingID domain.AccessBindingID) error
 
-	// AcquireBindingLockShared takes pg_advisory_xact_lock_shared(hashtext(binding_id))
-	// — the SHARE-mode sibling of AcquireBindingLock — on the forward writer-tx. It is
-	// the FIRST statement of the ADDITIVE forward path (forwardObjectForBinding). SHARE
-	// mode is chosen deliberately:
-	//
-	//   - SHARE ∥ SHARE do NOT conflict → N concurrent forward passes for DIFFERENT
-	//     objects of the SAME binding all hold it simultaneously and proceed CONCURRENTLY
-	//     (the throughput property — forwards never serialize on each other).
-	//   - SHARE conflicts with EXCLUSIVE (AcquireBindingLock) → a forward pass and a
-	//     concurrent FULL ReconcileObject of the SAME binding are MUTUALLY EXCLUSIVE. This
-	//     is REQUIRED for correctness: the full path holds `SELECT … FOR UPDATE` on the
-	//     access_bindings row, and the forward path's INSERT into the FK-child tables
-	//     (target_members / emitted_tuples) needs a FOR KEY SHARE lock on that same parent
-	//     row — FOR UPDATE conflicts with FOR KEY SHARE, so interleaving them deadlocks
-	//     (40P01, empirically). The SHARE advisory gate makes forward and full take turns
-	//     on the binding, so their row-locks never cross → no deadlock, and full never
-	//     revokes a just-forwarded in-mirror object as "stale".
-	//
-	// It is acquired in ASCENDING binding-id order (ReconcileObjectForward sorts the
-	// fan-out) — the SAME order the full path's dedupSortBindingIDs uses — so a forward
-	// and a full pass acquiring locks across multiple shared bindings cannot form an ABBA
-	// cycle (ordered locking). xact-scoped → auto-released on commit/rollback.
-	AcquireBindingLockShared(ctx context.Context, bindingID domain.AccessBindingID) error
 
 	// LoadBinding loads the minimal scope/selector/role facts for a binding.
 	// ok=false when the binding no longer exists (deleted — the reconciler then

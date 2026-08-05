@@ -87,19 +87,22 @@ type reconcileStore struct {
 // LoadBinding reads the minimal scope/selector/role facts for a binding inside
 // the tx. ok=false when the binding row is gone (deleted).
 //
-// It takes a `SELECT … FOR UPDATE` lock on the binding row (GetForUpdate) as the
-// FIRST statement of the reconcile writer-tx, so two concurrent reconcile passes
-// of the same binding serialize on the row-lock (system-design ВЗ-1): the second
-// pass blocks here until the first commits its diff, then sees the already-
-// materialized member (no status change → idempotent skip) and emits no
-// duplicate fga_outbox tuples. The expiry path (ExpireBinding) keeps its CAS
-// guard (RevokeExpiredBinding) and ALSO benefits from the lock taken here.
+// It takes a `SELECT … FOR NO KEY UPDATE` lock on the binding row
+// (GetForNoKeyUpdate) as the FIRST statement of the reconcile writer-tx, so two
+// concurrent reconcile passes of the same binding serialize on the row-lock
+// (system-design ВЗ-1): the second pass blocks here until the first commits its
+// diff, then sees the already-materialized member (no status change → idempotent
+// skip) and emits no duplicate fga_outbox tuples. The expiry path (ExpireBinding)
+// keeps its CAS guard (RevokeExpiredBinding) and ALSO benefits from the lock taken
+// here. Почему режим именно NO KEY (и что это не ослабляет) — в godoc
+// GetForNoKeyUpdate: он не конфликтует с `FOR KEY SHARE` дочерних вставок, поэтому
+// аддитивный форвард пути создания больше не стоит в очереди за фоновым проходом.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
 	return s.loadBinding(ctx, bindingID, true /* forUpdate — full path serializes the delete-stale diff */)
 }
 
 // LoadBindingUnlocked loads the same BindingScope as LoadBinding but WITHOUT the
-// `FOR UPDATE` row-lock — the read the ADDITIVE forward fast-path
+// `FOR NO KEY UPDATE` row-lock — the read the ADDITIVE forward fast-path
 // (reconcile.ReconcileObjectForward) uses. Forward only WRITES the freshly-registered
 // object's tuples (never a delete-stale diff), so it needs no serialization against a
 // concurrent pass of the same binding; taking the row-lock here would re-serialize all
@@ -120,7 +123,7 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		err error
 	)
 	if forUpdate {
-		b, err = r.GetForUpdate(ctx, bindingID)
+		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
 	} else {
 		b, err = r.Get(ctx, bindingID)
 	}
@@ -183,19 +186,6 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 func (s *reconcileStore) AcquireBindingLock(ctx context.Context, bindingID domain.AccessBindingID) error {
 	if _, err := s.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, string(bindingID)); err != nil {
 		return fmt.Errorf("reconcile: advisory-lock binding %s: %w", bindingID, err)
-	}
-	return nil
-}
-
-// AcquireBindingLockShared takes pg_advisory_xact_lock_shared(hashtext(binding_id)) —
-// the SHARE-mode advisory lock the ADDITIVE forward fast-path holds. SHARE ∥ SHARE do not
-// conflict (concurrent forwards of the same binding coexist → throughput), while SHARE
-// conflicts with the EXCLUSIVE AcquireBindingLock the FULL path takes (forward and full
-// take turns on the binding → their FK-child INSERT `FOR KEY SHARE` never crosses the
-// full path's `SELECT … FOR UPDATE` on the parent row → no 40P01 deadlock). xact-scoped.
-func (s *reconcileStore) AcquireBindingLockShared(ctx context.Context, bindingID domain.AccessBindingID) error {
-	if _, err := s.tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext($1))`, string(bindingID)); err != nil {
-		return fmt.Errorf("reconcile: shared advisory-lock binding %s: %w", bindingID, err)
 	}
 	return nil
 }
