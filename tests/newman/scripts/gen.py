@@ -654,6 +654,27 @@ def retry_until_authorized(step: Step, budget: int = 15, interval_ms: int = 400,
     globally unique after serialization) so the loop never bleeds across cases or
     steps -- same discipline as poll_operation_until_done.
     """
+    # Полоса, по которой приходит окно видимости, задаётся МЕТОДОМ, а не вкусом
+    # автора: у мутации отказ виден как 403, а у ЧТЕНИЯ он спрятан под 404
+    # (hide-existence: текст отказа побайтово равен настоящему «не найдено», см.
+    # `security.md`). Поэтому рукописное `retry_on=(403,)` на GET — обёртка,
+    # которая не может сработать на том коде, который она увидит: форма есть,
+    # содержания нет. Такое место в дереве нашлось (vpc1 `get-no-dhcp`: 404 на
+    # первом же обращении, ретрай не сработал ни разу, шаг упал). Чинится по
+    # построению здесь, а не перечнем в кейсах; 404, названный шагом законным
+    # исходом, в retry_on не попадает вовсе — его отсекает вызывающий.
+    # Ожидание НИКОГДА не включает код, который шаг сам объявил приемлемым
+    # исходом: иначе проба пережидала бы ровно то, ради чего написана, и жгла бы
+    # бюджет на успехе. Нормализация здесь, а не у вызывающих: рукописные
+    # обёртки этого не делали (5 мест в дереве ждали заявленный ими же 404).
+    _acc = _accepted_http_codes("\n".join(step.test_script))
+    retry_on = tuple(c for c in retry_on if c not in _acc)
+    if step.method == "GET" and 404 not in retry_on and 404 not in _acc:
+        retry_on = tuple(retry_on) + (404,)
+    if not retry_on:
+        # Ждать нечего: все коды полосы видимости объявлены исходами. Обёртка
+        # выродилась бы в петлю, которая не может сработать, — не ставим её.
+        return step
     retry_set = ",".join(str(c) for c in retry_on)
     guard = [
         "// bounded read-your-writes retry over the owner-tuple materialization window",
@@ -1479,9 +1500,20 @@ def _wrap_own_fresh_reads(steps: List[Step], rename: bool = True) -> List[Step]:
         self_looped = "setNextRequest" in body
         already = "_authRetryCount" in body or "_absRetryCount" in body
         accepted = _accepted_http_codes(body) if st.test_script else set()
-        positive = 200 in accepted and 403 not in accepted
+        # Ждать можно ТОЛЬКО код, который шаг исходом не заявлял, — тогда
+        # ожидание ничего не маскирует по построению: если 403/404 названы
+        # приемлемым исходом, шаг про них и спрашивает, и ретрай там запрещён.
+        # Требования «шаг обязан ждать 200» больше нет: отрицательная проба
+        # СВОЕГО СВЕЖЕГО ресурса («такой CIDR отвергается») тоже упирается в
+        # окно видимости и получает 403 вместо ожидаемого 400 — то есть падает
+        # не по своему предмету. Чужой аккаунт, посеянный и несуществующий id
+        # под правило не подпадают: они не рождены в этом кейсе.
+        # Шаг без единого утверждения ждёт только 403: у чтения/уборки 404
+        # часто законное «уже нет», и жечь на нём бюджет незачем.
         retry_on = tuple(c for c in (403, 404) if c not in accepted)
-        if st.test_script and not self_looped and not already and positive and retry_on:
+        if not accepted:
+            retry_on = (403,)
+        if st.test_script and not self_looped and not already and 403 not in accepted and retry_on:
             if _VAR_REF_RE.findall(st.path) and (set(_VAR_REF_RE.findall(st.path)) & fresh):
                 w = retry_until_authorized(st, retry_on=retry_on)
                 st = replace(w, name=st.name) if not rename else w

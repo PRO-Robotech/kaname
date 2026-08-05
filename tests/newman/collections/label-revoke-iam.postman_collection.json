@@ -221,7 +221,7 @@
           ]
         },
         {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: clr-precheck-has-label-rya77",
+          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: clr-precheck-has-label-rya164",
           "request": {
             "method": "GET",
             "header": [
@@ -309,7 +309,7 @@
           ]
         },
         {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: update-proj-clr-rya78",
+          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: update-proj-clr-rya165",
           "request": {
             "method": "PATCH",
             "header": [
@@ -487,7 +487,7 @@
           ]
         },
         {
-          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: clr-post-clear-empty-rya79",
+          "name": "IAM-LBLCLEAR-PROJECT-EMPTY-01 :: clr-post-clear-empty-rya166",
           "request": {
             "method": "GET",
             "header": [
@@ -1458,7 +1458,7 @@
           ]
         },
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: update-proj-r1-rya80",
+          "name": "IAM-LBLREVOKE-PROJECT-01 :: update-proj-r1-rya167",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1636,7 +1636,7 @@
           ]
         },
         {
-          "name": "IAM-LBLREVOKE-PROJECT-01 :: r1-labels-empty-rya81",
+          "name": "IAM-LBLREVOKE-PROJECT-01 :: r1-labels-empty-rya168",
           "request": {
             "method": "GET",
             "header": [
