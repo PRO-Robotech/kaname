@@ -1400,7 +1400,73 @@ def step_to_postman(step: Step) -> Dict:
     return item
 
 
+# --- Класс: первый доступ к СВОЕМУ свежему ресурсу без ограниченного ретрая ---
+#
+# Обёртка `retry_until_authorized` ставилась ВРУЧНУЮ, поэтому её пропуск был
+# неотличим от решения не оборачивать. Замер по артефактам прогона CI
+# 31002239590 (8 суит, 82 отчёта, 15648 утверждений, 151 падение): из 68
+# падений полосы видимости (403/404) **42** пришлись на шаги, у которых обёртки
+# не было ВОВСЕ, при том что соседние шаги той же формы в тех же кейсах
+# обёрнуты — то есть пропуск, а не замысел.
+#
+# Предикат ставит обёртку ПО СВОЙСТВУ шага, а не по списку имён, и потому
+# закрывает класс, а не перечисленные экземпляры. Четыре условия — все
+# обязательны:
+#   1. шаг УТВЕРЖДАЕТ УСПЕХ (`to.eql(200)`). Негатив, ждущий отказ, не
+#      оборачивается никогда: ретрай на 403/404 там маскировал бы настоящий
+#      отказ (`testing.md` — «НЕ оборачивать: negatives, cross-account deny»);
+#   2. адрес шага ссылается на переменную, РОЖДЁННУЮ РАНЕЕ В ЭТОМ ЖЕ КЕЙСЕ
+#      (её published предыдущий шаг). Чужой/заранее известный id предикату
+#      неизвестен — значит absent-id-негативы остаются строгими;
+#   3. у шага НЕТ собственной петли (`setNextRequest`) — поллер операции ведёт
+#      свою и переименован под себя; вторая петля сломала бы резолв имени;
+#   4. шаг ещё не обёрнут вручную (идемпотентность).
+#
+# Доказательство в обе стороны — `scripts/selftest_autowrap.py`: инъекция
+# настоящего пропуска (краснеет без предиката) и ЧЕТЫРЕ законных близнеца
+# (негатив, поллер, уже обёрнутый, чужой id), на которых предикат обязан
+# молчать.
+_FRESH_VAR_SET_RE = re.compile(
+    r"pm\.(?:environment|collectionVariables|globals)\.set\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]"
+)
+_VAR_REF_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
+
+
+def _wrap_own_fresh_reads(steps: List[Step], rename: bool = True) -> List[Step]:
+    """Обернуть положительные первые обращения к своему свежему ресурсу.
+
+    Возвращает НОВЫЙ список шагов; исходные Step не мутируются.
+
+    `rename=False` — для генератора, который САМ делает имена шагов глобально
+    уникальными при сериализации (iam: `<case-id> :: <шаг>`) и переписывает
+    буквальные переходы `setNextRequest('<сосед>')` по БАЗОВЫМ именам. Там
+    переименование обёрткой сломало бы резолв такого перехода, а нужды в нём
+    нет: `pm.info.requestName` резолвится в итоговое имя, уже уникальное.
+    """
+    fresh: set = set()
+    out: List[Step] = []
+    for st in steps:
+        body = "\n".join(st.test_script)
+        self_looped = "setNextRequest" in body
+        already = "_authRetryCount" in body or "_absRetryCount" in body
+        if st.test_script and not self_looped and not already and "to.eql(200)" in body:
+            if _VAR_REF_RE.findall(st.path) and (set(_VAR_REF_RE.findall(st.path)) & fresh):
+                w = retry_until_authorized(st)
+                st = replace(w, name=st.name) if not rename else w
+                body = "\n".join(st.test_script)
+        for name in _FRESH_VAR_SET_RE.findall(body):
+            fresh.add(name)
+        out.append(st)
+    return out
+
+
+
 def case_to_postman(case: Case) -> Dict:
+    # Обёртка первого доступа к своему свежему ресурсу ставится ПЕРЕД любой
+    # обработкой имён: `rename=False` — iam сам делает имена глобально
+    # уникальными (`<case-id> :: <шаг>`) и переписывает буквальные переходы
+    # по БАЗОВЫМ именам, поэтому переименование обёрткой сломало бы резолв.
+    case = replace(case, steps=_wrap_own_fresh_reads(case.steps, rename=False))
     tags = [f"class:{c}" for c in case.classes] + [f"priority:{case.priority}"]
 
     # HARNESS FIX: step names MUST be globally UNIQUE across the whole collection.
