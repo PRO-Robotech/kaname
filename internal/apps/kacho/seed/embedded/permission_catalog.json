@@ -1857,7 +1857,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Delete",
     "permission": "storage.images.delete",
-    "required_relation": "editor",
+    "required_relation": "v_delete",
     "scope_extractor": {
       "object_type": "storage_image",
       "from_request_field": "image_id"
@@ -1867,7 +1867,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Get",
     "permission": "storage.images.get",
-    "required_relation": "viewer",
+    "required_relation": "v_get",
     "scope_extractor": {
       "object_type": "storage_image",
       "from_request_field": "image_id"
@@ -1887,7 +1887,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/ListOperations",
     "permission": "storage.images.listOperations",
-    "required_relation": "viewer",
+    "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "storage_image",
       "from_request_field": "image_id"
@@ -1897,7 +1897,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Update",
     "permission": "storage.images.update",
-    "required_relation": "editor",
+    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "storage_image",
       "from_request_field": "image_id"
@@ -1998,7 +1998,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Delete",
     "permission": "storage.snapshots.delete",
-    "required_relation": "editor",
+    "required_relation": "v_delete",
     "scope_extractor": {
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
@@ -2008,7 +2008,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Get",
     "permission": "storage.snapshots.get",
-    "required_relation": "viewer",
+    "required_relation": "v_get",
     "scope_extractor": {
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
@@ -2028,7 +2028,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Update",
     "permission": "storage.snapshots.update",
-    "required_relation": "editor",
+    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
@@ -2048,7 +2048,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Delete",
     "permission": "storage.volumes.delete",
-    "required_relation": "editor",
+    "required_relation": "v_delete",
     "scope_extractor": {
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
@@ -2058,7 +2058,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Get",
     "permission": "storage.volumes.get",
-    "required_relation": "viewer",
+    "required_relation": "v_get",
     "scope_extractor": {
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
@@ -2078,7 +2078,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/ListOperations",
     "permission": "storage.volumes.listOperations",
-    "required_relation": "viewer",
+    "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
@@ -2088,7 +2088,7 @@
   {
     "fqn": "kacho.cloud.storage.v1.VolumeService/Update",
     "permission": "storage.volumes.update",
-    "required_relation": "editor",
+    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "storage_volume",
       "from_request_field": "volume_id"
