@@ -119,7 +119,6 @@ type ReconcileStore interface {
 	// обратно «по аналогии».
 	AcquireBindingLock(ctx context.Context, bindingID domain.AccessBindingID) error
 
-
 	// LoadBinding loads the minimal scope/selector/role facts for a binding.
 	// ok=false when the binding no longer exists (deleted — the reconciler then
 	// does nothing; the CASCADE already dropped its members).
