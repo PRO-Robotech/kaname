@@ -4,31 +4,32 @@
 """Cross-service ARM_LABELS revoke-on-label-change, vpc resources (e2e, black-box).
 
 ╔═══════════════════════════════════════════════════════════════════════════════════╗
-║ READ THIS BEFORE CALLING A RED HERE A FLAKE — IT WAS MEASURED, NOT GUESSED.        ║
+║ THE RED THAT STOOD HERE WAS A PRODUCT FINDING, AND IT IS CLOSED. WHAT IT WAS.      ║
 ║                                                                                   ║
-║ The revoke-side probes exhaust their budget on this stand. That is NOT             ║
-║ eventual-consistency noise, NOT a drainer backlog and NOT a wrong probe. Measured  ║
-║ 2026-08-04 on a production-posture stand with no competing load:                   ║
+║ Seven assertions of this file exhausted their budget under the parallel run and    ║
+║ passed when the same collection ran alone. That is not flakiness and was not an    ║
+║ eventual-consistency lag one could wait out: the ADD half and the REMOVE half      ║
+║ failed for ONE reason, and both halves ride an Update.                            ║
 ║                                                                                   ║
-║   * the drainer is CAUGHT UP — zero unsent rows out of 3 544 498; a delete row     ║
-║     goes out in 0.03-0.15 s, mean lag 2.3 s and worst 31.5 s over 90 minutes;      ║
-║   * the ADD half materialises on the request path: its write row is created        ║
-║     within milliseconds of the granting call, and `add-post-add-allow` converges   ║
-║     in ~1 s (two polls);                                                           ║
-║   * the REMOVE half does not. For the three probes that failed, the delete rows    ║
-║     were created about two minutes after their own Update — and all three within   ║
-║     the SAME half-second, although the three Updates were 20 s and 80 s apart.     ║
-║     Rows arriving together for requests that did not is the signature of a later   ║
-║     sweep, not of the request that caused them. Across 4031 write→delete pairs in  ║
-║     one 35-minute window the median separation is 37.7 s, the largest 4 m 38 s.    ║
+║ Measured 2026-08-05 (revision 1e94ff69, production-posture stand). Creating a      ║
+║ resource delivered its registration TWICE — durable intent in the writer-tx plus   ║
+║ a synchronous call right after the commit — so a grant was visible on the request  ║
+║ path. Changing labels on Update delivered it ONCE: the intent was written and      ║
+║ nothing else. For the six objects whose probes failed, those intent rows sat in    ║
+║ `kacho_vpc.fga_register_outbox` for 188-365 s (mean over three hours 278 s, p95    ║
+║ 446 s, worst 1193 s) while this file's budget is POLL_CAP × 500 ms = 15 s. The     ║
+║ sibling services drain the same queue in seconds, which is why only vpc reddened   ║
+║ and only under load — the defect was the ASYMMETRY, not the depth.                 ║
 ║                                                                                   ║
-║ So the two halves of one contract are asymmetric: adding the label grants now,     ║
-║ removing it revokes when something later gets round to it. The probe budget here   ║
-║ is POLL_CAP × 500 ms = 15 s and is deliberately NOT raised to cover minutes: a     ║
-║ budget stretched until a red turns green states that the latency is accepted, and  ║
-║ nobody has accepted it. These assertions therefore stay RED as a finding ABOUT     ║
-║ THE PRODUCT — not masked, not skipped, not weakened — and the numbers above are    ║
-║ what a fix has to move.                                                            ║
+║ Fixed by making the Update path deliver synchronously exactly as Create does       ║
+║ (commit 993cf744; the class was 14 sites across vpc/nlb/storage/compute, all       ║
+║ converted, and a tree gate in internal/repohygiene keeps it that way).             ║
+║                                                                                   ║
+║ THE BUDGET WAS NOT RAISED, AND THAT IS THE POINT. POLL_CAP is still 30. On the     ║
+║ green run the queue was just as deep — the same six objects' Update intents took   ║
+║ 177-364 s to drain — and every probe converged inside 15 s anyway. A budget        ║
+║ stretched until a red turns green would have stated that the latency is accepted;  ║
+║ nobody accepted it, and nothing here waits for the queue any more.                 ║
 ╚═══════════════════════════════════════════════════════════════════════════════════╝
 
 verifies: removing/changing the matching label on a vpc resource Update revokes
