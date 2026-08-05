@@ -1558,7 +1558,7 @@
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/AddTargets",
     "permission": "loadbalancer.targetGroups.addTargets",
-    "required_relation": "v_update",
+    "required_relation": "v_addtargets",
     "scope_extractor": {
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"
@@ -1627,7 +1627,7 @@
   {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/RemoveTargets",
     "permission": "loadbalancer.targetGroups.removeTargets",
-    "required_relation": "v_update",
+    "required_relation": "v_removetargets",
     "scope_extractor": {
       "object_type": "nlb_target_group",
       "from_request_field": "target_group_id"

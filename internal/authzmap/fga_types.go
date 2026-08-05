@@ -116,9 +116,14 @@ var dottedByFGAType = func() map[string]string {
 	return m
 }()
 
-// TypeHasVerbRelations reports whether the FGA object_type carries the closed
-// per-verb relation set (v_get/v_list/v_create/v_update/v_delete) in the
-// canonical authorization model.
+// TypeHasVerbRelations reports whether the FGA object_type carries per-verb
+// relations at all in the canonical authorization model — it says nothing about
+// WHICH ones. The set is an attribute of the TYPE (VerbRelationsOfType), not a
+// platform constant: `nlb_target_group` declares the canonical CRUD plus its two
+// membership relations (NLB-TGT-1), so the previous wording — which named the
+// five CRUD relations as THE set every verb-bearing type carries — described a
+// tree that no longer exists and would have sent the next reader looking for a
+// constant instead of the per-type table.
 //
 // rbac-explicit-model-2026 P3 / D-6 (expand): the hierarchy ancestors
 // `account` / `project` are now ALSO verb-bearing — the canonical fga_model.fga
@@ -221,6 +226,18 @@ const VerbRelationPrefix = "v_"
 // сверит его с моделью ПОТИПОВО, а не с этим литералом.
 var fullCrudVerbRelations = []string{"v_create", "v_delete", "v_get", "v_list", "v_update"}
 
+// targetGroupVerbRelations — набор `nlb_target_group`: канонический CRUD ПЛЮС два
+// отношения управления составом группы (NLB-TGT-1).
+//
+// Это первый в дереве набор, отличающийся от `fullCrudVerbRelations`, — то есть
+// первый предъявленный случай того свойства, ради которого набор вообще стал
+// атрибутом типа. Имена выведены приведением авторских глаголов роли
+// (`addTargets` → `v_addtargets`), а не выбраны: имя, написанное иначе, чем его
+// собирает эмиттер, адресовало бы отношение, по которому никто не постучится.
+var targetGroupVerbRelations = []string{
+	"v_addtargets", "v_create", "v_delete", "v_get", "v_list", "v_removetargets", "v_update",
+}
+
 // typeVerbRelations — НАБОР `v_*`-отношений, объявленный КАЖДЫМ типом.
 //
 // Прежняя редакция таблицы была булевой («несёт полный набор либо ни одного»), и
@@ -249,10 +266,14 @@ var typeVerbRelations = map[string][]string{
 	"vpc_network_interface":     fullCrudVerbRelations,
 	"vpc_address_pool":          fullCrudVerbRelations,
 	"nlb_network_load_balancer": fullCrudVerbRelations,
-	"nlb_target_group":          fullCrudVerbRelations,
-	"nlb_listener":              fullCrudVerbRelations,
-	"registry_registry":         fullCrudVerbRelations,
-	"registry_repository":       fullCrudVerbRelations,
+	// NLB-TGT-1: первый тип с набором ШИРЕ канонического CRUD — управление составом
+	// группы целей отделено от изменения самой группы. Литерал `fullCrudVerbRelations`
+	// здесь неприменим по построению: у типа СВОЙ набор, и гейт дрейфа сверяет его с
+	// канонической моделью потипово (TestDrift_TypeVerbSetsMatchModelExactly).
+	"nlb_target_group":    targetGroupVerbRelations,
+	"nlb_listener":        fullCrudVerbRelations,
+	"registry_registry":   fullCrudVerbRelations,
+	"registry_repository": fullCrudVerbRelations,
 	// storage (kacho-storage) — Volume/Snapshot/Image per-object authz objects.
 	// Verb-bearing so the reconciler materializes per-object v_* for the creator's
 	// project binding — the model type + these Go tables + knownModules("storage")

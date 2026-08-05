@@ -181,8 +181,12 @@ CAS-guard в `RevokeAdmin`.
 
 ## account/project — verb-bearing ресурсы
 
-`account` и `project` теперь несут собственный замкнутый набор verb-relations
-(`v_get/v_list/v_create/v_update/v_delete`), как листовые ресурсы. Следствие:
+`account` и `project` теперь несут собственный набор verb-relations
+(`v_get/v_list/v_create/v_update/v_delete`) — тот же, что и большинство листовых
+ресурсов. «Замкнутый» здесь относится к набору ЭТИХ типов, а не к платформе:
+набор — атрибут типа (`authzmap.VerbRelationsOfType`), и `nlb_target_group`
+объявляет сверх канонического CRUD ещё два отношения управления составом
+(см. ниже). Следствие:
 
 - Грант роли `iam.account.get` @ ACCOUNT материализует `account:<A> # v_get @
   subj` — доступ к **самому** account-объекту, без доступа к его содержимому.
