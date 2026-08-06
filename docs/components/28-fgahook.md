@@ -2,7 +2,20 @@
 
 ## Назначение
 
-`internal/apps/kacho/api/fgahook` — небольшой helper, через который
+> [!warning] Пакет под этим именем в дереве отсутствует — глава описывает ДВА разных механизма
+> Замер 2026-08-06: каталога с именем из заголовка в сервисе нет. Под то, что глава
+> описывает, сегодня приходятся **две разные** вещи, и путать их нельзя:
+> **(а)** регистрация ресурса чужим сервисом идёт RPC `InternalIAMService.RegisterResource`
+> (`internal/apps/kacho/api/internal_iam/register_resource.go`) — по внутреннему листенеру,
+> идемпотентно, через собственный outbox вызывающего (см. правило топологии, раздел про
+> рёбра рантайма); **(б)** IAM пишет родительские tuple **своим** ресурсам помощником
+> `internal/apps/kacho/api/relationhook/` — он именно про Group / ServiceAccount / Role /
+> AccessBinding и наружу не предназначен.
+> Имя из заголовка не воспроизводится в тексте как путь: процитированное, оно читается как
+> живой пакет. Ниже — прежнее описание; читать как историю замысла, сверяя с двумя адресами
+> выше.
+
+Помощник, через который
 **другие Kachō-сервисы** (vpc/compute/loadbalancer) могут опубликовать
 FGA-hierarchy tuple после создания собственного ресурса. Это
 post-commit best-effort — failure НЕ rollback'ит исходную DB-операцию
@@ -80,7 +93,7 @@ grpcurl ... WriteCreatorTuple '{"user_id":"usr_alice","resource_type":"vpc_netwo
 
 ## Подробности реализации
 
-- **Package:** `internal/apps/kacho/api/fgahook/` (минималистичный, ~50 LOC).
+- **Package:** см. предупреждение в начале главы — под этим именем каталога нет.
 - **Caller responsibility:** caller-сервис сам строит `user` / `resource` /
   `parent` строки в FGA-notation.
 - **Idempotency:** OpenFGA `WriteTuples` возвращает 400 `already-exists` на
@@ -102,5 +115,8 @@ grpcurl ... WriteCreatorTuple '{"user_id":"usr_alice","resource_type":"vpc_netwo
 
 ## Ссылки на код
 
-- `internal/apps/kacho/api/fgahook/`
-- Caller examples: `kacho-vpc`, `kacho-compute`, `kacho-loadbalancer`.
+- `internal/apps/kacho/api/internal_iam/register_resource.go` — регистрация ресурса
+  чужим сервисом (то, ради чего глава заводилась).
+- `internal/apps/kacho/api/relationhook/relationhook.go` — родительские tuple для
+  собственных ресурсов IAM.
+- Вызывающие — сервисы vpc / compute / nlb / storage / registry монорепо.

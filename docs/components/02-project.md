@@ -197,20 +197,23 @@ Move идемпотентен в особом смысле: повторный M
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-# Newman.
-cd kacho-iam && SERVICE=iam-project ./tests/newman/scripts/run.sh
+# Newman. Набор выбирается флагом: имя, переданное окружением, прогонщик
+# затирает первым делом, и прогон молча уходит на весь сервис.
+./services/iam/tests/newman/scripts/run.sh --service iam-project
 
 # psql.
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, account_id, name FROM kacho_iam.projects;
 
 # Integration tests + Move CAS race test.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s -run TestProject \
-  ./internal/repo/kacho/pg/...
+go test -short -count=1 -timeout 120s -run TestProject \
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации

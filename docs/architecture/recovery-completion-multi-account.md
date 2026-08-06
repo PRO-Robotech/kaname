@@ -37,44 +37,46 @@ multi-account collision case is **BLOCKED + ACTIVE across Accounts**.
 
 ## How recovery handles BLOCKED + ACTIVE across Accounts
 
-Recovery matches the identity's ACTIVE/BLOCKED rows by `(external_id, email)` and, in
-**one writer-tx**, re-enables each matched row (BLOCKED → ACTIVE), then revokes all of
-the identity's live sessions and emits one audit row. Re-enabling a BLOCKED row beside
-an already-ACTIVE sibling collides with `users_active_external_id_uniq` and raises
-SQLSTATE `23505` (→ `ErrAlreadyExists`).
+Recovery matches the identity's ACTIVE/BLOCKED rows by `(external_id, email)` and works
+on both statuses in one writer-tx — the matched set is `recoveryStatuses` in
+`internal/apps/kacho/api/user/internal_on_recovery.go`. Re-enabling a BLOCKED row beside
+an already-ACTIVE sibling would collide with `users_active_external_id_uniq` and raise
+SQLSTATE `23505`.
 
-A raw `23505` inside a bare transaction aborts it (`25P02`), which would make every
-subsequent statement (revoke / audit / commit) fail. But the security goal of recovery
-is to **revoke the identity's old sessions even when one row's re-enable collides** —
-the identity already has its canonical ACTIVE presence via the sibling. To make that
-degradation possible on the real schema, each per-row re-enable is bounded by a
-**SAVEPOINT**:
-
-1. `SAVEPOINT sp_reenable` before each `ReEnable`.
-2. On success → `RELEASE SAVEPOINT sp_reenable`.
-3. On `ErrAlreadyExists` (the global-guard collision) → `ROLLBACK TO SAVEPOINT
-   sp_reenable` (the tx is usable again), skip this row (it stays BLOCKED), continue.
-4. Any other error → propagate (full rollback).
-
-After the loop, revoke-all + audit run on the now-clean tx and the whole Operation
-commits. Net effect for the BLOCKED+ACTIVE-across-accounts case: the colliding
-BLOCKED row stays BLOCKED, but every matched row gets a revoke-all cutoff and exactly
-one audit row commits.
-
-The SAVEPOINT primitives live in the pg adapter (`internal/repo/kacho/pg/tx.go`,
-exposed via the `kacho.Writer` port) so the use-case stays pgx-free. Savepoint names
-are static literals (`sp_reenable`), validated by `safeSavepointName` — never user
-input.
+> [!warning] Ниже здесь был описан механизм, которого в дереве НЕТ — раздел снят, а не поправлен
+> Прежняя редакция описывала пошаговую схему с точками сохранения внутри транзакции:
+> постановку точки перед каждым повторным включением строки, откат к ней на коллизии
+> глобального индекса и продолжение цикла, плюс примитивы этой схемы в pg-адаптере и
+> проверку имени точки. Замер на 2026-08-06, предикат назван: поиск по всем `*.go`
+> сервиса даёт **ноль** вхождений и у примитива точки сохранения, и у метода повторного
+> включения, и у проверки имени; единственное совпадение слова «savepoint» во всём
+> сервисе — в тесте другого ресурса. То есть документ описывал не «как сделано», а
+> замысел, и делал это в настоящем времени.
+>
+> Имена не воспроизводятся: в обратных кавычках они читаются как живые координаты, и
+> следующий контрибьютор пойдёт их искать (а найдя пустоту — «починит» код под неверный
+> документ; ровно тот сценарий, от которого предостерегает правило о правдивости
+> комментариев).
+>
+> Что из прежнего раздела **остаётся верным** и потому сохранено выше: разбор схемы
+> уникальности, недостижимость состояния «две ACTIVE-строки» и достижимость пары
+> BLOCKED + ACTIVE в разных аккаунтах. Это утверждения о миграции `0011_users_drop_global_email_uniqueness.sql`,
+> и они проверены по ней.
 
 ## Tests
 
-- `internal/repo/kacho/pg/recovery_completions_integration_test.go`
-  - `TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll` — canonical
-    BLOCKED + PENDING-sibling multi-account shape.
-  - `TestOnRecoveryCompleted_S09b_BlockedActiveAcrossAccounts_SkipReEnable_StillRevokeAudit`
-    — the reachable BLOCKED + ACTIVE-across-accounts collision: re-enable skipped,
-    revoke-all + audit still commit (fails without the SAVEPOINT handling, passes with it).
-- `internal/repo/kacho/pg/user_reenable_concurrent_integration_test.go`
-  - `TestUserReEnable_ConcurrentCAS_ExactlyOneWasBlocked` — N goroutines drive
-    `ReEnable` directly; exactly one observes `wasBlocked=true`, proving the
-    `UPDATE … FROM (SELECT … FOR UPDATE)` row-lock serializes.
+- `internal/repo/kacho/pg/recovery_completions_integration_test.go` —
+  `TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll` (канонический случай
+  BLOCKED + PENDING-сосед), плюс сценарии S01-S05 и S07 в том же файле; конкурентность
+  покрыта `TestOnRecoveryCompleted_S05_DuplicateJTI_IdempotentNoop`.
+- `internal/repo/kacho/pg/recovery_keeps_block_integration_test.go` —
+  `TestOnRecoveryCompleted_BlockedStaysBlocked` / `_ActiveStaysActive`.
+
+> [!warning] Здесь были перечислены ещё две пробы — их нет
+> Прежняя редакция называла пробу на коллизию BLOCKED + ACTIVE между аккаунтами и
+> отдельный файл с пробой на гонку повторного включения. Поиск по имени функции и по
+> имени файла даёт ноль. **Проба, которой нет, хуже отсутствующей**: она занимает слот в
+> перечне покрытия и создаёт уверенность, которой нет. Это открытый долг — заявленный
+> инвариант (при коллизии одна строка остаётся заблокированной, а отзыв сессий и запись
+> аудита всё равно фиксируются) **не проверяется ничем**, и записан он здесь именно как
+> долг с числом, а не как зелёная строка перечня.

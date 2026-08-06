@@ -36,7 +36,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 - [`06-group.md`](06-group.md) — Group + GroupMember (триггер `group_members_member_exists_trg`).
 - [`07-role.md`](07-role.md) — Role (58 system seed; custom per-Account; multi-scope XOR; permissions JSONB).
 - [`08-access-binding.md`](08-access-binding.md) — AccessBinding (5-tuple; idempotent INSERT; atomic emit-in-tx FGA + subject_change).
-- [`09-conditions.md`](09-conditions.md) — Access Binding Conditions (ABAC overlay: IP-CIDR/time/device-trust + standalone Conditions).
+- Условия на привязку (ABAC-overlay) — главы нет. Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - [`10-operations.md`](10-operations.md) — LRO Operations (`iop`-prefix; async-API contract; principal extension).
 
 ### Authorization

@@ -207,13 +207,18 @@ Account'а (`super_admin: admin from account`) и, каскадом, админ�
 
 ## Конфигурация
 
-| Env var                         | YAML key                            | Default                  | Описание                                  |
-|---------------------------------|--------------------------------------|--------------------------|-------------------------------------------|
-| `KACHO_IAM_KRATOS_ADMIN_URL`    | `extapi.kratos.admin-url`           | (none)                   | URL Kratos admin API для magic-link.      |
-| `KACHO_IAM_KRATOS_ADMIN_TOKEN`  | `extapi.kratos.admin-token`         | (none)                   | Bearer token для Kratos admin.            |
+**Своих ручек у приглашения нет.** Предикат: `grep -rhoE 'KACHO_IAM_KRATOS_[A-Z0-9]*'`
+по всему дереву даёт **ноль** вхождений (замер 2026-08-06).
 
-В dev без Kratos используется stub-клиент (`clients.NewKratosAdminStub()`) —
-invite создает User, но magic-link не отправляется (логируется как WARN).
+> [!note] Здесь стояли две переменные под админ-API поставщика личности — их нет
+> Прежняя редакция объявляла адрес и токен админского API Kratos с YAML-двойниками
+> и описывала dev-заглушку клиента. Ни переменных, ни YAML-ключей, ни самого клиента
+> в дереве нет: клиент удалён, и об этом прямо сказано в шапке
+> `internal/apps/kacho/api/user/invite.go`. Приглашение создаёт строку пользователя в
+> состоянии PENDING и (опционально) привязку доступа; **чем именно** приглашённый
+> активирует строку — вход через поставщика личности, ссылка, помощь администратора —
+> вынесено за пределы сервиса. Имена переменных не воспроизводятся: в обратных кавычках
+> они читаются как живые ручки, которые кто-нибудь пропишет в чарт.
 
 ## Как пользоваться
 
@@ -271,28 +276,32 @@ grpcurl -plaintext -d '{
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-cd kacho-iam && SERVICE=iam-user ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-user
 
 # psql:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, account_id, email, invite_status, external_id FROM kacho_iam.users LIMIT 10;
 
 # Integration: invite-flow + UpsertFromIdentity.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestUser|TestUpsertFromIdentity|TestInvite" \
-  ./internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/user/{get,list,delete,invite,upsert_from_identity}.go`.
-- **Handler:** `internal/apps/kacho/api/user/handler.go` (public) + `internal_handler.go` (Internal).
+- **Use-cases:** `internal/apps/kacho/api/user/` (`get.go`, `list.go`, `delete.go`,
+  `invite.go`, `internal_upsert.go`, `set_blocked.go`, `update.go`, `audit.go`).
+- **Handler:** `internal/apps/kacho/api/user/handler.go` (public); internal-полоса —
+  `internal_upsert.go` и `internal_on_recovery.go` в том же каталоге (отдельного файла
+  с обобщённым именем внутреннего обработчика здесь нет).
 - **Repo:** `internal/repo/kacho/pg/user_repo.go` + `user_pool_repo.go` (Hydra hooks).
-- **Kratos client:** `internal/clients/kratos_admin.go` (production HTTP) + stub.
 - **Bootstrap path:** `UpsertFromIdentity` создает User + Account + Project +
   AccessBindings в одной transaction, минуя per-resource `CreateUseCase`.
   FGA tuples — все в одном `fga_outbox` batch.
@@ -330,6 +339,5 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
 - `internal/domain/user.go`
 - `internal/apps/kacho/api/user/`
 - `internal/repo/kacho/pg/user_repo.go`, `user_pool_repo.go`
-- `internal/clients/kratos_admin.go`
-- `internal/migrations/0001_initial.sql:1199-1219`
-- `tests/newman/cases/iam-user-*.py`
+- `internal/migrations/0001_initial.sql` (таблица пользователей)
+- `tests/newman/cases/iam-user.py`

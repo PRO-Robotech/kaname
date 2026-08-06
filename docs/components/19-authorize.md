@@ -19,7 +19,7 @@ SDK `auth_simulate`-хелперы).
    `create`/`update` → `editor`, `delete` → `admin`) либо явный
    `required_relation`-override (`authzmap`).
 2. **OpenFGA Check** — REBAC tuple resolution + Conditional tuples (CEL)
-   вдоль resolution-path (см. [`09-conditions.md`](09-conditions.md)).
+   вдоль resolution-path. Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 
 FGA — единственный policy-gate; deny возвращает `deny_reasons` (какие
 conditions не прошли).
@@ -155,7 +155,6 @@ curl -X POST http://localhost:18080/iam/v1/authorize:listObjects \
 
 - [`20-internal-authorize.md`](20-internal-authorize.md) — peer-call FGA writer.
 - [`21-internal-iam.md`](21-internal-iam.md) — backend сервисы зовут internal-вариант.
-- [`09-conditions.md`](09-conditions.md) — Conditions overlay.
 - [`29-openfga-check.md`](29-openfga-check.md) — propagation chain.
 
 ## Ссылки на код

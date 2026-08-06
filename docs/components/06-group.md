@@ -150,9 +150,23 @@ sequenceDiagram
 | GET     | `/iam/v1/groups?account_id=...`                                       | `GroupService.List`           |
 | PATCH   | `/iam/v1/groups/{groupId}`                                            | `GroupService.Update`         |
 | DELETE  | `/iam/v1/groups/{groupId}`                                            | `GroupService.Delete`         |
-| POST    | `/iam/v1/groups/{groupId}/members`                                    | `GroupService.AddMember`      |
-| DELETE  | `/iam/v1/groups/{groupId}/members/{memberType}/{memberId}`            | `GroupService.RemoveMember`   |
-| GET     | `/iam/v1/groups/{groupId}/members`                                    | `GroupService.ListMembers`    |
+| POST    | `/iam/v1/groups/{groupId}:addMember`                                  | `GroupService.AddMember`      |
+| POST    | `/iam/v1/groups/{groupId}:removeMember`                               | `GroupService.RemoveMember`   |
+| GET     | `/iam/v1/groups/{groupId}:listMembers`                                | `GroupService.ListMembers`    |
+
+> [!note] Здесь стояли три sub-collection-пути `…/members…` — край их не обслуживает
+> Членство меняется suffix-действиями (`:verb`) по конвенции API Kachō, а не вложенной
+> коллекцией: сверено с `google.api.http` в `proto/kacho/cloud/iam/v1/group_service.proto`.
+> Снятые адреса не воспроизводятся — процитированные, они читаются как живые маршруты.
+> Метод списка членов — **чтение**, а не запись: прежняя редакция строки объявляла его
+> отправкой, что расходилось с тем же объявлением контракта.
+>
+> **Правка таблицы половинчата, пока команды ниже зовут снятые пути.** Именно так и
+> вышло с первой редакцией этой врезки: адреса были приведены к дереву здесь и
+> оставлены в разделе «Как пользоваться» пятнадцатью строками ниже — то есть документ
+> стал противоречить сам себе, и ложной была именно та половина, которую копируют в
+> терминал. Проверка свежести координат этого поймать не может: она обнуляет каждую
+> строку внутри огороженного блока.
 
 ## Конфигурация
 
@@ -170,17 +184,17 @@ RESP=$(curl -s -X POST http://localhost:18080/iam/v1/groups \
 GRP=...
 
 # Add user member.
-curl -X POST "http://localhost:18080/iam/v1/groups/$GRP/members" \
+curl -X POST "http://localhost:18080/iam/v1/groups/$GRP:addMember" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"member_type":"user","member_id":"usr_alice"}'
 
 # Add SA member.
-curl -X POST "http://localhost:18080/iam/v1/groups/$GRP/members" \
+curl -X POST "http://localhost:18080/iam/v1/groups/$GRP:addMember" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"member_type":"service_account","member_id":"sva_ci"}'
 
-# List members.
-curl "http://localhost:18080/iam/v1/groups/$GRP/members" -H "Authorization: Bearer $TOKEN" | jq
+# List members — чтение.
+curl "http://localhost:18080/iam/v1/groups/$GRP:listMembers" -H "Authorization: Bearer $TOKEN" | jq
 
 # Grant role group'у через AccessBinding.
 curl -X POST http://localhost:18080/iam/v1/accessBindings \
@@ -204,20 +218,22 @@ member_id) → `23505` → GREEN handling, возвращает existing).
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-cd kacho-iam && SERVICE=iam-group ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-group
 
 # psql:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT g.id, g.name, gm.member_type, gm.member_id FROM kacho_iam.groups g LEFT JOIN kacho_iam.group_members gm USING (...);
 
 # Integration:
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestGroup|TestGroupMember|TestGroupIsMember" \
-  ./internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации

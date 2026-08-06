@@ -31,8 +31,8 @@ kubectl -n kacho get pod -l app=kacho-iam
 # OpenFGA reachable? (default endpoint — KACHO_IAM_OPENFGA_ENDPOINT)
 kubectl -n kacho exec deploy/kacho-iam -- curl -sf http://kacho-umbrella-openfga:8080/healthz
 
-# DB reachable?
-cd kacho-deploy && make psql SVC=iam   # либо nc -zv <db-host> 5432
+# DB reachable? (от корня репозитория)
+make -C deploy psql SVC=iam   # либо nc -zv <db-host> 5432
 
 # fga_outbox растет (pending = sent_at IS NULL)?
 kubectl -n kacho exec deploy/postgres -- \
@@ -250,8 +250,8 @@ ORDER BY granted_at DESC;
 ## Утилитарные команды
 
 ```bash
-# psql.
-cd kacho-deploy && make psql SVC=iam
+# psql (от корня репозитория).
+make -C deploy psql SVC=iam
 
 # Tail logs.
 kubectl -n kacho logs -l app=kacho-iam -f --tail=200

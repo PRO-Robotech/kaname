@@ -203,28 +203,32 @@ curl -X PATCH http://localhost:18080/iam/v1/roles/rol_custom_xxx \
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-cd kacho-iam && SERVICE=iam-role ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-role
 
 # psql — посмотреть system-роли:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, name, jsonb_array_length(permissions) FROM kacho_iam.roles WHERE is_system=true ORDER BY name;
 
 # Integration: seed determinism + permissions CHECK.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestRole|TestSeedRoleIds|TestSeedNlbRoles|TestRolesPermissionsValid" \
-  ./internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации
 
 - **Use-cases:** `internal/apps/kacho/api/role/{create,get,list,update,delete}.go`.
 - **Handler:** `internal/apps/kacho/api/role/handler.go`.
-- **Repo:** `internal/repo/kacho/pg/role_repo.go` + `role_read_port.go` (read-only
-  port для FGA-side `authzmap.PermissionsToRelations`).
+- **Repo:** `internal/repo/kacho/pg/role_repo.go`. Отдельного файла-порта только на
+  чтение здесь нет: вывод отношений из списка прав живёт в
+  `internal/authzmap/permissions_to_relations.go` (`PermissionsToRelations`) и репозитория
+  не требует.
 - **DB:** `roles(id, cluster_id, account_id, project_id,
   name, description, permissions JSONB, rules JSONB, is_system, created_at)`.
 - **Indexes:** PK; partial UNIQUE `roles_custom_unique` ON `(scope_id, name) WHERE is_system=false`;
@@ -264,6 +268,7 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
 
 - `internal/domain/role.go`
 - `internal/apps/kacho/api/role/`
-- `internal/repo/kacho/pg/role_repo.go`, `role_read_port.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
+- `internal/repo/kacho/pg/role_repo.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
+- `internal/authzmap/permissions_to_relations.go`
 - `internal/authzmap/permissions_to_relations.go`
 - `internal/migrations/0001_initial.sql:1015-1037` + seed-блок

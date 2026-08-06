@@ -150,8 +150,9 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 
 - **Handler:** `internal/apps/kacho/api/internal_iam/handler.go`.
 - **LookupSubject:** `lookup_subject.go`.
-- **ListPermissions:** `list_permissions.go` (читает из embedded permissions
-  catalog).
+- **ListPermissions:** RPC **снят** — в `proto/kacho/cloud/iam/v1/internal_iam_service.proto`
+  на его месте стоит надгробие с прямым запретом заводить метод под тем же именем. Файла
+  обработчика нет; имя не воспроизводится как координата.
 - **Check delegation:** narrow port `authorizer` over `*service.AuthorizeService`.
 - **PollSubjectChanges:** narrow port `subjectChanger` over `*service.SubjectChangeService`.
 - **WriteCreatorTuple:** narrow port `fgaWriter` over `*clients.OpenFGAHTTPClient`.
@@ -176,6 +177,7 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 
 ## Ссылки на код
 
-- `internal/apps/kacho/api/internal_iam/handler.go`, `lookup_subject.go`, `list_permissions.go`
+- `internal/apps/kacho/api/internal_iam/handler.go`, `lookup_subject.go`,
+  `register_resource.go`, `force_logout.go`, `get_role_compiled.go`
 - `internal/service/authorize_service.go`, `subject_change_service.go`
 - `internal/clients/openfga_client.go`

@@ -15,9 +15,12 @@ IAM-сервис Kachō: control-plane для identity & access. Управля�
 
 ## Quick start (локальный стенд)
 
+Команды запускаются **от корня репозитория**: дерево одно, соседних репозиториев
+стенда рядом с ним нет.
+
 ```bash
 # 1. Поднять полный стенд (kind + helm + Postgres + все сервисы):
-cd ../kacho-deploy && make dev-up
+make -C deploy dev-up
 
 # 2. Прокинуть api-gateway наружу
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
@@ -29,9 +32,9 @@ curl 'http://localhost:18080/iam/v1/accounts?pageSize=5'
 Перезапуск только IAM после изменений в коде:
 
 ```bash
-cd ../kacho-deploy && make reload-svc SVC=iam
-make logs-svc SVC=iam
-make psql SVC=iam            # psql kacho_iam
+make -C deploy reload-svc SVC=iam
+make -C deploy logs-svc SVC=iam
+make -C deploy psql SVC=iam            # psql kacho_iam
 ```
 
 ## Архитектура

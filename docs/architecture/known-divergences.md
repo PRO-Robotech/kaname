@@ -149,7 +149,11 @@ so the enforced model did not change when the file was restored). It is the sing
 source; the ConfigMap is GENERATED from it by `make openfga-model-json`, and
 `internal/authzmap/fga_model_configmap_identity_test.go` pins both generated blocks
 to it — the byte-identical DSL copy and, more importantly, the pre-transformed
-`model.json` the bootstrap Job actually applies. Resolution is a plain walk-up to
+JSON model block the bootstrap Job actually applies. That block is not a file: it is
+generated into
+`deploy/helm/umbrella/charts/openfga-bootstrap/templates/openfga-model-stub-configmap.yaml`,
+so naming it as a standalone path (as an earlier revision did) sends the reader looking
+for something the tree does not contain. Resolution is a plain walk-up to
 the module root; **the absence of the model is now a hard failure, and there is no
 environment opt-out** (`KACHO_IAM_REQUIRE_FGA_MODEL` is gone). The gate also runs
 in the reverse direction: a type in the enforced model that no catalog knows about,

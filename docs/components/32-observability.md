@@ -58,7 +58,8 @@ kubectl -n kacho logs -l app=kacho-iam -f --max-log-requests 10
 ### Экспорт
 
 Метрики отдаются `promhttp`-хендлером на **отдельном cluster-internal HTTP-listener**
-(`KACHO_IAM_METRICS_ENDPOINT`, default `tcp://0.0.0.0:9095`; `metrics.enable`,
+(`KACHO_IAM_API_SERVER__METRICS_ENDPOINT` — ключ `api-server.metrics-endpoint`,
+точка → `__`, дефис → `_`; default `tcp://0.0.0.0:9095`; `metrics.enable`,
 default `true`). Это не публичная gRPC-поверхность: кардинальность внутренних
 лейблов не должна светиться наружу. Listener по умолчанию plaintext; включается
 mTLS отдельной per-edge настройкой (см. `31-deployment.md`). Pod несет

@@ -199,8 +199,8 @@ events с `id > since_id` — api-gateway держит ledger.
 
 - `internal/clients/fga_applier.go`, `fga_outbox/` package
 - `internal/clients/cache_invalidation_applier.go`
-- `internal/repo/kacho/pg/subject_change_emitter.go`, `subject_change_repo.go`, `fga_outbox_emitter.go`
+- `internal/repo/kacho/pg/subject_change_repo.go`, `subject_state_reader.go`, `fga_outbox_emitter.go`
 - `cmd/kacho-iam/serve.go` (fga drainer wiring)
 - `cmd/kacho-iam/subject_change_wiring.go`
 - `internal/migrations/0001_initial.sql:769-803, 1159-1198`
-- `kacho-corelib/outbox/drainer/`
+- `pkg/outbox/drainer/`
