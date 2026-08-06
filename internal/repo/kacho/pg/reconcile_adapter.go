@@ -1428,8 +1428,8 @@ func groupTuplesByObject(tuples []reconcile.SyncFGATuple) []objectTupleGroup {
 // ATOMICALLY PER OBJECT. It is the SYNC closer for one ReconcileObject/
 // ReconcileBinding pass. Owner-tuple materialization is eventually-consistent (it
 // does not gate Operation.done), but it MUST land all-or-nothing PER OBJECT: the
-// creator's per-object grant is the set {v_get,v_list,v_create,v_update,v_delete,
-// tier}. If it landed per-tuple, a transient write-contention on ONE tuple (e.g.
+// creator's per-object grant is the whole verb-set the object's TYPE declares plus
+// the tier tuple. If it landed per-tuple, a transient write-contention on ONE tuple (e.g.
 // v_delete) would leave the object PARTIAL — a creator doing a bounded-retry
 // immediate mutate could see v_update (PATCH) but not the still-undrained v_delete
 // (DELETE → 403 "lacks v_delete"). All-or-nothing guarantees v_update-visible ⟹

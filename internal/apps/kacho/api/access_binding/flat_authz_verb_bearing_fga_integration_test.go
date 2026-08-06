@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
@@ -149,7 +150,13 @@ func TestFGAModel_VBC06_VListSelectorNoContent_NoViewerUnion(t *testing.T) {
 }
 
 // TestFGAModel_VBC10_VGetNoEscalation — VBC-10: a v_get-only grant does NOT
-// escalate to v_create/v_update/v_delete or editor/admin (no union, F-2).
+// escalate to any OTHER verb the type declares, nor to editor/admin (no union, F-2).
+//
+// The escalation targets are DERIVED from the type, not listed. A literal stood here
+// naming `v_create`, which `iam_role` no longer declares — and `check` reports an
+// undefined relation as `allowed=false`, so that entry had quietly become an
+// assertion nothing could violate. A denial over a relation that cannot exist is
+// indistinguishable from a denial the model enforces.
 func TestFGAModel_VBC10_VGetNoEscalation(t *testing.T) {
 	c := startOpenFGA(t)
 
@@ -162,7 +169,17 @@ func TestFGAModel_VBC10_VGetNoEscalation(t *testing.T) {
 	})
 
 	require.True(t, c.check(t, "user:"+u1, "v_get", "iam_role:"+r), "VBC-10: v_get available")
-	for _, rel := range []string{"v_create", "v_update", "v_delete", "editor", "admin"} {
+
+	targets := []string{"editor", "admin"}
+	for _, rel := range authzmap.VerbRelationsOfType("iam_role") {
+		if rel != "v_get" {
+			targets = append(targets, rel)
+		}
+	}
+	require.Greaterf(t, len(targets), 2,
+		"iam_role declares no verb relation besides v_get — VBC-10 would only be asserting "+
+			"the tier ladder, not the absence of a verb union")
+	for _, rel := range targets {
 		require.False(t, c.check(t, "user:"+u1, rel, "iam_role:"+r),
 			"VBC-10: v_get grant must NOT escalate to %q (no-escalation, no union)", rel)
 	}

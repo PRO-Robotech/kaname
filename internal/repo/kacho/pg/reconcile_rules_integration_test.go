@@ -137,7 +137,10 @@ func TestC22_MatchLabels_PerObject_NoOverGrant(t *testing.T) {
 	_, ok2 := memberStatusByRule(t, ctx, pool, bid, fp, "compute.instance", "i2")
 	assert.False(t, ok2, "non-matched object is not a member")
 
-	// Per-object tuple on i1 (v_create + tier editor); NO anchor/scope_grant tuple.
+	// Per-object tuples on i1 for the verbs the TYPE declares, plus the tier editor
+	// derived from the authored verb class; NO anchor/scope_grant tuple. (`create` is
+	// authored by the rule but `compute_instance` declares no `v_create` relation, so
+	// it contributes the tier and no verb tuple.)
 	assert.GreaterOrEqual(t, countFGAOutbox(t, ctx, pool, "fga.tuple.write", "compute_instance:i1"), 1)
 	assert.Equal(t, 0, countFGAOutbox(t, ctx, pool, "fga.tuple.write", "compute_instance:i2"), "no tuple on non-matched")
 	var anchorTuples int

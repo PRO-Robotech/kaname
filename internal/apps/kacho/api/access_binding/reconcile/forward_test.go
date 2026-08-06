@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -95,7 +96,7 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 // binding's advisory lock under a create burst).
 //
 // (a) SHARE-lock, single-object; (b) BYTE-IDENTICAL owner verb-set to the FULL path
-// (v_get/v_list/v_create/v_update/v_delete + admin). RED before the iam-direct-aware
+// (the type's declared verb relations + admin). RED before the iam-direct-aware
 // forward: ReconcileObjectForward delegated every iam-direct type straight to the FULL
 // ReconcileObject → EXCLUSIVE lock (f.locks>0).
 func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLock(t *testing.T) {
@@ -138,7 +139,9 @@ func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLo
 
 	// (b) BYTE-IDENTICAL owner verb-set to the FULL path (shared ruleObjectTuples).
 	w := allWrites(f)
-	for _, v := range []string{"v_get", "v_list", "v_create", "v_update", "v_delete"} {
+	wantVerbs := authzmap.VerbRelationsOfType("iam_access_binding")
+	require.NotEmpty(t, wantVerbs, "iam_access_binding declares no verb relation — the assertion below would be vacuous")
+	for _, v := range wantVerbs {
 		assert.True(t, hasTuple(w, v, "iam_access_binding:acb-new"), "%s on the registered access_binding", v)
 	}
 	assert.True(t, hasTuple(w, "admin", "iam_access_binding:acb-new"), "admin tier on the registered access_binding (owner)")

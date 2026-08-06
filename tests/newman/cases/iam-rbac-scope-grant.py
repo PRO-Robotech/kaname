@@ -370,19 +370,26 @@ CASES.append(Case(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RBACSG-PER-VERB — {get,create} rule emits ONLY v_get + v_create direct tuples
-# on the scope_grant, so a raw FGA-native Check of v_delete / v_update on that
-# SAME object DENIES (per-verb tuple separation, delete≠create).
+# RBACSG-PER-VERB — a {get,create} rule materializes per-verb tuples DIRECTLY on
+# the content object, never on a scope_grant carrier, so a raw FGA-native Check on
+# that carrier DENIES for every verb — including the granted ones.
+#
+# Which verbs the rule actually materializes is a property of the TYPE: on
+# `compute_instance` the rule contributes `v_get` plus the write tier derived from
+# the `create` verb class, and NO `v_create` tuple — that relation is declared only
+# by `registry_registry` (creating a thing is not an operation on the thing; the
+# question is asked of the parent). The carrier contract asserted below does not
+# depend on which verbs those are.
 #
 # This proves the MODEL / tuple-emission layer: distinct v_* relations are NOT
-# collapsed (v_create granted ⇏ v_delete granted). It is NOT a proof of
+# collapsed (a granted verb ⇏ v_delete granted). It is NOT a proof of
 # consumer-side per-verb enforcement — the vpc/compute interceptor still resolves
 # an RPC verb to a TIER (editor → permits delete), so on the consumer Check path
 # delete is currently over-granted. That separate gap is the verb→TIER mapping
 # (wiring the consumer Check to per-verb v_*), out of scope for this FGA-native
 # raw-tuple suite (the consumer-enforcement arm is a vpc/compute interceptor
 # concern, not black-box-reachable through this RPC).
-# verifies: the model emits per-verb separated tuples (v_create granted ⇏ v_delete).
+# verifies: the model emits per-verb separated tuples (a granted verb ⇏ v_delete).
 # ─────────────────────────────────────────────────────────────────────────────
 
 CASES.append(Case(
@@ -399,10 +406,10 @@ CASES.append(Case(
             "getcreate",
         ),
         *bind_role_steps("_sgRoleGC", "_sgBindGCOp", "getcreate"),
-        # The scope_grant carrier is removed: a raw Check on it DENIES even for
-        # the GRANTED verb (v_create), because per-verb materialization is now DIRECT
+        # The scope_grant carrier is removed: a raw Check on it DENIES for every
+        # relation, because per-verb materialization is now DIRECT
         # on the content object (compute_instance:<id>), never on a scope_grant
-        # carrier. The per-verb SEPARATION (v_create granted ⇏ v_delete granted) is
+        # carrier. The per-verb SEPARATION (a granted verb ⇏ v_delete granted) is
         # proven on the content object by the integration tests (TestC22_MatchLabels..
         # / TestP4_A02_Names..); here we assert only the black-box-reachable contract:
         # the carrier is gone for every verb. Steady-state deny, no poll.

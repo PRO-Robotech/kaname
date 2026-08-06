@@ -87,8 +87,13 @@ scope ⊇ местоположение(объект)   И   selector матчи�
    →  эмитируется прямой tuple  <objType>:<id> # v_<verb> @ <subject>
 ```
 
-Verb-relation на объекте — `v_get` / `v_list` / `v_create` / `v_update` /
-`v_delete` (+ tier `admin` для admin-набора). Снятые/измененные гранты
+Verb-relation на объекте — `v_get` / `v_list` / `v_update` / `v_delete`
+(+ tier `admin` для admin-набора). `v_create` в наборе НЕТ: глагольное отношение
+называет операцию над объектом, на который указывает кортеж, а «создать» такой
+операцией не является — в момент решения объекта ещё нет, поэтому вопрос задают
+РОДИТЕЛЮ (ярус записи, `editor@project`). Единственный носитель `v_create` —
+`registry_registry` (контейнерная семантика «создать репозиторий в этом
+пространстве имён», её спрашивают хендлер и docker-data-plane). Снятые/измененные гранты
 снимают tuple **по сохраненному ledger** (`access_binding_emitted_tuples`), не
 пере-выводя из роли.
 
@@ -182,7 +187,7 @@ CAS-guard в `RevokeAdmin`.
 ## account/project — verb-bearing ресурсы
 
 `account` и `project` теперь несут собственный набор verb-relations
-(`v_get/v_list/v_create/v_update/v_delete`) — тот же, что и большинство листовых
+(`v_get/v_list/v_update/v_delete`) — тот же, что и большинство листовых
 ресурсов. «Замкнутый» здесь относится к набору ЭТИХ типов, а не к платформе:
 набор — атрибут типа (`authzmap.VerbRelationsOfType`), и `nlb_target_group`
 объявляет сверх канонического CRUD ещё два отношения управления составом

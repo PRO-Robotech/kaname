@@ -150,7 +150,22 @@ func TestListPermissionCatalog_ClosedVerbsAreTheCommonSetInCanonicalOrder(t *tes
 	resp := callCatalog(t)
 	got := resp.GetClosedVerbs()
 
-	want := []string{"get", "list", "create", "update", "delete"}
+	// `create` УШЛО ИЗ СОСТАВА, и это поведение поля, а не его поломка. Поле — это
+	// ПЕРЕСЕЧЕНИЕ наборов всех типов; `v_create` объявляет теперь один
+	// `registry_registry` (контейнерная семантика «создать репозиторий в этом
+	// пространстве имён» — единственная, у которой есть читатель), поэтому глагол
+	// перестал быть общим. Собственный контракт поля это предусматривает дословно:
+	// «ресурс вправе объявлять более широкий набор, и такой глагол сюда не попадёт».
+	//
+	// Следствие названо и посчитано, а не замолчано: глагол, энфорсящийся на одном
+	// ресурсе, но отсутствующий в общем словаре, не предлагается выпадающим списком
+	// редактора ролей. Это НЕ новый класс — в нём уже жили `addTargets`/`removeTargets`
+	// у `loadbalancer.targetGroups` (NLB-TGT-1). Радиус класса стал 3 и прибит
+	// гейтом authzmap/verb_relation_has_reader_test.go
+	// (TestVerbRelation_EnforcedVerbsAbsentFromClosedVerbs), который краснеет, если
+	// в класс попадёт четвёртая пара — и краснеет же, когда словарь ПО РЕСУРСУ
+	// (отдельная под-фаза, названная в proto) сделает какую-то из трёх ненужной.
+	want := []string{"get", "list", "update", "delete"}
 	if len(got) != len(want) {
 		t.Fatalf("closedVerbs=%v, want %v", got, want)
 	}

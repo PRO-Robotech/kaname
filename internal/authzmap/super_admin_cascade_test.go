@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
@@ -68,8 +69,25 @@ const (
 	subjStranger    = "user:usr-sastranger"
 )
 
-// verbs — the closed CRUD verb set every verb-bearing type declares.
-var saVerbs = []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
+// saVerbsOf — the verb relations THIS object's type declares, read from the same
+// per-type table the emitter uses.
+//
+// Here stood a five-name literal introduced as "the closed CRUD verb set every
+// verb-bearing type declares". That sentence stopped being true twice: once when
+// `nlb_target_group` took two membership verbs the literal never mentioned (so the
+// cascade over them was asserted nowhere), and again when `v_create` was withdrawn
+// from every type but `registry_registry` (so the literal named a relation most of
+// these objects no longer have). A duplicated set cannot follow its subject —
+// deriving it is what makes the cascade assertion exhaustive by construction.
+func saVerbsOf(t *testing.T, object string) []string {
+	t.Helper()
+	typ, _, ok := strings.Cut(object, ":")
+	require.Truef(t, ok, "object %q is not `<type>:<id>`", object)
+	verbs := authzmap.VerbRelationsOfType(typ)
+	require.NotEmptyf(t, verbs, "type %q declares no verb relation — the cascade assertion "+
+		"over it would be vacuous", typ)
+	return verbs
+}
 
 // seedSuperAdminWorld builds the two-account hierarchy the directive talks about,
 // using ONLY the structural parent-pointer tuples that production actually emits
@@ -138,7 +156,7 @@ func TestSuperAdminCascade_CloudAdminRevokesForeignBinding(t *testing.T) {
 			"(iam_access_binding v_delete) — this is the 2026-07-26 incident: 652 denials "+
 			"against 32 allows, an employee leaves and his colleague's access cannot be revoked")
 
-	for _, v := range saVerbs {
+	for _, v := range saVerbsOf(t, saBindingA) {
 		require.Truef(t, saCheck(t, h, subjCloudAdmin, v, saBindingA),
 			"cloud administrator must resolve %s on a foreign binding", v)
 		require.Truef(t, saCheck(t, h, subjBootstrapSA, v, saBindingA),
@@ -166,7 +184,7 @@ func TestSuperAdminCascade_ReachesEveryVerbBearingType(t *testing.T) {
 		saBindingA, saUserA, saGroupA,
 	}
 	for _, obj := range objects {
-		for _, v := range saVerbs {
+		for _, v := range saVerbsOf(t, obj) {
 			require.Truef(t, saCheck(t, h, subjCloudAdmin, v, obj),
 				"cloud administrator must resolve %s on %s", v, obj)
 			require.Truef(t, saCheck(t, h, subjAccAdminA, v, obj),
@@ -182,7 +200,7 @@ func TestSuperAdminCascade_ReachesEveryVerbBearingType(t *testing.T) {
 	}
 
 	// The account object itself: the cloud administrator manages accounts.
-	for _, v := range saVerbs {
+	for _, v := range saVerbsOf(t, saAccountA) {
 		require.Truef(t, saCheck(t, h, subjCloudAdmin, v, saAccountA),
 			"cloud administrator must resolve %s on the account object", v)
 	}
@@ -201,7 +219,7 @@ func TestSuperAdminCascade_DoesNotLeakBelowThreeLevels(t *testing.T) {
 
 	contents := []string{saNetworkA, saVolumeA, saLbA, saRegistryA, saRepoA, saBindingA}
 	for _, obj := range contents {
-		for _, v := range saVerbs {
+		for _, v := range saVerbsOf(t, obj) {
 			require.Falsef(t, saCheck(t, h, subjProjAdminA, v, obj),
 				"a PROJECT administrator must NOT reach %s on %s by derivation — project "+
 					"scope and below stay flat, access is materialized per object", v, obj)
@@ -214,7 +232,7 @@ func TestSuperAdminCascade_DoesNotLeakBelowThreeLevels(t *testing.T) {
 
 	// And an ordinary tenant with nothing at all reaches nothing at all.
 	for _, obj := range append(contents, saAccountA, saProjectA, saUserA, saGroupA) {
-		for _, v := range saVerbs {
+		for _, v := range saVerbsOf(t, obj) {
 			require.Falsef(t, saCheck(t, h, subjStranger, v, obj),
 				"a subject with no tuple must not resolve %s on %s", v, obj)
 		}
@@ -230,7 +248,7 @@ func TestSuperAdminCascade_StopsAtTheAccountBoundary(t *testing.T) {
 
 	foreign := []string{saAccountB, saProjectB, saBindingB}
 	for _, obj := range foreign {
-		for _, v := range saVerbs {
+		for _, v := range saVerbsOf(t, obj) {
 			require.Falsef(t, saCheck(t, h, subjAccAdminA, v, obj),
 				"the administrator of account A must NOT reach %s on %s in account B", v, obj)
 			require.Falsef(t, saCheck(t, h, subjAccOwnerA, v, obj),
@@ -243,7 +261,7 @@ func TestSuperAdminCascade_StopsAtTheAccountBoundary(t *testing.T) {
 	}
 
 	// Levels 1-2 are cloud-wide by construction — account B is theirs too.
-	for _, v := range saVerbs {
+	for _, v := range saVerbsOf(t, saBindingB) {
 		require.Truef(t, saCheck(t, h, subjCloudAdmin, v, saBindingB),
 			"the cloud administrator spans accounts — %s on a binding in account B", v)
 	}

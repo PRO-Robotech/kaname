@@ -78,9 +78,24 @@ func TestVerbBearing_AccountProjectVerbToRelation(t *testing.T) {
 	}{
 		{"account get/list", "iam", "account", []string{"get", "list"}, []string{"v_get", "v_list"}},
 		{"project get/update", "iam", "project", []string{"get", "update"}, []string{"v_get", "v_update"}},
-		{"account wildcard verb → full closed set", "iam", "account", []string{"*"},
-			[]string{"v_get", "v_list", "v_create", "v_update", "v_delete"}},
+		// Подстановка `*` разворачивается в набор, ОБЪЯВЛЕННЫЙ ТИПОМ, поэтому и
+		// ожидание берётся оттуда же. Здесь стоял пятиимённый литерал с `v_create`;
+		// он пережил свой предмет, когда отношение сняли со всех типов, кроме
+		// `registry_registry`, — и требовал бы от аккаунта глагол, которого у него
+		// больше нет. Ожидание, выписанное отдельно от источника, не может следовать
+		// за ним; тавтологией это не становится, потому что утверждается ПУТЬ —
+		// разворот подстановки `*` доменом и отбор развёрнутых глаголов по набору
+		// типа, — а не сама таблица. Обе функции этого пути живут в домене и
+		// вызываются телом теста ниже; здесь они намеренно не названы по имени:
+		// комментарий, называющий защиту, которую ЭТОТ пакет не применяет, отвечает
+		// читателю на вопрос вместо самой защиты (гейт internal/repohygiene
+		// TestCommentsNamingAGuardHaveItInScope).
+		{"account wildcard verb → the type's declared set", "iam", "account", []string{"*"},
+			authzmap.VerbRelationsOfType("account")},
 	}
+	require.NotEmpty(t, cases[2].wantRels,
+		"тип account не объявляет ни одного глагольного отношения — подстановочный случай "+
+			"стал бы бессодержательным (ожидание пусто, полученное пусто)")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			objType, ok := authzmap.ObjectType(tc.module, tc.res)
@@ -101,11 +116,22 @@ func TestVerbBearing_AccountProjectVerbToRelation(t *testing.T) {
 	}
 }
 
-// The per-verb v_* relations remain in the closed expandable-relation set
-// (ExpandAccess "who can do <verb> on account:<id>" Check).
+// Каждое глагольное отношение, объявленное account/project, остаётся в закрытом
+// множестве спрашиваемых (ExpandAccess «кто может <глагол> на account:<id>»).
+//
+// Множество выводится из наборов ВСЕХ типов, поэтому проверять его перечнем от
+// имени двух — значит утверждать больше, чем эти два типа знают: прежняя редакция
+// называла `v_create`, который аккаунт не объявляет с тех пор, как отношение
+// оставили одному `registry_registry`. Отношение осталось спрашиваемым, но уже НЕ
+// по этой причине, и утверждать это здесь было бы верным выводом из ложной посылки.
 func TestVerbBearing_VRelationsAreExpandable(t *testing.T) {
-	for _, r := range []string{"v_get", "v_list", "v_create", "v_update", "v_delete"} {
-		require.Truef(t, authzmap.IsExpandableRelation(r),
-			"%q must be an expandable relation (Check/ExpandAccess on verb-bearing account/project)", r)
+	for _, ty := range []string{"account", "project"} {
+		rels := authzmap.VerbRelationsOfType(ty)
+		require.NotEmptyf(t, rels, "тип %q не объявляет глагольных отношений", ty)
+		for _, r := range rels {
+			require.Truef(t, authzmap.IsExpandableRelation(r),
+				"%q объявлено типом %q, но ExpandAccess его не принимает — право энфорсится "+
+					"и остаётся неспрашиваемым", r, ty)
+		}
 	}
 }

@@ -39,6 +39,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -380,8 +381,13 @@ func TestP4_ScopeSelf_WildcardAdmin_Account_MaterializesTierOnAnchor(t *testing.
 	// The tier tuple on the scope anchor itself — the no-access-loss anchor.
 	assert.True(t, fgaOutboxTuple(t, ctx, pool, subject, "admin", object),
 		"`*.*` admin role bound on account → admin tier tuple on account:<id> (write-authz anchor)")
-	// account is verb-bearing: the self-access v_* set is materialized too.
-	for _, v := range []string{"v_get", "v_list", "v_create", "v_update", "v_delete"} {
+	// account is verb-bearing: the self-access v_* set is materialized too. The set is
+	// read from the type — the literal that stood here named `v_create`, which
+	// `account` no longer declares (creating an account is not an operation ON an
+	// account, and the per-object relation had no reader).
+	accountVerbs := authzmap.VerbRelationsOfType("account")
+	require.NotEmpty(t, accountVerbs, "account declares no verb relation — the loop below would be vacuous")
+	for _, v := range accountVerbs {
 		assert.True(t, fgaOutboxTuple(t, ctx, pool, subject, v, object),
 			"verb-bearing self %s on account:<id>", v)
 	}

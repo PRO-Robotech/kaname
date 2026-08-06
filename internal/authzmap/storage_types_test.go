@@ -86,9 +86,14 @@ var storageTypes = []string{"storage_volume", "storage_image", "storage_snapshot
 func TestStorageModel_DefinesTypesAndProjectRelation(t *testing.T) {
 	dsl := modelDSL(t) // canonical model DSL (single source of truth)
 	proj := regexp.MustCompile(`(?m)^\s*define project:\s*\[project\]`)
-	verbs := []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
 
 	for _, ty := range storageTypes {
+		// Набор берётся У ТИПА, а не выписывается. Литерал, стоявший здесь, называл
+		// `v_create`; хранилище его больше не объявляет — создание тома/снимка/образа
+		// авторизуется ярусом записи на проекте, а не пообъектным глаголом на самом
+		// томе, которого в момент решения ещё нет.
+		verbs := authzmap.VerbRelationsOfType(ty)
+		require.NotEmptyf(t, verbs, "тип %q не объявляет ни одного глагольного отношения", ty)
 		body := typeBody(t, dsl, ty) // fails loudly if the type is absent
 		require.Truef(t, proj.MatchString(body),
 			"%s must define `project: [project]` so the storage-emitted project owner-hierarchy "+

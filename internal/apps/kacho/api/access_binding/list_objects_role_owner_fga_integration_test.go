@@ -17,7 +17,7 @@ package access_binding
 //	  define admin:  [user, service_account, group#member]   // NO `from account`
 //	  define editor: admin
 //	  define viewer: editor
-//	  define v_get/v_list/v_create/v_update/v_delete: [user, service_account, group#member]
+//	  define v_get/v_list/v_update/v_delete: [user, service_account, group#member]
 //
 // The `<rel> from account` ACCESS cascade that the earlier fix relied on was
 // REMOVED. The hierarchy pointer
@@ -48,6 +48,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
 
@@ -64,17 +65,21 @@ import (
 // DELIBERATELY omitted: it grants nothing under the flat model, so including it
 // would not change any assertion (and asserting it grants access would re-encode
 // the removed cascade).
+// Набор глаголов берётся У ТИПА, а не выписывается. Здесь стоял литерал с
+// `v_create`; когда отношение сняли с `iam_role` (создание роли — не операция над
+// ролью, и пообъектного читателя у него не было), фикстура начала писать кортеж,
+// который владелец модели ОТВЕРГАЕТ: `Invalid tuple … relation 'iam_role#v_create'
+// not found`. Фикстура, пишущая то, чего эмиттер не пишет, проверяет не продукт.
 func ownRoleMaterializedTuples(roleID, ownerUser string) []abrepo.RelationTuple {
 	obj := "iam_role:" + roleID
 	user := "user:" + ownerUser
-	return []abrepo.RelationTuple{
+	out := []abrepo.RelationTuple{
 		{User: user, Relation: "admin", Object: obj}, // tier admin→editor→viewer
-		{User: user, Relation: "v_get", Object: obj},
-		{User: user, Relation: "v_list", Object: obj},
-		{User: user, Relation: "v_create", Object: obj},
-		{User: user, Relation: "v_update", Object: obj},
-		{User: user, Relation: "v_delete", Object: obj},
 	}
+	for _, rel := range authzmap.VerbRelationsOfType("iam_role") {
+		out = append(out, abrepo.RelationTuple{User: user, Relation: rel, Object: obj})
+	}
+	return out
 }
 
 // TestIntegration_ListObjects_Role_OwnerViewerCascade_193 — role-owner visibility under the flat

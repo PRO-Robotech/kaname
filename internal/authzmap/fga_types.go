@@ -220,22 +220,45 @@ func CommonVerbVocabulary() []string {
 // форма, в которой глагол попадает в кортеж.
 const VerbRelationPrefix = "v_"
 
-// fullCrudVerbRelations — набор, который на сегодня объявляет КАЖДЫЙ глагольный
-// тип. Это НЕ платформенная константа «набор всех глаголов»: это значение, которое
-// 24 типа пока СОВПАДАЮЩЕ объявляют. Тип вправе объявить другой набор — и гейт
-// сверит его с моделью ПОТИПОВО, а не с этим литералом.
-var fullCrudVerbRelations = []string{"v_create", "v_delete", "v_get", "v_list", "v_update"}
-
-// targetGroupVerbRelations — набор `nlb_target_group`: канонический CRUD ПЛЮС два
-// отношения управления составом группы (NLB-TGT-1).
+// objectVerbRelations — набор, который объявляет типичный глагольный тип: четыре
+// операции, выполнимые НАД УЖЕ СУЩЕСТВУЮЩИМ объектом. Это НЕ платформенная
+// константа «набор всех глаголов»: это значение, которое 22 типа пока СОВПАДАЮЩЕ
+// объявляют. Тип вправе объявить другой набор — и гейт сверит его с моделью
+// ПОТИПОВО, а не с этим литералом.
 //
-// Это первый в дереве набор, отличающийся от `fullCrudVerbRelations`, — то есть
+// `v_create` В НЁМ НЕТ, и это решение, а не пропуск. Глагольное отношение
+// называет операцию НАД объектом, на который указывает кортеж; «создать» такой
+// операцией не является — в момент решения объекта ещё нет, поэтому вопрос всегда
+// задают РОДИТЕЛЮ, и Kachō отвечает на него ярусом записи на родителе
+// (`editor@project` гейтит каждый Create в каталоге прав). Пообъектный `v_create`
+// поэтому не спрашивал никто, при том что его объявляли 24 типа и материализовал
+// реконсайлер: 41087 кортежей на эталонном стенде, 9.05% всего хранилища.
+// Единственный оставшийся носитель — `registry_registry` (контейнерная семантика,
+// см. ниже). Обе стороны держит authzmap/verb_relation_has_reader_test.go.
+var objectVerbRelations = []string{"v_delete", "v_get", "v_list", "v_update"}
+
+// registryNamespaceVerbRelations — набор `registry_registry`: операции над
+// объектом ПЛЮС `v_create`.
+//
+// Реестр — КОНТЕЙНЕР, и «создать репозиторий в этом пространстве имён» — операция
+// именно над ним. Её действительно спрашивают: хендлеры CreateRepository /
+// RenameRepository и data-plane docker (push в новый repo, cross-repo mount,
+// раскрытие собственного свежего блоба). Это единственный тип, у которого
+// `v_create` имеет читателя, — не «пока», а по существу семантики.
+var registryNamespaceVerbRelations = []string{
+	"v_create", "v_delete", "v_get", "v_list", "v_update",
+}
+
+// targetGroupVerbRelations — набор `nlb_target_group`: операции над объектом ПЛЮС
+// два отношения управления составом группы (NLB-TGT-1).
+//
+// Это первый в дереве набор, отличающийся от `objectVerbRelations`, — то есть
 // первый предъявленный случай того свойства, ради которого набор вообще стал
 // атрибутом типа. Имена выведены приведением авторских глаголов роли
 // (`addTargets` → `v_addtargets`), а не выбраны: имя, написанное иначе, чем его
 // собирает эмиттер, адресовало бы отношение, по которому никто не постучится.
 var targetGroupVerbRelations = []string{
-	"v_addtargets", "v_create", "v_delete", "v_get", "v_list", "v_removetargets", "v_update",
+	"v_addtargets", "v_delete", "v_get", "v_list", "v_removetargets", "v_update",
 }
 
 // typeVerbRelations — НАБОР `v_*`-отношений, объявленный КАЖДЫМ типом.
@@ -256,41 +279,41 @@ var targetGroupVerbRelations = []string{
 // предками иерархии (admin/editor/viewer — якоря write-authz, D-7); глагольность
 // добавлена сверху, а не вместо.
 var typeVerbRelations = map[string][]string{
-	"compute_instance":          fullCrudVerbRelations,
-	"vpc_network":               fullCrudVerbRelations,
-	"vpc_subnet":                fullCrudVerbRelations,
-	"vpc_address":               fullCrudVerbRelations,
-	"vpc_security_group":        fullCrudVerbRelations,
-	"vpc_route_table":           fullCrudVerbRelations,
-	"vpc_gateway":               fullCrudVerbRelations,
-	"vpc_network_interface":     fullCrudVerbRelations,
-	"vpc_address_pool":          fullCrudVerbRelations,
-	"nlb_network_load_balancer": fullCrudVerbRelations,
+	"compute_instance":          objectVerbRelations,
+	"vpc_network":               objectVerbRelations,
+	"vpc_subnet":                objectVerbRelations,
+	"vpc_address":               objectVerbRelations,
+	"vpc_security_group":        objectVerbRelations,
+	"vpc_route_table":           objectVerbRelations,
+	"vpc_gateway":               objectVerbRelations,
+	"vpc_network_interface":     objectVerbRelations,
+	"vpc_address_pool":          objectVerbRelations,
+	"nlb_network_load_balancer": objectVerbRelations,
 	// NLB-TGT-1: первый тип с набором ШИРЕ канонического CRUD — управление составом
-	// группы целей отделено от изменения самой группы. Литерал `fullCrudVerbRelations`
+	// группы целей отделено от изменения самой группы. Литерал `objectVerbRelations`
 	// здесь неприменим по построению: у типа СВОЙ набор, и гейт дрейфа сверяет его с
 	// канонической моделью потипово (TestDrift_TypeVerbSetsMatchModelExactly).
 	"nlb_target_group":    targetGroupVerbRelations,
-	"nlb_listener":        fullCrudVerbRelations,
-	"registry_registry":   fullCrudVerbRelations,
-	"registry_repository": fullCrudVerbRelations,
+	"nlb_listener":        objectVerbRelations,
+	"registry_registry":   registryNamespaceVerbRelations,
+	"registry_repository": objectVerbRelations,
 	// storage (kacho-storage) — Volume/Snapshot/Image per-object authz objects.
 	// Verb-bearing so the reconciler materializes per-object v_* for the creator's
 	// project binding — the model type + these Go tables + knownModules("storage")
 	// are ALL required or owner-GET fail-closes 403 (#71). Parity with nlb (project-
 	// only emitter, DIRECT v_*, no `owner` derivation).
-	"storage_volume":      fullCrudVerbRelations,
-	"storage_snapshot":    fullCrudVerbRelations,
-	"storage_image":       fullCrudVerbRelations,
-	"iam_user":            fullCrudVerbRelations,
-	"iam_service_account": fullCrudVerbRelations,
-	"iam_group":           fullCrudVerbRelations,
-	"iam_role":            fullCrudVerbRelations,
-	"iam_access_binding":  fullCrudVerbRelations,
+	"storage_volume":      objectVerbRelations,
+	"storage_snapshot":    objectVerbRelations,
+	"storage_image":       objectVerbRelations,
+	"iam_user":            objectVerbRelations,
+	"iam_service_account": objectVerbRelations,
+	"iam_group":           objectVerbRelations,
+	"iam_role":            objectVerbRelations,
+	"iam_access_binding":  objectVerbRelations,
 	// rbac-2026 P3 / D-6: account/project are now verb-bearing (additive — they
 	// also keep their tier relations as write-authz anchors, D-7).
-	"account": fullCrudVerbRelations,
-	"project": fullCrudVerbRelations,
+	"account": objectVerbRelations,
+	"project": objectVerbRelations,
 }
 
 // expandableRelations — the closed set of FGA relation names a caller may pass

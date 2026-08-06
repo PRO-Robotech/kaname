@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
@@ -64,7 +65,12 @@ const (
 	aoStranger  = "user:usr-aostranger" // no tuple anywhere
 )
 
-var aoVerbs = []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
+// aoVerbs — the verb relations the `account` type declares, read from the same
+// per-type table the emitter uses rather than re-listed here. A literal cannot
+// follow its subject: this one named `v_create`, which the account type no longer
+// declares (creating an account is not an operation ON an account), and every
+// assertion below would have gone on asserting a relation the model had dropped.
+var aoVerbs = authzmap.VerbRelationsOfType("account")
 
 func aoCheck(t *testing.T, h *fgatest.Harness, subject, relation, object string) bool {
 	t.Helper()
