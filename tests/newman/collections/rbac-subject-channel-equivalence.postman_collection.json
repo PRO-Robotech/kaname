@@ -279,7 +279,16 @@
                   "const pc = parseInt(pm.environment.get('_chUserDelCount') || '0', 10);",
                   "if (!j.done && pc < 300) { pm.environment.set('_chUserDelCount', String(pc + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUserDelCount'); pm.environment.unset('_chUserDelStarted');",
-                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
+                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -766,7 +775,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chUserRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chUserRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chUserRevOpCount'); pm.environment.unset('_chUserRevOpStarted');"
+                  "pm.environment.unset('_chUserRevOpCount'); pm.environment.unset('_chUserRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -1694,7 +1715,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chgEquivRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chgEquivRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chgEquivRevOpCount'); pm.environment.unset('_chgEquivRevOpStarted');"
+                  "pm.environment.unset('_chgEquivRevOpCount'); pm.environment.unset('_chgEquivRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -2833,7 +2866,19 @@
                   "  return;",
                   "}",
                   "pm.environment.unset('__teardownflipRevOpCount'); pm.environment.unset('__teardownflipRevOpStarted');",
-                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));"
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -3654,7 +3699,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chgNmRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chgNmRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chgNmRevOpCount'); pm.environment.unset('_chgNmRevOpStarted');"
+                  "pm.environment.unset('_chgNmRevOpCount'); pm.environment.unset('_chgNmRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -4506,7 +4563,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chgRvRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chgRvRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chgRvRevOpCount'); pm.environment.unset('_chgRvRevOpStarted');"
+                  "pm.environment.unset('_chgRvRevOpCount'); pm.environment.unset('_chgRvRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -4851,7 +4920,16 @@
                   "const pc = parseInt(pm.environment.get('_chSaDelCount') || '0', 10);",
                   "if (!j.done && pc < 300) { pm.environment.set('_chSaDelCount', String(pc + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaDelCount'); pm.environment.unset('_chSaDelStarted');",
-                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
+                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -5338,7 +5416,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chSaRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chSaRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chSaRevOpCount'); pm.environment.unset('_chSaRevOpStarted');"
+                  "pm.environment.unset('_chSaRevOpCount'); pm.environment.unset('_chSaRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -5683,7 +5773,16 @@
                   "const pc = parseInt(pm.environment.get('_chSaIsoDelCount') || '0', 10);",
                   "if (!j.done && pc < 300) { pm.environment.set('_chSaIsoDelCount', String(pc + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chSaIsoDelCount'); pm.environment.unset('_chSaIsoDelStarted');",
-                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
+                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -6165,7 +6264,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chSaIsoRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chSaIsoRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chSaIsoRevOpCount'); pm.environment.unset('_chSaIsoRevOpStarted');"
+                  "pm.environment.unset('_chSaIsoRevOpCount'); pm.environment.unset('_chSaIsoRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -6510,7 +6621,16 @@
                   "const pc = parseInt(pm.environment.get('_chUsrIsoDelCount') || '0', 10);",
                   "if (!j.done && pc < 300) { pm.environment.set('_chUsrIsoDelCount', String(pc + 1)); const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chUsrIsoDelCount'); pm.environment.unset('_chUsrIsoDelStarted');",
-                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));"
+                  "pm.test('dup-revoke done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -6992,7 +7112,19 @@
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "const c = parseInt(pm.environment.get('_chUsrIsoRevOpCount') || '0', 10);",
                   "if (j && !j.done && c < 300) { pm.environment.set('_chUsrIsoRevOpCount', String(c + 1)); const _ipd6 = Date.now(); while (Date.now() - _ipd6 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_chUsrIsoRevOpCount'); pm.environment.unset('_chUsrIsoRevOpStarted');"
+                  "pm.environment.unset('_chUsrIsoRevOpCount'); pm.environment.unset('_chUsrIsoRevOpStarted');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }

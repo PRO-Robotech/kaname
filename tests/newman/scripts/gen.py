@@ -1467,6 +1467,87 @@ _DELETE_ACCEPTED = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# ИСХОД ОПЕРАЦИИ УДАЛЕНИЯ УТВЕРЖДАЕТСЯ, А НЕ ТОЛЬКО ЕЁ ЗАВЕРШЕНИЕ
+# ---------------------------------------------------------------------------
+# Опрос дожидается `done` и на этом успокаивается. Но `done` — это «воркер
+# закончил», а не «сделал»: операция, завершившаяся ОШИБКОЙ, тоже `done`.
+# Поэтому отказ удаления читался как успех — ресурс оставался жить, ограниченный
+# пул деградировал, списочные контракты плыли, а вердикт не менялся.
+#
+# Утверждение ставится ПРОХОДОМ ПО ШАГАМ КЕЙСА, а не параметром помощника:
+# опросов в дереве больше, чем вызовов помощника (часть кейсов несёт собственные,
+# рукописные), и параметр закрыл бы только своих — то есть починил бы экземпляр,
+# а не класс. Предмет опроса — ближайшая предшествующая мутация ТОГО ЖЕ кейса;
+# граница кейса соблюдается намеренно, иначе опрос подхватил бы удаление из
+# соседнего и утверждение относилось бы к паре, которой нет.
+#
+# Кейс, чей ПРЕДМЕТ — отказ удаления (`must_fail`), исход уже утверждает сам, и
+# проход его не трогает: наличие утверждения об `error` — единственный признак,
+# по которому шаг признаётся закрытым, а форма записи не навязывается.
+#
+# Гейт по дереву на обе половины пары — `deploy/scripts/assert-delete-operation-outcome.py`.
+_OP_POLL_PATH = re.compile(r"/operations/\{\{(\w+)\}\}")
+_MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+_OUTCOME_ASSERT = re.compile(r"pm\.expect\(\s*[A-Za-z_$][\w$]*\.error\b")
+_DONE_ASSERT = re.compile(r"pm\.expect\(\s*[A-Za-z_$][\w$]*\.done\b")
+
+
+def _delete_outcome_assert(need_done: bool) -> List[str]:
+    """Утверждение об исходе операции удаления, дописываемое в КОНЕЦ скрипта опроса.
+
+    Конец, а не начало: у опроса есть ранние выходы — «поллить нечего» (мутация
+    отвергнута синхронно, имя пустое), «ответ не 200» и «ещё не done, повторяем».
+    Дописанное в конец исполняется ровно тогда, когда опрос дошёл до терминального
+    состояния, — и не утверждает ничего там, где утверждать не о чем.
+
+    `need_done` — у рукописных поллеров уборки завершение не утверждается вовсе;
+    для них к исходу добавляется и оно, иначе повисшая операция осталась бы зелёной.
+    Носитель ответа читается ЗАНОВО (`_do`), а не переиспользуется: имя переменной
+    у каждого поллера своё, и опираться на него значило бы связать проход с формой.
+    """
+    lines = [
+        "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+        "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+        "// успех, ресурс остаётся жить, а вердикт не меняется.",
+        "(function () {",
+        "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+    ]
+    if need_done:
+        lines += [
+            "  pm.test('delete operation done', function () {",
+            "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+            "  });",
+        ]
+    lines += [
+        "  pm.test('delete operation succeeded (no operation.error)', function () {",
+        "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error')"
+        ".to.eql(undefined);",
+        "  });",
+        "})();",
+    ]
+    return lines
+
+
+def _assert_delete_operation_outcome(steps: List[Step]) -> List[Step]:
+    """Каждый опрос, чей предмет — удаление, обязан утверждать ИСХОД операции."""
+    out: List[Step] = []
+    subject = None
+    for st in steps:
+        polls = _OP_POLL_PATH.search(st.path) if st.method == "GET" else None
+        if polls is None:
+            if st.method in _MUTATION_METHODS:
+                subject = st.method
+            out.append(st)
+            continue
+        code = _strip_js_comments("\n".join(st.test_script))
+        if subject == "DELETE" and not _OUTCOME_ASSERT.search(code):
+            st = replace(st, test_script=list(st.test_script)
+                         + _delete_outcome_assert(not _DONE_ASSERT.search(code)))
+        out.append(st)
+    return out
+
+
 def step_to_postman(step: Step) -> Dict:
     item: Dict = {
         "name": step.name,
@@ -1629,7 +1710,8 @@ def case_to_postman(case: Case) -> Dict:
     # обработкой имён: `rename=False` — iam сам делает имена глобально
     # уникальными (`<case-id> :: <шаг>`) и переписывает буквальные переходы
     # по БАЗОВЫМ именам, поэтому переименование обёрткой сломало бы резолв.
-    case = replace(case, steps=_wrap_own_fresh_reads(case.steps, rename=False))
+    case = replace(case, steps=_assert_delete_operation_outcome(
+        _wrap_own_fresh_reads(case.steps, rename=False)))
     tags = [f"class:{c}" for c in case.classes] + [f"priority:{case.priority}"]
 
     # HARNESS FIX: step names MUST be globally UNIQUE across the whole collection.
