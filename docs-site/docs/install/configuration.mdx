@@ -25,7 +25,7 @@ Kachō IAM конфигурируется через переменные окр
     <tr><td><code>KACHO_IAM_DB_NAME</code></td><td>Имя БД (схема <code>kacho_iam</code>)</td></tr>
     <tr><td><code>KACHO_IAM_DB_SSLMODE</code></td><td>Режим SSL (<code>require</code> в проде)</td></tr>
     <tr><td><code>KACHO_IAM_DB_MAX_CONNS</code></td><td>Размер пула pgx</td></tr>
-    <tr><td><code>KACHO_IAM_DB_URL</code></td><td>Альтернатива — полный DSN одной строкой</td></tr>
+    <tr><td><code>KACHO_IAM_REPOSITORY__POSTGRES__URL</code></td><td>Альтернатива — полный DSN одной строкой. Двойное подчёркивание — не опечатка: конфигурация грузится viper'ом с префиксом <code>KACHO_IAM</code>, точка пути ключа заменяется на <code>__</code>, дефис на <code>_</code></td></tr>
   </tbody>
 </table>
 
@@ -50,7 +50,7 @@ Kachō IAM конфигурируется через переменные окр
     <tr><td><code>KACHO_IAM_HYDRA_ADMIN_URL</code> / <code>KACHO_IAM_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов)</td></tr>
     <tr><td><code>KACHO_IAM_HYDRA_ISSUER</code> / <code>KACHO_IAM_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra</td></tr>
     <tr><td><code>KACHO_IAM_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
-    <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code> / <code>KACHO_IAM_JWKS_ROTATION_DAYS</code></td><td>Шифрование и ротация JWKS выпускаемых токенов</td></tr>
+    <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code></td><td>Ключ шифрования JWKS. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
     <tr><td><code>KACHO_IAM_SAKEY_REDACT_GRACE</code> / <code>KACHO_IAM_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
   </tbody>
 </table>
@@ -68,7 +68,7 @@ listener'ы. Каждый может требовать mTLS.
     <tr><td><code>KACHO_IAM_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
     <tr><td><code>KACHO_IAM_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (Kratos identity-хуки)</td></tr>
     <tr><td><code>KACHO_IAM_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
-    <tr><td><code>KACHO_IAM_METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>:9095</code>)</td></tr>
+    <tr><td><code>KACHO_IAM_API_SERVER__METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>tcp://0.0.0.0:9095</code>). Имя без двойных подчёркиваний, стоявшее здесь прежде, встречается в дереве <b>только в комментарии</b> — читателя у него нет</td></tr>
     <tr><td><code>KACHO_IAM_GATEWAY_INTERNAL_…</code></td><td>Адрес и клиентский mTLS до internal-mux api-gateway (subject-change)</td></tr>
   </tbody>
 </table>

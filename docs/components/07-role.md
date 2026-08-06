@@ -223,8 +223,10 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
 
 - **Use-cases:** `internal/apps/kacho/api/role/{create,get,list,update,delete}.go`.
 - **Handler:** `internal/apps/kacho/api/role/handler.go`.
-- **Repo:** `internal/repo/kacho/pg/role_repo.go` + `role_read_port.go` (read-only
-  port для FGA-side `authzmap.PermissionsToRelations`).
+- **Repo:** `internal/repo/kacho/pg/role_repo.go`. Отдельного файла-порта только на
+  чтение здесь нет: вывод отношений из списка прав живёт в
+  `internal/authzmap/permissions_to_relations.go` (`PermissionsToRelations`) и репозитория
+  не требует.
 - **DB:** `roles(id, cluster_id, account_id, project_id,
   name, description, permissions JSONB, rules JSONB, is_system, created_at)`.
 - **Indexes:** PK; partial UNIQUE `roles_custom_unique` ON `(scope_id, name) WHERE is_system=false`;
@@ -264,6 +266,7 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
 
 - `internal/domain/role.go`
 - `internal/apps/kacho/api/role/`
-- `internal/repo/kacho/pg/role_repo.go`, `role_read_port.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
+- `internal/repo/kacho/pg/role_repo.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
+- `internal/authzmap/permissions_to_relations.go`
 - `internal/authzmap/permissions_to_relations.go`
 - `internal/migrations/0001_initial.sql:1015-1037` + seed-блок

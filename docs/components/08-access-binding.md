@@ -311,7 +311,6 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
 ## Связанные компоненты
 
 - [`07-role.md`](07-role.md) — role_id ссылается сюда.
-- [`09-conditions.md`](09-conditions.md) — overlay-условия на binding.
 - [`29-openfga-check.md`](29-openfga-check.md) — FGA propagation chain.
 
 ## Ссылки на код

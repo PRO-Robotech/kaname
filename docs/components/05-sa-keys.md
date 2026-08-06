@@ -329,7 +329,8 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
 - `internal/clients/hydra_admin_client.go`,
   `hydra_oauth_clients.go` — `CreateOAuthClient` с `jwks` /
   `token_endpoint_auth_method=private_key_jwt`.
-- `internal/clients/ops_response_redactor.go`.
+- `internal/repo/kacho/pg/ops_response_redactor.go` (тот же файл, что назван выше — прежде
+  здесь стоял другой каталог, и две ссылки об одном предмете расходились).
 - `internal/migrations/0001_initial.sql` — таблица
   `service_account_oauth_clients` (`public_key_pem`, `key_algorithm`).
 - `internal/handler/operation_handler_anti_leak_test.go`.

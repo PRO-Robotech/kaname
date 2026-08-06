@@ -54,7 +54,8 @@ scope'ом internal-CA + NetworkPolicy + hardening'ом pod'ов модулей.
 **обязан** быть доступен на публичном слушателе — следовательно, его защита строится на
 транспортной аутентификации и строгом режиме, а не на сокрытии endpoint'а:
 
-- **production-strict** (профиль `deploy/values.prod.yaml`): анонимный вызов
+- **production-strict** (профиль `deploy/helm/umbrella/values.prod.yaml` — он общий
+  для стенда, у сервисного чарта своего prod-профиля нет): анонимный вызов
   fail-closed; запрос без валидного principal отклоняется до обращения к backend.
 - **mTLS/JWT** на транспорте: вызов PDP несет проверенную identity.
 - Решения PDP не раскрывают инфра-чувствительных данных — только tenant-facing

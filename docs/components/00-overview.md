@@ -303,6 +303,6 @@ sequenceDiagram
   [`21-internal-iam.md`](21-internal-iam.md),
   [`28-fgahook.md`](28-fgahook.md),
   [`29-openfga-check.md`](29-openfga-check.md).
-- Conditions (CEL ABAC) → [`09-conditions.md`](09-conditions.md).
+- Conditions (CEL ABAC) — Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - Production deploy / эксплуатация → [`31-deployment.md`](31-deployment.md),
   [`32-observability.md`](32-observability.md), [`33-runbook.md`](33-runbook.md).

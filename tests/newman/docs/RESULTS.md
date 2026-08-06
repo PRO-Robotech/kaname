@@ -24,7 +24,8 @@ step failed, and the reason is not in the name. So it cannot tell its subject fr
 stranger at any width; narrowing only reduced how many strangers it caught per run. A
 fourth narrowing would have been the same move a third time.
 
-Injection check on a real report (`out/authz-deny.json`, run 2026-07-26): newman
+Injection check on a real report (JSON-отчёт коллекции authz-deny в каталоге `out/`
+суиты — он под `.gitignore`, отчёт производит прогон; run 2026-07-26): newman
 reported `assertions.failed=3`; the gate printed **2**. The one it removed was
 `AUTHZ-REVOKE-ENFORCED-A-INV :: inv-get-account-allow-warm-cache`.
 
@@ -61,8 +62,9 @@ the measurement would be of the wrong thing. All three comments are now correcte
 constant.
 
 There is no live declaration for this step: no tracker issue was ever opened for it, and there
-is no evidence that it is red **now**. The last evidence is dated — `out/authz-deny.json`, run
-2026-07-26, where newman reported three failed assertions and the deduction removed this one.
+is no evidence that it is red **now**. The last evidence is dated — тот же отчёт коллекции
+authz-deny, прогон 2026-07-26, где newman отчитался о трёх упавших утверждениях, а вычет снял
+одно из них.
 Re-verification needs a live run; nothing here asserts an outcome for it. If it is still red,
 the runner says so by name (there is nothing left to subtract) and it becomes a finding with a
 fresh tracker.
@@ -235,7 +237,9 @@ Triaged the clean-seed umbrella CI artifact (`na4/iam/.../out/*.json`). Findings
   (proto3-JSON default omission) → the poll could never converge on a correct deny. Fixed
   to `code===200 && j.allowed !== true` (a genuine still-allowed `{"allowed":true}` still
   fails — nothing masked). (b) `AUTHZGCP-AB-CREATE-CHECK-VISIBLE::probe-check` hit the
-  unregistered `/iam/v1/check` (always `403 catalog: no entry for method`) → migrated to the
+  unregistered public check-путь, которого нет в каталоге разрешений (always `403 catalog: no
+  entry for method`; адрес не воспроизводится — процитированный, он читается как живой
+  маршрут) → migrated to the
   working `poll_check_allowed_step` internal `/iam/v1/internal/iam:check` probe. (c)
   `AUTHZGCP-SAKEY-SECRET-NOT-LEAKED::re-get-op-redacted` read non-existent snake_case
   `client_id/client_secret` (real fields are camelCase `clientId`/`privateKeyPem`/
@@ -498,7 +502,9 @@ umbrella run):
   (`create_suite_project` → `{{_t31Proj}}` / `{{_t31cProj}}`, op-poll asserts `done` +
   **no error**) under `accountAId` and route all resource creates through it, replacing
   the shared `{{projectA1Id}}` dependency entirely — mirrors the existing runtime
-  zone-discovery pattern in `label-revoke-compute.py`. accountAId stays the shared-tenant
+  zone-discovery pattern в кейсе снятия меток соседнего домена (файл под доменом compute из
+  набора iam с тех пор удалён — сегодня там домены iam / nlb / storage / vpc; имя не
+  воспроизводится). accountAId stays the shared-tenant
   anchor (the ARM_LABELS role is account-scoped and containment matches
   `parent_account_id == accountAId`, which a project under account-A satisfies). A
   freshly-created, poll-confirmed project is guaranteed to exist for the peer-check, so
@@ -555,9 +561,10 @@ in-scope leaf objects, NOT on the account/project anchor itself"`, seed catalog 
   requires `scopeType` (dotted `iam.account|iam.cluster|iam.project`) + `scopeId` + a
   REQUIRED `target`; the resource message exposes **only** `scopeType`/`scopeId` (no legacy
   `resourceType`/`resourceId`). All **41** legacy create bodies across **15** files
-  (`iam-access-binding.py` ×19, `authz-deny.py`, `authz-sa-apitoken.py`,
+  (`iam-access-binding-redesign.py` ×19 — файл с тех пор переименован, здесь стоит нынешнее
+  имя, `authz-deny.py`, `authz-sa-apitoken.py`,
   `iam-authz-grant-check-propagation.py`, `iam-rbac-scope-grant.py`, `iam-rbac-subjects.py`,
-  `iam-role.py`, `iam-invite-grant-fga.py`, `label-revoke-{vpc,compute,nlb,iam}.py`, …) were
+  `iam-role.py`, `iam-invite-grant-fga.py`, кейсы снятия меток по доменам, …) were
   migrated: `resourceType:"account"→scopeType:"iam.account"` (+cluster/project),
   `resourceId→scopeId`, and a `target:{allInScope:{}}` injected (these are all whole-scope
   grants, so `allInScope` is the semantically-correct target). The ~40 response-reader

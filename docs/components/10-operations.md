@@ -7,7 +7,7 @@ RPC в kacho-iam возвращают `*operation.Operation` (никогда н�
 это API-contract `flat-resources + Operations`: мутации возвращают
 `Operation` (async), не ресурс синхронно.
 
-Реализация — общая `kacho-corelib/operations`-таблица + **IAM-extension**
+Реализация — общая таблица `pkg/operations` + **IAM-extension**
 (три поля принципала: `principal_type`, `principal_id`, `principal_display_name`).
 
 **Use-cases:**
@@ -100,21 +100,45 @@ sequenceDiagram
 | `List`   | sync       | Список (filter by principal_id, done, age).        |
 | `Cancel` | sync       | Для большинства IAM no-op (быстрые операции).     |
 
-### REST mapping (от corelib)
+### REST mapping
 
-| HTTP    | Path                                  | gRPC mapping                |
-|---------|---------------------------------------|------------------------------|
-| GET     | `/iam/v1/operations/{operationId}`    | `OperationService.Get`       |
-| GET     | `/iam/v1/operations`                  | `OperationService.List`      |
-| POST    | `/iam/v1/operations/{opId}:cancel`    | `OperationService.Cancel`    |
+`OperationService` — **домен-агностичный** контракт (`proto/kacho/cloud/operation/operation_service.proto`),
+поэтому его пути не несут имени сервиса; шлюз выбирает бэкенд по 3-символьному префиксу
+id (`iop` → iam) в `gateway/internal/opsproxy/proxy.go`.
+
+| HTTP    | Path                                       | gRPC mapping                |
+|---------|--------------------------------------------|------------------------------|
+| GET     | `/operations/{operation_id}`               | `OperationService.Get`       |
+| POST    | `/operations/{operation_id}:cancel`        | `OperationService.Cancel`    |
+
+Списки операций — **всегда в области своего ресурса**, отдельным RPC владельца:
+`/iam/v1/accounts/{account_id}/operations`, `.../projects/{project_id}/operations`,
+`.../users/{user_id}/operations`, `.../serviceAccounts/{service_account_id}/operations`,
+`.../groups/{group_id}/operations`, `.../roles/{role_id}/operations`,
+`.../accessBindings/{access_binding_id}/operations`, плюс аккаунт-широкий
+`/iam/v1/accounts/{account_id}/operations:all` и админ-дамп `/iam/v1/internal/operations`
+(cluster-internal).
+
+> [!note] Здесь стояли три пути под собственным доменом сервиса и `List` без области
+> Ни одного из них край не обслуживает: `OperationService` домен-агностичен, а
+> списочного RPC без ресурса-владельца у него нет вовсе. Снятые адреса не
+> воспроизводятся — процитированные, они читаются как живые маршруты.
 
 ## Конфигурация
 
-| Env var                              | YAML                                          | Default | Описание                                  |
-|--------------------------------------|-----------------------------------------------|---------|-------------------------------------------|
-| `KACHO_IAM_OPS_WORKER_COUNT`         | corelib `operations.worker-count`             | 4       | Число параллельных worker'ов.              |
-| `KACHO_IAM_OPS_WORKER_INTERVAL_MS`   | corelib `operations.worker-interval-ms`       | 500     | Tick interval.                            |
-| `KACHO_IAM_OPS_RETENTION_DAYS`       | corelib `operations.retention-days`           | 30      | Сколько дней хранить done operations.      |
+**Настраиваемых снаружи ручек у этой подсистемы в iam нет.** Предикат:
+`grep -rhoE 'KACHO_IAM_OPS_[A-Z0-9]*'` по всему дереву даёт **ноль** вхождений
+(замер 2026-08-06). Параметры берутся из умолчаний общего пакета — период
+фонового обхода бесхозных операций задан `operations.ReconcilerConfig` (30 s,
+`pkg/operations/reconciler.go`), а сама постановка идёт в `pkg/operations`
+(`Run`), не отдельным пулом воркеров с настраиваемым размером.
+
+> [!note] Здесь стояла таблица из трёх переменных окружения — их нет ни одной
+> Прежняя редакция объявляла число воркеров, период тика и срок хранения
+> завершённых операций, каждую с YAML-двойником и дефолтом. Ни переменных, ни
+> YAML-ключей, ни механизма срока хранения в дереве нет (`grep -rni retention`
+> по общему пакету операций — ноль). Имена не воспроизводятся: в обратных
+> кавычках они читаются как живые ручки, которые кто-нибудь пропишет в чарт.
 
 ## Как пользоваться
 
@@ -174,13 +198,16 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 60s \
 
 ## Подробности реализации
 
-- **Repo:** `internal/repo/kacho/pg/operations_repo.go` (extends corelib с principal_*).
+- **Repo:** общий `pkg/operations` (`repo.go`); iam добавляет поверх него редактор
+  секретов в ответе — `internal/repo/kacho/pg/ops_response_redactor.go`. Отдельного
+  файла-репозитория операций у iam нет.
 - **Handler:** `internal/handler/operation_handler.go` + `operation_handler_anti_leak_test.go`.
 - **Wiring:** `cmd/kacho-iam/serve.go::operations.NewRepo(pool, "kacho_iam")`.
-- **Worker:** запускается через `operations.NewWorker` (corelib) → drain in-flight.
-  IAM operations в основном инициируются и сразу завершаются в одной writer-tx
-  (sync-ish), worker рисует `done=true` если еще не помечено.
-- **Migration extension:** `migrations_iam_extensions_integration_test.go`
+- **Исполнение:** use-case зовёт `operations.Run` (`pkg/operations`) сразу после
+  writer-TX; IAM-операции в основном завершаются тут же (sync-ish). Бэкстопом стоит
+  реконсайлер бесхозных операций — `cmd/kacho-iam/recovery.go` (`startLROReconciler`),
+  boot-обход плюс периодический.
+- **Migration extension:** `internal/repo/kacho/pg/migrations_iam_extensions_integration_test.go`
   гарантирует, что `principal_*` колонки добавлены поверх corelib baseline.
 - **Principal sources:**
   - Public-API: api-gateway interceptor → metadata headers → `UnaryPrincipalExtract`.
@@ -191,8 +218,11 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 60s \
 
 - **`iop`-prefix НЕ `opr`/`acc`** — иначе api-gateway routing коллизия.
 - **Operation reuse** — нельзя reuse id; каждое RPC создает новый.
-- **Retention** — после 30 дней операции удаляются worker-cleanup loop'ом;
-  audit-trail продолжает жить в `audit_outbox`.
+- **Срока хранения нет.** Прежняя редакция обещала удаление завершённых операций
+  через 30 дней «cleanup-петлёй воркера»: такой петли в общем пакете операций не
+  существует (`grep -rni retention` — ноль), строки живут, пока их кто-нибудь не
+  удалит. Это открытый долг, а не поведение; audit-trail при этом живёт отдельно
+  в `audit_outbox`.
 - **Anonymous bootstrap path** — при первом `UpsertFromIdentity` у Account
   еще нет owner'а, principal = `('system','bootstrap','kacho-iam-bootstrap')`.
 
@@ -200,12 +230,13 @@ cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 60s \
 
 - [`05-sa-keys.md`](05-sa-keys.md) — secret-redactor работает поверх operations.
 - [`32-observability.md`](32-observability.md) — metrics на in-flight count + done latency.
-- corelib `kacho-corelib/operations` — базовая реализация.
+- `pkg/operations` — базовая реализация.
 
 ## Ссылки на код
 
 - `internal/handler/operation_handler.go`
-- `internal/repo/kacho/pg/operations_repo.go`
-- `internal/migrations/0001_initial.sql:892-917` (IAM extension)
-- `cmd/kacho-iam/serve.go` (worker wiring)
-- corelib: `kacho-corelib/operations/`
+- `internal/repo/kacho/pg/ops_response_redactor.go`
+- `internal/migrations/0001_initial.sql` (IAM extension — колонки принципала)
+- `cmd/kacho-iam/serve.go` (`operations.NewRepo(pool, "kacho_iam")`)
+- `cmd/kacho-iam/recovery.go` (реконсайлер бесхозных операций)
+- `pkg/operations/`

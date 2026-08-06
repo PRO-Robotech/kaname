@@ -150,9 +150,14 @@ sequenceDiagram
 | GET     | `/iam/v1/groups?account_id=...`                                       | `GroupService.List`           |
 | PATCH   | `/iam/v1/groups/{groupId}`                                            | `GroupService.Update`         |
 | DELETE  | `/iam/v1/groups/{groupId}`                                            | `GroupService.Delete`         |
-| POST    | `/iam/v1/groups/{groupId}/members`                                    | `GroupService.AddMember`      |
-| DELETE  | `/iam/v1/groups/{groupId}/members/{memberType}/{memberId}`            | `GroupService.RemoveMember`   |
-| GET     | `/iam/v1/groups/{groupId}/members`                                    | `GroupService.ListMembers`    |
+| POST    | `/iam/v1/groups/{groupId}:addMember`                                  | `GroupService.AddMember`      |
+| POST    | `/iam/v1/groups/{groupId}:removeMember`                               | `GroupService.RemoveMember`   |
+| POST    | `/iam/v1/groups/{groupId}:listMembers`                                | `GroupService.ListMembers`    |
+
+> [!note] Здесь стояли три sub-collection-пути `…/members…` — край их не обслуживает
+> Членство меняется suffix-действиями (`:verb`) по конвенции API Kachō, а не вложенной
+> коллекцией: сверено с `google.api.http` в `proto/kacho/cloud/iam/v1/group_service.proto`.
+> Снятые адреса не воспроизводятся — процитированные, они читаются как живые маршруты.
 
 ## Конфигурация
 
