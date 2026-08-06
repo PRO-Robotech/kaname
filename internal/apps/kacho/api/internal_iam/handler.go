@@ -4,8 +4,14 @@
 // Package internal_iam — InternalIAMService (kacho-only, gRPC port :9091).
 //
 // Ban #6 (Internal.* не публикуется на external endpoint): internal-only сервис.
-// Регистрируется ТОЛЬКО на internal listener (port 9091). gRPC-direct only — НЕ через restmux
-// api-gateway (loop-prevention).
+// Регистрируется ТОЛЬКО на internal listener (port 9091).
+//
+// Инвариант — INTERNAL-ONLY, а не «только gRPC». LookupSubject и Check несут
+// http-аннотации, и api-gateway заводит им REST-маршруты на СВОЁМ внутреннем mux
+// (`/iam/v1/internal/iam:{lookupSubject,check}`); на внешний listener они не
+// выходят. Сам gateway ходит сюда gRPC-direct — чтобы его auth-интерсептор не
+// рекурсировал через собственную цепочку (loop-prevention), а не потому что
+// маршрута нет.
 //
 // Методы:
 //   - LookupSubject(by external_id|id|email) — для auth-interceptor api-gateway

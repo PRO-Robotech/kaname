@@ -468,7 +468,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
-	// — same FGA + OPA pipeline). gRPC-direct only, port 9091.
+	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
+	// the external endpoint (ban #6). "gRPC-direct only" used to stand here and
+	// is wrong — the api-gateway also exposes these two over REST on its
+	// INTERNAL mux; internal-only is the invariant, gRPC-direct is not.
 	lookupSubject := internaliamapp.NewLookupSubjectUseCase(kachoRepo)
 	// SEC-C — FGA-proxy: RegisterResource / UnregisterResource enqueue the
 	// owner-hierarchy tuple into kacho_iam.fga_outbox in one writer-tx (drainer
