@@ -111,6 +111,18 @@ func buildSubjectChangeDrainer(
 			BackoffMin:   200 * time.Millisecond,
 			BackoffMax:   10 * time.Second,
 			ApplyTimeout: 3 * time.Second,
+			// PartitionColumn намеренно пуст: поток коммутативен. Применение
+			// строки — сброс кэшированных решений СУБЪЕКТА у шлюза
+			// (InvalidateSubject; поля события про ресурс шлюз ИГНОРИРУЕТ, сброс
+			// всегда по субъекту целиком). Событие ничего не устанавливает,
+			// поэтому отменить предыдущее ему нечем: два сброса одного субъекта
+			// идемпотентны (пустой кэш → NotFound → ErrAlreadyApplied → строка
+			// доставлена), и финальное состояние — отсутствие кэшированных
+			// записей — сходится при ЛЮБОМ порядке применения. Это условие (а)
+			// из drainer.Config.PartitionColumn; сериализовать порядок здесь
+			// нечем и незачем. Решение машинно проверяется записью в
+			// repohygiene.commutativeDrainExempt — она же покраснеет, если
+			// очередь когда-нибудь получит вторую половину и ключ порядка.
 		},
 		clients.DecodeSubjectChange,
 		clients.NewSubjectChangeApplier(cli),
