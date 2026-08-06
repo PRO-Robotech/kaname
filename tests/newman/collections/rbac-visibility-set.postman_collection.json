@@ -132,6 +132,16 @@
                   "} catch (e) {}",
                   "try {",
                   "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('visSetDefPrj', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('visSetDefPrj') === -1) _pv.push('visSetDefPrj');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('visSetAcctOp', String(v));",
                   "} catch (e) {}"
@@ -214,6 +224,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visSetAcct'); } else if (j.response && j.response.id && !pm.environment.get('visSetAcct')) { pm.environment.set('visSetAcct', j.response.id); }",
+                  "if (j.error) { pm.environment.unset('visSetDefPrj'); } ",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -387,6 +398,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visPP1'); } else if (j.response && j.response.id && !pm.environment.get('visPP1')) { pm.environment.set('visPP1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -560,6 +572,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visPP2'); } else if (j.response && j.response.id && !pm.environment.get('visPP2')) { pm.environment.set('visPP2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -733,6 +746,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visPP3'); } else if (j.response && j.response.id && !pm.environment.get('visPP3')) { pm.environment.set('visPP3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -906,6 +920,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visPM1'); } else if (j.response && j.response.id && !pm.environment.get('visPM1')) { pm.environment.set('visPM1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -1079,6 +1094,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visPM2'); } else if (j.response && j.response.id && !pm.environment.get('visPM2')) { pm.environment.set('visPM2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -1252,6 +1268,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visPM3'); } else if (j.response && j.response.id && !pm.environment.get('visPM3')) { pm.environment.set('visPM3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -1425,6 +1442,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visBQ1'); } else if (j.response && j.response.id && !pm.environment.get('visBQ1')) { pm.environment.set('visBQ1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -1598,6 +1616,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visBQ2'); } else if (j.response && j.response.id && !pm.environment.get('visBQ2')) { pm.environment.set('visBQ2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -1771,6 +1790,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visSetRole'); } else if (j.response && j.response.id && !pm.environment.get('visSetRole')) { pm.environment.set('visSetRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -1945,6 +1965,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
@@ -3723,6 +3744,183 @@
           ]
         },
         {
+          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: teardown-suite-default-project",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{visSetDefPrj}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{visSetDefPrj}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
+                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_suite_default_project') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_suite_default_project', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_suite_default_project', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_suite_default_project') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_suite_default_project', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_suite_default_project');",
+                  "pm.environment.unset('_poll200_started_teardown_suite_default_project');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_teardownsuitedefaultprojectRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownsuitedefaultprojectRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: teardown-suite-default-project-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_teardownsuitedefaultprojectRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_teardownsuitedefaultprojectRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
+                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__teardownsuitedefaultprojectRevOpStarted') !== pm.info.requestName) { pm.environment.set('__teardownsuitedefaultprojectRevOpCount', '0'); pm.environment.set('__teardownsuitedefaultprojectRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_teardownsuitedefaultprojectRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__teardownsuitedefaultprojectRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__teardownsuitedefaultprojectRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__teardownsuitedefaultprojectRevOpCount'); pm.environment.unset('__teardownsuitedefaultprojectRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: teardown-suite-account",
           "request": {
             "method": "DELETE",
@@ -3805,7 +4003,7 @@
                   "pm.environment.unset('_poll200_started_teardown_suite_account');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "pm.environment.unset('_teardownsuiteaccountRevOp');",
-                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 400, 404, 409]));",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
                   "if (pm.response.code === 200 && j && j.id) pm.environment.set('_teardownsuiteaccountRevOp', j.id);"
                 ]
               }
@@ -4071,6 +4269,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visVlProj'); } else if (j.response && j.response.id && !pm.environment.get('visVlProj')) { pm.environment.set('visVlProj', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -4244,6 +4443,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visVcProj'); } else if (j.response && j.response.id && !pm.environment.get('visVcProj')) { pm.environment.set('visVcProj', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -4671,6 +4871,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visVlRole'); } else if (j.response && j.response.id && !pm.environment.get('visVlRole')) { pm.environment.set('visVlRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -4846,6 +5047,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -5019,6 +5221,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('visVcRole'); } else if (j.response && j.response.id && !pm.environment.get('visVcRole')) { pm.environment.set('visVcRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -5193,6 +5396,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
@@ -6494,6 +6698,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaPP1'); } else if (j.response && j.response.id && !pm.environment.get('setSvaPP1')) { pm.environment.set('setSvaPP1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -6667,6 +6872,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaPP2'); } else if (j.response && j.response.id && !pm.environment.get('setSvaPP2')) { pm.environment.set('setSvaPP2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -6840,6 +7046,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaPP3'); } else if (j.response && j.response.id && !pm.environment.get('setSvaPP3')) { pm.environment.set('setSvaPP3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -7013,6 +7220,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaPM1'); } else if (j.response && j.response.id && !pm.environment.get('setSvaPM1')) { pm.environment.set('setSvaPM1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -7186,6 +7394,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaPM2'); } else if (j.response && j.response.id && !pm.environment.get('setSvaPM2')) { pm.environment.set('setSvaPM2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -7359,6 +7568,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaPM3'); } else if (j.response && j.response.id && !pm.environment.get('setSvaPM3')) { pm.environment.set('setSvaPM3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -7532,6 +7742,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaBQ1'); } else if (j.response && j.response.id && !pm.environment.get('setSvaBQ1')) { pm.environment.set('setSvaBQ1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -7705,6 +7916,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaBQ2'); } else if (j.response && j.response.id && !pm.environment.get('setSvaBQ2')) { pm.environment.set('setSvaBQ2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -8132,6 +8344,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaRole'); } else if (j.response && j.response.id && !pm.environment.get('setSvaRole')) { pm.environment.set('setSvaRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -8306,6 +8519,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
@@ -10246,6 +10460,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolPP1'); } else if (j.response && j.response.id && !pm.environment.get('setRolPP1')) { pm.environment.set('setRolPP1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -10419,6 +10634,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolPP2'); } else if (j.response && j.response.id && !pm.environment.get('setRolPP2')) { pm.environment.set('setRolPP2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -10592,6 +10808,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolPP3'); } else if (j.response && j.response.id && !pm.environment.get('setRolPP3')) { pm.environment.set('setRolPP3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -10765,6 +10982,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolPM1'); } else if (j.response && j.response.id && !pm.environment.get('setRolPM1')) { pm.environment.set('setRolPM1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -10938,6 +11156,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolPM2'); } else if (j.response && j.response.id && !pm.environment.get('setRolPM2')) { pm.environment.set('setRolPM2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -11111,6 +11330,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolPM3'); } else if (j.response && j.response.id && !pm.environment.get('setRolPM3')) { pm.environment.set('setRolPM3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -11284,6 +11504,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolBQ1'); } else if (j.response && j.response.id && !pm.environment.get('setRolBQ1')) { pm.environment.set('setRolBQ1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -11457,6 +11678,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolBQ2'); } else if (j.response && j.response.id && !pm.environment.get('setRolBQ2')) { pm.environment.set('setRolBQ2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -11884,6 +12106,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setRolRole'); } else if (j.response && j.response.id && !pm.environment.get('setRolRole')) { pm.environment.set('setRolRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -12058,6 +12281,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
@@ -13998,6 +14222,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpPP1'); } else if (j.response && j.response.id && !pm.environment.get('setGrpPP1')) { pm.environment.set('setGrpPP1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -14171,6 +14396,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpPP2'); } else if (j.response && j.response.id && !pm.environment.get('setGrpPP2')) { pm.environment.set('setGrpPP2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -14344,6 +14570,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpPP3'); } else if (j.response && j.response.id && !pm.environment.get('setGrpPP3')) { pm.environment.set('setGrpPP3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -14517,6 +14744,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpPM1'); } else if (j.response && j.response.id && !pm.environment.get('setGrpPM1')) { pm.environment.set('setGrpPM1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -14690,6 +14918,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpPM2'); } else if (j.response && j.response.id && !pm.environment.get('setGrpPM2')) { pm.environment.set('setGrpPM2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -14863,6 +15092,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpPM3'); } else if (j.response && j.response.id && !pm.environment.get('setGrpPM3')) { pm.environment.set('setGrpPM3', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -15036,6 +15266,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpBQ1'); } else if (j.response && j.response.id && !pm.environment.get('setGrpBQ1')) { pm.environment.set('setGrpBQ1', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -15209,6 +15440,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpBQ2'); } else if (j.response && j.response.id && !pm.environment.get('setGrpBQ2')) { pm.environment.set('setGrpBQ2', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -15636,6 +15868,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpRole'); } else if (j.response && j.response.id && !pm.environment.get('setGrpRole')) { pm.environment.set('setGrpRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -15810,6 +16043,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
@@ -17750,6 +17984,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaVl'); } else if (j.response && j.response.id && !pm.environment.get('setSvaVl')) { pm.environment.set('setSvaVl', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -17923,6 +18158,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaVlCtl'); } else if (j.response && j.response.id && !pm.environment.get('setSvaVlCtl')) { pm.environment.set('setSvaVlCtl', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -18350,6 +18586,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaVlRole'); } else if (j.response && j.response.id && !pm.environment.get('setSvaVlRole')) { pm.environment.set('setSvaVlRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -18525,6 +18762,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -18698,6 +18936,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setSvaVcRole'); } else if (j.response && j.response.id && !pm.environment.get('setSvaVcRole')) { pm.environment.set('setSvaVcRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -18872,6 +19111,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
@@ -20173,6 +20413,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpVl'); } else if (j.response && j.response.id && !pm.environment.get('setGrpVl')) { pm.environment.set('setGrpVl', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -20346,6 +20587,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpVlCtl'); } else if (j.response && j.response.id && !pm.environment.get('setGrpVlCtl')) { pm.environment.set('setGrpVlCtl', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -20773,6 +21015,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpVlRole'); } else if (j.response && j.response.id && !pm.environment.get('setGrpVlRole')) { pm.environment.set('setGrpVlRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -20948,6 +21191,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -21121,6 +21365,7 @@
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
                   "if (j.error) { pm.environment.unset('setGrpVcRole'); } else if (j.response && j.response.id && !pm.environment.get('setGrpVcRole')) { pm.environment.set('setGrpVcRole', j.response.id); }",
+                  "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
                 ]
@@ -21295,6 +21540,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
+                  "",
                   "",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);"
