@@ -849,7 +849,7 @@ func runServe(cfg config.Config) error {
 	// Enterprise SSO (SCIM + SAML) is not served by this listener set.
 
 	// fga_outbox drainer. Watches kacho_iam.fga_outbox via LISTEN/NOTIFY
-	// (channel `kacho_iam_fga_outbox` set up by migration 0002), drains
+	// (channel `kacho_iam_fga_outbox` set up by migration 0001_initial.sql), drains
 	// pending tuples at startup, and applies each row to OpenFGA via
 	// clients.NewFGAApplier (Write/Delete tuples; idempotent on 400-already-
 	// exists / 400-cannot-delete; retry on 5xx; poison on validation_error).

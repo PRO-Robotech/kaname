@@ -26,7 +26,8 @@
 //	DB-level: tx-commit is the atomicity primitive, not "INSERT then call
 //	OpenFGA sync then hope".
 //
-// Schema (migration 0002 `kacho_iam.fga_outbox`):
+// Schema of `kacho_iam.fga_outbox` (table and NOTIFY trigger — migration
+// `0001_initial.sql`; the ordering partition key — `0067_fga_outbox_tuple_key_partition.sql`):
 //
 //	id            bigserial    PK
 //	event_type    text         IN ('fga.tuple.write','fga.tuple.delete')
@@ -35,6 +36,13 @@
 //	sent_at       timestamptz  NULL until drainer applies
 //	last_error    text
 //	attempt_count int
+//	tuple_key     text         `user relation object`, filled by a BEFORE INSERT
+//	                           trigger — NEVER by a writer. It is the drainer's
+//	                           ordering partition, so a second rendering of it
+//	                           would split one tuple across two partitions and
+//	                           lose the write→delete order silently. A payload
+//	                           missing any component yields NULL and is refused
+//	                           by fga_outbox_tuple_key_present_check at INSERT.
 //
 // Drainer event types (clients/fga_applier.go):
 //   - clients.FGAEventTypeWrite  = "fga.tuple.write"

@@ -164,7 +164,10 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 	}
 
 	// 2b: fga_outbox — tuple write for the FGA-tuple drainer.
-	// fga_outbox schema (migration 0002): bigserial id, event_type, payload (jsonb).
+	// fga_outbox schema (migration 0001_initial.sql): bigserial id, event_type,
+	// payload (jsonb). The ordering partition key `tuple_key` is NOT written here:
+	// migration 0067's BEFORE INSERT trigger fills it for every writer, which is
+	// why the key has a single source of truth across all emit sites.
 	fgaPayload := map[string]any{
 		"object":   "cluster:" + clusterID,
 		"relation": "system_admin",
