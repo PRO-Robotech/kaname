@@ -55,6 +55,59 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
 	return nil
 }
 
+// UpsertManyTx — тот же UPSERT, что UpsertTx, но НАБОРОМ строк одним стейтментом.
+//
+// ЗАЧЕМ. Аддитивный проход материализации пишет по строке члена на КАЖДУЮ выдачу,
+// совпавшую с одним объектом, а совпавших столько, сколько выдач покрывает область
+// объекта (по дереву выдач: p50 = 9, хвост 227). Поштучная вставка делала стоимость
+// прохода линейной по числу выдач соседей, хотя изменился ровно один объект.
+//
+// Семантика дословно та же: тот же ключ конфликта, то же перезаписывание статуса,
+// то же advance updated_at. Дубли по ключу внутри одного набора схлопываются здесь —
+// `ON CONFLICT … DO UPDATE` не вправе задеть одну строку дважды в одном стейтменте, и
+// набор с дублем Postgres отверг бы целиком (поштучная вставка этого не требовала,
+// потому что каждая строка ехала своим стейтментом). Пустой набор — no-op.
+func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
+	if len(members) == 0 {
+		return nil
+	}
+	n := len(members)
+	bindings := make([]string, 0, n)
+	roles := make([]string, 0, n)
+	fps := make([]string, 0, n)
+	objTypes := make([]string, 0, n)
+	objIDs := make([]string, 0, n)
+	statuses := make([]string, 0, n)
+	seen := make(map[[5]string]struct{}, n)
+	for _, m := range members {
+		k := [5]string{m.BindingID, m.RoleID, m.RuleFP, m.ObjectType, m.ObjectID}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		bindings = append(bindings, m.BindingID)
+		roles = append(roles, m.RoleID)
+		fps = append(fps, m.RuleFP)
+		objTypes = append(objTypes, m.ObjectType)
+		objIDs = append(objIDs, m.ObjectID)
+		statuses = append(statuses, string(m.VerificationStatus))
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kacho_iam.access_binding_target_members
+		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+		 SELECT b, r, f, ot, oi, vs, now(), now()
+		   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+		        AS t(b, r, f, ot, oi, vs)
+		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+		    SET verification_status = EXCLUDED.verification_status,
+		        updated_at          = now()`,
+		bindings, roles, fps, objTypes, objIDs, statuses,
+	); err != nil {
+		return fmt.Errorf("target_members: upsert many (%d): %w", len(bindings), err)
+	}
+	return nil
+}
+
 // DeleteTx removes a membership row for the full rule coordinate (binding, role,
 // rule_fp, object) on the caller tx. Used when an ACTIVE member falls out of the
 // matched set (label removed / rule removed) — the reconciler

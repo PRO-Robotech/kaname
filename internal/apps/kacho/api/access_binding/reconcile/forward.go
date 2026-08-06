@@ -163,6 +163,7 @@ import (
 // (no over-/under-grant; idempotent forward + async-backstop overlap).
 func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID domain.AccessBindingID) error {
 	col := &syncFGACollector{}
+	w := &forwardWriteSet{}
 	// needsFull is set inside the peek below when the binding already has materialized
 	// members (a replay create / a call on an existing binding), which requires the FULL
 	// delete-stale diff the additive forward path deliberately omits (DELETE-STALE GUARD).
@@ -205,11 +206,11 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 			if d.Status != domain.VerificationActive {
 				continue
 			}
-			if err := r.materializeForwardMember(ctx, s, bs, d, col); err != nil {
+			if err := r.materializeForwardMember(ctx, s, bs, d, col, w); err != nil {
 				return err
 			}
 		}
-		return nil
+		return w.flush(ctx, s)
 	}); err != nil {
 		return err
 	}
@@ -325,6 +326,7 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 	// object getter + the fast-path fan-out differ per feed; everything else is shared.
 	iamDirect := domain.FeedSourceForType(objectType) == domain.FeedIAMDirect
 	col := &syncFGACollector{}
+	w := &forwardWriteSet{}
 	// needsFull is set inside the peek below when the object already has materialized
 	// members (a RE-REGISTER / label-UPDATE), which requires the FULL delete-stale diff
 	// that the additive forward path deliberately omits (see the DELETE-STALE GUARD note).
@@ -408,12 +410,27 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 		if err != nil {
 			return fmt.Errorf("forward: selector bindings matching object %s:%s: %w", objectType, objectID, err)
 		}
-		for _, bID := range dedupSortBindingIDs(matching) {
-			if err := r.forwardObjectForBinding(ctx, s, bID, obj, col); err != nil {
+		// Факты выдач читаются ПАКЕТОМ — за фиксированное число обращений, а не по два на
+		// выдачу. Стоимость прохода задаётся размером веера (p50 = 9 кандидатов, хвост
+		// 227 по дереву выдач), и поштучное чтение делало её линейной по числу выдач
+		// СОСЕДЕЙ, хотя изменился ровно один объект. Проекция та же (bindingScopeFrom у
+		// адаптера — единственная точка вывода), блокировок пакетное чтение не берёт, как
+		// не брало и поштучное.
+		ids := dedupSortBindingIDs(matching)
+		scopes, err := s.LoadBindingsUnlocked(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("forward: load bindings %s:%s: %w", objectType, objectID, err)
+		}
+		for _, bID := range ids {
+			bs, ok := scopes[bID]
+			if !ok || !bs.Active {
+				continue // удалена / не ACTIVE — материализовать нечего (тот же исход, что был)
+			}
+			if err := r.forwardObjectForBinding(ctx, s, bs, obj, col, w); err != nil {
 				return err
 			}
 		}
-		return nil
+		return w.flush(ctx, s)
 	}); err != nil {
 		return err
 	}
@@ -433,23 +450,14 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 }
 
 // forwardObjectForBinding materializes the ONE object's ACTIVE per-object tuples for a
-// single matching binding. It takes NO advisory lock (neither the EXCLUSIVE lock the full
-// path takes nor a SHARE one) and NO FOR UPDATE row-lock (LoadBindingUnlocked): the pass is
-// additive-only (see file-level doc). A binding that is gone / no longer ACTIVE / whose
-// (scope-aware) selectors do not match this object is a no-op. Non-ACTIVE per-object
-// verdicts (REJECTED containment) are LEFT to the async full backstop — the additive
-// path never writes a non-grant.
-func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, obj domain.MirrorObject, col *syncFGACollector) error {
-	// БЕЗ advisory-блокировки (см. «LOCK CHOICE» в шапке файла): проход аддитивен, а
-	// перекрёстного ожидания с полным проходом больше нет — тот держит строку биндинга
-	// в режиме `FOR NO KEY UPDATE`, совместимом с `FOR KEY SHARE` дочерних вставок.
-	bs, ok, err := s.LoadBindingUnlocked(ctx, bindingID)
-	if err != nil {
-		return fmt.Errorf("forward: load binding %s: %w", bindingID, err)
-	}
-	if !ok || !bs.Active {
-		return nil // deleted / not ACTIVE — nothing to materialize.
-	}
+// single matching binding whose facts the caller has ALREADY read (пакетом — см.
+// reconcileObjectForward). It takes NO advisory lock (neither the EXCLUSIVE lock the full
+// path takes nor a SHARE one) and NO FOR UPDATE row-lock: the pass is additive-only (see
+// file-level doc). A binding whose (scope-aware) selectors do not match this object is a
+// no-op; выдачи, которой уже нет или которая не ACTIVE, вызывающий сюда не приносит.
+// Non-ACTIVE per-object verdicts (REJECTED containment) are LEFT to the async full
+// backstop — the additive path never writes a non-grant.
+func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject, col *syncFGACollector, w *forwardWriteSet) error {
 	// The object's desired members under this binding — derived by the SHARED
 	// desiredMembersForObject (per-object target least-priv, arm match, containment
 	// verdict, scope-self anchor), so the forward fast-path, the object-narrowed full
@@ -464,39 +472,64 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 			// containment audit.
 			continue
 		}
-		if err := r.materializeForwardMember(ctx, s, bs, dm, col); err != nil {
+		if err := r.materializeForwardMember(ctx, s, bs, dm, col, w); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// materializeForwardMember writes ONE ACTIVE per-object member additively: UPSERT the
-// member row, enqueue the per-object FGA tuple-write into fga_outbox, collect it for the
-// post-commit sync OpenFGA write, and co-commit it into the emitted-tuple ledger — all
-// in the caller's writer-tx (ban #10). Every step is idempotent, so a re-run (forward
-// retry) or the async full backstop emitting the SAME tuples is a safe no-op.
-func (r *Reconciler) materializeForwardMember(ctx context.Context, s ReconcileStore, bs BindingScope, dm DesiredMember, col *syncFGACollector) error {
-	if err := s.UpsertMember(ctx, domain.TargetMember{
+// forwardWriteSet — накопитель записи одного аддитивного прохода. Проход материализует
+// по строке члена и по записи реестра на КАЖДУЮ совпавшую выдачу, а совпавших выдач у
+// одного объекта столько, сколько выдач покрывает его область (p50 = 9, хвост 227 по
+// дереву выдач). Поштучная запись делала стоимость прохода линейной по числу выдач
+// СОСЕДЕЙ, хотя изменился ровно один объект; накопитель сводит её к фиксированному числу
+// обращений (flush ниже) БЕЗ изменения того, что записывается.
+//
+// Отложить запись до конца транзакции безопасно и ничего не меняет по существу: все три
+// записи и так коммитились одной транзакцией (ban #10), каждая идемпотентна, а порядок
+// внутри очереди сохраняется — накопление идёт в том же порядке, в каком проход обходит
+// выдачи, и flush отдаёт набор одним стейтментом в этом же порядке.
+type forwardWriteSet struct {
+	members []domain.TargetMember
+	fresh   []domain.MembershipTuple
+	ledger  []EmittedTupleRef
+}
+
+// flush записывает накопленное — три обращения к базе на ВЕСЬ веер вместо трёх на выдачу.
+func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
+	if err := s.UpsertMembers(ctx, w.members); err != nil {
+		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
+	}
+	if err := s.EmitTupleWrite(ctx, w.fresh); err != nil {
+		return fmt.Errorf("forward: emit tuple write (%d): %w", len(w.fresh), err)
+	}
+	if err := s.RecordEmittedTuplesBatch(ctx, w.ledger); err != nil {
+		return fmt.Errorf("forward: record emitted tuples (%d): %w", len(w.ledger), err)
+	}
+	return nil
+}
+
+// materializeForwardMember накапливает ОДНОГО ACTIVE-члена: строку члена, кортежи для
+// очереди fga_outbox (и для пост-коммитной синхронной записи в OpenFGA) и записи реестра
+// выданных кортежей. Всё это уходит в базу одним flush'ем на проход, в той же
+// транзакции (ban #10) и с той же идемпотентностью: повтор прохода или наложение
+// асинхронного полного прохода на те же кортежи — безопасный no-op.
+func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStore, bs BindingScope, dm DesiredMember, col *syncFGACollector, w *forwardWriteSet) error {
+	w.members = append(w.members, domain.TargetMember{
 		BindingID: bs.BindingID, RoleID: domain.RoleID(bs.RoleID), RuleFP: dm.RuleFP,
 		ObjectType: dm.ObjectType, ObjectID: dm.ObjectID, VerificationStatus: domain.VerificationActive,
-	}); err != nil {
-		return fmt.Errorf("forward: upsert member %s/%s:%s: %w", dm.RuleFP, dm.ObjectType, dm.ObjectID, err)
-	}
+	})
 	// Enqueue ONLY the tuples this pass has not already enqueued, and collect the same set
 	// for the post-commit synchronous OpenFGA write (read-after-write closer). Per-pass
 	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
-	if fresh := col.collectNew(dm.Tuples); len(fresh) > 0 {
-		if err := s.EmitTupleWrite(ctx, fresh); err != nil {
-			return fmt.Errorf("forward: emit tuple write %s:%s: %w", dm.ObjectType, dm.ObjectID, err)
-		}
-	}
+	w.fresh = append(w.fresh, col.collectNew(dm.Tuples)...)
 	// Co-commit the emitted member-tuple into the ledger — the symmetric revoke +
 	// Role.Update reconcile both rest on it (ban #10). The INSERT is
 	// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'`
 	// (idempotent — a re-emit / async-full-backstop overlap re-tags at most, never dups).
-	if err := s.RecordEmittedTuples(ctx, bs.BindingID, dm.Tuples); err != nil {
-		return fmt.Errorf("forward: record emitted tuple %s:%s: %w", dm.ObjectType, dm.ObjectID, err)
+	for _, t := range dm.Tuples {
+		w.ledger = append(w.ledger, EmittedTupleRef{BindingID: bs.BindingID, Tuple: t})
 	}
 	return nil
 }

@@ -93,6 +93,15 @@ type DesiredMember struct {
 	Tuples     []domain.MembershipTuple
 }
 
+// EmittedTupleRef — одна запись реестра выданных кортежей вместе с выдачей, которая её
+// породила. Нужна затем, чтобы весь веер прохода записывался ОДНИМ обращением: реестр
+// ключуется по (выдача, субъект, отношение, объект), поэтому идентификатор выдачи обязан
+// ехать вместе с кортежем, а не быть общим параметром вызова.
+type EmittedTupleRef struct {
+	BindingID domain.AccessBindingID
+	Tuple     domain.MembershipTuple
+}
+
 // ReconcileStore — the tx-scoped port the reconciler drives. Every method runs
 // inside the single writer-tx the implementation opens for one reconcile pass,
 // so the membership writes + FGA tuple emits + containment audit all commit
@@ -138,6 +147,20 @@ type ReconcileStore interface {
 	// registrations sharing one editor/owner binding (the throughput bottleneck this
 	// fast-path removes). ok=false when the binding no longer exists.
 	LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
+
+	// LoadBindingsUnlocked — то же чтение, что LoadBindingUnlocked, но для ЦЕЛОГО НАБОРА
+	// выдач за фиксированное число обращений к базе (не по два на выдачу).
+	//
+	// Веер материализации адресуется числом ВЫДАЧ, покрывающих область объекта, а не
+	// числом объектов: меняется один объект, а кандидатов у него столько, сколько выдач
+	// его области. Перепись по дереву выдач (8267 объектов зеркала) дала p50 = 9
+	// кандидатов, p95 = 19, p99 = 226, максимум 227, поэтому поштучное чтение делало
+	// хвост в 454 последовательных обращения внутри одной транзакции.
+	//
+	// Контракт: выдача, которой в базе нет (удалена), в карте ОТСУТСТВУЕТ — ровно как
+	// ok=false у одиночного чтения; роль, удалённая из-под выдачи, даёт «нет покрытия»
+	// (пустые селекторы), а не ошибку. Блокировок не берёт — путь аддитивен.
+	LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error)
 
 	// MatchSelector returns the MIRROR objects matching a selector's
 	// types+matchLabels (labels @> matchLabels) — the consumer-owned feed
@@ -278,6 +301,19 @@ type ReconcileStore interface {
 	// ForgetEmittedTuples removes exactly the supplied member rows (eager-revoke /
 	// fell-out). A deleted binding's rows are dropped by the FK ON DELETE CASCADE.
 	RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error
+
+	// UpsertMembers / RecordEmittedTuplesBatch — те же записи, что UpsertMember и
+	// RecordEmittedTuples, но НАБОРОМ и за фиксированное число обращений к базе, каким
+	// бы ни был размер веера. Аддитивный форвард материализует по строке члена и по
+	// записи реестра на КАЖДУЮ совпавшую выдачу, поэтому поштучная запись делала
+	// стоимость прохода линейной по числу выдач области (p50 = 9 кандидатов, хвост 227
+	// по дереву выдач) — при том что изменился ровно один объект.
+	//
+	// Семантика сохраняется дословно: тот же ON CONFLICT, та же идемпотентность повтора,
+	// тот же порядок строк (а на порядке id очереди держится поголовный FIFO партиции —
+	// выдача и отзыв одного ключа НЕ коммутативны). Пустой набор — no-op.
+	UpsertMembers(ctx context.Context, members []domain.TargetMember) error
+	RecordEmittedTuplesBatch(ctx context.Context, refs []EmittedTupleRef) error
 	ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error
 
 	// EmitContainmentAudit writes the "rejected: not contained in scope" audit

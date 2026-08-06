@@ -85,6 +85,7 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	if len(tuples) == 0 {
 		return nil
 	}
+	payloads := make([]string, 0, len(tuples))
 	for _, t := range tuples {
 		payload, err := json.Marshal(map[string]string{
 			"user":     t.User,
@@ -94,13 +95,20 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 		if err != nil {
 			return fmt.Errorf("fga_outbox: marshal payload: %w", err)
 		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
-			 VALUES ($1, $2::jsonb, now())`,
-			eventType, payload,
-		); err != nil {
-			return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
-		}
+		payloads = append(payloads, string(payload))
+	}
+	// ОДИН стейтмент на весь набор вместо одного на кортеж. Порядок строк сохраняется:
+	// `unnest` в FROM выдаёт элементы в порядке массива, поэтому возрастающие id
+	// назначаются в том же порядке, в каком вызывающий перечислил кортежи, — а на
+	// порядке id держится поголовный FIFO партиции у claim'а дренажа (выдача и отзыв
+	// одного ключа НЕ коммутативны). Прежняя поштучная вставка давала ровно тот же
+	// порядок, только за N обращений к серверу вместо одного.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+		 SELECT $1, p::jsonb, now() FROM unnest($2::text[]) AS p`,
+		eventType, payloads,
+	); err != nil {
+		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
 	}
 	return nil
 }

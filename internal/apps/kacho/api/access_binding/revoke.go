@@ -18,11 +18,11 @@ package access_binding
 // (partitionRevokeSet), not a re-derive from the binding's CURRENT role — so a
 // Role.Update between grant and revoke cannot orphan tuples, and a sibling ACTIVE
 // binding's access is never stripped along with this one's.
-// "The SAME writer-tx" only holds because that tx opens with the binding's EXCLUSIVE
-// advisory lock (see doRevoke): a concurrent reconcile/forward pass takes the SHARE
-// sibling of that lock, so it can never append to the ledger between the snapshot and
-// the commit — which no path would ever reclaim, a REVOKED binding being skipped by
-// every reconcile route.
+// "The SAME writer-tx" opens with the binding's EXCLUSIVE advisory lock (see doRevoke).
+// Здесь стояло, что этим отзыв разведён с аддитивным форвардом, «берущим SHARE-близнеца
+// того же ключа». Форвард advisory-блокировку НЕ БЕРЁТ (снята 2026-08-05, см.
+// reconcile/forward.go «LOCK CHOICE»), поэтому утверждение описывало код, которого нет;
+// оставшийся разъезд назван у doRevoke и открыт как отдельная задача.
 // Post-commit the same set is removed from OpenFGA synchronously (latency-parity
 // with grant); the in-tx EmitRelationDelete + drainer remain the at-least-once
 // backstop. Because revoked rows carry revoked_at, the partial active-grant UNIQUE
@@ -149,17 +149,20 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	}()
 	// Take the binding's EXCLUSIVE xact advisory lock as the FIRST statement of the
 	// writer-tx — the SAME pg_advisory_xact_lock(hashtext(binding_id)) key the
-	// reconciler uses (reconcile_adapter.go AcquireBindingLock / …Shared). Without
-	// it the revoke conflicts with NOTHING: a ReconcileBindingForward pass holds only
-	// a SHARE lock, so it can commit a NEW member + ledger row (and write its FGA
-	// tuple post-commit) inside the window between this tx's ledger snapshot and its
-	// commit. That tuple would be absent from the delete-set, and since a REVOKED
-	// binding short-circuits `!bs.Active` in reconcileBinding AND in both forward
-	// paths, NOTHING would ever reclaim it — the revoked subject keeps that object's
-	// verbs forever. EXCLUSIVE ⊥ SHARE makes the two txs strictly serial in either
-	// direction: an in-flight forward pass commits before the snapshot is taken, and
-	// one that starts later re-reads the status and no-ops (ban #10 — DB-level
-	// serialization, not a software check-then-act).
+	// reconciler's FULL pass uses (reconcile_adapter.go AcquireBindingLock). Этим
+	// держится взаимное исключение отзыва с полным проходом, истечением срока и вторым
+	// отзывом: ни один из них не вклинится между снимком реестра и коммитом.
+	//
+	// ЧТО ЭТА БЛОКИРОВКА НЕ ЗАКРЫВАЕТ (сказано прямо, чтобы следующий не достроил).
+	// Прежняя редакция объясняла её тем, что аддитивный форвард берёт SHARE-близнеца
+	// того же ключа. Форвард advisory-блокировку не берёт вовсе (снята 2026-08-05,
+	// reconcile/forward.go «LOCK CHOICE»), поэтому контрагента у EXCLUSIVE на этой
+	// стороне нет. Существенно же то, что ни одна xact-блокировка и не могла бы это
+	// закрыть: применение к хранилищу прав у ОБЕИХ сторон — и у выдачи, и у отзыва —
+	// происходит ПОСЛЕ коммита своей транзакции, то есть заведомо вне блокировки.
+	// Значит порядок применения обязан обеспечиваться на уровне применения, а не
+	// транзакции; предмет наблюдаем как кортежи, которых не держит ни одна выдача, и
+	// ведётся отдельной задачей.
 	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}

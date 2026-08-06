@@ -175,14 +175,21 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 		}
 	}()
 	// Take the binding's EXCLUSIVE xact advisory lock FIRST — the same
-	// pg_advisory_xact_lock(hashtext(binding_id)) key the reconciler uses
-	// (reconcile_adapter.go AcquireBindingLock / …Shared). A concurrent
-	// ReconcileBindingForward pass holds only a SHARE lock and would otherwise not
-	// conflict at all: it could commit a NEW ledger row (and write its FGA tuple
-	// post-commit) after the snapshot below, leaving that tuple live in OpenFGA with
-	// no ledger row to reclaim it (the FK CASCADE removes the row, the reconciler
-	// skips the now-absent binding). EXCLUSIVE ⊥ SHARE serializes the two txs in
-	// either direction (ban #10) — the same critical section revoke.go takes.
+	// pg_advisory_xact_lock(hashtext(binding_id)) key the reconciler's FULL pass uses
+	// (reconcile_adapter.go AcquireBindingLock). Взаимное исключение с полным проходом,
+	// истечением срока и параллельным отзывом этим держится.
+	//
+	// ЧЕГО ЭТА БЛОКИРОВКА БОЛЬШЕ НЕ ДАЁТ — И ЭТО НАДО ЗНАТЬ, А НЕ ДОСТРАИВАТЬ.
+	// Здесь стояло утверждение, что EXCLUSIVE разводит отзыв с аддитивным форвардом,
+	// потому что тот держит SHARE-блокировку того же ключа. **Форвард не берёт
+	// advisory-блокировку вовсе** (снята 2026-08-05, см. reconcile/forward.go «LOCK
+	// CHOICE»), поэтому у EXCLUSIVE на этой стороне не осталось контрагента: два
+	// утверждения об одном предмете, из которых верным было одно, и верным — не это.
+	// Комментарий приведён к коду; сам разъезд отзыва с пост-коммитной записью форварда
+	// в хранилище прав — открытая задача (её предмет наблюдаем как кортежи, которых не
+	// держит ни одна выдача), и закрывается она упорядочиванием ПРИМЕНЕНИЯ, а не
+	// возвратом блокировки: применение к хранилищу прав у обеих сторон происходит ПОСЛЕ
+	// коммита, то есть заведомо вне любой xact-блокировки.
 	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}

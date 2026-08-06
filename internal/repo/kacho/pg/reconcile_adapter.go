@@ -80,8 +80,15 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 }
 
 // reconcileStore — tx-scoped reconcile.ReconcileStore implementation.
+//
+// roleCache — памятка ролей на ЖИЗНЬ ОДНОГО прохода (одна транзакция). Веер прохода
+// адресуется числом выдач, а роли у них повторяются, поэтому без памятки полный проход
+// перечитывал одну и ту же строку роли по разу на выдачу. Внутри одной транзакции ответ
+// измениться не может; роль, изменённая в середине прохода, доводится своим собственным
+// веером Role.Update — как и до памятки.
 type reconcileStore struct {
-	tx pgx.Tx
+	tx        pgx.Tx
+	roleCache map[domain.RoleID]domain.Role
 }
 
 // LoadBinding reads the minimal scope/selector/role facts for a binding inside
@@ -112,6 +119,98 @@ func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID doma
 	return s.loadBinding(ctx, bindingID, false /* no row-lock — additive forward path */)
 }
 
+// LoadBindingsUnlocked loads the SAME BindingScope facts as LoadBindingUnlocked for a
+// WHOLE SET of bindings — in TWO round-trips total (one for the binding rows, one for
+// their DISTINCT roles), instead of two PER BINDING.
+//
+// ЗАЧЕМ. Веер материализации адресуется числом ВЫДАЧ, совпавших с одним объектом, а не
+// числом объектов: меняется ровно один объект, но кандидатов у него столько, сколько
+// выдач покрывает его область. Перепись по дереву выдач стенда (8267 объектов зеркала,
+// предикат — та же SQL-форма, что у SelectorBindingsMatchingObject) дала p50 = 9
+// кандидатов, p95 = 19, p99 = 226, максимум 227. Поштучное чтение превращало хвост в 454
+// последовательных обращения внутри ОДНОЙ транзакции пост-коммитного прохода, то есть
+// стоимость видимости своего свежего ресурса росла линейно с числом выдач соседей.
+// Замер (testcontainers PG16, 15 проходов на размер): 9 выдач — p50 14.6 мс, 227 выдач —
+// p50 349.1 мс, то есть ~1.5 мс на выдачу.
+//
+// ЧТО НЕ МЕНЯЕТСЯ. Ни блокировок, ни порядка: путь аддитивен и advisory-блокировки не
+// берёт (см. reconcile/forward.go «LOCK CHOICE»), а строчной блокировки у этого чтения не
+// было и раньше. Проекция BindingScope собирается тем же bindingScopeFrom, что и у
+// поштучного чтения, поэтому пакетный и одиночный пути выводят ПОБАЙТОВО те же факты.
+// Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
+// одиночного чтения; отсутствующая роль трактуется как «нет покрытия», а не как ошибка.
+func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
+	out := make(map[domain.AccessBindingID]reconcile.BindingScope, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	raw := make([]string, 0, len(ids))
+	seen := make(map[domain.AccessBindingID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		raw = append(raw, string(id))
+	}
+	rows, err := s.tx.Query(ctx,
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC`, abCols), raw)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
+	}
+	bindings := make([]domain.AccessBinding, 0, len(raw))
+	roleIDs := make([]string, 0, len(raw))
+	roleSeen := make(map[domain.RoleID]struct{}, len(raw))
+	for rows.Next() {
+		b, serr := scanAB(rows)
+		if serr != nil {
+			rows.Close()
+			return nil, fmt.Errorf("reconcile: scan binding batch row: %w", serr)
+		}
+		bindings = append(bindings, b)
+		if _, dup := roleSeen[b.RoleID]; !dup {
+			roleSeen[b.RoleID] = struct{}{}
+			roleIDs = append(roleIDs, string(b.RoleID))
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
+	}
+
+	// Роли — ОДНИМ обращением по различным идентификаторам. Их у веера заметно меньше,
+	// чем выдач (на стенде при 227 кандидатах различных ролей 194, при медианных 9 —
+	// четыре), но главное здесь не сжатие, а то, что число обращений перестаёт зависеть
+	// от размера веера.
+	roles := make(map[domain.RoleID]domain.Role, len(roleIDs))
+	if len(roleIDs) > 0 {
+		rrows, rerr := s.tx.Query(ctx,
+			fmt.Sprintf(`SELECT %s FROM roles WHERE id = ANY($1)`, roleCols), roleIDs)
+		if rerr != nil {
+			return nil, fmt.Errorf("reconcile: load roles batch: %w", rerr)
+		}
+		for rrows.Next() {
+			ro, serr := scanRole(rrows)
+			if serr != nil {
+				rrows.Close()
+				return nil, fmt.Errorf("reconcile: scan role batch row: %w", serr)
+			}
+			roles[ro.ID] = ro
+		}
+		rrows.Close()
+		if rerr := rrows.Err(); rerr != nil {
+			return nil, fmt.Errorf("reconcile: load roles batch: %w", rerr)
+		}
+	}
+
+	for _, b := range bindings {
+		// Роль, удалённая из-под выдачи, — «нет покрытия» (пустая доменная роль), тот же
+		// исход, что у одиночного чтения: реконсайлер не эмитит кортежей, а не падает.
+		out[b.ID] = bindingScopeFrom(b, roles[b.RoleID])
+	}
+	return out, nil
+}
+
 // loadBinding is the shared reader for LoadBinding (forUpdate=true) and
 // LoadBindingUnlocked (forUpdate=false). The BindingScope projection is IDENTICAL in
 // both modes — only the row-lock differs — so the full and forward paths derive the
@@ -135,8 +234,11 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 	}
 
 	// Role permissions (verb-bundle) — read inside the tx so the tier derivation
-	// is consistent with the binding row read.
-	role, err := (&roleReader{tx: s.tx}).Get(ctx, b.RoleID)
+	// is consistent with the binding row read. Memoized per-tx (roleCache): a fan-out
+	// pass reads the SAME role once per pass instead of once per binding, and within one
+	// tx the answer cannot differ. A role changed mid-pass is re-materialized by its own
+	// Role.Update fan-out, exactly as before.
+	role, err := s.role(ctx, b.RoleID)
 	if err != nil {
 		// A dangling role (deleted out from under the binding) leaves no perms —
 		// the reconciler then emits no tuples (membership stays non-ACTIVE). Treat
@@ -147,6 +249,36 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		}
 	}
 
+	return bindingScopeFrom(b, role), true, nil
+}
+
+// role reads a role inside the tx, memoized for the lifetime of THIS pass. The per-binding
+// full path (reconcileBindingForObject) fans out over the same candidate set as the
+// forward path and re-read the SAME role row once per binding; the memo makes that read
+// O(distinct roles) instead of O(bindings). A not-found role is memoized too (as "no
+// coverage"), so a dangling role does not turn into a per-binding round-trip either.
+func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Role, error) {
+	if s.roleCache == nil {
+		s.roleCache = make(map[domain.RoleID]domain.Role)
+	}
+	if ro, ok := s.roleCache[id]; ok {
+		return ro, nil
+	}
+	ro, err := (&roleReader{tx: s.tx}).Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, iamerr.ErrNotFound) {
+			s.roleCache[id] = domain.Role{}
+		}
+		return ro, err
+	}
+	s.roleCache[id] = ro
+	return ro, nil
+}
+
+// bindingScopeFrom — ЕДИНСТВЕННАЯ точка вывода BindingScope из строки выдачи и её роли.
+// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsUnlocked),
+// поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
+func bindingScopeFrom(b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
 	return reconcile.BindingScope{
 		BindingID:   b.ID,
 		Scope:       scopeAnchorFor(b),
@@ -176,7 +308,7 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		Target: b.Target,
 		RoleID: string(b.RoleID),
 		Active: b.Status == domain.AccessBindingStatusActive,
-	}, true, nil
+	}
 }
 
 // AcquireBindingLock takes pg_advisory_xact_lock(hashtext(binding_id)) on the
@@ -789,6 +921,67 @@ func (s *reconcileStore) UpsertMember(ctx context.Context, m domain.TargetMember
 	})
 }
 
+// UpsertMembers — тот же UPSERT, что UpsertMember, но НАБОРОМ: одно обращение к базе на
+// весь веер прохода вместо одного на выдачу. Тот же ON CONFLICT, та же идемпотентность.
+func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
+	if len(members) == 0 {
+		return nil
+	}
+	rows := make([]target_members.Member, 0, len(members))
+	for _, m := range members {
+		rows = append(rows, target_members.Member{
+			BindingID:          string(m.BindingID),
+			RoleID:             string(m.RoleID),
+			RuleFP:             m.RuleFP,
+			ObjectType:         m.ObjectType,
+			ObjectID:           m.ObjectID,
+			VerificationStatus: m.VerificationStatus,
+		})
+	}
+	return target_members.UpsertManyTx(ctx, s.tx, rows)
+}
+
+// RecordEmittedTuplesBatch — тот же реестр, что RecordEmittedTuples, но набором,
+// охватывающим НЕСКОЛЬКО выдач сразу: идентификатор выдачи едет вместе с кортежем,
+// потому что ключ реестра — (выдача, субъект, отношение, объект).
+func (s *reconcileStore) RecordEmittedTuplesBatch(ctx context.Context, refs []reconcile.EmittedTupleRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	binds := make([]string, 0, len(refs))
+	users := make([]string, 0, len(refs))
+	rels := make([]string, 0, len(refs))
+	objs := make([]string, 0, len(refs))
+	// Дедуп по ПОЛНОМУ ключу конфликта: `ON CONFLICT … DO UPDATE` не вправе задеть одну
+	// строку дважды в одном стейтменте (см. RecordEmittedTuples).
+	seen := make(map[[4]string]struct{}, len(refs))
+	for _, ref := range refs {
+		t := ref.Tuple
+		if t.User == "" || t.Relation == "" || t.Object == "" {
+			return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
+				t.User, t.Relation, t.Object)
+		}
+		k := [4]string{string(ref.BindingID), t.User, t.Relation, t.Object}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		binds = append(binds, string(ref.BindingID))
+		users = append(users, t.User)
+		rels = append(rels, t.Relation)
+		objs = append(objs, t.Object)
+	}
+	if _, err := s.tx.Exec(ctx,
+		`INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
+		 SELECT b, u, r, o, 'member' FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) AS t(b, u, r, o)
+		 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
+		binds, users, rels, objs,
+	); err != nil {
+		return fmt.Errorf("reconcile: record emitted tuples batch: %w", err)
+	}
+	return nil
+}
+
 // DeleteMember removes a membership row scoped by rule_fp (so removing one rule's
 // member never drops another rule's member of the same object, C-21).
 func (s *reconcileStore) DeleteMember(ctx context.Context, bindingID domain.AccessBindingID, ruleFP, objectType, objectID string) error {
@@ -878,25 +1071,45 @@ func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.Me
 // so no real binding↔member collision), so a repeated reconcile of the same ACTIVE member
 // — or a forward + async-full overlap — is an idempotent no-op. len==0 is a no-op.
 func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error {
+	users := make([]string, 0, len(tuples))
+	rels := make([]string, 0, len(tuples))
+	objs := make([]string, 0, len(tuples))
+	// Дедуп по ключу конфликта ОБЯЗАТЕЛЕН перед набором: `ON CONFLICT … DO UPDATE` не
+	// вправе задеть одну и ту же строку дважды В ОДНОМ стейтменте (Postgres отвергает
+	// такой набор целиком). Поштучная вставка этого не требовала, потому что каждая
+	// строка ехала своим стейтментом; при переходе на набор дубль внутри одного вызова
+	// обязан схлопываться здесь. Исход тот же: повтор был идемпотентен и раньше.
+	seen := make(map[[3]string]struct{}, len(tuples))
 	for _, t := range tuples {
 		if t.User == "" || t.Relation == "" || t.Object == "" {
 			return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
 				t.User, t.Relation, t.Object)
 		}
-		if _, err := s.tx.Exec(ctx,
-			// source='member': ARM_LABELS per-object tuples owned by the reconciler /
-			// RoleMembershipFanout — kept distinct from binding-level rows so a
-			// Role.Update binding-level reconcile (ReplaceEmittedTuples) never wipes them.
-			// DO UPDATE SET source='member' self-heals any pre-0032 row that defaulted to
-			// 'binding' (object-spaces are disjoint, so a real binding↔member collision
-			// cannot occur — this only re-tags an existing member row).
-			`INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-			 VALUES ($1, $2, $3, $4, 'member')
-			 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
-			string(bindingID), t.User, t.Relation, t.Object,
-		); err != nil {
-			return fmt.Errorf("reconcile: record emitted tuple: %w", err)
+		k := [3]string{t.User, t.Relation, t.Object}
+		if _, dup := seen[k]; dup {
+			continue
 		}
+		seen[k] = struct{}{}
+		users = append(users, t.User)
+		rels = append(rels, t.Relation)
+		objs = append(objs, t.Object)
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	if _, err := s.tx.Exec(ctx,
+		// source='member': ARM_LABELS per-object tuples owned by the reconciler /
+		// RoleMembershipFanout — kept distinct from binding-level rows so a
+		// Role.Update binding-level reconcile (ReplaceEmittedTuples) never wipes them.
+		// DO UPDATE SET source='member' self-heals any pre-0032 row that defaulted to
+		// 'binding' (object-spaces are disjoint, so a real binding↔member collision
+		// cannot occur — this only re-tags an existing member row).
+		`INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
+		 SELECT $1, u, r, o, 'member' FROM unnest($2::text[], $3::text[], $4::text[]) AS t(u, r, o)
+		 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
+		string(bindingID), users, rels, objs,
+	); err != nil {
+		return fmt.Errorf("reconcile: record emitted tuple: %w", err)
 	}
 	return nil
 }

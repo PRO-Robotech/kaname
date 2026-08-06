@@ -52,7 +52,8 @@ type fakeStore struct {
 	audits        []string                 // objectID audited
 	ledger        []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
 	locks         int                      // AcquireBindingLock (EXCLUSIVE) call count
-	unlockedLoads int                      // LoadBindingUnlocked call count (forward path)
+	unlockedLoads int                      // выдач, прочитанных без advisory-блокировки (форвард)
+	batchLoads    int                      // ОБРАЩЕНИЙ пакетного чтения (не выдач) — веер за фикс. число обращений
 
 	// Producer-cost counters. An object-triggered pass must recompute ONLY the changed
 	// object, so the whole-scope candidate scan (MatchAllInScope*) and the whole-binding
@@ -115,6 +116,28 @@ func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBin
 		ScopeSelfVerbs: f.scopeSelfVerbs,
 		Active:         f.active,
 	}, true, nil
+}
+
+// LoadBindingsUnlocked — пакетное чтение фактов выдач (то же, что LoadBindingUnlocked,
+// но для набора). batchLoads считает ОБРАЩЕНИЯ (не выдачи), поэтому проба может утверждать,
+// что число обращений не растёт с размером веера; unlockedLoads по-прежнему растёт на
+// каждую прочитанную выдачу, чтобы «прочитал ли вообще» осталось наблюдаемым.
+func (f *fakeStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error) {
+	f.batchLoads++
+	out := make(map[domain.AccessBindingID]BindingScope, len(ids))
+	for _, id := range ids {
+		f.unlockedLoads++
+		out[id] = BindingScope{
+			BindingID:      id,
+			Scope:          f.scope,
+			SubjectType:    f.subjectType,
+			SubjectID:      f.subjectID,
+			Selectors:      f.selectors,
+			ScopeSelfVerbs: f.scopeSelfVerbs,
+			Active:         f.active,
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) MatchSelector(ctx context.Context, types []string, ml map[string]string) ([]domain.MirrorObject, error) {
@@ -294,6 +317,34 @@ func (f *fakeStore) EmitTupleDelete(ctx context.Context, ts []domain.MembershipT
 }
 func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {
 	f.recorded = append(f.recorded, ts)
+	return nil
+}
+
+// UpsertMembers / RecordEmittedTuplesBatch кладут В ТЕ ЖЕ наблюдаемые двойника, что и
+// поштучные близнецы: существующие пробы утверждают, ЧТО материализовано, и обязаны
+// остаться зелёными при переходе на набор — иначе «стало быстрее» пряталось бы за
+// изменившимся предметом наблюдения. Пустой набор ничего не добавляет, чтобы проход,
+// не сделавший ничего, не выглядел сделавшим.
+func (f *fakeStore) UpsertMembers(ctx context.Context, ms []domain.TargetMember) error {
+	f.upserts = append(f.upserts, ms...)
+	return nil
+}
+
+func (f *fakeStore) RecordEmittedTuplesBatch(ctx context.Context, refs []EmittedTupleRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	byBinding := make(map[domain.AccessBindingID][]domain.MembershipTuple, 1)
+	order := make([]domain.AccessBindingID, 0, 1)
+	for _, ref := range refs {
+		if _, ok := byBinding[ref.BindingID]; !ok {
+			order = append(order, ref.BindingID)
+		}
+		byBinding[ref.BindingID] = append(byBinding[ref.BindingID], ref.Tuple)
+	}
+	for _, b := range order {
+		f.recorded = append(f.recorded, byBinding[b])
+	}
 	return nil
 }
 func (f *fakeStore) ForgetEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {
