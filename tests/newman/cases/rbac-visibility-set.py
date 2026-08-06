@@ -133,9 +133,17 @@ _HUMAN_STEPUP = "jwtHumanCeremonyStepUp"
 # Helpers (local — mirror iam-rbac-scope-grant.py / iam-read-authz-vget.py idioms).
 # ---------------------------------------------------------------------------
 
-def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA"):
-    """GET /operations/{op_var} until done; assert done && no error; optionally capture id."""
+def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", also_clear_on_error=()):
+    """GET /operations/{op_var} until done; assert done && no error; optionally capture id.
+
+    `also_clear_on_error` — прочие ПРОВИЗОРНЫЕ переменные того же шага создания
+    (сопутствующий потомок саги). Они сняты той же логикой фантома, что и
+    `out_id_var`: их идентификаторы тоже предвыделены и присутствуют у операции,
+    завершившейся ошибкой, поэтому на ошибке они обязаны исчезнуть вместе с ней.
+    """
     capture = ""
+    clear_extra = "".join(
+        f"if (j.error) {{ pm.environment.unset('{v}'); }} " for v in also_clear_on_error)
     if out_id_var:
         # ФАНТОМНЫЙ ИДЕНТИФИКАТОР: снимается ЗДЕСЬ, потому что здесь впервые известен исход.
         #
@@ -181,6 +189,7 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA"):
             "pm.environment.unset('_pollCount');",
             "pm.environment.unset('_pollStarted');",
             capture,
+            clear_extra,
             "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
             "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
         ],
@@ -295,9 +304,20 @@ def preclean_account_loop(tag, next_step):
     ]
 
 
-def create_suite_account(acc_var, op_var, auth="jwtHumanCeremony"):
+def create_suite_account(acc_var, op_var, auth="jwtHumanCeremony", def_prj_var=None):
     """Create a FRESH, suite-private account per run so the by-label PROJECT exact-set reads
     an account in which the reading subject (svaInviteeId) is NOT a member.
+
+    АККАУНТ РОЖДАЕТСЯ НЕ ПУСТЫМ, И ЭТО ЗАБОТА УБОРКИ. Сага создания co-commit'ит в
+    той же транзакции проект `default` (redesign-2026 F2), а `Account.Delete`
+    отказывается сносить аккаунт, пока в нём есть хоть один проект. Этого потомка
+    кейс не заводил и в своих шагах не видит — единственный его след здесь
+    `metadata.defaultProjectId`, доступный ещё до `done`. Не захватив id, уборка
+    получает ЗАКОННЫЙ отказ `FAILED_PRECONDITION "Account <id> contains projects"`
+    на последнем шаге, аккаунт переживает прогон, и красным становится кейс, а не
+    продукт. Поэтому `def_prj_var` — не удобство, а условие того, чтобы уборка
+    вообще могла завершиться; свойство держит гейт
+    `deploy/scripts/assert-cocreated-child-is-torn-down.py`.
 
     ВЛАДЕЛЕЦ — ЧЕЛОВЕК, И ИНАЧЕ БЫТЬ НЕ МОЖЕТ. `owner_user_id` ссылается на `users(id)`, а
     владелец выводится из принципала. Все предъявители матричного посева — служебные учётки,
@@ -321,6 +341,9 @@ def create_suite_account(acc_var, op_var, auth="jwtHumanCeremony"):
     rbacvis-<runId> name), so it cannot be contaminated. (VLIST-ONLY / SVA / GRP / ROL cases stay
     on accountAId — they already pass; the member floor only breaks the exact-set's M−/baz-hidden
     assertion.)"""
+    def_prj_capture = ([] if def_prj_var is None else
+                       save_from_response("j.metadata && j.metadata.defaultProjectId",
+                                          def_prj_var))
     return [
         Step(name="create-suite-account", method="POST", path="/iam/v1/accounts",
              # IAM-1 F1: ownerUserId° derived-from-caller — not sent in the body.
@@ -329,8 +352,10 @@ def create_suite_account(acc_var, op_var, auth="jwtHumanCeremony"):
              auth=auth,
              test_script=[*assert_status(200),
                           *save_from_response("j.metadata && j.metadata.accountId", acc_var),
+                          *def_prj_capture,
                           *save_from_response("j.id", op_var)]),
-        poll_op(op_var, out_id_var=acc_var, auth=auth),
+        poll_op(op_var, out_id_var=acc_var, auth=auth,
+                also_clear_on_error=() if def_prj_var is None else (def_prj_var,)),
     ]
 
 
@@ -520,7 +545,8 @@ CASES.append(Case(
         # заводит человек; а раз владелец он, то и всё, что внутри (проекты, роль, выдача,
         # уборка), делает он же. Разделить эти два выбора нельзя: служебная учётка матрицы
         # в чужом приватном аккаунте прав не имеет.
-        *create_suite_account("visSetAcct", "visSetAcctOp", auth=_HUMAN),
+        *create_suite_account("visSetAcct", "visSetAcctOp", auth=_HUMAN,
+                              def_prj_var="visSetDefPrj"),
         # M+ (foo=runId) — 3 projects.
         *mk_project("setpp1", "foo", "visPP1", "visPP1Op", acct_var="visSetAcct", auth=_HUMAN),
         *mk_project("setpp2", "foo", "visPP2", "visPP2Op", acct_var="visSetAcct", auth=_HUMAN),
@@ -568,10 +594,9 @@ CASES.append(Case(
                 "});",
             ],
         ),
-        # Teardown — revoke the grant (committed, not best-effort) + role; best-effort delete the
-        # run's projects, then the suite-private account (bound growth). Account delete may 409
-        # while its projects are still async-deleting — tolerated (a leaked per-run rbacvis-<runId>
-        # account is harmless: unique name, not pool-constrained, never asserted).
+        # Teardown — revoke the grant (committed, not best-effort) + role; delete the run's
+        # projects AND the project `default`, заведённый сагой создания аккаунта, и только
+        # затем сам аккаунт: он не удаляется, пока в нём есть хоть один проект.
         robust_revoke_binding("teardown-binding", "visSetAcb", auth=_HUMAN_STEPUP),
         *teardown("teardown-role", "/iam/v1/roles/{{visSetRole}}", auth=_HUMAN_STEPUP),
         *teardown("teardown-pp1", "/iam/v1/projects/{{visPP1}}", auth=_HUMAN_STEPUP),
@@ -582,13 +607,26 @@ CASES.append(Case(
         *teardown("teardown-pm3", "/iam/v1/projects/{{visPM3}}", auth=_HUMAN_STEPUP),
         *teardown("teardown-bq1", "/iam/v1/projects/{{visBQ1}}", auth=_HUMAN_STEPUP),
         *teardown("teardown-bq2", "/iam/v1/projects/{{visBQ2}}", auth=_HUMAN_STEPUP),
+        # ПОТОМОК, КОТОРОГО КЕЙС НЕ ЗАВОДИЛ. Проект `default` co-commit'ится сагой
+        # `Account.Create` в её же транзакции (redesign-2026 F2) — восьми шагов выше
+        # для пустого аккаунта НЕ ДОСТАТОЧНО. Единственный след этого потомка в кейсе —
+        # `metadata.defaultProjectId` шага создания аккаунта, снятый в `visSetDefPrj`.
+        *teardown("teardown-suite-default-project", "/iam/v1/projects/{{visSetDefPrj}}",
+                  auth=_HUMAN_STEPUP),
         # Снос аккаунта суиты: 403 НЕ принимается — он значит, что аккаунт остаётся, а
         # вместе с ним всё, что суита в нём насоздавала. Отказ retry'ится через окно
-        # материализации; терминально допустимы снятие (200), «его уже нет» (404) и
-        # «ещё не пуст» (400/409 — дочерние ресурсы сносятся шагами выше, и если один из
-        # них не доехал, это видно ИМЕННО здесь, а не растворяется в общем «best-effort»).
+        # материализации; терминальны снятие (200) и «его уже нет» (404).
+        #
+        # ПРЕЖДЕ ЗДЕСЬ ТЕРПЕЛИСЬ ЕЩЁ 400 И 409 «на случай, если аккаунт ещё не пуст», и
+        # у этой полосы НЕТ ПРОИЗВОДИТЕЛЯ: `Account.Delete` асинхронен и на корректный
+        # авторизованный запрос отвечает 200 + `Operation`, а непустоту сообщает уже
+        # ИСХОД операции — `error.code 9` «contains projects». То есть терпимость
+        # перечисляла коды, которых этот шаг не отдаёт, а комментарий рядом обещал, что
+        # недоехавший потомок «виден ИМЕННО здесь», — виден он на `-await`, утверждением
+        # об исходе. Полоса без производителя ничего не смягчает и вводит в заблуждение
+        # следующего читателя, поэтому снята.
         *reliable_delete("teardown-suite-account", "/iam/v1/accounts/{{visSetAcct}}",
-                         auth=_HUMAN_STEPUP, terminal_codes=(200, 400, 404, 409)),
+                         auth=_HUMAN_STEPUP),
     ],
 ))
 
