@@ -189,14 +189,61 @@ func (c *fgaClient) post(t *testing.T, path string, body any) map[string]any {
 	return out
 }
 
-func (c *fgaClient) check(t *testing.T, user, relation, object string) bool {
+// checkOutcome — исход вопроса к хранилищу прав, различающий ДВА состояния,
+// которые булев ответ схлопывает в одно `false`. Захвачено с настоящего
+// openfga/openfga v1.8.4, не выведено из документации:
+//
+//	отношение ОБЪЯВЛЕНО типом, но не выдано → map[allowed:false resolution:]
+//	отношение типом НЕ ОБЪЯВЛЕНО           → map[code:validation_error
+//	                                            message:relation '<тип>#<отн>' not found]
+//
+// Ключа `allowed` во втором ответе нет вовсе, поэтому `out["allowed"].(bool)` с
+// игнорируемым `ok` даёт `false` — и всякое утверждение вида «этого отношения
+// здесь нет», написанное через булев `check`, оказывается истинным в ОБОИХ
+// состояниях, то есть не утверждает ничего. Такой ложный свидетель уже стоял в
+// дереве (парный контроль `TestCreateAuthority_RegistryNamespaceKeepsItsReader`)
+// и был зелёным ровно на том состоянии, которое обещал ловить.
+type checkOutcome struct {
+	Allowed bool   // ответ хранилища, когда вопрос принят
+	Defined bool   // тип объявляет это отношение — вопрос ПРИНЯТ
+	Code    string // код отказа хранилища, когда Defined == false
+	Message string // его собственный текст — в утверждение идёт он, не пересказ
+}
+
+// checkOutcome задаёт вопрос хранилищу и возвращает исход, не схлопывая
+// «не объявлено» в «не разрешено». Проба, утверждающая ОТСУТСТВИЕ отношения в
+// модели, обязана ключеваться на `Defined`, а не на `Allowed`.
+func (c *fgaClient) checkOutcome(t *testing.T, user, relation, object string) checkOutcome {
 	t.Helper()
 	out := c.post(t, fmt.Sprintf("/stores/%s/check", c.store), map[string]any{
 		"authorization_model_id": c.modelID,
 		"tuple_key":              map[string]string{"user": user, "relation": relation, "object": object},
 	})
-	allowed, _ := out["allowed"].(bool)
-	return allowed
+	if code, ok := out["code"].(string); ok {
+		return checkOutcome{Code: code, Message: fmt.Sprint(out["message"])}
+	}
+	allowed, ok := out["allowed"].(bool)
+	require.Truef(t, ok, "ответ хранилища на Check %q@%s не несёт НИ `allowed`, НИ `code`: %v — "+
+		"форма ответа сменилась, и обе ветки этого хелпера читают не то", relation, object, out)
+	return checkOutcome{Allowed: allowed, Defined: true}
+}
+
+// check — булев ответ для проб, спрашивающих про ОБЪЯВЛЕННОЕ отношение.
+//
+// Он ОТКАЗЫВАЕТСЯ отвечать, когда хранилище отвергло сам вопрос: молчаливый
+// `false` на неопределённом отношении — это не ответ, а совпадение формы, и
+// именно на нём зеленел ложный контроль. Отказ здесь громкий и называет
+// инструмент, который для такого утверждения нужен, — иначе следующий автор
+// напишет то же самое утверждение заново.
+func (c *fgaClient) check(t *testing.T, user, relation, object string) bool {
+	t.Helper()
+	o := c.checkOutcome(t, user, relation, object)
+	require.Truef(t, o.Defined,
+		"хранилище ОТВЕРГЛО вопрос %q@%s (%s: %s). Булев `check` вернул бы здесь `false` — "+
+			"неотличимо от «отношение объявлено, но не выдано». Утверждение «отношения нет в модели» "+
+			"пишется через `checkOutcome(...).Defined`, а не через `check`",
+		relation, object, o.Code, o.Message)
+	return o.Allowed
 }
 
 func (c *fgaClient) write(t *testing.T, tuples []abrepo.RelationTuple) {
