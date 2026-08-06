@@ -572,6 +572,14 @@ CASES.append(Case(
             test_script=[*assert_status(200), *save_from_response("j.id", "opId")],
         ),
         assert_op_error(6, "ALREADY_EXISTS", msg_substr="already granted"),
+        # Уборка снимает ОБЕ выдачи, а не только действующую. Отзыв — переход
+        # состояния, а не удаление: строка `rdAcbRg1` остаётся с status=REVOKED как
+        # запись о бывшей выдаче, и внешний ключ роли (ON DELETE RESTRICT) считает её
+        # наравне с действующей. Освобождает ссылку только жёсткое удаление выдачи,
+        # поэтому «отозвал» здесь не заменяет «убрал»: без этого шага удаление роли
+        # получает законный отказ «role is in use by access bindings», а роль
+        # переживает прогон. Свойство держит deploy/scripts/assert-teardown-frees-parent.py.
+        *_cleanup_binding("rdAcbRg1", name="cleanup-binding-revoked"),
         *_cleanup_binding("rdAcbRg2"),
         *_cleanup_role("rdRoleRg"),
     ],
