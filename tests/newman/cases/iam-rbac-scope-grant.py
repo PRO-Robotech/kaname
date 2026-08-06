@@ -321,10 +321,14 @@ CASES.append(Case(
     steps=[
         # GRANT CONTRACT — the role Create + AccessBinding.Create succeed (the
         # bind-step asserts 200 + op-done). This is the black-box-reachable half.
+        # `create` из набора СНЯТ: на `compute_instance` он инертен вдвойне —
+        # пообъектного `v_create` тип не объявляет (создание авторизуется ярусом
+        # записи на родителе), а ярус здесь и так `admin` от `delete`. То есть
+        # глагол не менял ни одного кортежа и держался только по инерции набора.
         *create_rules_role_steps(
             "_sgRoleA",
             [{"module": "compute", "resources": ["instance"],
-              "verbs": ["get", "list", "create", "update", "delete"]}],
+              "verbs": ["get", "list", "update", "delete"]}],
             "admin",
         ),
         *bind_role_steps("_sgRoleA", "_sgBindAOp", "admin"),
@@ -370,16 +374,18 @@ CASES.append(Case(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RBACSG-PER-VERB — a {get,create} rule materializes per-verb tuples DIRECTLY on
+# RBACSG-PER-VERB — a {get,update} rule materializes per-verb tuples DIRECTLY on
 # the content object, never on a scope_grant carrier, so a raw FGA-native Check on
 # that carrier DENIES for every verb — including the granted ones.
 #
-# Which verbs the rule actually materializes is a property of the TYPE: on
-# `compute_instance` the rule contributes `v_get` plus the write tier derived from
-# the `create` verb class, and NO `v_create` tuple — that relation is declared only
-# by `registry_registry` (creating a thing is not an operation on the thing; the
-# question is asked of the parent). The carrier contract asserted below does not
-# depend on which verbs those are.
+# The rule pairs one READ verb with one WRITE verb, and both are verbs the TYPE
+# declares, so both actually materialize. It used to pair get with `create`, which
+# on `compute_instance` materializes NO per-object tuple at all — that relation is
+# declared only by `registry_registry` (creating a thing is not an operation on the
+# thing; the question is asked of the parent). A verb that emits nothing made the
+# case's own name ("per-verb") describe one verb while claiming two. The carrier
+# contract asserted below does not depend on which verbs those are, which is exactly
+# why the wrong pair could sit here unnoticed.
 #
 # This proves the MODEL / tuple-emission layer: distinct v_* relations are NOT
 # collapsed (a granted verb ⇏ v_delete granted). It is NOT a proof of
@@ -394,15 +400,15 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="RBACSG-PER-VERB",
-    title="per-verb {get,create} all_in_scope grant succeeds; scope_grant carrier removed for every verb",
+    title="per-verb {get,update} all_in_scope grant succeeds; scope_grant carrier removed for every verb",
     classes=["FGA", "AUTHZ", "PER-VERB"],
     priority="P0",
     steps=[
-        # GRANT CONTRACT — a {get,create} all_in_scope rule Create + bind succeed.
+        # GRANT CONTRACT — a {get,update} all_in_scope rule Create + bind succeed.
         *create_rules_role_steps(
             "_sgRoleGC",
             [{"module": "compute", "resources": ["instance"],
-              "verbs": ["get", "create"]}],
+              "verbs": ["get", "update"]}],
             "getcreate",
         ),
         *bind_role_steps("_sgRoleGC", "_sgBindGCOp", "getcreate"),

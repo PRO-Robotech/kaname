@@ -77,8 +77,10 @@ CASES.append(Case(
             body={
                 "name": "rdtier{{runId}}",
                 "definitionTier": {"tierType": "iam.account", "tierId": "{{accountAId}}"},
+                # `create` из набора снят: на `compute_instance` он инертен — тип не
+                # объявляет пообъектного `v_create`, а ярус записи уже даёт `update`.
                 "rules": [{"module": "compute", "resources": ["instance"],
-                           "verbs": ["get", "list", "create", "update"]},
+                           "verbs": ["get", "list", "update"]},
                           {"module": "storage", "resources": ["volumes"],
                            "verbs": ["get", "list"]}],
             },

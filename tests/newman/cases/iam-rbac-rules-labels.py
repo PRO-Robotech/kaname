@@ -78,9 +78,14 @@ CASES.append(Case(
                 "accountId": "{{accountAId}}",
                 "name": "rbac_lbl_fed_{{runId}}",
                 "description": "newman ARM_LABELS fed-type probe role",
+                # Пара «чтение + запись», и ОБА глагола объявлены типом, поэтому оба
+                # действительно материализуются. Стояло `create`: на `compute_instance`
+                # он не даёт пообъектного кортежа вовсе (создание авторизуется ярусом
+                # записи на родителе), то есть правило с меткой заявляло два глагола, а
+                # проверять по метке было нечего у одного из них.
                 "rules": [{
                     "module": "compute", "resources": ["instance"],
-                    "verbs": ["get", "create"],
+                    "verbs": ["get", "update"],
                     "matchLabels": {"env": "prod"},
                 }],
             },
