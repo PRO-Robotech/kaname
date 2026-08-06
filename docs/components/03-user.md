@@ -276,20 +276,22 @@ grpcurl -plaintext -d '{
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-cd kacho-iam && SERVICE=iam-user ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-user
 
 # psql:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, account_id, email, invite_status, external_id FROM kacho_iam.users LIMIT 10;
 
 # Integration: invite-flow + UpsertFromIdentity.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestUser|TestUpsertFromIdentity|TestInvite" \
-  ./internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации

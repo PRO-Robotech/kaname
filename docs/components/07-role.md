@@ -203,20 +203,22 @@ curl -X PATCH http://localhost:18080/iam/v1/roles/rol_custom_xxx \
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-cd kacho-iam && SERVICE=iam-role ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-role
 
 # psql — посмотреть system-роли:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, name, jsonb_array_length(permissions) FROM kacho_iam.roles WHERE is_system=true ORDER BY name;
 
 # Integration: seed determinism + permissions CHECK.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestRole|TestSeedRoleIds|TestSeedNlbRoles|TestRolesPermissionsValid" \
-  ./internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации

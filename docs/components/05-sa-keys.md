@@ -133,7 +133,7 @@ sequenceDiagram
     Redactor->>DB: UPDATE operations SET response_data=$new WHERE id=$opId
 
     Note over Admin,DB: Повторный GET /operations/$opId — secret отсутствует
-    Admin->>GW: GET /iam/v1/operations/iop_..
+    Admin->>GW: GET /operations/iop_..
     GW->>IAM: OperationService.Get
     IAM-->>GW: Operation (response с client_secret="<redacted>")
 ```
@@ -148,7 +148,7 @@ sequenceDiagram
     participant DB
     participant Hydra
 
-    Admin->>IAM: SAKeyService.RevokeKey {sak_id}
+    Admin->>IAM: SAKeyService.Revoke {sak_id}
     IAM->>DB: SELECT hydra_client_id FROM service_account_oauth_clients WHERE id=$sak
     IAM->>DB: DELETE FROM service_account_oauth_clients WHERE id=$sak (+ audit-row в той же TX)
     IAM->>Hydra: DELETE /admin/clients/{client_id}
@@ -161,19 +161,28 @@ sequenceDiagram
 
 ### Public gRPC (порт 9090)
 
-| RPC          | Sync/Async | Описание                                              |
-|--------------|------------|-------------------------------------------------------|
-| `IssueSAKey` | async      | Выпускает OAuth-ключ. Secret в response (один раз).   |
-| `RevokeSAKey`| async      | Удаляет строку маппинга + Hydra client.               |
-| `ListSAKeys` | sync       | Список ключей для SA (без секретов).                  |
+| RPC       | Sync/Async | Описание                                              |
+|-----------|------------|-------------------------------------------------------|
+| `Issue`   | async      | Выпускает OAuth-ключ. Secret в response (один раз).   |
+| `Revoke`  | async      | Удаляет строку маппинга + Hydra client.               |
+| `List`    | sync       | Список ключей для SA (без секретов).                  |
 
 ### REST mapping
 
-| HTTP    | Path                                                | gRPC mapping                |
-|---------|-----------------------------------------------------|-----------------------------|
-| POST    | `/iam/v1/serviceAccounts/{saId}/keys`               | `SAKeyService.IssueSAKey`   |
-| DELETE  | `/iam/v1/serviceAccounts/{saId}/keys/{keyId}`       | `SAKeyService.RevokeSAKey`  |
-| GET     | `/iam/v1/serviceAccounts/{saId}/keys`               | `SAKeyService.ListSAKeys`   |
+| HTTP    | Path                                                | gRPC mapping           |
+|---------|-----------------------------------------------------|------------------------|
+| POST    | `/iam/v1/serviceAccounts/{saId}/keys`               | `SAKeyService.Issue`   |
+| DELETE  | `/iam/v1/serviceAccounts/{saId}/keys/{keyId}`       | `SAKeyService.Revoke`  |
+| GET     | `/iam/v1/serviceAccounts/{saId}/keys`               | `SAKeyService.List`    |
+
+> [!note] Обе таблицы называли методы длинными именами — так зовутся сообщения
+> запроса и use-case'ы, но не RPC
+> Контракт объявляет три метода короткими именами (выпуск, список, отзыв); длинные
+> формы живут в именах сообщений (`IssueSAKeyRequest`) и в именах use-case'ов Go.
+> Ошибка была устойчива к проверке свежести: живая перепроверка координаты вида
+> «сервис.метод» ищет **имя метода** по всему дереву контрактов, а `IssueSAKey`
+> там встречается — в имени сообщения. Отсюда правило: пару «сервис + метод»
+> сверять с объявлением **этого** сервиса, а не с наличием слова.
 
 ## Конфигурация
 
@@ -191,8 +200,8 @@ RESP=$(curl -s -X POST http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys
   -H "Authorization: Bearer $TOKEN" \
   -d '{"description":"CI runner key"}')
 OP_ID=$(echo "$RESP" | jq -r .id)
-# poll до done=true
-RESULT=$(curl -s http://localhost:18080/iam/v1/operations/$OP_ID -H "Authorization: Bearer $TOKEN")
+# poll до done=true; путь домен-агностичен — без имени сервиса в начале
+RESULT=$(curl -s "http://localhost:18080/operations/$OP_ID" -H "Authorization: Bearer $TOKEN")
 CLIENT_ID=$(echo "$RESULT" | jq -r .response.client_id)
 KEY_ID=$(echo    "$RESULT" | jq -r .response.key_id)
 echo "$RESULT" | jq -r .response.private_key_pem > sa.key  # ← сохранить;
@@ -259,18 +268,29 @@ curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys -H "Authorization
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up        # включает Hydra
+make -C deploy dev-up        # включает Hydra
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-# Newman:
-cd kacho-iam && SERVICE=iam-sa-keys ./tests/newman/scripts/run.sh
+# Newman: отдельного набора «ключи SA» нет — они покрыты набором служебной
+# учётки и набором токена по ключу.
+./services/iam/tests/newman/scripts/run.sh --service iam-service-account
+./services/iam/tests/newman/scripts/run.sh --service authz-sa-apitoken
 
 # Integration (testcontainers + Hydra stub):
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestSAKey|TestOpsResponseRedactor|TestIssueSAKey" \
-  ./internal/clients/ ./internal/apps/kacho/api/sa_keys/
+  ./services/iam/internal/clients/ ./services/iam/internal/apps/kacho/api/sa_keys/
 ```
+
+> [!note] Прежняя команда звала набор, которого нет, и передавала имя набора
+> переменной окружения, которую прогонщик обнуляет первым делом
+> Набора с таким именем среди сгенерированных коллекций сервиса не существует, а
+> имя, переданное окружением, затиралось — то есть команда завершалась успехом,
+> прогнав **весь** сервис вместо запрошенного набора. Успех без предмета читается
+> как исполненная проверка, поэтому обе половины исправлены разом.
 
 ## Подробности реализации
 

@@ -265,7 +265,7 @@ sequenceDiagram
     IAM->>DB: UPDATE operations SET done=true, response=Account
 
     loop poll
-        Cli->>GW: GET /iam/v1/operations/iop_..
+        Cli->>GW: GET /operations/iop_..
         GW->>IAM: gRPC OperationService.Get
         IAM->>DB: SELECT operation
         IAM-->>GW: Operation (done=true, response=Account)

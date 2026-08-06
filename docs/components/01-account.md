@@ -101,7 +101,7 @@ sequenceDiagram
     end
 
     loop Tenant polls
-        Cli->>GW: GET /iam/v1/operations/iop_..
+        Cli->>GW: GET /operations/iop_..
         GW->>IAM: OperationService.Get
         IAM-->>GW: Operation (done=true, response=Account)
         GW-->>Cli: 200 {done:true, response:{id,name,...}}
@@ -154,9 +154,9 @@ RESP=$(curl -s -X POST http://localhost:18080/iam/v1/accounts \
   -d '{"name":"acme","description":"Acme Corp","labels":{"env":"prod"},"owner_user_id":"usr_xxx"}')
 OP_ID=$(echo "$RESP" | jq -r .id)
 
-# 3. Poll Operation.
+# 3. Poll Operation. Путь домен-агностичен — без имени сервиса в начале.
 while true; do
-  R=$(curl -s "http://localhost:18080/iam/v1/operations/$OP_ID" -H "Authorization: Bearer $TOKEN")
+  R=$(curl -s "http://localhost:18080/operations/$OP_ID" -H "Authorization: Bearer $TOKEN")
   [ "$(echo "$R" | jq -r .done)" = "true" ] && break
   sleep 1
 done
@@ -198,27 +198,35 @@ Account.Create **не** идемпотентен — повторный вызо
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория** (дерево одно, соседних репозиториев
+стенда и сервиса рядом с ним нет).
+
 ```bash
 # 1. Поднять стенд (kind + helm umbrella).
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 
 # 2. Port-forward api-gateway.
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # 3. Newman regression для Account.
-cd kacho-iam && SERVICE=iam-account ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-account
 
 # 4. psql.
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, name, owner_user_id, created_at FROM kacho_iam.accounts LIMIT 10;
 
 # 5. Integration tests.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
-  ./internal/repo/kacho/pg/account_integration_test.go ./internal/repo/kacho/pg/
+go test -short -count=1 -timeout 120s ./services/iam/internal/repo/kacho/pg/
 
 # 6. Логи сервиса.
-cd kacho-deploy && make logs-svc SVC=iam
+make -C deploy logs-svc SVC=iam
 ```
+
+> [!note] Набор выбирается флагом, а не переменной окружения
+> Прогонщик присваивает своей переменной пустое значение первым делом, поэтому
+> имя набора, переданное окружением, затиралось и прогонялись **все** коллекции
+> сервиса. Команда при этом завершалась успехом — то есть выглядела исполненной,
+> а спрашивала не то, о чём просил читатель.
 
 ## Подробности реализации
 

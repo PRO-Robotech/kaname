@@ -64,7 +64,7 @@ sequenceDiagram
     Worker->>DB: UPDATE operations SET done=true, response=... WHERE id=$opId
 
     loop Tenant poll
-        Cli->>GW: GET /iam/v1/operations/iop_...
+        Cli->>GW: GET /operations/iop_...
         GW->>IAM: gRPC OperationService.Get
         IAM->>DB: SELECT FROM operations WHERE id=$opId
         IAM-->>GW: Operation (done=true|false)
@@ -97,8 +97,16 @@ sequenceDiagram
 | RPC      | Sync/Async | Описание                                          |
 |----------|------------|---------------------------------------------------|
 | `Get`    | sync       | Получает Operation по id.                          |
-| `List`   | sync       | Список (filter by principal_id, done, age).        |
 | `Cancel` | sync       | Для большинства IAM no-op (быстрые операции).     |
+
+> [!note] Здесь стояла третья строка — списочный RPC с фильтрами по принципалу,
+> состоянию и возрасту
+> Такого метода у домен-агностичного контракта операций нет: он объявляет ровно два —
+> получение по идентификатору и отмену. Ни фильтра по принципалу, ни по флагу
+> завершённости, ни по возрасту не существует нигде: областные списки ниже принимают
+> только идентификатор владельца, размер страницы и курсор. Строка описывала
+> возможность, которой не было, и **исполняемая половина документа была написана по
+> ней** — команда опроса в разделе «Как пользоваться» звала именно этот список.
 
 ### REST mapping
 
@@ -149,9 +157,9 @@ OP=$(curl -s -X POST http://localhost:18080/iam/v1/accounts \
   -d '{"name":"foo","owner_user_id":"usr_x"}' | jq -r .id)
 echo "Operation: $OP"
 
-# Poll до done.
+# Poll до done. Путь домен-агностичен — без имени сервиса в начале.
 while true; do
-  R=$(curl -s http://localhost:18080/iam/v1/operations/$OP -H "Authorization: Bearer $TOKEN")
+  R=$(curl -s "http://localhost:18080/operations/$OP" -H "Authorization: Bearer $TOKEN")
   if [ "$(echo "$R" | jq -r .done)" = "true" ]; then
     echo "$R" | jq
     break
@@ -159,10 +167,22 @@ while true; do
   sleep 0.5
 done
 
-# List recent ops для principal.
-curl "http://localhost:18080/iam/v1/operations?principal_id=usr_alice&done=true&page_size=20" \
+# Список операций — только в области ресурса-владельца, курсором.
+curl "http://localhost:18080/iam/v1/accounts/$ACC_ID/operations:all?pageSize=20" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+> [!note] Обе команды выше звали пути, которых край не обслуживает
+> Опрос шёл под собственным доменом сервиса, а «список операций принципала» — по
+> адресу, у которого нет ни маршрута, ни RPC, ни фильтра по принципалу (см. врезку
+> к таблице поверхности выше). Таблица маршрутов в этом же документе была приведена
+> к дереву раньше, чем команды, — и полсотни строк документ противоречил сам себе,
+> причём ложным было именно то, что копируют в терминал. Снятые адреса здесь не
+> воспроизводятся: процитированные, они читаются как живые.
+>
+> Хук свежести этого не поймал и не мог: он обнуляет каждую строку внутри
+> огороженного блока, то есть исполняемую половину документа не читает вовсе.
+> Поэтому правка по хуку обязана сопровождаться чтением документа целиком.
 
 ### Anti-replay для secret-носящих operations
 
@@ -184,16 +204,19 @@ curl "http://localhost:18080/iam/v1/operations?principal_id=usr_alice&done=true&
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**: дерево одно, соседних репозиториев
+стенда и сервиса рядом с ним нет.
+
 ```bash
 # psql:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, description, done, principal_type, principal_id, principal_display_name FROM kacho_iam.operations LIMIT 20;
 # > SELECT count(*) FROM kacho_iam.operations WHERE done=false;     -- in-flight
 
 # Integration: anti-leak.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 60s \
+go test -short -count=1 -timeout 60s \
   -run "TestOperationHandlerAntiLeak" \
-  ./internal/handler/...
+  ./services/iam/internal/handler/...
 ```
 
 ## Подробности реализации

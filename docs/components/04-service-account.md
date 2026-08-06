@@ -187,20 +187,22 @@ grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # Newman:
-cd kacho-iam && SERVICE=iam-service-account ./tests/newman/scripts/run.sh
+./services/iam/tests/newman/scripts/run.sh --service iam-service-account
 
 # psql:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT id, account_id, name, enabled FROM kacho_iam.service_accounts;
 
 # Integration:
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s -run TestServiceAccount \
-  ./internal/repo/kacho/pg/...
+go test -short -count=1 -timeout 120s -run TestServiceAccount \
+  ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации

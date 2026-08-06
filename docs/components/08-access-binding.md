@@ -253,22 +253,26 @@ curl -X DELETE http://localhost:18080/iam/v1/accessBindings/$ACB_ID \
 
 ## Как воспроизвести локально
 
+Команды запускаются **от корня репозитория**.
+
 ```bash
-cd kacho-deploy && make dev-up
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-cd kacho-iam && SERVICE=iam-access-binding ./tests/newman/scripts/run.sh
+# Имя набора — то, под которым он сгенерирован; набора без суффикса переработки
+# в дереве нет, и прежняя команда прогоняла весь сервис молча.
+./services/iam/tests/newman/scripts/run.sh --service iam-access-binding-redesign
 
 # psql:
-cd kacho-deploy && make psql SVC=iam
+make -C deploy psql SVC=iam
 # > SELECT subject_type, subject_id, role_id, resource_type, resource_id, status FROM kacho_iam.access_bindings LIMIT 20;
 # > SELECT * FROM kacho_iam.fga_outbox LIMIT 10;     -- pending tuples
 # > SELECT * FROM kacho_iam.subject_change_outbox LIMIT 10;
 
 # Integration: idempotency + atomic emit-in-tx + subject_change emit + FGA symmetric.
-cd kacho-iam && GOWORK=off go test -short -count=1 -timeout 120s \
+go test -short -count=1 -timeout 120s \
   -run "TestAccessBinding|TestAccessBindingFGAOutbox|TestAccessBindingSubjectChange|TestAccessBindingIdempotent|TestAccessBindingFGASymmetric" \
-  ./internal/apps/kacho/api/access_binding/ ./internal/repo/kacho/pg/
+  ./services/iam/internal/apps/kacho/api/access_binding/ ./services/iam/internal/repo/kacho/pg/
 ```
 
 ## Подробности реализации

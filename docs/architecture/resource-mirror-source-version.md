@@ -68,10 +68,10 @@ already handles.
 
 ## Tests
 
-- IAM (`internal/repo/kacho/pg/resource_mirror/emitter_integration_test.go`,
+- IAM (`services/iam/internal/repo/kacho/pg/resource_mirror/emitter_integration_test.go`,
   testcontainers): stale register → no-op (v2 kept); same-version repeat → no-op;
   newer register applies + advances version; stale tombstone does not wipe a fresh
   row; fresh tombstone removes the row.
-- compute (`internal/repo/fga_register_mirror_integration_test.go`): Create then
+- compute (`services/compute/internal/repo/fga_register_mirror_integration_test.go`): Create then
   Update-on-labels stamp a strictly-increasing monotonic `source_version`;
   Delete stamps a tombstone-version `>=` the register.
