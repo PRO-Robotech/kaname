@@ -14038,6 +14038,7 @@
                   "}",
                   "pm.environment.unset('_poll200_delete_ab_teardown');",
                   "pm.environment.unset('_poll200_started_delete_ab_teardown');",
+                  "pm.environment.set('_abDelOpId_AUTHZ_AB_CR_A_AAA', '');",
                   "try { const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('_abDelOpId_AUTHZ_AB_CR_A_AAA', _dop.id); } catch(e) {}",
                   "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES into the next run', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));"
                 ]
@@ -14122,7 +14123,19 @@
                   "pm.environment.unset('_abTeardownOpId_AUTHZ_AB_CR_A_AAA');",
                   "pm.environment.unset('_abTeardownId_AUTHZ_AB_CR_A_AAA');",
                   "pm.environment.unset('_abDelOpId_AUTHZ_AB_CR_A_AAA');",
-                  "pm.environment.unset('_abTeardownDelId');"
+                  "pm.environment.unset('_abTeardownDelId');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -14709,6 +14722,7 @@
                   "}",
                   "pm.environment.unset('_poll200_delete_ab_teardown');",
                   "pm.environment.unset('_poll200_started_delete_ab_teardown');",
+                  "pm.environment.set('_abDelOpId_AUTHZ_AB_CR_B_AAB', '');",
                   "try { const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('_abDelOpId_AUTHZ_AB_CR_B_AAB', _dop.id); } catch(e) {}",
                   "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES into the next run', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));"
                 ]
@@ -14793,7 +14807,19 @@
                   "pm.environment.unset('_abTeardownOpId_AUTHZ_AB_CR_B_AAB');",
                   "pm.environment.unset('_abTeardownId_AUTHZ_AB_CR_B_AAB');",
                   "pm.environment.unset('_abDelOpId_AUTHZ_AB_CR_B_AAB');",
-                  "pm.environment.unset('_abTeardownDelId');"
+                  "pm.environment.unset('_abTeardownDelId');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -15294,6 +15320,7 @@
                   "}",
                   "pm.environment.unset('_poll200_delete_ab_teardown');",
                   "pm.environment.unset('_poll200_started_delete_ab_teardown');",
+                  "pm.environment.set('_abDelOpId_AUTHZ_AB_CR_B_INV', '');",
                   "try { const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('_abDelOpId_AUTHZ_AB_CR_B_INV', _dop.id); } catch(e) {}",
                   "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 means the grant SURVIVES into the next run', () => pm.expect(pm.response.code, JSON.stringify(pm.response.json() || {})).to.be.oneOf([200, 404]));"
                 ]
@@ -15378,7 +15405,19 @@
                   "pm.environment.unset('_abTeardownOpId_AUTHZ_AB_CR_B_INV');",
                   "pm.environment.unset('_abTeardownId_AUTHZ_AB_CR_B_INV');",
                   "pm.environment.unset('_abDelOpId_AUTHZ_AB_CR_B_INV');",
-                  "pm.environment.unset('_abTeardownDelId');"
+                  "pm.environment.unset('_abTeardownDelId');",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation done', function () {",
+                  "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
+                  "  });",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }

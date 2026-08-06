@@ -564,6 +564,12 @@ for _case in CASES:
         auth=_auth,
         retry_on=(403,),
         test_script=[
+            # Идентификатор операции удаления СБРАСЫВАЕТСЯ ПЕРЕД захватом: ветка
+            # `404` («уже нет») законна и тела с `id` не несёт, поэтому захват не
+            # срабатывает. Без сброса имя сохранило бы операцию предыдущего шага, и
+            # опрос подтвердил бы чужой завершённый успех. Пустая строка, а не
+            # `unset`: парный опрос снимает себя `skipRequest`, когда имя пусто.
+            f"pm.environment.set('{_delopvar}', '');",
             # Save delete Operation id for the follow-up poll.
             f"try {{ const _dop = pm.response.json(); if (_dop && _dop.id) pm.environment.set('{_delopvar}', _dop.id); }} catch(e) {{}}",
             "pm.test('[teardown] delete-ab: revoked (200) or already gone (404) — a persistent 403 "
