@@ -172,3 +172,106 @@ func TestFGAOutboxEmitter_EmitWriteTx_EmptyTuplesIsNoop(t *testing.T) {
 		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')`).Scan(&count))
 	require.Equal(t, 0, count, "empty tuples is no-op")
 }
+
+// Порядок ОДНОГО КЛЮЧА переживает переход на набор.
+//
+// Выдача и отзыв одного (субъект, отношение, объект) НЕ коммутативны: переставь их —
+// и кортеж останется жив, то есть право не будет отозвано. Дренаж держит поголовный
+// FIFO партиции по возрастанию id, поэтому всё, на чём стоит эта гарантия, — что id
+// назначаются в том порядке, в каком вызывающий перечислил события. Вставка набором
+// (`unnest` в FROM) обязана сохранять это дословно.
+//
+// Проба утверждает ИСХОД (какой id у какого события), а не «позвали ли набор», и несёт
+// парный контроль: тот же набор, перечисленный в обратном порядке, обязан дать обратный
+// порядок id — иначе утверждение было бы тождественно истинным на любой реализации.
+func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	require.NoError(t, err)
+	defer pool.Close()
+
+	key := clients.RelationTuple{User: "user:usr_order", Relation: "admin", Object: "account:acc_order"}
+	other := clients.RelationTuple{User: "user:usr_order", Relation: "viewer", Object: "account:acc_order"}
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	// Набор из трёх — тот же ключ едет ПЕРВЫМ, затем два соседних, чтобы «первый в
+	// массиве» и «первый по id» проверялись на наборе, а не на одиночке.
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx, []clients.RelationTuple{key, other,
+		{User: "user:usr_order2", Relation: "admin", Object: "account:acc_order"}}))
+	require.NoError(t, fga_outbox.EmitDeleteTx(ctx, tx, []clients.RelationTuple{key}))
+	require.NoError(t, tx.Commit(ctx))
+
+	type ev struct {
+		id  int64
+		typ string
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT id, event_type FROM kacho_iam.fga_outbox
+		 WHERE payload->>'user'=$1 AND payload->>'relation'=$2 AND payload->>'object'=$3
+		 ORDER BY id ASC`, key.User, key.Relation, key.Object)
+	require.NoError(t, err)
+	defer rows.Close()
+	var evs []ev
+	for rows.Next() {
+		var e ev
+		require.NoError(t, rows.Scan(&e.id, &e.typ))
+		evs = append(evs, e)
+	}
+	require.Len(t, evs, 2, "у ключа ровно два события: выдача и её отзыв")
+	require.Equal(t, "fga.tuple.write", evs[0].typ, "выдача обязана быть первой по id")
+	require.Equal(t, "fga.tuple.delete", evs[1].typ, "отзыв обязан быть строго после неё")
+	require.Greater(t, evs[1].id, evs[0].id)
+
+	// ВНУТРИ одного набора порядок id обязан следовать порядку массива. Без этого
+	// утверждения проба покрывала бы только соседство двух ВЫЗОВОВ и оставалась зелёной
+	// на реализации, которая переставляет элементы внутри набора, — а именно перестановка
+	// внутри набора и есть то, что вставка через `unnest` могла бы потерять (проверено
+	// инъекцией: без этой части проба на развороте набора не краснела).
+	inner, err := pool.Query(ctx, `
+		SELECT payload->>'user' || '|' || (payload->>'relation') FROM kacho_iam.fga_outbox
+		 WHERE event_type='fga.tuple.write' AND payload->>'object'=$1
+		 ORDER BY id ASC`, key.Object)
+	require.NoError(t, err)
+	defer inner.Close()
+	var got []string
+	for inner.Next() {
+		var s string
+		require.NoError(t, inner.Scan(&s))
+		got = append(got, s)
+	}
+	require.Equal(t, []string{
+		key.User + "|" + key.Relation,
+		other.User + "|" + other.Relation,
+		"user:usr_order2|admin",
+	}, got, "порядок строк внутри набора обязан совпасть с порядком, в котором их перечислил вызывающий")
+
+	// Парный контроль: обратный порядок перечисления даёт обратный порядок id.
+	// Без него утверждение выше зеленело бы на реализации, которая сортирует как угодно.
+	tx2, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx2.Rollback(ctx) })
+	rev := clients.RelationTuple{User: "user:usr_rev", Relation: "admin", Object: "account:acc_order"}
+	require.NoError(t, fga_outbox.EmitDeleteTx(ctx, tx2, []clients.RelationTuple{rev}))
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx2, []clients.RelationTuple{rev}))
+	require.NoError(t, tx2.Commit(ctx))
+
+	rows2, err := pool.Query(ctx, `
+		SELECT event_type FROM kacho_iam.fga_outbox
+		 WHERE payload->>'user'=$1 AND payload->>'relation'=$2 AND payload->>'object'=$3
+		 ORDER BY id ASC`, rev.User, rev.Relation, rev.Object)
+	require.NoError(t, err)
+	defer rows2.Close()
+	var typs []string
+	for rows2.Next() {
+		var s string
+		require.NoError(t, rows2.Scan(&s))
+		typs = append(typs, s)
+	}
+	require.Equal(t, []string{"fga.tuple.delete", "fga.tuple.write"}, typs,
+		"порядок id следует порядку вызовов, а не какой-то внутренней сортировке")
+}
