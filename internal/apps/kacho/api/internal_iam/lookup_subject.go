@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // Package internal_iam — LookupSubjectUseCase
-// (gRPC-direct only from api-gateway auth-interceptor).
+// (зовётся auth-интерсептором api-gateway gRPC-direct; см. handler.go про то,
+// почему это loop-prevention, а не отсутствие REST-маршрута).
 //
 // Oneof key: external_id (OIDC `sub`, Ory) | id (`usr...` / `sva...`) | email.
 // Возвращает либо User, либо ServiceAccount (oneof subject).
@@ -27,8 +28,9 @@ import (
 type Repo = kachorepo.Repository
 
 // LookupSubjectUseCase резолвит внешний OIDC subject (`sub` claim, Ory) в локальный
-// kacho subject (User mirror или ServiceAccount). gRPC-direct only — НЕ
-// регистрируется в restmux api-gateway (запрет #6 + loop-prevention).
+// kacho subject (User mirror или ServiceAccount). Internal-only (запрет #6):
+// на внешний endpoint не выходит, но REST-маршрут на ВНУТРЕННЕМ mux api-gateway у
+// него есть — см. handler.go.
 type LookupSubjectUseCase struct {
 	repo Repo
 }
