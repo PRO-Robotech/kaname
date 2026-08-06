@@ -213,9 +213,11 @@ make -C deploy psql SVC=iam
 # > SELECT id, description, done, principal_type, principal_id, principal_display_name FROM kacho_iam.operations LIMIT 20;
 # > SELECT count(*) FROM kacho_iam.operations WHERE done=false;     -- in-flight
 
-# Integration: anti-leak.
+# Anti-leak: пробы лежат в services/iam/internal/handler/operation_handler_anti_leak_test.go.
+# Имя в -run обязано совпадать хоть с одной пробой: -run, не совпавший ни с чем,
+# печатает «no tests to run» и выходит НУЛЁМ — команда выглядит исполненной.
 go test -short -count=1 -timeout 60s \
-  -run "TestOperationHandlerAntiLeak" \
+  -run "TestW1_6_09_Operation" \
   ./services/iam/internal/handler/...
 ```
 
