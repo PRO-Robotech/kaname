@@ -1489,8 +1489,27 @@ _DELETE_ACCEPTED = [
 # Гейт по дереву на обе половины пары — `deploy/scripts/assert-delete-operation-outcome.py`.
 _OP_POLL_PATH = re.compile(r"/operations/\{\{(\w+)\}\}")
 _MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
-_OUTCOME_ASSERT = re.compile(r"pm\.expect\(\s*[A-Za-z_$][\w$]*\.error\b")
-_DONE_ASSERT = re.compile(r"pm\.expect\(\s*[A-Za-z_$][\w$]*\.done\b")
+# Утверждение об исходе / о завершении — обращение к полю операции ВНУТРИ аргумента
+# `pm.expect(...)`. Опознаётся ПОЛЕ, а не носитель и не форма выражения: имя
+# переменной у каждого поллера своё (`j`, `_dj`, `_do`), а записей исхода в дереве
+# три (`j.error && j.error.code`, `Boolean(j.response) && !j.error`,
+# `pm.environment.get('lastOpError') || ''`). Узнавать одну значило бы ловить
+# полюбившуюся запись вместо существа — и дописать утверждение туда, где оно уже есть.
+_FIELD_OUTCOME = re.compile(r"\.error\b|lastOpError")
+_FIELD_DONE = re.compile(r"\.done\b")
+
+
+def _expect_args(code: str):
+    for m in re.finditer(r"pm\.expect\(", code):
+        yield code[m.end():m.end() + 300].split(";")[0]
+
+
+def _asserts_outcome(code: str) -> bool:
+    return any(_FIELD_OUTCOME.search(a) for a in _expect_args(code))
+
+
+def _asserts_done(code: str) -> bool:
+    return any(_FIELD_DONE.search(a) for a in _expect_args(code))
 
 
 def _delete_outcome_assert(need_done: bool) -> List[str]:
@@ -1530,21 +1549,39 @@ def _delete_outcome_assert(need_done: bool) -> List[str]:
 
 
 def _assert_delete_operation_outcome(steps: List[Step]) -> List[Step]:
-    """Каждый опрос, чей предмет — удаление, обязан утверждать ИСХОД операции."""
-    out: List[Step] = []
+    """У каждого удаления кто-нибудь из читателей его операции обязан назвать ИСХОД.
+
+    Вопрос задаётся ОДИН НА ЦЕПОЧКУ, а не каждому шагу. У одного удаления опросов
+    бывает несколько: первый дожидается завершения, следующий читает ту же операцию
+    и утверждает о ней предметное. Требуя утверждения от каждого, проход дописал бы
+    «операция удаления УСПЕШНА» ожидающему шагу кейса, чей ПРЕДМЕТ — ОТКАЗ удаления,
+    и кейс стал бы утверждать обе взаимоисключающие вещи разом. Замеренные случаи:
+    удаление отсутствующего образа (ожидается ошибка операции с точным текстом) и
+    удаление роли, на которую есть выдача. Поэтому: если исход называет ЛЮБОЙ шаг
+    цепочки — успехом или отказом, — дописывать нечего.
+
+    Дописывается ПЕРВОМУ шагу цепочки: он и есть тот, кто дождался терминального
+    состояния, и чинить класс надо там, где он возникает.
+    """
+    out = list(steps)
+    chains = {}
     subject = None
-    for st in steps:
-        polls = _OP_POLL_PATH.search(st.path) if st.method == "GET" else None
-        if polls is None:
-            if st.method in _MUTATION_METHODS:
-                subject = st.method
-            out.append(st)
+    for idx, st in enumerate(out):
+        if st.method == "GET" and _OP_POLL_PATH.search(st.path):
+            if subject is not None:
+                chains.setdefault(subject, []).append(idx)
             continue
-        code = _strip_js_comments("\n".join(st.test_script))
-        if subject == "DELETE" and not _OUTCOME_ASSERT.search(code):
-            st = replace(st, test_script=list(st.test_script)
-                         + _delete_outcome_assert(not _DONE_ASSERT.search(code)))
-        out.append(st)
+        if st.method in _MUTATION_METHODS:
+            subject = idx
+    for sidx, polls in chains.items():
+        if out[sidx].method != "DELETE":
+            continue
+        code = "\n".join(_strip_js_comments("\n".join(out[k].test_script)) for k in polls)
+        if _asserts_outcome(code):
+            continue
+        k = polls[0]
+        out[k] = replace(out[k], test_script=list(out[k].test_script)
+                         + _delete_outcome_assert(not _asserts_done(code)))
     return out
 
 
