@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // registry_owner_derivation_test.go — regression lock for #64 Defect A.
@@ -68,9 +70,16 @@ func typeBody(t *testing.T, dsl, typeName string) string {
 // the full CRUD verb-set (esp. v_create → CreateRepository) on their own resource.
 func TestRegistryModel_OwnerDerivesVerbs(t *testing.T) {
 	dsl := modelDSL(t)
-	verbs := []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
 	for _, ty := range []string{"registry_registry", "registry_repository"} {
 		body := typeBody(t, dsl, ty)
+		// Набор берётся У ТИПА, а не выписывается: `registry_registry` несёт
+		// `v_create` (контейнерная семантика — «создать репозиторий в этом
+		// пространстве имён», её спрашивают хендлер и data-plane), а
+		// `registry_repository` — нет. Пятиимённый литерал, стоявший здесь, требовал
+		// бы `v_create` и от репозитория, то есть краснел бы на законной модели.
+		verbs := authzmap.VerbRelationsOfType(ty)
+		require.NotEmptyf(t, verbs, "тип %q не объявляет ни одного глагольного отношения — "+
+			"утверждение ниже было бы бессодержательным", ty)
 		for _, v := range verbs {
 			// match e.g. `define v_create: [user, service_account, group#member] or owner`
 			re := regexp.MustCompile(`(?m)^\s*define ` + v + `:.*\bor owner\b`)

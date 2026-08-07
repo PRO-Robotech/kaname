@@ -293,11 +293,30 @@ func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
 	}
 }
 
-// TestCreateOnlyGrantStillOpensItsOwnCreate — контроль в обратную сторону.
+// TestCreateOnlyGrantMaterializesSomething — контроль в обратную сторону.
 //
 // Проба выше запрещает; без этого утверждения её «зелёное» неотличимо от
 // «create-выдача не даёт вообще ничего», то есть от сломанной материализации.
-func TestCreateOnlyGrantStillOpensItsOwnCreate(t *testing.T) {
+//
+// ЧТО ИМЕННО КОНТРОЛИРУЕТСЯ И ПОЧЕМУ ЭТО ИЗМЕНИЛОСЬ. Прежде контроль требовал,
+// чтобы create-выдача резолвила `v_create`. Отношение снято со всех типов, кроме
+// `registry_registry`: «создать» — не операция над уже существующим объектом, и
+// пообъектный `v_create` на томе или сети не спрашивал ни один путь запроса. Если
+// оставить прежнюю формулировку, контроль краснел бы на ЗАКОННОЙ модели, требуя
+// вернуть отношение, у которого нет читателя.
+//
+// Контроль поэтому переформулирован на то, что действительно доказывает живость
+// материализации, и он СИЛЬНЕЕ прежнего, потому что утверждает обе половины:
+//
+//	(а) авторский глагол `create` СЧИТАН и классифицирован — на объект лёг ярус
+//	    записи (`editor`), выведенный из класса глагола; выдача, которую эмиттер
+//	    уронил бы на пол, не дала бы ни одного кортежа;
+//	(б) пообъектные глаголы на ЭТИХ ЖЕ типах живы — выдача, назвавшая глагол,
+//	    который тип объявляет, резолвит соответствующее `v_*`.
+//
+// Без (б) «ярус есть» было бы неотличимо от «v_* сломаны на всём типе», а именно
+// на `v_*` и держится запрет соседней пробы.
+func TestCreateOnlyGrantMaterializesSomething(t *testing.T) {
 	root := repoRootFromTest(t)
 	dsl, err := os.ReadFile(filepath.Join(root, modelRelPath))
 	if err != nil {
@@ -310,14 +329,44 @@ func TestCreateOnlyGrantStillOpensItsOwnCreate(t *testing.T) {
 		if !ok {
 			t.Fatalf("точечный ключ %s не резолвится в тип модели", dotted)
 		}
-		tuples, emitted := ruleObjectTuples("user:usr_probe", []string{"create"}, dotted, "obj_probe")
+		implies := implications(t, string(dsl), fgaType)
+
+		// (а) глагол считан → ярус записи на объекте.
+		createTuples, emitted := ruleObjectTuples("user:usr_probe", []string{"create"}, dotted, "obj_probe")
 		if !emitted {
 			t.Fatalf("эмиссия для %s не состоялась", dotted)
 		}
-		got := closure(relationsOf(tuples), implications(t, string(dsl), fgaType))
-		if !got["v_create"] {
-			t.Errorf("правило с глаголом `create` на %s не резолвит `v_create` (%v) — материализация сломана, "+
-				"и запрет в соседней пробе стал бы тождественно истинным", dotted, sortedKeys(got))
+		if len(createTuples) == 0 {
+			t.Errorf("правило с глаголом `create` на %s не дало НИ ОДНОГО кортежа — выдача уронена на пол, "+
+				"и запрет в соседней пробе стал бы тождественно истинным", dotted)
+		}
+		got := closure(relationsOf(createTuples), implies)
+		if !got["editor"] {
+			t.Errorf("правило с глаголом `create` на %s не резолвит ярус `editor` (%v) — авторский глагол "+
+				"не классифицирован как запись, то есть эмиттер его не увидел", dotted, sortedKeys(got))
+		}
+		// `v_create` на этих типах больше не существует — если он появился, значит
+		// кто-то вернул отношение без читателя (или эмиттер пишет висячий кортеж,
+		// который владелец модели отвергает окончательно).
+		if got["v_create"] {
+			t.Errorf("на %s резолвится `v_create` (%v) — тип его не объявляет; это висячий кортеж "+
+				"либо возвращённое отношение, которого никто не спрашивает", dotted, sortedKeys(got))
+		}
+
+		// (б) пообъектные глаголы этого типа живы.
+		declared := authzmap.VerbRelationsOfType(fgaType)
+		if len(declared) == 0 {
+			t.Fatalf("тип %s не объявляет глагольных отношений — половина (б) была бы бессодержательна", fgaType)
+		}
+		liveVerb := strings.TrimPrefix(declared[0], "v_")
+		liveTuples, emitted := ruleObjectTuples("user:usr_probe", []string{liveVerb}, dotted, "obj_probe")
+		if !emitted {
+			t.Fatalf("эмиссия правила с глаголом %q на %s не состоялась", liveVerb, dotted)
+		}
+		if live := closure(relationsOf(liveTuples), implies); !live[declared[0]] {
+			t.Errorf("правило с глаголом %q на %s не резолвит %q (%v) — пообъектная материализация "+
+				"на этом типе сломана, и запрет соседней пробы держаться не на чем",
+				liveVerb, dotted, declared[0], sortedKeys(live))
 		}
 		checked++
 	}

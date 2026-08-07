@@ -417,9 +417,13 @@ func TestReconcileRules_MatchLabels_PerObjectOnly_NoAnchor(t *testing.T) {
 
 	w := allWrites(f)
 	// Per-object tuples on the CONCRETE object — never a broad anchor (no scope_grant,
-	// no tuple on project:prj-1). v_get + v_create + tier (viewer→editor: create⇒editor).
+	// no tuple on project:prj-1). v_get + tier (viewer→editor: the authored `create`
+	// verb is a write verb, so the tier is editor even though `compute_instance` no
+	// longer declares a `v_create` relation to materialize — the tier is derived from
+	// the AUTHORED verbs, the v_* set from the TYPE.
 	assert.True(t, hasTuple(w, "v_get", "compute_instance:i-prod"), "v_get on matched object")
-	assert.True(t, hasTuple(w, "v_create", "compute_instance:i-prod"), "v_create on matched object")
+	assert.False(t, hasTuple(w, "v_create", "compute_instance:i-prod"),
+		"v_create emitted on compute_instance, which does not declare it — a dangling tuple OpenFGA rejects")
 	assert.True(t, hasTuple(w, "editor", "compute_instance:i-prod"), "back-compat tier on matched object")
 	// NO tuple on the non-matching object, NO anchor/scope_grant.
 	for _, tup := range w {

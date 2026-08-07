@@ -7,8 +7,8 @@ package pg_test
 // closer.
 //
 // INVARIANT UNDER TEST (all-or-nothing materialization): the reconciler
-// materializes the creator's per-object owner grant as the set {v_get,v_list,
-// v_create,v_update,v_delete,tier} on ONE object. Owner-tuple materialization is
+// materializes the creator's per-object owner grant as the whole verb-set the
+// object's TYPE declares, plus the tier tuple, on ONE object. Owner-tuple materialization is
 // eventually-consistent (it does NOT gate Operation.done), but if the sync write
 // applies that object's tuples NON-atomically (per-tuple), a transient
 // write-contention on ONE tuple (e.g. v_delete) leaves the object PARTIAL: a
@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
@@ -76,10 +77,16 @@ func (s *atomicRelationStore) has(t clients.RelationTuple) bool {
 	return ok
 }
 
-// ownerGrant is the reconciler's per-object owner grant on ONE object: the closed
-// per-verb v_* set + the back-compat tier tuple, all for the creator.
+// ownerGrant is the reconciler's per-object owner grant on ONE object: the verb-set
+// the TYPE declares + the back-compat tier tuple, all for the creator.
+//
+// The verb-set is read from a real type rather than written out. A literal stood
+// here naming `v_create`, which no ordinary resource type declares any more — so
+// the fixture described a grant the reconciler does not produce, and an atomicity
+// invariant proven over a set production never writes proves it over nothing. The
+// fixture must not be shaped differently from the product it stands in for.
 func ownerGrant(subject, object string) []reconcile.SyncFGATuple {
-	relations := []string{"v_get", "v_list", "v_create", "v_update", "v_delete", "viewer"}
+	relations := append(authzmap.VerbRelationsOfType("vpc_network"), "viewer")
 	out := make([]reconcile.SyncFGATuple, 0, len(relations))
 	for _, r := range relations {
 		out = append(out, reconcile.SyncFGATuple{User: subject, Relation: r, Object: object})
@@ -174,10 +181,21 @@ func TestSyncFGAWriter_SiblingReject_DoesNotStripOwner(t *testing.T) {
 		{User: creator, Relation: "v_get", Object: objB},
 		{User: creator, Relation: "viewer", Object: objB}, // computed-only → OpenFGA rejects
 	}
-	// Interleave A and B so a naive flat write cannot rely on ordering.
+	// Interleave A and B so a naive flat write cannot rely on ordering. The weave is
+	// built from the two slices rather than by naming positions: fixed indices
+	// `ownerA[0..5]` encoded "the owner grant has exactly six tuples" nowhere the
+	// reader could see it, and read out of range the moment the verb-set lost one.
+	if len(ownerA) < len(siblingB) {
+		t.Fatalf("owner grant has %d tuple(s), fewer than sibling B's %d — the interleave "+
+			"below could not place every B tuple between two A tuples", len(ownerA), len(siblingB))
+	}
 	var pass []reconcile.SyncFGATuple
-	pass = append(pass, ownerA[0], siblingB[0], ownerA[1], ownerA[2], siblingB[1])
-	pass = append(pass, ownerA[3], ownerA[4], ownerA[5])
+	for i, g := range ownerA {
+		pass = append(pass, g)
+		if i < len(siblingB) {
+			pass = append(pass, siblingB[i])
+		}
+	}
 
 	viewerB := rt(reconcile.SyncFGATuple{User: creator, Relation: "viewer", Object: objB})
 	store := &atomicRelationStore{contended: viewerB}

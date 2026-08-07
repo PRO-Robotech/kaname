@@ -368,10 +368,18 @@ func (s *contendedFGAStore) has(t clients.RelationTuple) bool {
 // "deferred to the async drainer" and no "did not converge" in the log.
 func TestSyncFGAWriter_ConcurrentMaterialization_NoDeferral(t *testing.T) {
 	const (
-		writersPerObject  = 8
-		drainersPerObject = 6 // one per grant tuple — the outbox row-per-tuple shape
-		objects           = 6
+		writersPerObject = 8
+		objects          = 6
 	)
+	// One drainer per grant tuple — the outbox row-per-tuple shape. Derived from the
+	// grant, not a constant: a literal 6 indexed grant[i] out of range the moment the
+	// verb-set shrank by one (`v_create` withdrawn from the ordinary resource types).
+	// The coupling was real and unstated, so it broke as a panic in a goroutine rather
+	// than as an assertion.
+	drainersPerObject := len(ownerGrant(conflictCreator, "vpc_address:adr0000000000000000"))
+	if drainersPerObject == 0 {
+		t.Fatal("empty grant — the contention this test creates would be nil")
+	}
 	store := newContendedFGAStore()
 
 	var mu sync.Mutex

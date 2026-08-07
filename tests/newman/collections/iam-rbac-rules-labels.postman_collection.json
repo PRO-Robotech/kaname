@@ -71,7 +71,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rbac_lbl_fed_{{runId}}\", \"description\": \"newman ARM_LABELS fed-type probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"create\"], \"matchLabels\": {\"env\": \"prod\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"rbac_lbl_fed_{{runId}}\", \"description\": \"newman ARM_LABELS fed-type probe role\", \"rules\": [{\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"get\", \"update\"], \"matchLabels\": {\"env\": \"prod\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"

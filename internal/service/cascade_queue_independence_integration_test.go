@@ -59,6 +59,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -67,8 +68,25 @@ import (
 
 const ciClusterObject = "cluster:cluster_kacho_root"
 
-// ciVerbs — the closed CRUD verb set every verb-bearing type declares.
-var ciVerbs = []string{"v_get", "v_list", "v_create", "v_update", "v_delete"}
+// ciVerbsOf — the verb relations THIS object's type declares, read from the same
+// per-type table the emitter uses.
+//
+// A five-name literal stood here, introduced as "the closed CRUD verb set every
+// verb-bearing type declares". It stopped being true when `v_create` was withdrawn
+// from every type but `registry_registry` — creating a thing is not an operation on
+// the thing, so the per-object relation had no reader and no longer exists on
+// `account` or `iam_access_binding`. A duplicated set cannot follow its subject; a
+// derived one covers whatever the type declares next, including relations this file
+// has never heard of.
+func ciVerbsOf(t *testing.T, object string) []string {
+	t.Helper()
+	typ, _, ok := strings.Cut(object, ":")
+	require.Truef(t, ok, "object %q is not `<type>:<id>`", object)
+	verbs := authzmap.VerbRelationsOfType(typ)
+	require.NotEmptyf(t, verbs, "type %q declares no verb relation — the assertion over it "+
+		"would be vacuous", typ)
+	return verbs
+}
 
 // ciWorld bundles the committed iam state with the authorization service under
 // test. Ids are literal (not ids.NewID) so a failure message names the row it is
@@ -203,14 +221,14 @@ func TestAccountAdminRevokesForeignGrantWhileQueueHasNotDelivered(t *testing.T) 
 
 	// The binding's parent-pointer `account:<A> # account @ iam_access_binding:<B>`
 	// is deliberately ABSENT: the drainer has not delivered it.
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "iam_access_binding:"+binding) {
 		require.True(t, w.allowed(t, "user:"+accAdmin, verb, "iam_access_binding:"+binding),
 			"level 3 (account administrator) must hold %s on a binding in his own account "+
 				"while the queue has not delivered the binding's parent-pointer", verb)
 	}
 
 	// Narrowing still works — the fix must not turn the cascade into a pass.
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "iam_access_binding:"+binding) {
 		require.False(t, w.allowed(t, "user:"+stranger, verb, "iam_access_binding:"+binding),
 			"a member of the same account WITHOUT the admin delegation must stay denied on %s", verb)
 	}
@@ -256,8 +274,8 @@ func TestRevokedBindingStaysManageableAndGrantsNothing(t *testing.T) {
 
 	// The queue has delivered everything this ACTIVE binding emits: the grantee's
 	// per-object verbs on the scope, and the binding's parent pointer.
-	emitted := make([]clients.RelationTuple, 0, len(ciVerbs)+1)
-	for _, verb := range ciVerbs {
+	emitted := make([]clients.RelationTuple, 0, len(ciVerbsOf(t, "account:"+acc))+1)
+	for _, verb := range ciVerbsOf(t, "account:"+acc) {
 		w.harness.Write(t, "user:"+grantee, verb, "account:"+acc)
 		emitted = append(emitted, clients.RelationTuple{
 			User: "user:" + grantee, Relation: verb, Object: "account:" + acc})
@@ -267,7 +285,7 @@ func TestRevokedBindingStaysManageableAndGrantsNothing(t *testing.T) {
 		User: "account:" + acc, Relation: "account", Object: "iam_access_binding:" + binding})
 
 	// Premise: the grant is live. If this fails the rest proves nothing.
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "account:"+acc) {
 		require.True(t, w.allowed(t, "user:"+grantee, verb, "account:"+acc),
 			"premise: the ACTIVE binding's %s must be in force before revoking it", verb)
 	}
@@ -282,7 +300,7 @@ func TestRevokedBindingStaysManageableAndGrantsNothing(t *testing.T) {
 	// The grant is gone and nothing supplied at request time may bring it back: what
 	// the grantee held were tuples on the SCOPE object, and the resolver projects
 	// parent pointers and the account owner, never a grant on a scope.
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "account:"+acc) {
 		require.False(t, w.allowed(t, "user:"+grantee, verb, "account:"+acc),
 			"revocation must stay revoked: the grantee must hold no %s on the scope after "+
 				"the emitted set is removed, even though the binding row survives", verb)
@@ -319,7 +337,7 @@ func TestForeignAccountAdminIsNotAdminHere(t *testing.T) {
 
 	w.harness.Write(t, "user:"+admB, "admin", "account:"+accB)
 
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "iam_access_binding:"+bindingA) {
 		require.False(t, w.allowed(t, "user:"+admB, verb, "iam_access_binding:"+bindingA),
 			"administrator of account B must not reach a binding scoped to account A (%s)", verb)
 	}
@@ -379,11 +397,11 @@ func TestAccountOwnerCanDeleteHisAccountWhileQueueHasNotDelivered(t *testing.T) 
 	w.seedUser(t, delegate, acc)
 
 	// Nothing at all is in the store. The account was just created.
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "account:"+acc) {
 		require.True(t, w.allowed(t, "user:"+owner, verb, "account:"+acc),
 			"the account owner must hold %s on his own account the instant the row exists", verb)
 	}
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "account:"+acc) {
 		require.False(t, w.allowed(t, "user:"+outsider, verb, "account:"+acc),
 			"a non-owner must not reach the account object (%s)", verb)
 	}
@@ -394,7 +412,7 @@ func TestAccountOwnerCanDeleteHisAccountWhileQueueHasNotDelivered(t *testing.T) 
 	// structural facts at request time must not blur that: `account`'s verbs read
 	// `owner` and `super_admin`, never the `admin` tier, and this holds it.
 	w.harness.Write(t, "user:"+delegate, "admin", "account:"+acc)
-	for _, verb := range ciVerbs {
+	for _, verb := range ciVerbsOf(t, "account:"+acc) {
 		require.False(t, w.allowed(t, "user:"+delegate, verb, "account:"+acc),
 			"the delegated account administrator must not reach the account object itself (%s)", verb)
 	}

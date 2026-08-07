@@ -37,6 +37,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -93,7 +95,14 @@ func TestReconcileObjectForwardNoStale_MembersOfSameCreate_StayOnAdditivePath(t 
 	require.Len(t, f.upserts, 1, "the new object is materialized for the matching owner binding")
 	assert.Equal(t, "acb-new", f.upserts[0].ObjectID)
 	w := allWrites(f)
-	for _, v := range []string{"v_get", "v_list", "v_create", "v_update", "v_delete"} {
+	// The set is read from the type, not re-listed: "byte-identical to the full path"
+	// is an assertion ABOUT the emitter, and a literal cannot follow it. This one named
+	// `v_create`, which `iam_access_binding` stopped declaring once the relation was
+	// left to `registry_registry` alone — so the literal would have gone on demanding a
+	// tuple the full path no longer writes either.
+	wantVerbs := authzmap.VerbRelationsOfType("iam_access_binding")
+	require.NotEmpty(t, wantVerbs, "iam_access_binding declares no verb relation — the assertion below would be vacuous")
+	for _, v := range wantVerbs {
 		assert.True(t, hasTuple(w, v, "iam_access_binding:acb-new"), "%s on the new access_binding", v)
 	}
 	assert.True(t, hasTuple(w, "admin", "iam_access_binding:acb-new"), "admin tier on the new access_binding")

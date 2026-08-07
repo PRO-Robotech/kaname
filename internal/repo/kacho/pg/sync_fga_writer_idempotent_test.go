@@ -136,6 +136,21 @@ func (s *idempotentFGAStore) readCount() int {
 	return s.reads
 }
 
+// splitGrant cuts the grant in two non-empty halves. Both halves must be non-empty
+// or the "part pre-exists / part raced in" shape degenerates: with everything
+// pre-existing there is no missing-write to race, and with nothing pre-existing the
+// fast path skips the read entirely — either way the test would pass while asserting
+// nothing about the read-modify-write it exists to prove.
+func splitGrant(t *testing.T, grant []clients.RelationTuple) (head, tail []clients.RelationTuple) {
+	t.Helper()
+	if len(grant) < 2 {
+		t.Fatalf("grant has %d tuple(s) — the partial-overlap shape this test needs is not "+
+			"expressible on it", len(grant))
+	}
+	mid := len(grant) / 2
+	return grant[:mid], grant[mid:]
+}
+
 // grantTuples is ownerGrant projected to clients.RelationTuple (the persisted shape).
 func grantTuples(subject, object string) []clients.RelationTuple {
 	g := ownerGrant(subject, object) // defined in sync_fga_writer_test.go
@@ -159,8 +174,11 @@ const (
 // read-delta fix writes the MISSING subset so the FULL grant is present.
 func TestSyncFGAWriter_PartPreExists_CompletesFullGrant(t *testing.T) {
 	grant := grantTuples(idmpCreator, idmpObject)
-	// Pre-exist the first three verbs (v_get, v_list, v_create).
-	store := newIdempotentFGAStore(grant[0], grant[1], grant[2])
+	// Pre-exist HALF the grant. The split follows the grant's length instead of naming
+	// positions: fixed indices `grant[0..2]` silently encoded "the grant has six
+	// tuples", and read out of range the moment the verb-set lost one.
+	head, _ := splitGrant(t, grant)
+	store := newIdempotentFGAStore(head...)
 	w := kachopg.NewSyncFGAWriter(store, nil)
 
 	if err := w.WriteTuples(context.Background(), ownerGrant(idmpCreator, idmpObject)); err != nil {
@@ -237,11 +255,13 @@ func TestSyncFGAWriter_NonePreExist_NoRead(t *testing.T) {
 // second-writer-wins TOCTOU).
 func TestSyncFGAWriter_BenignRace_ReReadConverges(t *testing.T) {
 	grant := grantTuples(idmpCreator, idmpObject)
-	// Pre-exist the first three; the racer will land the LAST three right after our
-	// first read, so our missing-write of them hits already-exists.
-	store := newIdempotentFGAStore(grant[0], grant[1], grant[2])
+	// Pre-exist the first half; the racer lands the SECOND half right after our first
+	// read, so our missing-write of them hits already-exists. The split follows the
+	// grant's length — see splitGrant.
+	head, tail := splitGrant(t, grant)
+	store := newIdempotentFGAStore(head...)
 	store.raceArmed = true
-	store.raceInject = []clients.RelationTuple{grant[3], grant[4], grant[5]}
+	store.raceInject = tail
 	w := kachopg.NewSyncFGAWriter(store, nil)
 
 	if err := w.WriteTuples(context.Background(), ownerGrant(idmpCreator, idmpObject)); err != nil {
