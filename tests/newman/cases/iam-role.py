@@ -1008,7 +1008,7 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 # Clear FIRST — the sync-reject branch mints no Operation, and a
                 # leftover id would make the poll below confirm a FOREIGN operation.
-                "pm.environment.unset('opId');",
+                "pm.environment.set('opId', '');",
                 "if (pm.response.code === 400) {",
                 "  pm.test('sync code 9 (FAILED_PRECONDITION — system role)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(9));",
                 "  pm.test('sync message names the system role', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('system role'));",

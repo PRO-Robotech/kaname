@@ -850,7 +850,7 @@ CASES.append(Case(
                 # `oneOf([200, 400])` принимало исход, которого нет, и заодно проходило
                 # бы при ПРИЁМЕ фантомного участника.
                 *assert_status(200),
-                "pm.environment.unset('opId');",
+                "pm.environment.set('opId', '');",
                 "pm.test('200 — это конверт операции', () => pm.expect(pm.response.json().id, pm.response.text()).to.be.a('string').and.not.empty);",
                 "pm.environment.set('opId', pm.response.json().id);",
             ],

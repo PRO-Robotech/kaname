@@ -384,7 +384,7 @@ CASES.append(Case(
                 "  pm.environment.set('opId', j.id);",
                 "  pm.test('async Delete accepted (op minted)', () => pm.expect(true).to.eql(true));",
                 "} else {",
-                "  pm.environment.unset('opId');",
+                "  pm.environment.set('opId', '');",
                 "  pm.test('sync FAILED_PRECONDITION', () => pm.expect(pm.response.code).to.eql(400));",
                 "  pm.test('sync code 9', () => pm.expect(j.code).to.eql(9));",
                 "}",

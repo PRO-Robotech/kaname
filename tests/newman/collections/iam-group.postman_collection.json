@@ -2414,7 +2414,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.environment.unset('opId');",
+                  "pm.environment.set('opId', '');",
                   "pm.test('200 — это конверт операции', () => pm.expect(pm.response.json().id, pm.response.text()).to.be.a('string').and.not.empty);",
                   "pm.environment.set('opId', pm.response.json().id);"
                 ]
