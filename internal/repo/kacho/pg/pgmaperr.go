@@ -101,11 +101,12 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		return fmt.Sprintf("Role with name %s already exists", idHint)
 	case "access_bindings_unique",
 		"access_bindings_active_grant_uniq":
-		// idHint = "<subject_id>|<resource_type>:<resource_id>" — composed
-		// by the access_binding repo Insert (only caller that has subject /
-		// resource handy). Falls back to a generic message otherwise.
+		// Подсказка от access_binding.Insert — единственного места, где под рукой
+		// сразу субъект, область и роль. Разбирается общим splitBindingHint,
+		// потому что ЭТУ ЖЕ строку читает ветвь FK по роли ниже и берёт из неё
+		// СВОЁ поле: одна подсказка, три потребителя, каждый со своим слотом.
 		if idHint != "" {
-			if subj, scope, ok := strings.Cut(idHint, "|"); ok {
+			if subj, scope, _ := splitBindingHint(idHint); scope != "" {
 				return fmt.Sprintf("these permissions are already granted to %s on %s", subj, scope)
 			}
 			return fmt.Sprintf("these permissions are already granted to %s", idHint)
@@ -160,6 +161,16 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// is a HARD delete (purges the row) which is what clears the precondition.
 		if kindHint == "Role.Delete" {
 			return "role is in use by access bindings"
+		}
+		// Подсказка на INSERT-стороне приходит от access_binding.Insert и несёт
+		// ТРИ поля. Прежде эта ветвь печатала её целиком, поэтому вызывающий
+		// получал «Role <субъект>|project:<область> not found» — сообщение,
+		// называющее сущности, о которых он не спрашивал, и НЕ называющее ту,
+		// из-за которой отказ. Клиент уходил искать причину в субъекте и проекте.
+		// Тексты отказов — часть контракта (api-conventions.md §Error-format),
+		// поэтому берётся именно роль (issue #105).
+		if _, _, role := splitBindingHint(idHint); role != "" {
+			return fmt.Sprintf("Role %s not found", role)
 		}
 		return fmt.Sprintf("Role %s not found", idHint)
 	case "access_binding_conditions_condition_fk":
@@ -231,4 +242,30 @@ func checkText(pgErr *pgconn.PgError) string {
 // normally caught earlier by domain validation, so a generic message suffices.
 func notNullText(_ *pgconn.PgError) string {
 	return "a required field is missing"
+}
+
+// splitBindingHint разбирает подсказку, которую составляет access_binding.Insert:
+//
+//	"<subject_id>|<resource_type>:<resource_id>|<role_id>"
+//
+// Одна строка — три потребителя, и каждый берёт СВОЙ слот: текст UNIQUE называет
+// субъекта и область, ветвь FK по роли — роль. Прежде поля роли не было вовсе, и
+// ветвь FK печатала всю строку в слот роли: вызывающий получал сообщение о
+// сущностях, которых не называл, без той, из-за которой отказ (issue #105).
+//
+// Разбор устойчив к КОРОТКОЙ форме: подсказка без роли (двухполевая, как её писали
+// раньше) и подсказка без разделителей вовсе не ломают ни одного потребителя —
+// отсутствующие слоты возвращаются пустыми, а вызывающий сам решает, что делать
+// с пустым. Это не запас на будущее, а требование совместимости: mapErr зовут из
+// 190 мест, и не все они про выдачу.
+func splitBindingHint(idHint string) (subject, scope, role string) {
+	if idHint == "" {
+		return "", "", ""
+	}
+	subject, rest, ok := strings.Cut(idHint, "|")
+	if !ok {
+		return idHint, "", ""
+	}
+	scope, role, _ = strings.Cut(rest, "|")
+	return subject, scope, role
 }

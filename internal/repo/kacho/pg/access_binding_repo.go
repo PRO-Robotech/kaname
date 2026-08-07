@@ -638,8 +638,12 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	)
 	out, err := scanAB(row)
 	if err != nil {
-		// idHint encoding for uniqueText: "<subject_id>|<resource_type>:<resource_id>".
-		idHint := fmt.Sprintf("%s|%s:%s", b.SubjectID, b.ResourceType, b.ResourceID)
+		// Подсказка несёт ТРИ слота: "<subject_id>|<resource_type>:<resource_id>|<role_id>".
+		// Разбирает её splitBindingHint, и каждый потребитель берёт своё: текст UNIQUE —
+		// субъекта и область, ветвь FK по роли — роль. Роль добавлена, потому что без неё
+		// FK-ветвь печатала всю подсказку в слот роли и называла вызывающему сущности,
+		// о которых он не спрашивал (issue #105).
+		idHint := fmt.Sprintf("%s|%s:%s|%s", b.SubjectID, b.ResourceType, b.ResourceID, b.RoleID)
 		return domain.AccessBinding{}, mapErr(err, "", idHint)
 	}
 	return out, nil
