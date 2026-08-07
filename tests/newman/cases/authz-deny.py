@@ -834,7 +834,7 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 # Clear FIRST — a rejected create mints no Operation and must not
                 # inherit a previous case's id (the poll below would confirm it).
-                "pm.environment.unset('opId');",
+                "pm.environment.set('opId', '');",
                 "if (j && j.id) pm.environment.set('opId', j.id);",
                 "if (j && j.metadata && j.metadata.accessBindingId) {",
                 "  pm.environment.set('w12RevokeBindingId', j.metadata.accessBindingId);",
@@ -927,7 +927,7 @@ CASES.append(Case(
                 "pm.test('revoke accepted (200; 202 краем не производится)', () => pm.expect(pm.response.code).to.eql(200));",
                 "const j = pm.response.json();",
                 # Clear FIRST — see the grant step above.
-                "pm.environment.unset('opId');",
+                "pm.environment.set('opId', '');",
                 "if (j && j.id) pm.environment.set('opId', j.id);",
             ],
         ),

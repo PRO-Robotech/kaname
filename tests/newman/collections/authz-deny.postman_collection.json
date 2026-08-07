@@ -23934,7 +23934,7 @@
                 "exec": [
                   "pm.test('grant create accepted (200; мутация возвращает Operation, 202 краем не производится)', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.environment.unset('opId');",
+                  "pm.environment.set('opId', '');",
                   "if (j && j.id) pm.environment.set('opId', j.id);",
                   "if (j && j.metadata && j.metadata.accessBindingId) {",
                   "  pm.environment.set('w12RevokeBindingId', j.metadata.accessBindingId);",
@@ -24179,7 +24179,7 @@
                   "pm.environment.unset('_w12RevokeRetry');",
                   "pm.test('revoke accepted (200; 202 краем не производится)', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.environment.unset('opId');",
+                  "pm.environment.set('opId', '');",
                   "if (j && j.id) pm.environment.set('opId', j.id);"
                 ]
               }
