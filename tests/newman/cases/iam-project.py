@@ -31,6 +31,12 @@ Case IDs follow the IAM-PRJ-<RPC>-<CLASS>[-detail] scheme.
 ProjectService.Get is owner-only (returns NOT_FOUND for a non-owner non-anonymous
 caller — it does NOT consult AccessBinding). This is asserted explicitly.
 
+Удаление НЕПУСТОГО проекта (IAM-PRJ-DL-NEG-HAS-CHILDREN) держится внешним ключом
+`roles_project_fk` (запрет удаления родителя): единственный живой ребёнок проекта в
+kacho_iam сегодня — ПРОЕКТНАЯ пользовательская роль. Кейс заводит и снимает его сам
+через публичный API, поэтому общая фикстура не задействована и после прогона ничего
+не остаётся.
+
 Test-first note (strict TDD):
   These cases are written RED-first. They will fail until the corresponding
   ProjectService RPCs are correctly implemented. Do not weaken assertions.
@@ -951,41 +957,195 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-PRJ-DL-NEG-HAS-CHILDREN — Delete project with active children → FailedPrecondition
-# TODO: requires a project that has children (e.g. ServiceAccounts bound to it).
-# This case is skipped until child-resource creation is covered by another suite.
-# For now we assert the negative on the pre-seeded "crud-child-prj" only if it
-# has groups/SAs; otherwise we skip gracefully.
+# IAM-PRJ-DL-NEG-HAS-CHILDREN — удаление проекта, У КОТОРОГО ЕСТЬ РЕБЁНОК.
+#
+# ЧТО ЗДЕСЬ БЫЛО И ПОЧЕМУ ЭТО НЕ МОГЛО УПАСТЬ. Кейс обещал заголовком отказ по
+# состоянию (FAILED_PRECONDITION на проекте с живыми детьми), а утверждал
+# `oneOf([404, 403])` по МУСОРНОМУ идентификатору `prj00000000000notfnd`. У такого
+# утверждения нет производителя заявленного исхода вовсе: несуществующий проект
+# отвечает промахом или отказом в правах, то есть проба зеленела ровно тогда, когда
+# защиты от удаления непустого проекта не существовало бы в продукте. Соседний кейс
+# IAM-PRJ-DL-NEG-NOTFOUND утверждает то же самое и по тому же входу — то есть слот
+# был занят дублем под чужим заголовком.
+#
+# ЧЕМ ЗАМЕНЕНО — НАСТОЯЩИЙ РЕБЁНОК, СОЗДАННЫЙ ПУБЛИЧНЫМ API. Единственный живой
+# ребёнок проекта в kacho_iam на сегодня — ПРОЕКТНАЯ пользовательская роль
+# (`roles.project_id`, внешний ключ с запретом удаления родителя). Он заводится через
+# публичный `POST /iam/v1/roles` с `projectId` (та же форма, что у
+# IAM-ROL-CR-PROJECT-SCOPED в cases/iam-role.py), поэтому фикстура кейса
+# САМОДОСТАТОЧНА: свой проект, свой ребёнок, своя уборка — ни один общий
+# идентификатор фикстуры не задействован и после кейса не остаётся.
+#
+# ПОЧЕМУ ТЕКСТ ИМЕННО ОБЩИЙ. Запрет удаления поднимает 23503 на внешнем ключе
+# `roles_project_fk`, а он в поимённом разборе маппера НЕ назван (в отличие от
+# ключей аккаунта), поэтому до клиента доходит общий текст ветви «внешний ключ без
+# собственного сообщения» — `referenced resource not found or still in use` с кодом
+# 9. Пиним ДОСТАВЛЕННЫЙ текст, а не желаемый: тон сообщений — часть контракта
+# (api-conventions.md §Error-format), и утверждение про «Project … contains …»
+# краснело бы на исправном продукте. Тот же приём и та же формулировка уже пинятся
+# в cases/iam-group.py::IAM-GRP-AM-NEG-MEMBER-MISSING.
+#
+# ПОЧЕМУ ОТРИЦАНИЕ ИДЁТ В ПАРЕ С ПОЛОЖИТЕЛЬНЫМ. Одинокий отказ неотличим от
+# «удаление проекта сломано вообще» (testing.md §«Отрицание годится только в паре с
+# положительным»). Поэтому после снятия ребёнка ТОТ ЖЕ запрос обязан пройти: ребёнок
+# удаляется, и удаление проекта завершается операцией БЕЗ ошибки. Красным станет и
+# пропавший запрет (первое утверждение), и запрет, ставший вечным (второе).
+#
+# ТОЛЕРАНТНОСТЬ «СНАЧАЛА ПРАВА» ЗДЕСЬ НЕ ПРИМЕНЯЕТСЯ. Она законна для НЕДОСТУПНОГО
+# объекта, а этот проект вызывающий только что создал сам, поэтому 403 на нём
+# означал бы потерю права создателем — дефект, а не законный исход. Краткое окно
+# материализации закрывается ограниченным повтором (retry_until_authorized) на
+# ПЕРВОМ обращении к своему свежему проекту; набор глаголов объекта пишется целиком
+# (data-integrity.md: sync-FGA-write атомарен per-object), поэтому видимый `v_get`
+# влечёт видимый `v_delete`.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-PRJ-DL-NEG-HAS-CHILDREN",
-    title="Delete project with active children → Operation.error FAILED_PRECONDITION (9)",
+    title="Delete a project that still has a child (project-scoped custom Role) → Operation.error "
+          "FAILED_PRECONDITION (9); after the child is removed the SAME delete succeeds",
     classes=["NEG", "STATE"],
     priority="P1",
     steps=[
-        # Use accountAId's pre-seeded child project (crud-child-prj) whose ID is
-        # NOT in the env directly. We do a fresh create+immediately delete to test
-        # the happy path; for the has-children scenario we rely on the fact that
-        # the main crud project may have been deleted above. If setup.sh seeds
-        # a project WITH children, use projectA1Id (full authz fixture).
-        # TODO authz-matrix: This case is best exercised with projectA1Id from
-        # full authz-fixtures, which has ServiceAccounts bound to it. For now we
-        # only assert the sync/async behavior against a garbage id to confirm
-        # routing is correct (the implementation check lives in the DB FK layer).
+        # 1. свой проект-носитель ребёнка (общая фикстура не трогается).
         Step(
-            name="delete-with-maybe-children",
-            method="DELETE",
-            path="/iam/v1/projects/prj00000000000notfnd",
+            name="create-child-host-project",
+            method="POST",
+            path="/iam/v1/projects",
+            body={
+                "accountId": "{{accountAId}}",
+                "name": "prjchild-{{runId}}",
+                "description": "newman has-children delete guard host",
+            },
             auth="jwtAccountAdminA",
             test_script=[
-                # For a non-existent project, expect 404 or 403 (no FGA path).
-                # A real has-children test requires projectA1Id from full authz fixture.
-                # TODO authz-matrix: IAM-PRJ-DL-NEG-HAS-CHILDREN — needs projectA1Id
-                # with ServiceAccounts; seed via full authz-fixtures/setup.sh.
-                "pm.test('404 or 403 (no FGA path or not found)', () => pm.expect(pm.response.code).to.be.oneOf([404, 403]));",
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.projectId", "childHostProjectId"),
             ],
         ),
+        # Операция обязана РЕАЛЬНО завершиться успехом: предвыделенный id лежит в
+        # metadata даже у операции с ошибкой, и без этой проверки дальше поехал бы
+        # фантомный проект, а отказ на нём читался бы как сработавший запрет.
+        poll_operation_until_done(),
+        assert_op_success(),
+        # Первое обращение к своему свежему проекту — под ограниченным повтором на
+        # окне материализации набора глаголов создателя.
+        retry_until_authorized(Step(
+            name="get-child-host-project",
+            method="GET",
+            path="/iam/v1/projects/{{childHostProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('фикстура записала id проекта-носителя', () => "
+                "  pm.expect(pm.environment.get('childHostProjectId'), 'childHostProjectId')"
+                "   .to.be.a('string').and.not.empty);",
+                "pm.test('и это именно он', () => pm.expect(pm.response.json().id)"
+                ".to.eql(pm.environment.get('childHostProjectId')));",
+            ],
+        )),
+        # 2. РЕБЁНОК — проектная пользовательская роль (roles.project_id → FK RESTRICT).
+        Step(
+            name="create-project-scoped-child-role",
+            method="POST",
+            path="/iam/v1/roles",
+            body={
+                "projectId": "{{childHostProjectId}}",
+                "name": "prj_child_{{runId}}",
+                "description": "newman child of the project under delete-guard test",
+                "rules": [
+                    {"module": "iam", "resources": ["project"], "verbs": ["get", "list"]},
+                ],
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.roleId", "childRoleId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # Ребёнок обязан СУЩЕСТВОВАТЬ и принадлежать этому проекту — иначе отказ ниже
+        # доказывал бы не запрет удаления непустого проекта, а что-то другое.
+        retry_until_authorized(Step(
+            name="get-child-role",
+            method="GET",
+            path="/iam/v1/roles/{{childRoleId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('ребёнок привязан именно к этому проекту', () => "
+                "  pm.expect(pm.response.json().projectId, pm.response.text())"
+                "   .to.eql(pm.environment.get('childHostProjectId')));",
+            ],
+        )),
+        # 3. ОТРИЦАНИЕ — удаление проекта с живым ребёнком отвергается ПО СОСТОЯНИЮ.
+        Step(
+            name="delete-project-with-child",
+            method="DELETE",
+            path="/iam/v1/projects/{{childHostProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                # Полоса одна и она АСИНХРОННАЯ: запрет живёт на внешнем ключе внутри
+                # DELETE, а DELETE исполняет worker. Синхронного 400 здесь не бывает —
+                # сервис возвращает конверт операции, а отказ приезжает в ней.
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_substr="referenced resource not found or still in use"),
+        # Проект обязан ОСТАТЬСЯ: отказ, после которого ресурс всё равно исчез, —
+        # это не сработавший запрет, а потерянная строка.
+        Step(
+            name="project-survived-refused-delete",
+            method="GET",
+            path="/iam/v1/projects/{{childHostProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('проект на месте после отвергнутого удаления', () => "
+                "  pm.expect(pm.response.json().id).to.eql(pm.environment.get('childHostProjectId')));",
+            ],
+        ),
+        # 4. ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ (он же уборка) — снимаем ребёнка, и ТОТ ЖЕ запрос
+        # проходит. Без этой половины отказ выше был бы зелёным и на полностью
+        # сломанном удалении проектов.
+        Step(
+            name="delete-child-role",
+            method="DELETE",
+            path="/iam/v1/roles/{{childRoleId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(
+            name="delete-project-after-child-gone",
+            method="DELETE",
+            path="/iam/v1/projects/{{childHostProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # И проект действительно ИСЧЕЗ: операция без ошибки — утверждение о самой
+        # операции, а не о строке. Иначе положительный контроль зеленел бы на
+        # удалении, которое ничего не удаляет.
+        get_until_gone("/iam/v1/projects/{{childHostProjectId}}", "Project"),
     ],
 ))
 

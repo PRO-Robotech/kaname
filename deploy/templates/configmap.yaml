@@ -49,7 +49,13 @@ data:
       postgres:
         url: {{ printf "postgres://%s@%s:%v/%s" .Values.db.user .Values.db.host .Values.db.port .Values.db.name | quote }}
         max-conns: {{ default 0 .Values.repository.postgres.maxConns }}
-        ssl-mode: {{ default "disable" .Values.repository.postgres.sslMode | quote }}
+        # ЯВНО ЗАДАННЫЙ, А НЕ ПОДРАЗУМЕВАЕМЫЙ — та же правка, что в двух других
+        # чартах с этой строкой (перепись: `git grep 'default "disable"'`). Пустое
+        # значение давало открытый канал к базе молча; теперь это отказ с именем
+        # настройки. Этот чарт НЕ подключён к умбрелле и потому не покрыт
+        # deploy/dbtls_declaration_test.go — тем важнее, что он не производит
+        # открытый текст сам.
+        ssl-mode: {{ required "repository.postgres.sslMode не задан: канал к Postgres обязан быть объявлен явно (disable|require|verify-ca|verify-full); пустое значение молча дало бы открытый текст" .Values.repository.postgres.sslMode | quote }}
         password-from-env: KACHO_IAM_DB_PASSWORD
 
     authn:

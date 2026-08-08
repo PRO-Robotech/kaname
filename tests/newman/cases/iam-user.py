@@ -32,6 +32,14 @@ CRUD fixture dependency:
     System role id used for Invite: `rol1bda80f2be4d3658e` (view — md5('view')[:17])
     — matches the deterministic system-role catalog. See authz-deny.py ROLE_VIEW constant.
 
+    IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS дополнительно требует:
+      jwtBootstrap      — предъявитель пробы модели прав (InternalIAMService.Check);
+      internalBaseUrl   — адрес cluster-internal REST-листенера (инжектится
+                          прогонщиком через --env-var; без него шаг ОТКАЗЫВАЕТ и
+                          пропускается, а не уезжает молча на публичный порт);
+      projectA1Id       — область, которую называет само приглашение;
+      projectB1Id       — проект ЧУЖОГО аккаунта, отрицательный контроль пробы.
+
 Operation envelope:
   Mutations return `operation.Operation` with id prefix `iop`.
   Poll hits /operations/{id} via OpsProxy (iop* → kacho-iam).
@@ -76,6 +84,61 @@ def assert_iam_operation_envelope():
         "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
         "});",
     ]
+
+
+# Шаги создания РАСХОДУЕМОГО PENDING-приглашения в accountA со своим адресом.
+# Общие для всех кейсов, которым нужно своё приглашение, поэтому собираются
+# функцией: копия в каждом кейсе разъехалась бы.
+#
+# Приглашение всегда СВОЁ: переиспользовать `invitedUserId` из
+# IAM-USR-INV-CRUD-OK нельзя — порядок кейсов не контракт, а чужая фикстура.
+#
+# Определение стоит ЗДЕСЬ, а не рядом с первым потребителем: потребителей теперь
+# двое — кейсы `:block`/`:unblock` ниже и IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS
+# выше, — а python читает файл сверху вниз.
+def _invite_probe(var: str, email_tag: str):
+    return [
+        Step(
+            name=f"invite-{email_tag}",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={
+                "accountId": "{{accountAId}}",
+                "projectId": "{{projectA1Id}}",
+                "email": f"{email_tag}-{{{{runId}}}}@kacho.local",
+                "roleId": ROLE_VIEW,
+            },
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered(f"invite-{email_tag}"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.userId", var),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        # Приглашение обязано РЕАЛЬНО состояться: отказ, снятый с несозданной
+        # строки, доказывает только то, что строки нет. Kachō кладёт
+        # предвыделенный id в metadata даже у операции, завершившейся ошибкой,
+        # поэтому без этой проверки дальше поехал бы фантом.
+        assert_op_success(auth="jwtAccountAdminA"),
+    ]
+
+
+# Адрес пробы модели прав. `/iam/v1/internal/*` обслуживает ТОЛЬКО
+# cluster-internal REST-листенер, поэтому шаг переписывает адрес на
+# {{internalBaseUrl}} санкционированной формой require_env_url: утвердить (назвав
+# переменную) и пропустить запрос. Без переписывания шаг ушёл бы на публичный порт
+# и получил маршрутный 404, неотличимый от отказа модели.
+CHECK_PATH = "/iam/v1/internal/iam:check"
+
+
+def _internal_check_url():
+    return require_env_url(
+        "internalBaseUrl", CHECK_PATH,
+        "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
+        "cluster-internal REST listener")
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +689,21 @@ CASES.append(Case(
 #
 # Полоса FK остаётся DB-уровневым backstop'ом (ban #10) для гонки «роль удалили между
 # проверкой и вставкой» — она недетерминируема из newman и здесь не утверждается.
-# verifies https://github.com/PRO-Robotech/kacho/issues/105
+#
+# ЗДЕСЬ СТОЯЛА ПОМЕТКА `# verifies …/issues/105`, И ОНА ПЕРЕЖИЛА СВОЙ ПРЕДМЕТ.
+# Пометка означает «кейс ожидаемо КРАСНЫЙ, пока дефект открыт» (ban #13) и выкупает его
+# из «всё обязано быть зелёным». Дефект закрыт (`kacho#105`, COMPLETED 2026-08-07):
+# подсказка мапперу ошибок на вставке выдачи теперь разбирается, и в слот роли попадает
+# сама роль — ветвь FK по роли в `internal/repo/kacho/pg/pgmaperr.go`, регрессия на ТЕКСТ
+# в `pgmaperr_binding_hint_test.go`. Пометка при этом стояла в одном абзаце с текстом,
+# который сам называл утверждение суженным до идентификатора, — то есть противоречила
+# соседней строке.
+#
+# ЧТО ЗАЩИЩАЕТ КЕЙС, и почему он остаётся после снятия пометки: приглашение с валидной по
+# ФОРМЕ, но несуществующей ролью отвергается СИНХРОННО, кодом FAILED_PRECONDITION, с
+# контрактным текстом, называющим САМУ РОЛЬ, и без конверта операции. Четыре утверждения
+# ниже различают четыре разных регресса: возврат полосы в асинхронную (появится операция),
+# подмену кода, возврат составной подсказки в слот роли и отказ по любому другому полю.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
@@ -863,35 +940,103 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS — Invite new user → invitee can list accountA
-# This is a stateful flow test: after Invite, the new user should have a viewer
-# binding on accountA and be able to list its users (or at minimum not get 403).
-# TODO authz-matrix: Full flow requires a live JWT for the new invitee — that
-# requires generating a real token for invitee-{{runId}}@kacho.local.
-# For now we verify the invite operation itself completed and leave the
-# post-invite access check as a TODO.
+# IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS — приглашение ДАЁТ ПРИГЛАШЁННОМУ ДОСТУП на
+# том объёме, который названо в приглашении.
+#
+# ЧТО ЗДЕСЬ БЫЛО И ПОЧЕМУ ЭТО НЕ МОГЛО УПАСТЬ. Кейс утверждал ровно одно: список
+# пользователей аккаунта A НЕПУСТ. Он непуст всегда — в нём как минимум владелец
+# аккаунта, — то есть утверждение было тождественно истинным и оставалось зелёным
+# при приглашении, не создавшем ни строки, ни выдачи. Заголовок при этом обещал
+# «приглашённый получает доступ», а шапка объявляла проверку доступа отложенной.
+# Заголовок называл и не тот объём: тело приглашения адресует ПРОЕКТ
+# (`projectId` обязателен, когда задан `roleId`), поэтому выдача создаётся на
+# `project:{{projectA1Id}}`, а не на аккаунте.
+#
+# ПОЧЕМУ ДОСТУП ПРОВЕРЯЕТСЯ ПРОБОЙ МОДЕЛИ, А НЕ ЗАПРОСОМ ОТ ПРИГЛАШЁННОГО. Токена
+# приглашённого не существует и получить его харнесс не может: машинный посев
+# получает только `client_credentials`, то есть служебную учётку (шапка
+# tests/authz-fixtures/mint_rs256.py), а приглашение по построению адресовано
+# человеку, который ЕЩЁ НЕ ВХОДИЛ. Прежняя шапка называла это «TODO: нужен живой
+# JWT» — но ждать тут нечего, предмет недостижим. Наблюдаемая величина, которая
+# ЕСТЬ, — вердикт самой модели прав: `InternalIAMService.Check` спрашивает про
+# ЛЮБОЙ субъект, не предъявляя его. Та же проба и тем же способом используется в
+# cases/iam-invite-grant-fga.py и cases/iam-rbac-scope-grant.py.
+#
+# ЧТО ИМЕННО УТВЕРЖДАЕТСЯ — `v_get`, А НЕ ЯРУС. Край разрешает чтение по
+# verb-bearing отношению (`get` → `v_get`), поэтому «доступ» — это именно `v_get` на
+# названном объекте. Ярус `viewer` тут был бы слабее и пропустил бы ровно тот
+# дефект, который назван в самом продукте: выдача, эмитировавшая ТОЛЬКО ярус,
+# оставляет приглашённого без `v_get`, то есть с отказом на GET подаренного проекта
+# (services/iam/internal/apps/kacho/api/user/invite.go, порт ObjectReconciler).
+# Роль `view` несёт `read/list/get` на `*.*`, а выдача создаётся без пообъектного
+# сужения (`allInScope`), поэтому глаголы материализуются и НА САМОМ объекте
+# области (reconcile.desiredRuleMembers → scopeSelfMember).
+#
+# ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ — ОБЯЗАТЕЛЕН И ОДНОКРАТЕН. Без него «разрешено» неотличимо
+# от пробы, которая отвечает «да» на что угодно. Поэтому тот же субъект спрашивается
+# про проект ЧУЖОГО аккаунта (`projectB1Id`), где ему не выдавали ничего, и там
+# ответ обязан быть «не разрешено». Отказ НЕ поллится (повтор на отрицании прятал бы
+# настоящую утечку) — это единственный выстрел.
+#
+# ОГРАНИЧЕННЫЙ ПОВТОР — только на положительной половине и только на окне
+# материализации: сама выдача пишется в транзакции приглашения, а её видимость в
+# хранилище прав доезжает форвардом/дренажем. Бюджет конечен, после него исполняется
+# настоящее утверждение — не сошлось значит красное.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS",
-    title="Invite flow: after Invite → invited user has viewer binding on accountAId",
-    classes=["FLOW"],
+    title="Invite flow: the invited user really HOLDS v_get on the invited project, and holds "
+          "nothing on a foreign-account project (Check probe, positive + paired negative)",
+    classes=["FLOW", "AUTHZ"],
     priority="P1",
     steps=[
-        Step(
-            name="verify-invitee-binding",
-            method="GET",
-            path="/iam/v1/users?accountId={{accountAId}}",
-            auth="jwtAccountAdminA",
+        # Своё приглашение со своим адресом (общая фикстура не задействована).
+        *_invite_probe("inviteAccessUserId", "accessprobe"),
+        # ПОЛОЖИТЕЛЬНАЯ ПОЛОВИНА — приглашённый держит v_get на подаренном проекте.
+        poll_request_until_status(
+            name="invitee-holds-v-get-on-invited-project",
+            method="POST",
+            path=CHECK_PATH,
+            auth="jwtBootstrap",
+            body={
+                "subjectId": "user:{{inviteAccessUserId}}",
+                "relation": "v_get",
+                "object": "project:{{projectA1Id}}",
+            },
+            expect_code=200,
+            pre_script=_internal_check_url(),
+            # Проба всегда отвечает 200; «ещё не сошлось» — это ТЕЛО ответа.
+            retry_predicate="(() => { let j; try { j = pm.response.json(); } "
+                            "catch (e) { return false; } return j.allowed !== true; })()",
             test_script=[
-                # After IAM-USR-INV-CRUD-OK, the invited user should appear in the
-                # users list for accountA (as a viewer member). We assert the list
-                # is non-empty and contains at least one user, which is consistent
-                # with a successful invite.
-                *assert_status(200),
-                "pm.test('users list non-empty after invite (binding created)', () => {",
-                "  const j = pm.response.json();",
-                "  pm.expect((j.users || []).length, 'at least one user (owner + invitee)').to.be.greaterThan(0);",
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                "pm.test('фикстура записала id приглашённого', () => "
+                "  pm.expect(pm.environment.get('inviteAccessUserId'), 'inviteAccessUserId')"
+                "   .to.be.a('string').and.not.empty);",
+                "pm.test('приглашение материализовало v_get на подаренном проекте', () => {",
+                "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                "  pm.expect(j && j.allowed, JSON.stringify(j)).to.eql(true);",
+                "});",
+            ],
+        ),
+        # ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ — та же проба, тот же субъект, чужой проект.
+        Step(
+            name="invitee-holds-nothing-on-foreign-project",
+            method="POST",
+            path=CHECK_PATH,
+            auth="jwtBootstrap",
+            body={
+                "subjectId": "user:{{inviteAccessUserId}}",
+                "relation": "v_get",
+                "object": "project:{{projectB1Id}}",
+            },
+            pre_script=_internal_check_url(),
+            test_script=[
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                "pm.test('на проекте чужого аккаунта доступа НЕТ (проба различает)', () => {",
+                "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
+                "  pm.expect(j && j.allowed, JSON.stringify(j)).to.not.eql(true);",
                 "});",
             ],
         ),
@@ -1213,36 +1358,6 @@ CASES.append(Case(
 # чужая фикстура, на которую наш отказ не должен опираться.
 # ---------------------------------------------------------------------------
 
-# Шаги создания расходуемого PENDING-приглашения в accountA. Общие для кейсов
-# ниже, поэтому собираются функцией: копия в каждом кейсе разъехалась бы.
-def _invite_block_probe(var: str, email_tag: str):
-    return [
-        Step(
-            name=f"invite-{email_tag}",
-            method="POST",
-            path="/iam/v1/users:invite",
-            body={
-                "accountId": "{{accountAId}}",
-                "projectId": "{{projectA1Id}}",
-                "email": f"{email_tag}-{{{{runId}}}}@kacho.local",
-                "roleId": ROLE_VIEW,
-            },
-            auth="jwtAccountAdminAStepUp",
-            test_script=[
-                *assert_answered(f"invite-{email_tag}"),
-                *assert_status(200),
-                *assert_iam_operation_envelope(),
-                *save_from_response("j.id", "opId"),
-                *save_from_response("j.metadata && j.metadata.userId", var),
-            ],
-        ),
-        poll_operation_until_done(auth="jwtAccountAdminA"),
-        # Приглашение обязано РЕАЛЬНО состояться: отказ, снятый с несозданной
-        # строки, доказывает только то, что строки нет. Kachō кладёт
-        # предвыделенный id в metadata даже у операции, завершившейся ошибкой,
-        # поэтому без этой проверки дальше поехал бы фантом.
-        assert_op_success(auth="jwtAccountAdminA"),
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1256,7 +1371,7 @@ CASES.append(Case(
     classes=["NEG", "VAL"],
     priority="P0",
     steps=[
-        *_invite_block_probe("blkPendingId", "blockprobe"),
+        *_invite_probe("blkPendingId", "blockprobe"),
         retry_until_authorized(Step(
             name="block-pending",
             method="POST",
@@ -1315,7 +1430,7 @@ CASES.append(Case(
     classes=["NEG", "VAL"],
     priority="P1",
     steps=[
-        *_invite_block_probe("ubkPendingId", "unblockprobe"),
+        *_invite_probe("ubkPendingId", "unblockprobe"),
         retry_until_authorized(Step(
             name="unblock-pending",
             method="POST",
@@ -1436,7 +1551,7 @@ CASES.append(Case(
     classes=["NEG", "AUTHZ"],
     priority="P0",
     steps=[
-        *_invite_block_probe("crossVictimId", "crossprobe"),
+        *_invite_probe("crossVictimId", "crossprobe"),
         Step(
             name="cross-account-block-denied",
             method="POST",

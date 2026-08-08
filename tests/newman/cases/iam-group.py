@@ -63,6 +63,11 @@ Acceptance scenarios:
   AddMember с несущ. user → FailedPrecondition (DB-триггер).
   RemoveMember + idempotent remove-of-non-member (набор членов не меняется).
   DeleteGroup с AccessBinding → FailedPrecondition (FK RESTRICT).
+  Update группы: ось «кто вправе» закрыта С ОБЕИХ сторон — создатель
+    (IAM-GRP-UP-CRUD-OK), делегированный администратор аккаунта, который группу
+    не создавал (IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW, каскад
+    `super_admin: admin from account`), и субъект без выдач
+    (IAM-GRP-UP-AUTHZ-NONADMIN-DENY).
 
 Test-first note (strict TDD):
   These cases are written RED-first. They will fail until the corresponding
@@ -707,12 +712,26 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW — jwtInvitee who is group admin can update
-# TODO authz-matrix: This requires an AccessBinding giving jwtInvitee editor on the
-# group or on accountBId. The crud-fixture only seeds invitee binding on accountBId.
-# Until we have a seeded invitee-admin-on-group fixture, we probe with jwtInvitee
-# updating their scoped group in accountBId instead.
-# Companion case: IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW.
+# IAM-GRP-UP-AUTHZ-NONADMIN-DENY — отрицательная половина оси «кто вправе править
+# группу». Положительная — IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW ниже.
+#
+# ЗДЕСЬ СТОЯЛА ШАПКА КЕЙСА, КОТОРОГО НЕ БЫЛО. Заголовок описывал
+# `IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW` и заканчивался строкой «Companion case:
+# IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW» — ссылкой на самого себя, — а объявлялся
+# под ней СОВСЕМ ДРУГОЙ кейс, отрицательный. Объявлений с этим идентификатором в
+# дереве было НОЛЬ (предикат: `git grep -n DELEGATED-ADMIN` → две строки, обе
+# комментарии). Читалось это как «делегированный админ покрыт», хотя покрыт не был:
+# у оси оставалась только клетка отказа, а она зеленеет и на полностью сломанной
+# правке групп.
+#
+# ОСНОВАНИЕ ЗАВЕСТИ КЕЙС, А НЕ СНЯТЬ ШАПКУ. Шапка объявляла предпосылку
+# отсутствующей («нужна выдача, дающая jwtInvitee editor на группу или на
+# accountBId»), но она ЕСТЬ: посев даёт `jwtInvitee` роль `admin` на account-B
+# (tests/authz-fixtures/prodseed_matrix.py — subject с ROLE_ADMIN на acctB), а
+# модель прав выводит на группе `super_admin: admin from account` → `v_update`
+# (proto/kacho/cloud/iam/v1/fga_model.fga, type iam_group). То есть предмет
+# конструируем публичным API целиком, и его отсутствие было не ограничением
+# фикстуры, а незакрытым долгом.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
@@ -733,6 +752,101 @@ CASES.append(Case(
                 "pm.test('NONADMIN: code 7 or 5', () => pm.expect(j && j.code).to.be.oneOf([7, 5]));",
             ],
         ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW — ДЕЛЕГИРОВАННЫЙ администратор аккаунта
+# правит группу, которую НЕ создавал.
+#
+# ЧТО ИМЕННО УТВЕРЖДАЕТСЯ. Право приходит не от владения объектом и не от создания
+# его, а от выдачи на АККАУНТ: `jwtInvitee` держит `admin` на account-B, группа
+# создаётся в account-B ДРУГИМ принципалом (`jwtAccountAdminB`), и правка проходит
+# через каскад `super_admin: admin from account` → `v_update` на `iam_group`
+# (security.md §«Три уровня супер-доступа — КАСКАДОМ»: администратор аккаунта может
+# всё в пределах аккаунта). Снятие этого каскада или потеря родительского указателя
+# `iam_group:<id>#account@account:<B>` роняет кейс — то есть он различает ровно то,
+# ради чего написан.
+#
+# ПОЧЕМУ ЭТО НЕ ДУБЛЬ IAM-GRP-UP-CRUD-OK. Там правит СОЗДАТЕЛЬ группы, чьи глаголы
+# материализуются на объект форвардом создания. Здесь правит субъект, которого на
+# объекте не было вовсе; клетка оси другая.
+#
+# ПОЧЕМУ ПОДТВЕРЖДЕНИЕ ЧИТАЕТ ДРУГОЙ ПРИНЦИПАЛ. Операция без ошибки — утверждение о
+# самой операции. Чтобы доказать, что правка ЛЕГЛА, поле перечитывает создатель
+# (`jwtAccountAdminB`) и сверяет значение, записанное делегатом.
+#
+# ОГРАНИЧЕННЫЙ ПОВТОР — на окне записи родительского указателя свежесозданной
+# группы, и только на ПЕРВОМ обращении делегата. Если каскада нет, повтор
+# израсходует бюджет и настоящее утверждение упадёт: маскировки здесь нет по
+# построению (см. docstring retry_until_authorized).
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW",
+    title="Update a group in accountBId as jwtInvitee (admin@accountBId by AccessBinding, NOT the "
+          "creator) → Operation done, and the creator re-reads the delegate's value",
+    classes=["AUTHZ", "CRUD"],
+    priority="P1",
+    steps=[
+        # 1. группа в account-B, созданная НЕ делегатом.
+        Step(
+            name="create-group-in-account-b",
+            method="POST",
+            path="/iam/v1/groups",
+            body={
+                "accountId": "{{accountBId}}",
+                "name": "grp-deleg-{{runId}}",
+                "description": "newman delegated-admin update host",
+            },
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.groupId", "delegGroupId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        # Создание обязано СОСТОЯТЬСЯ: id из metadata предвыделен и присутствует даже
+        # у операции с ошибкой, поэтому без этой проверки делегат правил бы фантом, а
+        # отказ на нём читался бы как отсутствие каскада.
+        assert_op_success(),
+        # 2. ПРАВКА ДЕЛЕГАТОМ — первое обращение делегата к этому объекту.
+        retry_until_authorized(Step(
+            name="update-as-delegated-admin",
+            method="PATCH",
+            path="/iam/v1/groups/{{delegGroupId}}",
+            body={"description": "deleg-updated-{{runId}}", "updateMask": "description"},
+            auth="jwtInvitee",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        )),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # 3. ПРАВКА ЛЕГЛА — читает создатель, сверяя значение делегата.
+        Step(
+            name="creator-reads-delegated-update",
+            method="GET",
+            path="/iam/v1/groups/{{delegGroupId}}",
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                "pm.test('описание содержит значение, записанное ДЕЛЕГАТОМ', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.description, 'description must include deleg-updated-')"
+                ".to.include('deleg-updated-');",
+                "});",
+            ],
+        ),
+        # 4. уборка — группа своя, в общем аккаунте её оставлять нельзя (списочные
+        # контракты соседних сьют плывут от накопленных групп).
+        *reliable_delete("teardown-deleg-group", "/iam/v1/groups/{{delegGroupId}}",
+                         auth="jwtAccountAdminB"),
     ],
 ))
 

@@ -926,7 +926,8 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
                               expect_code: int = 200,
                               retry_on=(403, 404),
                               retry_predicate: Optional[str] = None,
-                              body: Optional[Dict] = None) -> Step:
+                              body: Optional[Dict] = None,
+                              pre_script: Optional[List[str]] = None) -> Step:
     """Reusable poll-for-propagation step for read-after-WRITE on a fresh resource.
 
     flat-RBAC is eventually-consistent on grant→access: an
@@ -964,6 +965,14 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
     A per-step counter (`_poll200_<name>`) + first-entry flag (request-name-scoped)
     isolate this loop from the Operation-poll / gone-poll loops and from other
     poll-200 steps (no cross-case / cross-step bleed; same per-case reset discipline).
+
+    pre_script (optional): extra PRE-request lines, prepended BEFORE the counter
+    reset. Its one intended use is the sanctioned environment guard
+    `require_env_url` — a step that must be re-addressed to the cluster-internal
+    listener (`/iam/v1/internal/*` is served ONLY there) needs BOTH the URL rewrite
+    and this poll loop, and the alternative was a fifth hand-written copy of the
+    loop in a case file. Prepended, not appended, so the guard's
+    `pm.execution.skipRequest()` runs before anything else happens.
     """
     safe = name.replace("-", "_")
     counter_var = f"_poll200_{safe}"
@@ -976,6 +985,7 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
         auth=auth,
         body=body,
         pre_script=[
+            *(pre_script or []),
             "// poll-for-propagation counter reset on first entry (request-name-scoped);",
             "// re-invocations via setNextRequest skip the reset.",
             f"if (pm.environment.get('{started_var}') !== pm.info.requestName) {{",
