@@ -72,6 +72,12 @@ type ObjectReconciler interface {
 	// the throughput fix for the owner-tuple materialization lag under a parallel
 	// invite burst. It transparently delegates to the FULL ReconcileObject if the object
 	// already has members (delete-stale guard).
+	ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error
+	// ReconcileObjectForward — СТОРОЖЕВОЙ вход того же прохода: он сперва читает,
+	// есть ли у объекта члены, и при непустом наборе уходит на полный проход ради
+	// снятия устаревших. Пути СОЗДАНИЯ он не нужен (доказательство — выше), но
+	// остаётся в порту: его зовёт правка того же пакета, где прежние факты есть
+	// и снятие устаревших — как раз предмет.
 	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
 	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
 	// delete-stale / audit / sweep), driven by the reconcile worker off the co-committed
@@ -491,7 +497,7 @@ func (uc *InviteUserUseCase) reconcileObject(ctx context.Context, objectType, ob
 	if uc.reconciler == nil {
 		return
 	}
-	if rerr := uc.reconciler.ReconcileObjectForward(ctx, objectType, objectID); rerr != nil && uc.logger != nil {
+	if rerr := uc.reconciler.ReconcileObjectForwardNoStale(ctx, objectType, objectID); rerr != nil && uc.logger != nil {
 		uc.logger.Error("invite user: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}

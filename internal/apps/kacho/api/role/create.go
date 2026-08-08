@@ -41,6 +41,12 @@ type ObjectReconciler interface {
 	// EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
 	// materialization lag under a parallel role-create burst. It transparently delegates
 	// to the FULL ReconcileObject if the object already has members (delete-stale guard).
+	ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error
+	// ReconcileObjectForward — СТОРОЖЕВОЙ вход того же прохода: он сперва читает,
+	// есть ли у объекта члены, и при непустом наборе уходит на полный проход ради
+	// снятия устаревших. Пути СОЗДАНИЯ он не нужен (доказательство — выше), но
+	// остаётся в порту: его зовёт правка того же пакета, где прежние факты есть
+	// и снятие устаревших — как раз предмет.
 	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
 	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
 	// delete-stale / audit / sweep), driven by the reconcile worker off the co-committed
@@ -255,7 +261,7 @@ func (u *CreateRoleUseCase) reconcileObject(ctx context.Context, objectType, obj
 	if u.reconciler == nil {
 		return
 	}
-	if rerr := u.reconciler.ReconcileObjectForward(ctx, objectType, objectID); rerr != nil && u.logger != nil {
+	if rerr := u.reconciler.ReconcileObjectForwardNoStale(ctx, objectType, objectID); rerr != nil && u.logger != nil {
 		u.logger.Error("role create: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}

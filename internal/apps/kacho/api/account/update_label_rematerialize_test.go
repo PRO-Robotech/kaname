@@ -92,6 +92,15 @@ func (r *recordingObjectReconciler) ReconcileObjectForward(_ context.Context, ob
 	return nil
 }
 
+// ReconcileObjectForwardNoStale — ДОКАЗАННЫЙ вход того же прохода. Дублёр обязан
+// отвечать на оба, иначе он не удовлетворяет порту; тела совпадают, потому что
+// различие входов — про блокировки и чтение у настоящего реконсайлера, а не про
+// то, что видит этот тест.
+func (r *recordingObjectReconciler) ReconcileObjectForwardNoStale(_ context.Context, objectType, objectID string) error {
+	r.record("object_forward_nostale:" + objectType + ":" + objectID)
+	return nil
+}
+
 func (r *recordingObjectReconciler) ReconcileObject(_ context.Context, objectType, objectID string) error {
 	r.record("object_full:" + objectType + ":" + objectID)
 	return nil

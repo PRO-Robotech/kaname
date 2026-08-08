@@ -97,12 +97,20 @@ func (g *fakeGroupCreateGroupWriter) RemoveMember(context.Context, domain.GroupI
 	return assertNotCalled("group.RemoveMember")
 }
 
-// recordingObjectReconciler captures ReconcileObject (FULL) and ReconcileObjectForward
-// (ADDITIVE fast-path) calls in SEPARATE slices so the test can pin that the create
-// hot-path takes the FORWARD path (throughput fix) and NOT the FULL EXCLUSIVE path.
+// recordingObjectReconciler captures the THREE entry points in SEPARATE slices, and the
+// separation is the whole point: a double that recorded the two forward entries into one
+// slice would make the test green on either of them, i.e. it would stop being able to see
+// the very thing it is here to pin.
+//
+// The create hot-path must take the PROVEN forward entry (ReconcileObjectForwardNoStale):
+// the id was minted in the writer-tx that has just committed, so the object cannot carry
+// anything stale, and the guarded entry's "does this object have members?" read is a
+// question whose answer is known in advance. It must take neither the guarded forward nor
+// the FULL EXCLUSIVE pass.
 type recordingObjectReconciler struct {
-	calls        []struct{ objectType, objectID string } // FULL ReconcileObject
-	forwardCalls []struct{ objectType, objectID string } // ADDITIVE ReconcileObjectForward
+	calls               []struct{ objectType, objectID string } // FULL ReconcileObject
+	forwardCalls        []struct{ objectType, objectID string } // GUARDED ReconcileObjectForward
+	forwardNoStaleCalls []struct{ objectType, objectID string } // PROVEN ReconcileObjectForwardNoStale
 }
 
 func (r *recordingObjectReconciler) ReconcileObject(_ context.Context, objectType, objectID string) error {
@@ -112,6 +120,11 @@ func (r *recordingObjectReconciler) ReconcileObject(_ context.Context, objectTyp
 
 func (r *recordingObjectReconciler) ReconcileObjectForward(_ context.Context, objectType, objectID string) error {
 	r.forwardCalls = append(r.forwardCalls, struct{ objectType, objectID string }{objectType, objectID})
+	return nil
+}
+
+func (r *recordingObjectReconciler) ReconcileObjectForwardNoStale(_ context.Context, objectType, objectID string) error {
+	r.forwardNoStaleCalls = append(r.forwardNoStaleCalls, struct{ objectType, objectID string }{objectType, objectID})
 	return nil
 }
 
@@ -141,8 +154,18 @@ func TestGroupCreate_SyncReconcilesObject(t *testing.T) {
 	// materialized by the time Operation is done WITHOUT serializing on the account's
 	// single owner binding under a parallel create burst. It must NOT take the FULL
 	// EXCLUSIVE ReconcileObject on this path (that remains the async at-least-once backstop).
-	require.Len(t, rec.forwardCalls, 1, "group Create must synchronously ReconcileObjectForward post-commit")
-	assert.Equal(t, "iam.group", rec.forwardCalls[0].objectType)
-	assert.Equal(t, "grp00000000000000abcd", rec.forwardCalls[0].objectID)
+	//
+	// And it takes the PROVEN entry, not the guarded one. The guarded entry first reads
+	// whether the object has members and routes it to the FULL EXCLUSIVE pass when it does
+	// — on a create that read cannot come back non-empty, because the id was minted in the
+	// writer-tx that has just committed. Asserting the ENTRY rather than "some forward
+	// happened" is what keeps the distinction visible: both entries materialize the same
+	// tuples, so a test that accepted either would be green with the guarded one back.
+	require.Len(t, rec.forwardNoStaleCalls, 1,
+		"group Create must synchronously take the PROVEN forward entry post-commit")
+	assert.Equal(t, "iam.group", rec.forwardNoStaleCalls[0].objectType)
+	assert.Equal(t, "grp00000000000000abcd", rec.forwardNoStaleCalls[0].objectID)
+	assert.Empty(t, rec.forwardCalls,
+		"create hot-path must NOT take the GUARDED forward entry — its member-read is answerable in advance")
 	assert.Empty(t, rec.calls, "create hot-path must NOT take the FULL EXCLUSIVE ReconcileObject (forward only)")
 }
