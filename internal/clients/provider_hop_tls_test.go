@@ -26,6 +26,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -104,10 +105,28 @@ func (ca *testCA) serverCert(t *testing.T) tls.Certificate {
 }
 
 // tlsServer starts an https server presenting a leaf issued by ca.
+//
+// Журнал сервера уводится в t.Logf, и это не косметика. Две пробы ниже ОТКАЗЫВАЮТ
+// в рукопожатии намеренно — это и есть проверяемое свойство, — а `httptest.Server`
+// пишет отказ через журнал по умолчанию, то есть в общий stderr пакета, без имени
+// теста:
+//
+//	http: TLS handshake error from 127.0.0.1:NNNNN: remote error: tls: bad certificate
+//
+// В общем выводе пакета такая строка выглядит поломкой TLS и приклеивается к
+// СОСЕДНЕЙ пробе, упавшей по своей причине. Так и вышло 2026-08-08: строка про
+// сертификат стояла рядом с красной интеграционной пробой дренажа, к которой не
+// имела отношения, и увела разбор в сторону. Привязка к тесту делает намеренный
+// отказ отличимым от неожиданного: с `-v` строка помечена именем своей пробы, без
+// `-v` она вообще не печатается у зелёного теста.
 func tlsServer(t *testing.T, ca *testCA, h http.Handler) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(h)
 	srv.TLS = &tls.Config{Certificates: []tls.Certificate{ca.serverCert(t)}, MinVersion: tls.VersionTLS12}
+	// testLoggerWriter — тот же переходник t.Log→io.Writer, что уже несёт
+	// fga_applier_integration_test.go в этом же тестовом пакете. Заводить рядом
+	// второй такой же было бы двумя вещами на одну работу.
+	srv.Config.ErrorLog = log.New(testLoggerWriter{t}, "[tlsServer] ", 0)
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 	return srv

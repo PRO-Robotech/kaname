@@ -118,6 +118,23 @@ func startBufconnServer(t *testing.T, srv *recordingAuthzCacheServer) (apigatewa
 // notification raised in one test's database is not visible in another's.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// setupTestPGDrainer выдаёт тесту его собственную базу на общем контейнере пакета.
+//
+// # Звать ДО того, как заведён бюджет утверждений
+//
+// Первый вызов поднимает контейнер, каждый — клонирует базу из шаблона. На тихой
+// машине это доли секунды, под параллельной нагрузкой дерева — десятки. Если
+// `context.WithTimeout` заведён РАНЬШЕ этого вызова, часы бюджета идут во время
+// фикстуры, и первый же запрос после неё отвечает `context deadline exceeded` —
+// красное на исправном продукте, причём указывающее на INSERT, который ни при чём.
+//
+// Наблюдалось вживую: TestIntegration_SingleEmit_EndToEnd упал за 41.61 с при
+// loadavg 18.9, тогда как в одиночку проходит за доли секунды. Воспроизведено
+// инъекцией: задержка 29 с между заведением бюджета и фикстурой даёт ровно ту же
+// подпись — отказ на первом запросе с «Received unexpected error».
+//
+// Поэтому порядок в каждом тесте файла: сперва фикстура, потом бюджет. Бюджет
+// тогда меряет проверяемое поведение, а не то, насколько занята машина.
 func setupTestPGDrainer(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
@@ -144,10 +161,13 @@ func TestIntegration_SingleEmit_EndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	// Фикстура поднимается ДО того, как заводится бюджет утверждений: иначе старт
+	// контейнера и клон базы тратят бюджет, отведённый на проверяемое поведение.
+	// См. шапку setupTestPGDrainer.
+	pool := setupTestPGDrainer(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	pool := setupTestPGDrainer(t)
 
 	fakeSrv := &recordingAuthzCacheServer{}
 	cli, stop := startBufconnServer(t, fakeSrv)
@@ -232,10 +252,11 @@ func TestIntegration_LegacyRow_BackfilledAndDrained(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	// Фикстура — до бюджета утверждений (см. шапку setupTestPGDrainer).
+	pool := setupTestPGDrainer(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	pool := setupTestPGDrainer(t)
 
 	// Migration 0023 has already run. Simulate a row that was inserted
 	// the legacy (op-only) row by directly INSERTing then explicitly NULL'ing
@@ -333,10 +354,11 @@ func TestIntegration_AtomicRollback_NoLeak(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	// Фикстура — до бюджета утверждений (см. шапку setupTestPGDrainer).
+	pool := setupTestPGDrainer(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	pool := setupTestPGDrainer(t)
 
 	fakeSrv := &recordingAuthzCacheServer{}
 	cli, stop := startBufconnServer(t, fakeSrv)

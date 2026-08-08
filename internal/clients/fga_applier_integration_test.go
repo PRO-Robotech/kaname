@@ -156,26 +156,46 @@ func TestIntegration_BootstrapAdminGrant_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.Positive(t, insertedID)
 
-	// Poll for delivery (≤ 5s — generous CI margin; on dev usually <50ms via NOTIFY).
-	require.Eventually(t, func() bool {
-		ok, _ := stub.Check(ctx, "user:usr_root_e2e", "system_admin", "cluster:default")
-		return ok
-	}, 5*time.Second, 50*time.Millisecond,
-		"OpenFGA stub never received the tuple — drainer chain is broken")
-
-	// Confirm the row is fully marked sent.
+	// Ждём ПОСЛЕДНЕЕ звено цепочки — пометку строки, — а не первое.
+	//
+	// Порядок в дренаже жёсткий: applyRow (кладёт tuple в стаб) → markSuccess
+	// (SET sent_at = now()) → tx.Commit на весь батч. Значит «tuple виден в
+	// стабе» наступает СТРОГО РАНЬШЕ, чем «строка помечена», и ожидание по
+	// стабу с последующим синхронным чтением sent_at — чтение без отношения
+	// happens-before: между ними лежит apply остальных строк батча, все пометки
+	// и коммит. На загруженной машине это окно расширяется планировщиком, и
+	// строка законно оказывается ещё не помеченной — тест краснел на исправном
+	// продукте. Воспроизведено инъекцией: задержка 700 мс внутри applier роняет
+	// прежнюю форму детерминированно.
+	//
+	// Бюджет покрывает теперь всю цепочку, а не её начало; строки, засеянные
+	// миграциями, дренятся тем же батчем.
 	var (
 		sentAt       *time.Time
 		lastError    *string
 		attemptCount int
 	)
-	err = pool.QueryRow(ctx,
-		`SELECT sent_at, last_error, attempt_count
-		   FROM kacho_iam.fga_outbox WHERE id = $1`,
-		insertedID,
-	).Scan(&sentAt, &lastError, &attemptCount)
-	require.NoError(t, err)
-	require.NotNil(t, sentAt, "row must be marked sent_at after successful apply")
+	require.Eventually(t, func() bool {
+		if qerr := pool.QueryRow(ctx,
+			`SELECT sent_at, last_error, attempt_count
+			   FROM kacho_iam.fga_outbox WHERE id = $1`,
+			insertedID,
+		).Scan(&sentAt, &lastError, &attemptCount); qerr != nil {
+			return false
+		}
+		return sentAt != nil
+	}, 15*time.Second, 50*time.Millisecond,
+		"row was never marked sent_at — drainer chain is broken")
+
+	// СТРОГО СИЛЬНЕЕ прежнего опроса: раз apply предшествует пометке, к моменту
+	// пометки tuple обязан быть в стабе УЖЕ, без всякого ожидания. Опрос здесь
+	// принял бы и обратный порядок — то есть не отличил бы «дренаж применил и
+	// пометил» от «дренаж пометил, не применив».
+	applied, cerr := stub.Check(ctx, "user:usr_root_e2e", "system_admin", "cluster:default")
+	require.NoError(t, cerr)
+	require.True(t, applied,
+		"строка помечена отправленной, но tuple в стабе нет — пометка обогнала apply")
+
 	assert.Nil(t, lastError, "last_error must be NULL on happy path")
 	assert.Equal(t, 1, attemptCount, "one attempt should be enough on happy path")
 
