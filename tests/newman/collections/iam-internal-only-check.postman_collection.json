@@ -1529,7 +1529,7 @@
       ]
     },
     {
-      "name": "IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN — InternalIAMService.LookupSubject for unknown externalId → 404 with grpc code 5 (service-level, not mux)",
+      "name": "IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN — InternalIAMService.LookupSubject for unknown externalId → 404 ВЛАДЕЛЬЦА (текст называет запрошенный external_id; код 5 несёт и промах mux)",
       "description": "class:NEG | class:SEC | priority:P1",
       "item": [
         {
@@ -1617,7 +1617,12 @@
                 "exec": [
                   "pm.test('INT-LOOKUPSUBJ-UNK: status 404', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "const j = pm.response.json();",
-                  "pm.test('INT-LOOKUPSUBJ-UNK: grpc code 5 (NOT_FOUND from service, not mux)', () => pm.expect(j.code, JSON.stringify(j)).to.equal(5));"
+                  "pm.test('INT-LOOKUPSUBJ-UNK: grpc code 5 (NOT_FOUND, необходимое условие — но НЕ различитель)', () => pm.expect(j.code, JSON.stringify(j)).to.equal(5));",
+                  "const asked = ((pm.request.body && pm.request.body.raw) ? JSON.parse(pm.request.body.raw).externalId : '');",
+                  "pm.test('INT-LOOKUPSUBJ-UNK: 404 ВЛАДЕЛЬЦА называет запрошенный external_id (mux-404 несёт тот же код 5, но нашего ключа не знает)', () => {",
+                  "  pm.expect(asked, 'кейс обязан знать, о чём спросил').to.be.a('string').and.not.empty;",
+                  "  pm.expect(j.message || '', JSON.stringify(j)).to.include(asked);",
+                  "});"
                 ]
               }
             }

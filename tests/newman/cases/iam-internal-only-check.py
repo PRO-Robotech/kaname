@@ -28,7 +28,13 @@ Coverage:
                                          external + пин к absent-path контролю. НЕ доказывает
                                          route-изоляцию (см. «TWO FAMILIES» ниже) и прямо это заявляет
   IAM-INT-OK-INT-USER-UPSERT           — UpsertFromIdentity → 200 на internal (positive control)
-  IAM-INT-OK-INT-IAM-LOOKUPSUBJECT     — LookupSubject → 200/404 на internal (positive control)
+  IAM-INT-OK-INT-IAM-LOOKUPSUBJECT     — LookupSubject → РОВНО 200 на internal (positive control;
+                                         `oneOf([200,404])` снят — 404 здесь и был бы дефектом)
+  IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN
+                                       — неизвестный external_id → 404 ВЛАДЕЛЬЦА: текст называет
+                                         запрошенный ключ. Код 5 различителем НЕ является — его
+                                         несёт и промах mux; на этом различии стоит классификатор
+                                         посева церемонии
   IAM-INT-OK-INT-IAM-CHECK             — InternalIAMService.Check → 200 на internal
   IAM-INT-NEG-EXT-IC-LIST              — InternalInteractiveClientService.List → 404 mux-miss на external
   IAM-INT-NEG-EXT-IC-CREATE            — InternalInteractiveClientService.Create → 404 mux-miss на external
@@ -660,14 +666,26 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN
-# LookupSubject for a nonexistent externalId → 404 from service (grpc 5),
-# not a mux-404 (path not found). This distinguishes service-level 404 from
-# mux-level 404 — the body must contain grpc code 5.
+# LookupSubject for a nonexistent externalId → 404 from the SERVICE, not a
+# mux-404 (path not found).
+#
+# Что здесь на самом деле различает одно от другого — ТЕКСТ, а не код. Прежняя
+# редакция этого заголовка (и единственное утверждение под ним) объявляла
+# различителем `code == 5`; замер по живому проводу того же прогона показывает,
+# что промах маршрутизатора несёт РОВНО ТОТ ЖЕ код:
+#   владелец      → {"code":5,"message":"subject not found by external_id=zit-…"}
+#   маршрутизатор → {"code":5,"message":"Not Found","details":[]}
+# Владелец называет в тексте наш ключ, потому что он его читал; маршрутизатор
+# назвать его не может — тела он не видел. На этом различии стоит классификатор
+# посева церемонии (`tests/authz-fixtures/prodseed_ceremony.py::_mirror_lookup`,
+# исходы «нет-строки» против «не-дают-спросить»), и без утверждения ниже его
+# предпосылка не была прибита ничем: постоянная ошибка настройки навсегда
+# читалась бы как задержка (`security.md` §8).
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN",
-    title="InternalIAMService.LookupSubject for unknown externalId → 404 with grpc code 5 (service-level, not mux)",
+    title="InternalIAMService.LookupSubject for unknown externalId → 404 ВЛАДЕЛЬЦА (текст называет запрошенный external_id; код 5 несёт и промах mux)",
     classes=["NEG", "SEC"],
     priority="P1",
     steps=[
@@ -683,7 +701,16 @@ CASES.append(Case(
             test_script=[
                 "pm.test('INT-LOOKUPSUBJ-UNK: status 404', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                 "const j = pm.response.json();",
-                "pm.test('INT-LOOKUPSUBJ-UNK: grpc code 5 (NOT_FOUND from service, not mux)', () => pm.expect(j.code, JSON.stringify(j)).to.equal(5));",
+                "pm.test('INT-LOOKUPSUBJ-UNK: grpc code 5 (NOT_FOUND, необходимое условие — но НЕ различитель)', () => pm.expect(j.code, JSON.stringify(j)).to.equal(5));",
+                # РАЗЛИЧИТЕЛЬ: ответ владельца называет ЗАПРОШЕННЫЙ ключ, промах
+                # маршрутизатора назвать его не может. Спрошенное берём из самого
+                # запроса, а не из литерала: иначе утверждение начнёт проверять
+                # чужую строку в тот день, когда литерал поменяют.
+                "const asked = ((pm.request.body && pm.request.body.raw) ? JSON.parse(pm.request.body.raw).externalId : '');",
+                "pm.test('INT-LOOKUPSUBJ-UNK: 404 ВЛАДЕЛЬЦА называет запрошенный external_id (mux-404 несёт тот же код 5, но нашего ключа не знает)', () => {",
+                "  pm.expect(asked, 'кейс обязан знать, о чём спросил').to.be.a('string').and.not.empty;",
+                "  pm.expect(j.message || '', JSON.stringify(j)).to.include(asked);",
+                "});",
             ],
         ),
     ],
