@@ -45,7 +45,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/authz/catalogparity"
+	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
 )
 
 // PermissionEntry — one row from permission_catalog.json.
@@ -252,7 +252,7 @@ func isReadVerb(perm string) bool {
 // catalog lookup, so both layers key on one string.
 func (r *PermissionRegistry) ActionForMethod(fqn string) string {
 	e, ok := r.byFQN[fqn]
-	if !ok || e.Permission == catalogparity.ExemptPermission {
+	if !ok || e.Permission == catalogderive.ExemptPermission {
 		return ""
 	}
 	return e.Permission
