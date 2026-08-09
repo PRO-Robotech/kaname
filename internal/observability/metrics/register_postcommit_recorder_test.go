@@ -67,10 +67,58 @@ func TestRegisterPostCommitRecorder_RunsAndFailuresAreBothLive(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, 1.0, v)
 
-	// A step never observed carries NO series — the honest reading of "never reached",
-	// readable as such only because the reached ones do carry one.
-	_, ok = labelledCounter(t, reg, name, map[string]string{"step": "tuple_delete", "outcome": "error"})
-	require.False(t, ok, "an unobserved step must not fabricate a zero sample")
+	// A step never observed carries a series AT ZERO.
+	//
+	// Здесь стояло обратное утверждение — «необнаблюдённый шаг не должен
+	// фабриковать нулевую точку» — и оно закрепляло чтение, которого не хватало.
+	// Отсутствие серии отвечало на ДВА разных вопроса сразу: «шаг ни разу не
+	// исполнялся» и «коллектор не провязан», — а различать их и есть причина, по
+	// которой считаются запуски, а не только отказы. Ноль — не фабрикация: он
+	// утверждает «клетка существует, и в неё ни разу не попадали», что и требуется
+	// от наблюдаемости ветки, написанной, но ни разу не исполненной.
+	v, ok = labelledCounter(t, reg, name, map[string]string{"step": "tuple_delete", "outcome": "error"})
+	require.True(t, ok, "клетка закрытого набора обязана существовать до первого наблюдения")
+	require.Zero(t, v, "необнаблюдённая клетка стоит в нуле")
 
 	require.Equal(t, 4.0, gatherCounter(t, reg, name), "every observation reaches the registry")
+}
+
+// TestRegisterPostCommitRecorder_ZeroIsVisibleNotAbsent — каждая клетка закрытого
+// набора лейблов присутствует В НУЛЕ с момента сборки коллектора.
+//
+// Предмет — ровно тот, ради которого счётчик заводился, и в прежней редакции он
+// оставался незакрытым. Отсутствие серии отвечало сразу на ДВА вопроса: «шаг ни
+// разу не исполнялся» и «коллектор вообще не провязан», — а различать их и было
+// целью. Замер это подтвердил на живом стенде: доказанный вход материализации не
+// сработал НИ РАЗУ на 367 регистрациях, и установить это удалось только потому,
+// что сосед по набору серию имел; сам по себе доказанный вход выглядел как
+// несуществующий код.
+//
+// С предварительной инициализацией «ноль» становится утверждением, а не тишиной:
+// серия есть ⟺ коллектор провязан; серия равна нулю при растущем соседе ⟺ ветка
+// написана и не исполнялась. Второе — находка, симметрично правилу «ноль
+// доставленных строк за жизнь очереди».
+func TestRegisterPostCommitRecorder_ZeroIsVisibleNotAbsent(t *testing.T) {
+	reg := NewRegistry()
+	rec := reg.NewRegisterPostCommitRecorder()
+
+	const name = "kacho_iam_register_postcommit_steps_total"
+
+	for _, step := range RegisterPostCommitSteps {
+		for _, outcome := range RegisterPostCommitOutcomes {
+			v, ok := labelledCounter(t, reg, name, map[string]string{"step": step, "outcome": outcome})
+			require.Truef(t, ok, "серии {step=%q, outcome=%q} нет до первого наблюдения: "+
+				"«шаг не исполнялся» неотличимо от «коллектор не провязан», а это и есть "+
+				"вопрос, ради которого счётчик заведён", step, outcome)
+			require.Zerof(t, v, "клетка {step=%q, outcome=%q} инициализирована не нулём", step, outcome)
+		}
+	}
+
+	// Положительный контроль: предварительная инициализация не должна подменять
+	// счёт. Без него проба зеленела бы и на коллекторе, который только и делает,
+	// что объявляет нули.
+	rec.ObserveRegisterPostCommit(RegisterPostCommitSteps[0], "ok")
+	v, ok := labelledCounter(t, reg, name, map[string]string{"step": RegisterPostCommitSteps[0], "outcome": "ok"})
+	require.True(t, ok)
+	require.Equal(t, 1.0, v, "наблюдение считается поверх инициализированного нуля")
 }

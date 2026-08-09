@@ -34,8 +34,8 @@ import (
 
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
+	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -231,7 +231,7 @@ func (t tupleIntent) objectType() (string, string) {
 // delete the projection of a resource that still exists. So a pure grant is
 // applied as a tuple and nothing else.
 func (t tupleIntent) isPureGrant() bool {
-	return authzguard.IsPublicReadGrant(t.subject, t.relation)
+	return proxytuple.IsPublicReadGrant(t.subject, t.relation)
 }
 
 // RegisterResourceUseCase orchestrates the FGA-proxy tuple relay + the
@@ -563,8 +563,10 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 
 // residualTuples names what a teardown must take away IN ADDITION to the tuple the
 // request carries: every relationship still standing on the object that this proxy is
-// permitted to write (`project`/`account`/`parent`/`owner`, plus the public-read
-// wildcard). Returns nil for a pure-grant withdrawal and when no reader is wired.
+// permitted to write. The set is not re-spelled here — it is asked of the declaration
+// (pkg/authz/proxytuple.IsProxyWritable), so a set that changes cannot leave a residue
+// behind a comment that still names the old one. Returns nil for a pure-grant
+// withdrawal and when no reader is wired.
 //
 // WHY THE SET IS EXACTLY THE PROXY-WRITABLE ONE, AND NOT "EVERYTHING ON THE OBJECT".
 // The per-object verbs are NOT ours to remove: they are derived from grants and the
@@ -596,7 +598,7 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 		if have.Relation == t.relation && have.User == t.subject {
 			continue // the request already carries this one
 		}
-		if !authzguard.IsProxyWritable(have.User, have.Relation) {
+		if !proxytuple.IsProxyWritable(have.User, have.Relation) {
 			continue // not ours to remove — see the doc above
 		}
 		out = append(out, have)

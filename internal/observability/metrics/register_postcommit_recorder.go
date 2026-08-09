@@ -4,7 +4,28 @@
 package metrics
 
 import (
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
+)
+
+// RegisterPostCommitSteps / RegisterPostCommitOutcomes — ЗАКРЫТЫЙ набор лейблов
+// счётчика, объявленный ОДИН раз.
+//
+// Значения приходят из констант use-case, никогда из данных запроса, поэтому
+// кардинальность не растёт с трафиком. Набор объявлен здесь, а не пересказан в
+// строке помощи: прежняя редакция перечисляла шаги прозой и уже разошлась с
+// кодом — шагов стало шесть, а текст называл четыре. Перечень читают обе стороны:
+// коллектор — чтобы инициализировать каждую клетку нулём, проба use-case — чтобы
+// доказать, что его собственные константы этому набору равны в ОБЕ стороны
+// (TestPostCommitStepConstantsMatchTheDeclaredLabelSet).
+var (
+	RegisterPostCommitSteps = []string{
+		"forward_additive", "forward_guarded",
+		"tuple_write", "tuple_delete",
+		"residual_read", "residual_withdraw",
+	}
+	RegisterPostCommitOutcomes = []string{"ok", "error"}
 )
 
 // RegisterPostCommitRecorder counts the POST-COMMIT accelerators of the cross-service
@@ -17,9 +38,17 @@ import (
 // product that keeps working more slowly, and nothing that says so. A control that has
 // never refused in its whole life is indistinguishable from one that was never reached
 // unless RUNS are counted alongside OUTCOMES (security.md §Hardening-инвариант 8, the
-// same requirement as "zero rows ever delivered" for a queue). Both are counted here, so
-// `sum by (outcome)` answers "does it still work?" and the absence of the series
-// altogether answers "is it even wired?".
+// same requirement as "zero rows ever delivered" for a queue).
+//
+// WHY EVERY CELL STARTS AT ZERO RATHER THAN APPEARING ON FIRST USE. An absent series
+// answered two different questions at once — "this step never ran" and "this collector
+// is not wired at all" — and telling those apart is the whole point. Measured on a
+// stand: the ADDITIVE forward entry fired ZERO times across 367 registrations, and that
+// was establishable only because its sibling had a series; on its own the proven entry
+// looked like code that does not exist. With the closed label set initialised at
+// construction, presence answers "is it wired?" and the VALUE answers "was it ever
+// reached?" — so `forward_additive == 0` beside a growing `forward_guarded` is a
+// FINDING stated by the metric, not a silence somebody has to interpret.
 //
 // The `step` label additionally exposes WHICH materialization path each registration
 // took. That is not decoration: `forward_additive` is the fast path a redelivery is
@@ -28,8 +57,8 @@ import (
 // registrations back onto the guarded path shows up as a shift between two series, rather
 // than as a latency somebody has to notice.
 //
-// Label set is CLOSED (4 steps × 2 outcomes): the values come from constants in the
-// use-case, never from request data, so cardinality cannot grow with traffic.
+// The label set is CLOSED and declared once above — the count is not repeated in prose
+// here, because the prose already drifted from the code once.
 type RegisterPostCommitRecorder struct {
 	steps *prometheus.CounterVec
 }
@@ -41,10 +70,20 @@ func (r *Registry) NewRegisterPostCommitRecorder() *RegisterPostCommitRecorder {
 		steps: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kacho_iam_register_postcommit_steps_total",
 			Help: "Post-commit materialization steps of RegisterResource/UnregisterResource, " +
-				"by step (forward_additive|forward_guarded|tuple_write|tuple_delete) and outcome (ok|error). " +
-				"Counts runs as well as failures, so a step that has never failed stays distinguishable " +
-				"from one that never ran.",
+				"by step (" + strings.Join(RegisterPostCommitSteps, "|") + ") and outcome (" +
+				strings.Join(RegisterPostCommitOutcomes, "|") + "). Counts runs as well as failures, " +
+				"and every cell starts at zero, so a step that never ran is distinguishable both " +
+				"from one that never failed and from a collector that is not wired.",
 		}, []string{"step", "outcome"}),
+	}
+	// Каждая клетка закрытого набора заводится нулём. Иначе отсутствие серии
+	// означает сразу и «не исполнялось», и «не провязано», а различать эти два
+	// состояния — единственная причина, по которой считаются ЗАПУСКИ, а не только
+	// отказы. Locked by TestRegisterPostCommitRecorder_ZeroIsVisibleNotAbsent.
+	for _, step := range RegisterPostCommitSteps {
+		for _, outcome := range RegisterPostCommitOutcomes {
+			rec.steps.WithLabelValues(step, outcome)
+		}
 	}
 	r.reg.MustRegister(rec.steps)
 	return rec
