@@ -73,6 +73,11 @@ Not here, and each with its reason rather than a silence:
     Asserting one here would be asserting a capability that does not exist, and
     §8 puts the reason-token half at the unit level anyway. The TONE, which IS
     the contract today, is asserted in full below.
+    Note (2026-08-09): two OTHER tokens of the same closed dictionary —
+    `PEER_RESOURCE_MISSING` and `PEER_UNAVAILABLE` — ARE emitted now, on the
+    peer-validate lane, by five services. That does not change the sentence
+    above: it is about these two tokens on the iam direct-read lane, and they
+    still have no producer. Read it as "these two", not as "no tokens at all".
 
 Self-contained: every client this file creates carries {{runId}} in its name and
 is deleted by the case that made it, so a re-run does not collide with itself on
