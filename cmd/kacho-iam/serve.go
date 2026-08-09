@@ -38,7 +38,6 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/grpcmw"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytokenwire"
@@ -378,7 +377,7 @@ func runServe(cfg config.Config) error {
 		// interceptor or handler becomes a logged codes.Internal for that ONE
 		// request instead of crashing the whole PDP process (metrics still
 		// records the Internal code because recovery is inner of it).
-		grpcmw.UnaryRecovery(logger),
+		grpcsrv.UnaryPanicRecovery(logger),
 		// Outermost of the authz interceptors so it sees the refusal produced by
 		// ANY of them and by the handler: attaches the machine-readable reason a
 		// client keys on. It matters most where iam decides authorization itself
@@ -392,7 +391,7 @@ func runServe(cfg config.Config) error {
 		authzguard.AntiAnonymousUnary(logger),
 	)
 	publicStream := append([]grpc.StreamServerInterceptor{
-		grpcmw.StreamRecovery(logger),
+		grpcsrv.StreamPanicRecovery(logger),
 	}, identityStream(cfg)...)
 	publicStream = append(publicStream,
 		publicCallerPolicy.Stream(),
@@ -450,7 +449,7 @@ func runServe(cfg config.Config) error {
 		// public chain: a handler/interceptor panic on the PDP hot path must
 		// not crash the process (fail-closed cluster-wide); it degrades to a
 		// logged codes.Internal for that one request.
-		grpcmw.UnaryRecovery(logger),
+		grpcsrv.UnaryPanicRecovery(logger),
 		// Same reason as on the public chain, and on the same terms: a refusal
 		// this listener produces carries the machine-readable reason too, so a
 		// client does not have to know which listener (or which layer) said no.
@@ -464,7 +463,7 @@ func runServe(cfg config.Config) error {
 		internalACRFloor.Unary(),
 	)
 	internalStream := append([]grpc.StreamServerInterceptor{
-		grpcmw.StreamRecovery(logger),
+		grpcsrv.StreamPanicRecovery(logger),
 	}, identityStream(cfg)...)
 	internalStream = append(internalStream,
 		internalCallerPolicy.Stream(),
