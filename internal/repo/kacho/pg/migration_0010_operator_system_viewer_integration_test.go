@@ -37,15 +37,21 @@ import (
 // so the test pins the deterministic operator-SA id.
 const operatorSysViewerSubjectSQL = `'service_account:' || ('sva' || substr(md5('kacho-vpc-operator'), 1, 17))`
 
+// TestMigration0010_SECL_SeedsOperatorSystemViewerTuple меряет посев 0010 НА ЕГО
+// СОБСТВЕННОЙ версии.
+//
+// Прежняя редакция звала setupTestDB и читала состояние ГОЛОВЫ, а комментарий
+// рядом утверждал «applies migrations 0001..0010» — проба называла один предмет
+// и измеряла другой, и это было незаметно ровно до того дня, когда голова
+// разошлась с версией 10. Разошлась она миграцией 0081, снявшей учётку
+// оператора вместе с этим кортежем. Про сам посев 0010 утверждение осталось
+// верным — но спрашивать о нём надо у версии 10.
 func TestMigration0010_SECL_SeedsOperatorSystemViewerTuple(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	dsn := setupTestDB(t) // applies migrations 0001..0010
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
+	pool, _, _ := startPostgresUpTo(t, 10)
 
 	// Exactly one outbox row with the SEC-L operator system_viewer tuple.
 	var cnt int
@@ -69,14 +75,20 @@ func TestMigration0010_SECL_SeedsOperatorSystemViewerTuple(t *testing.T) {
 		"operator must be seeded system_viewer (NON-wildcard), never viewer (INV-6)")
 }
 
-// TestMigration0010_SECL_Idempotent_DownReverts drives a raw goose cycle
-// (re-up = idempotent; down removes the tuple; 0009 fga_writer untouched).
+// TestMigration0010_SECL_Idempotent_DownReverts гоняет цикл goose НА ГОЛОВЕ:
+// откат 0010 обязан снять свой посев, не тронув кортежи 0009 (ban #5).
+//
+// Счётчик РАЗЛИЧАЕТ событие. Прежняя редакция считала строки только по
+// отношению/объекту/субъекту — и после того как 0081 сняла у оператора выдачу и
+// поставила в очередь ОТЗЫВ того же кортежа, «одна строка» продолжала сходиться,
+// но означала уже противоположное: не выдачу, а её снятие. Утверждение, которое
+// одинаково зеленеет на выдаче и на отзыве, о выдаче не говорит ничего.
 func TestMigration0010_SECL_Idempotent_DownReverts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	dsn := setupTestDB(t) // already at 0010
+	dsn := setupTestDB(t) // голова
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer pool.Close()
@@ -88,13 +100,14 @@ func TestMigration0010_SECL_Idempotent_DownReverts(t *testing.T) {
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
 
-	count := func() int {
+	countOf := func(eventType string) int {
 		var c int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM kacho_iam.fga_outbox
-			  WHERE payload->>'relation' = 'system_viewer'
+			  WHERE event_type = $1
+			    AND payload->>'relation' = 'system_viewer'
 			    AND payload->>'object'   = 'cluster:cluster_kacho_root'
-			    AND payload->>'user'     = `+operatorSysViewerSubjectSQL).Scan(&c))
+			    AND payload->>'user'     = `+operatorSysViewerSubjectSQL, eventType).Scan(&c))
 		return c
 	}
 	fgaWriterCount := func() int {
@@ -106,22 +119,33 @@ func TestMigration0010_SECL_Idempotent_DownReverts(t *testing.T) {
 		return c
 	}
 
-	require.Equal(t, 1, count(), "baseline: one operator system_viewer tuple after up")
+	// На голове выдачи у оператора НЕТ, а отзыв поставлен в очередь — 0081.
+	require.Equal(t, 0, countOf("fga.tuple.write"),
+		"на голове у оператора не должно остаться намерения ВЫДАЧИ: 0081 сняла его учётку")
+	require.Equal(t, 1, countOf("fga.tuple.delete"),
+		"на голове у оператора обязан стоять ОТЗЫВ кортежа: удаление строки посева стёрло бы "+
+			"запись о намерении, а не сам кортеж в хранилище отношений")
 	require.Equal(t, 5, fgaWriterCount(),
 		"at HEAD: 0009 seeds 3 fga_writer tuples (vpc/compute/nlb) + 0044 registry-SA + 0057 storage-SA tuples")
 
-	// Re-up the whole set: ON CONFLICT DO NOTHING keeps it at one (idempotent).
+	// Прогон раннера на голове ничего не применяет — проверяем, что он и не
+	// добавляет строк.
 	require.NoError(t, goose.Up(db, "."))
-	require.Equal(t, 1, count(), "re-apply must remain idempotent (exactly one row)")
+	require.Equal(t, 0, countOf("fga.tuple.write"), "повтор раннера воскресил выдачу")
+	require.Equal(t, 1, countOf("fga.tuple.delete"), "повтор раннера задвоил отзыв")
 
 	// Down to version 9 → reverts every migration stacked at/above 0010 (0010
 	// itself, plus any later migration that seeds onto the same fga_outbox, e.g.
 	// 5.1's 0014). DownTo(9) is robust to head drift: a single goose.Down would
 	// only revert the current HEAD (no longer 0010 once newer migrations land),
-	// so it could not assert 0010's own down. After DownTo(9) the operator tuple
-	// (0010) is removed; 0009's fga_writer tuples (version 9, the floor) remain.
+	// so it could not assert 0010's own down. Собственный откат 0010 снимает СВОЙ
+	// субъект по отношению и объекту, не разбирая события, — поэтому после него
+	// у оператора не остаётся ни выдачи, ни отзыва; кортежи fga_writer из 0009
+	// (версия 9, пол отката) остаются.
 	require.NoError(t, goose.DownTo(db, ".", 9))
-	require.Equal(t, 0, count(), "down 0010 must remove the operator system_viewer tuple")
+	require.Equal(t, 0, countOf("fga.tuple.write"), "down 0010 must remove the operator system_viewer tuple")
+	require.Equal(t, 0, countOf("fga.tuple.delete"),
+		"откат 0010 снимает свой субъект целиком — отзыв, поставленный 0081, уходит вместе с ним")
 	require.Equal(t, 3, fgaWriterCount(),
 		"0009 fga_writer tuples must remain untouched after 0010 down (ban #5)")
 }

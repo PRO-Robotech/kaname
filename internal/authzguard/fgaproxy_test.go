@@ -82,12 +82,13 @@ func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 }
 
 func TestRelationWriteGate_B08_NoFGAWriterRelationDenied(t *testing.T) {
-	// vpc-operator cert resolves to a known SA but ReBAC denies (no relation).
+	// A well-formed module SAN resolves to its deterministic SA id, and ReBAC
+	// then denies it: geo holds no fga_writer relation.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
 
 	ctx := grpcsrv.WithCertIdentity(context.Background(),
-		"spiffe://kacho.cloud/ns/kacho-vpc-operator/sa/kacho-vpc-operator", true)
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo", true)
 
 	_, err := gate.Authorize(ctx)
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "no fga_writer relation → PermissionDenied")
@@ -235,7 +236,9 @@ func TestSANToServiceAccountID(t *testing.T) {
 		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", sva("vpc"), true},
 		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-compute", sva("compute"), true},
 		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-nlb", sva("nlb"), true},
-		{"spiffe://kacho.cloud/ns/kacho-vpc-operator/sa/kacho-vpc-operator", sva("vpc-operator"), true},
+		// Своё пространство имён у пира — законный случай, а не описка: сегмент ns
+		// приходит из чарта самого пира и единообразным быть не обязан.
+		{"spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage", sva("storage"), true},
 		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway", sva("api-gateway"), true},
 		{"spiffe://other/ns/x/sa/kacho-vpc", "", false},
 		{"garbage", "", false},

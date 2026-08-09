@@ -16,13 +16,14 @@ package project
 //
 // List-filter behaviour:
 //   - subject-prefix is derived from principal.Type (`user:` vs
-//     `service_account:`). Hardcoding `"user:"+id` would make the
-//     kacho-vpc-operator SA's ListObjects request resolve nothing → operator
-//     sees 0 projects.
+//     `service_account:`). Hardcoding `"user:"+id` would make EVERY
+//     service-account caller's ListObjects request resolve nothing — the caller
+//     would see 0 projects while holding grants, and the failure would look like
+//     a missing grant rather than a wrong subject.
 //   - the FGA branch is fail-closed: an FGA outage returns `Unavailable`, NOT
-//     a silent degrade to owner-only (INV-7). A degraded list could
-//     under-report to the operator (driving an erroneous ns-prune) or, for
-//     FGA-derived visibility, leak/under-report for users.
+//     a silent degrade to owner-only (INV-7). A degraded list would
+//     under-report — for a machine caller that drives a reconciliation loop, an
+//     under-report reads as "these projects are gone".
 //
 // The owner-via-Account union is intra-account ownership resolution; it is
 // retained (a user owning the parent Account sees every project in it), but

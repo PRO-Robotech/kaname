@@ -35,24 +35,31 @@ import (
 )
 
 const (
-	// storageSAN / operatorSAN — соседи с законным сертификатом внутреннего
-	// центра. storage ходит на :9090 за ProjectService.Get; оператор — за
-	// AccountService.List → ProjectService.List (SEC-G).
+	// storageSAN — сосед с законным сертификатом внутреннего центра: storage
+	// ходит на :9090 за ProjectService.Get.
 	//
-	// Обе строки взяты из чартов, которые эти сертификаты выдают, а не написаны по
-	// образцу: сегмент пространства имён у них СВОЙ. Здесь это не влияет на исход —
-	// политика читает только сегмент учётной записи, — но списку отправителей
-	// (точное совпадение) такая описка стоила бы молчаливого отказа рабочему пути,
-	// поэтому привычка брать строку из чарта заводится сразу.
-	storageSAN  = "spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage"
+	// Строка взята из чарта, который этот сертификат выдаёт, а не написана по
+	// образцу: сегмент пространства имён у storage СВОЙ. Здесь это не влияет на
+	// исход — политика читает только сегмент учётной записи, — но списку
+	// отправителей (точное совпадение) такая описка стоила бы молчаливого отказа
+	// рабочему пути, поэтому привычка брать строку из чарта заводится сразу.
+	storageSAN = "spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage"
+
+	// operatorSAN — сертификат СНЯТОГО сетевого оператора. Чарта, который его
+	// выпускал бы, в дереве нет, каталога модуля нет, репозитория нет — строка
+	// живёт здесь ровно как вход отрицания
+	// (TestPublicCallerPolicy_RetiredOperatorFanoutIsNotCallable): предъявитель
+	// такого сертификата обязан быть отвергнут на всём публичном листенере.
 	operatorSAN = "spiffe://kacho.cloud/ns/kacho-vpc-operator/sa/kacho-vpc-operator"
 
 	// projectGetMethod — единственный публичный RPC, который зовут ВСЕ
 	// consumer-модули (vpc/compute/nlb/storage/registry): существование проекта
 	// и его аккаунт на пути запроса Create.
 	projectGetMethod = "/kacho.cloud.iam.v1.ProjectService/Get"
-	// projectListMethod / accountListMethod — ребро SEC-G оператора пространств
-	// имён: он веером читает аккаунты, затем проекты.
+	// projectListMethod / accountListMethod — два списочных RPC, которые прежде
+	// стояли в таблице под веер снятого оператора. Соседо-вызываемыми они больше
+	// не объявлены; остаются здесь как предмет отрицания и как часть поверхности,
+	// доступной парадной двери.
 	projectListMethod = "/kacho.cloud.iam.v1.ProjectService/List"
 	accountListMethod = "/kacho.cloud.iam.v1.AccountService/List"
 
@@ -69,6 +76,12 @@ const (
 	// storage (internal/authzfilter). Единственный метод AuthorizeService, который
 	// кто-либо из них зовёт.
 	batchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
+
+	// registrySAN — живой модуль, который вправе спросить ProjectService.Get и
+	// НЕ вправе спросить BatchCheck (фильтра страницы у него нет). Пара
+	// «допущен на своё ребро / отвергнут на чужое» на одном и том же
+	// сертификате — то, чем проверяется пообъектность допуска.
+	registrySAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-registry"
 )
 
 func newStorageCtx() context.Context {
@@ -95,7 +108,7 @@ func TestPublicCallerPolicy_NeighbourDeniedOnGatewayOnlyRPC(t *testing.T) {
 			for name, ctx := range map[string]context.Context{
 				"storage":  newStorageCtx(),
 				"vpc":      newVPCCtx(),
-				"operator": newOperatorCtx(),
+				"registry": grpcsrv.WithCertIdentity(context.Background(), registrySAN, true),
 			} {
 				err := p.allow(ctx, method)
 				if err == nil {
@@ -131,9 +144,9 @@ func TestPublicCallerPolicy_GatewayMayCallEverything(t *testing.T) {
 
 // TestPublicCallerPolicy_PeerReadEdgesKeepWorking — обратная ошибка: сузить так,
 // что встанет рабочий путь. ProjectService.Get — путь запроса Create у ПЯТИ
-// сервисов; ProjectService.List / AccountService.List — веер оператора (SEC-G).
-// Без них Create в vpc/compute/nlb/storage/registry отвечал бы отказом, а
-// оператор перестал бы видеть проекты.
+// сервисов; BatchCheck — пер-страничный фильтр видимости у четырёх. Без них
+// Create в vpc/compute/nlb/storage/registry отвечал бы отказом, а List у тенанта
+// возвращал бы пустоту при живых ресурсах.
 func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 	p := testPublicPolicy(true)
 
@@ -142,16 +155,11 @@ func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-compute",
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-nlb",
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-storage",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-registry",
+		registrySAN,
 	} {
 		ctx := grpcsrv.WithCertIdentity(context.Background(), san, true)
 		if err := p.allow(ctx, projectGetMethod); err != nil {
 			t.Fatalf("%s denied on %s: %v — this is the request-path project validation of Create", san, projectGetMethod, err)
-		}
-	}
-	for _, method := range []string{accountListMethod, projectListMethod} {
-		if err := p.allow(newOperatorCtx(), method); err != nil {
-			t.Fatalf("the namespace operator was denied on %s: %v — SEC-G fan-out read", method, err)
 		}
 	}
 	// Пер-страничный фильтр видимости: без него List у тенанта отвечает пустотой
@@ -183,12 +191,18 @@ func TestPublicCallerPolicy_PeerReadEdgeIsPerRPCNotPerCaller(t *testing.T) {
 }
 
 // TestPublicCallerPolicy_PeerReadEdgeIsPerCallerNotOpenToAll — и наоборот:
-// разрешённый RPC открыт перечисленным вызывающим, а не любому модулю. Веер
-// оператора не должен становиться общедоступным списком аккаунтов.
+// разрешённый RPC открыт перечисленным вызывающим, а не любому модулю. registry
+// вправе спросить проект и НЕ вправе спросить фильтр видимости страницы:
+// пообъектного фильтра у него нет, и допуск об этом знает.
 func TestPublicCallerPolicy_PeerReadEdgeIsPerCallerNotOpenToAll(t *testing.T) {
 	p := testPublicPolicy(true)
-	if err := p.allow(newStorageCtx(), accountListMethod); err == nil {
-		t.Fatal("storage reached AccountService/List — the allowance names the operator, not every module")
+	registryCtx := grpcsrv.WithCertIdentity(context.Background(), registrySAN, true)
+	if err := p.allow(registryCtx, projectGetMethod); err != nil {
+		t.Fatalf("контроль: registry отвергнут на своём ребре %s: %v", projectGetMethod, err)
+	}
+	if err := p.allow(registryCtx, batchCheckMethod); err == nil {
+		t.Fatalf("registry дошёл до %s — допуск на этот RPC назван четырём модулям с "+
+			"пообъектным фильтром, а не всякому, кто уже допущен куда-то ещё", batchCheckMethod)
 	}
 }
 
@@ -316,5 +330,139 @@ func TestPublicPeerCallableRPCs_NamesNoGateway(t *testing.T) {
 					"its own arm; two sources of truth drift", method)
 			}
 		}
+	}
+}
+
+// TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree — допуск в таблице
+// обязан называть модуль, который в дереве ЕСТЬ.
+//
+// Это гейт на КЛАСС, а не на один случай. Запись под вызывающего, которого нет,
+// невозможно отличить от записи под вызывающего, который есть: она той же формы
+// в таблице, той же формы в ревью, той же формы в отказе. Разница только в том,
+// что первая ничего не разрешает сегодня — и разрешит всё, что в ней написано,
+// в тот день, когда кто-нибудь выпустит сертификат с таким именем. Тот же класс
+// уже находился в кругах доверенных отправителей (ebedae53), и там он держался
+// проверкой, которая лишнюю запись ТРЕБОВАЛА.
+//
+// Предикат — каталог `services/<имя>/`. Он самоистекает: заведут модуль со своим
+// каталогом — гейт пройдёт сам, без чьей-либо памяти. api-gateway в таблице не
+// значится по построению (у него своя ветвь, это держит
+// TestPublicPeerCallableRPCs_NamesNoGateway), поэтому отсутствие у него каталога
+// в `services/` предмета здесь не составляет.
+func TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree(t *testing.T) {
+	modules := serviceModulesInTree(t)
+	seen := 0
+	for method, svcs := range PublicPeerCallableRPCs() {
+		for _, svc := range svcs {
+			seen++
+			if _, ok := modules[svc]; !ok {
+				t.Fatalf("%s допускает %q, а каталога services/%s в дереве нет: допуск выдан "+
+					"предъявителю сертификата, которого мы не выпускаем и не контролируем",
+					method, svc, svc)
+			}
+		}
+	}
+	// Объём осмотренного: «ноль находок» обязано быть отличимо от «ноль прочитанного».
+	t.Logf("осмотрено: допусков в таблице=%d, модулей в дереве=%d", seen, len(modules))
+	if seen == 0 {
+		t.Fatal("предпосылка гейта нарушена: таблица допусков пуста — проверять нечего")
+	}
+	if len(modules) == 0 {
+		t.Fatal("предпосылка гейта нарушена: в дереве не найдено ни одного модуля — " +
+			"любой допуск прошёл бы даром")
+	}
+}
+
+// serviceModulesInTree возвращает короткие имена модулей продукта — по каталогам
+// `services/*`, а не по списку в коде: список разошёлся бы с деревом молча.
+func serviceModulesInTree(t *testing.T) map[string]struct{} {
+	t.Helper()
+	dir := filepath.Join("..", "..", "..", "..", "services")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read services dir %s: %v", dir, err)
+	}
+	out := map[string]struct{}{}
+	for _, e := range entries {
+		if e.IsDir() {
+			out[e.Name()] = struct{}{}
+		}
+	}
+	return out
+}
+
+// ── снятый сетевой оператор ────────────────────────────────────────────────
+
+// TestPublicCallerPolicy_RetiredOperatorFanoutIsNotCallable — веер снятого
+// сетевого оператора (AccountService.List → ProjectService.List) публичным
+// листенером больше не обслуживается.
+//
+// Предмет. Компонента нет: ни каталога в дереве, ни репозитория, ни чарта,
+// который выпускал бы ему сертификат, — поэтому оба допуска не описывали
+// действующее ребро, а держали открытой поверхность под имя. Пока имя стоит в
+// таблице, любой, кто когда-нибудь получит сертификат с этим SAN, читает два
+// списочных RPC iam ЗА пользователя, чью личность он передаст.
+//
+// Утверждается ДВА разных свойства, и одного не хватило бы:
+//   - таблица не несёт эти методы КЛЮЧАМИ (запись — это объявление ребра; ребра
+//     нет, значит не должно быть и объявления);
+//   - вызов с сертификатом оператора отвергается в боевом режиме — то есть
+//     проверяется ИСХОД, а не только состав таблицы.
+//
+// Форма снятия — ОТСУТСТВИЕ ключа, а не ключ с пустым списком. По исходу они
+// неразличимы, и это здесь же доказано положительным контролём ниже: индексация
+// отсутствующего ключа даёт nil-карту, индексация nil-карты законна и даёт
+// «не найдено», поэтому отвергают обе формы одинаково. Различие — в том, что
+// ключ с пустым списком ОБЪЯВЛЯЕТ метод соседо-вызываемым (его читают
+// TestPublicPeerCallableRPCs_CarryNoMutation и человек в ревью) и приглашает
+// вписать вызывающего в уже готовую строку.
+//
+// RED до правки: таблица несёт оба метода, оператор на них проходит.
+func TestPublicCallerPolicy_RetiredOperatorFanoutIsNotCallable(t *testing.T) {
+	retired := []string{accountListMethod, projectListMethod}
+
+	table := PublicPeerCallableRPCs()
+	if len(table) == 0 {
+		t.Fatal("предпосылка нарушена: таблица допусков пуста — отрицание прошло бы даром")
+	}
+	for _, method := range retired {
+		if callers, present := table[method]; present {
+			t.Fatalf("%s всё ещё объявлен соседо-вызываемым (вызывающие: %v): компонента, ради "+
+				"которого допуск заводился, в дереве нет — снимается ЗАПИСЬ, а не её содержимое",
+				method, callers)
+		}
+	}
+
+	p := testPublicPolicy(true)
+	for _, method := range retired {
+		err := p.allow(newOperatorCtx(), method)
+		if err == nil {
+			t.Fatalf("сертификат снятого оператора прошёл на %s: iam на публичном листенере НЕ "+
+				"перепроверяет права конечного пользователя, поэтому предъявитель действует с "+
+				"полномочиями того, чью личность он передал", method)
+		}
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("%s: код = %v, ожидался PermissionDenied", method, status.Code(err))
+		}
+		if msg := status.Convert(err).Message(); msg != "permission denied" {
+			t.Fatalf("%s: сообщение = %q, ожидалось невыдающее %q", method, msg, "permission denied")
+		}
+	}
+
+	// Положительный контроль тем же путём: живое ребро на месте. Без него
+	// отрицание зеленело бы и на политике, отвергающей вообще всех.
+	if err := p.allow(newStorageCtx(), projectGetMethod); err != nil {
+		t.Fatalf("контроль: storage отвергнут на своём живом ребре %s: %v — отрицание выше "+
+			"получено бы даром", projectGetMethod, err)
+	}
+
+	// Контроль формы: ключ с ПУСТЫМ списком отвергает ровно так же. Значит выбор
+	// «снять запись» сделан не ради исхода, а ради правдивости таблицы, — и
+	// «починка» дописыванием пустой строки этот гейт не обойдёт.
+	empty := NewPublicCallerPolicy(true, map[string][]string{accountListMethod: {}})
+	if err := empty.allow(newOperatorCtx(), accountListMethod); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("контроль формы: пустой список вызывающих дал код %v, ожидался PermissionDenied — "+
+			"объяснение в шапке о неразличимости исходов неверно и его надо переписать",
+			status.Code(err))
 	}
 }

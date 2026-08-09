@@ -42,10 +42,11 @@ package account
 //     `iam.projectses`) is absent from the closed object-type table, so the
 //     reconciler emits no tuple for any of them. Measured, with a control, and
 //     pinned by TestSeededRoleRulesResolveOrArePinned.
-//     Consequence for this page: the operator sees the same as anyone else —
-//     what it was granted per object. Do NOT widen the predicate here to restore
-//     the sentence; the fan-out is a dead grant to be revived or retired at the
-//     seed, not a floor this filter owes anybody.
+//     The retirement then happened at the seed, where it belonged: 0076 took the
+//     role and its binding, 0081 the identity itself and the cluster tuple it
+//     still held. Do NOT widen the predicate here to restore the sentence — a
+//     cluster-wide reader floor is a grant, and grants are made at the seed, not
+//     conceded by a list filter.
 //   - Anonymous short-circuits to empty BEFORE any FGA call.
 //   - FGA outage on EITHER relation → fail-closed `Unavailable`: never a
 //     full-list leak, never a degraded/partial list.

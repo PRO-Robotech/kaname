@@ -38,23 +38,31 @@
 // было, — то есть выдать новое право под видом снятия мёртвого. Поэтому уходят
 // вместе правила, права, привязка и сама роль.
 //
-// # Что НЕ снято и снято быть не может
+// # Здесь стояло «кортеж и учётка снятыми быть не могут» — довод не выдержал
 //
-// Кластерный кортеж `system_viewer@cluster:cluster_kacho_root` (посев 0010)
-// ОСТАЁТСЯ. Он был посеян ради каскада из пункта 2, но с тех пор приобрёл
-// ВТОРОГО, действующего читателя, и это записано в дереве прямым текстом:
-// миграция 0014 не сеет оператору system_viewer именно потому, что «он уже
-// держит его из 0010», а `authzguard.SystemViewerFloor` гейтит на этом отношении
-// READ-RPC внутреннего листенера; vpc отдельно гейтит на нём
-// `InternalNetworkService/GetNetwork` (чтение инфра-чувствительного vrf_id),
-// называя потребителем именно оператора сети. Снятие кортежа было бы снятием
-// ЖИВОГО права. Второе утверждение файла держит это свойство, чтобы следующая
-// уборка не приняла кортеж за остаток снятого веера.
+// Прежняя редакция держала вторым утверждением файла сохранность кластерного
+// кортежа `system_viewer@cluster:cluster_kacho_root` (посев 0010) и самой
+// учётки, обосновывая это «вторым, действующим читателем»: миграция 0014 не
+// сеет оператору system_viewer, потому что он уже держит его из 0010;
+// `authzguard.SystemViewerFloor` гейтит на этом отношении READ-RPC внутреннего
+// листенера; vpc гейтит на нём чтение инфра-чувствительного поля сети.
+//
+// Все три наблюдения верны и ни одно — не про этот кортеж. Это читатели
+// ОТНОШЕНИЯ, а кортеж адресован ОДНОМУ субъекту: `cluster.system_viewer`
+// объявлен прямым назначением без userset и без `from`, поэтому не
+// раскрывается ни на кого, кроме своего субъекта. Живые читатели держат СВОИ
+// кортежи (посев 0014). «Кто читает отношение» и «кто держит кортеж» — разные
+// вопросы, и у первого всегда есть ответ; довод, собранный из ответа на первый,
+// звучит как обоснование сохранности и ничего о ней не говорит.
+//
+// Учётку и кортеж снимает миграция 0081; свойство держит
+// TestMigration0081_RetiresOperatorIdentityAndItsGrants — вместе с контролем,
+// что три живых читателя своих кортежей не теряют, и с проверкой самой
+// предпосылки (отношение остаётся прямым).
 package pg_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -221,42 +229,4 @@ func seedLivePrincipalBoundToResolvableRole(
 	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool),
 		"контроль: не удалось спроецировать селекторы после выдачи")
 	return subjectID
-}
-
-// TestOperatorClusterTupleSurvivesRetirement — кортеж
-// `system_viewer@cluster:cluster_kacho_root` оператора ОСТАЁТСЯ, и его учётка
-// тоже.
-//
-// Это не «на всякий случай». Кортеж посеян 0010 ради каскада, который из модели
-// удалён, — но с тех пор у него появился второй, действующий читатель, и снятие
-// стало бы снятием живого права. Утверждение стоит рядом со снятием мёртвого
-// именно потому, что оба предмета выглядят одинаково «остатками SEC-L»: без
-// этого замка следующая уборка снимет живое, опираясь на ту же историю
-// происхождения.
-func TestOperatorClusterTupleSurvivesRetirement(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: требует Postgres")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, setupTestDB(t))
-	require.NoError(t, err)
-	defer pool.Close()
-
-	operatorSVA := scalarString(t, ctx, pool, operatorSVAExpr)
-
-	require.Equal(t, 1, scalarInt(t, ctx, pool,
-		`SELECT count(*) FROM kacho_iam.service_accounts WHERE id = $1`, operatorSVA),
-		"учётка оператора сети — его личность на внутреннем периметре; снятие мёртвой выдачи "+
-			"её не касается")
-
-	require.Equal(t, 1, scalarInt(t, ctx, pool,
-		fmt.Sprintf(`SELECT count(*) FROM kacho_iam.fga_outbox
-		              WHERE event_type = 'fga.tuple.write'
-		                AND payload->>'relation' = 'system_viewer'
-		                AND payload->>'object'   = 'cluster:cluster_kacho_root'
-		                AND payload->>'user'     = 'service_account:' || %s`, operatorSVAExpr)),
-		"кортеж system_viewer@cluster оператора обязан ОСТАТЬСЯ: на нём гейтятся READ-RPC "+
-			"внутреннего листенера (authzguard.SystemViewerFloor) и vpc "+
-			"InternalNetworkService/GetNetwork; миграция 0014 прямо на него опирается, "+
-			"не сея оператору собственный")
 }

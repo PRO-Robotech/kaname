@@ -3,26 +3,20 @@
 
 // seed_module_sa_identity_integration_test.go — module ServiceAccount identity seed.
 //
-// Verifies the seed migration (0009) that provisions least-privilege
-// module ServiceAccount identities in the ReBAC model:
-//   - 5 module SAs (deterministic sva-id, system account, cluster scope);
-//   - a backing RBAC-v2 role with the exact 4-segment permission set
-//     (byte-for-byte from permission_catalog.json) for FOUR of them — the
-//     vpc-operator's was retired by migration 0076;
-//   - an AccessBinding (subject=service_account, role, cluster-scope) for those
-//     same four;
+// Verifies the state the seed migration (0009) and its successors leave behind
+// for the least-privilege module ServiceAccount identities:
+//   - 4 module SAs of the original five (deterministic sva-id, system account) —
+//     the network operator's identity was retired by migration 0081 together with
+//     everything granted to it, its role and binding having gone in 0076;
+//   - no backing role and no AccessBinding for any of them (0076 + 0077);
 //   - FGA relation-tuples `<sva>#fga_writer@iam_fgaproxy:system` in fga_outbox
-//     for vpc/compute/nlb only (vpc-operator / api-gateway have none);
+//     for vpc/compute/nlb only (api-gateway has none);
 //   - immutable system role; idempotent ON CONFLICT re-apply.
 //
-// Source-of-truth permission strings (permission_catalog.json):
-//
-//	compute     vpc.subnets.*.get, vpc.security_groups.*.get,
-//	            vpc.addresses.*.get/create/delete/update, iam.projects.*.get
-//	vpc         compute.zones.*.get, iam.projects.*.get
-//	nlb         vpc.subnets.*.get, iam.projects.*.get
-//	vpc-operator (none — role retired by 0076; identity kept, no grant)
-//	api-gateway (none — identity-only)
+// The permission strings the backing roles once carried are deliberately NOT
+// pinned here any more: pinning the contents of a retired role would demand its
+// return, and returning it rules-less would land a cluster-anchored relation the
+// module never had.
 //
 // Skipped under `go test -short`.
 package pg_test
@@ -85,7 +79,14 @@ func rolID(svc string) string {
 	return "rol" + hex.EncodeToString(sum[:])[:17]
 }
 
-func TestSeedModuleSA_B01_AllFiveModuleSAsCreated(t *testing.T) {
+// TestSeedModuleSA_B01_ModuleIdentitiesCreated — ось по всем пяти учёткам
+// исходного посева 0009: четыре обязаны БЫТЬ, пятая — сетевого оператора —
+// обязана ОТСУТСТВОВАТЬ (снята 0081).
+//
+// Ось перечисляет и снятую клетку, а не молча укорачивается: перечень, из
+// которого имя просто исчезло, не отличить от перечня, где о нём забыли, — и
+// возвращение строки прошло бы мимо этой пробы.
+func TestSeedModuleSA_B01_ModuleIdentitiesCreated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -94,7 +95,7 @@ func TestSeedModuleSA_B01_AllFiveModuleSAsCreated(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	wantSvcs := []string{"vpc", "compute", "nlb", "vpc-operator", "api-gateway"}
+	wantSvcs := []string{"vpc", "compute", "nlb", "api-gateway"}
 	for _, svc := range wantSvcs {
 		var id, name, accountID string
 		err := pool.QueryRow(ctx,
@@ -104,6 +105,14 @@ func TestSeedModuleSA_B01_AllFiveModuleSAsCreated(t *testing.T) {
 		require.Equal(t, "kacho-"+svc, name, "SA name segment is canonical kacho-<svc>")
 		require.NotEmpty(t, accountID, "SA must be attached to the seeded system account (account_id NOT NULL)")
 	}
+
+	var retired int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.service_accounts WHERE id = $1`,
+		svaID("vpc-operator")).Scan(&retired))
+	require.Zero(t, retired,
+		"учётка сетевого оператора обязана отсутствовать (0081): модуля в дереве нет и чарта, "+
+			"выпускающего её сертификат, тоже — предъявить её некому")
 }
 
 // TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept — у compute снята
@@ -196,19 +205,19 @@ func requireRoleRetired(t *testing.T, ctx context.Context, pool *pgxpool.Pool, s
 		"учётка kacho-%s — личность модуля на внутреннем периметре; снятие выдачи её не касается", svc)
 }
 
-// TestSeedModuleSA_B05_OperatorRoleRetiredIdentityKept — у оператора сети
-// остаётся ЛИЧНОСТЬ и не остаётся выдачи.
+// TestSeedModuleSA_B05_OperatorFullyRetired — у сетевого оператора не остаётся
+// НИЧЕГО: ни роли, ни привязки, ни личности.
 //
-// Прежняя редакция пинила ЧЕТЫРЕ строки прав его backing-роли как «набор из
-// исходного каталога». Роль снята миграцией 0076: ни одно из четырёх имён
-// закрытая таблица типов не несёт, поэтому пообъектно она не материализовала
-// ничего, а каскад, ради которого веер задумывался, из модели удалён. Пиновать
-// состав снятой роли значило бы требовать её возвращения.
+// Прежняя редакция этого места утверждала обратное — «учётка остаётся, она
+// личность на внутреннем периметре, а не право». Это верно ровно до тех пор,
+// пока личность кто-то может предъявить. Предъявить её некому: каталога модуля в
+// дереве нет, репозитория нет, чарт, выпускающий сертификат с её SPIFFE-именем,
+// не существует. Строка в таблице принципалов, за которой нет предъявителя, —
+// не личность, а место, куда выдача приезжает без чьего-либо решения.
 //
-// Учётка при этом остаётся: она — личность оператора на внутреннем периметре, а
-// не право. Как и прежде, у неё нет кортежа fga_writer (read-only sync ничего не
-// регистрирует).
-func TestSeedModuleSA_B05_OperatorRoleRetiredIdentityKept(t *testing.T) {
+// Положительный контроль — рядом: api-gateway остаётся личностью БЕЗ права
+// записи. Без него «ноль у оператора» зеленел бы и на выкошенном посеве.
+func TestSeedModuleSA_B05_OperatorFullyRetired(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -231,18 +240,23 @@ func TestSeedModuleSA_B05_OperatorRoleRetiredIdentityKept(t *testing.T) {
 		svaID("vpc-operator")).Scan(&bindCnt))
 	require.Zero(t, bindCnt, "снятая роль не может оставаться выданной оператору")
 
-	// Личность остаётся — контроль в положительную сторону: «ноль» выше получен
-	// не из того, что учётки нет вовсе.
-	var name string
+	// Личность снята (0081).
+	var saCnt int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.service_accounts WHERE id = $1`,
+		svaID("vpc-operator")).Scan(&saCnt))
+	require.Zero(t, saCnt,
+		"учётка оператора обязана быть снята: за ней нет предъявителя, а строка принципала "+
+			"переживает компонент и принимает на себя следующую выдачу")
+
+	// Положительный контроль: api-gateway — живая личность, и у неё по-прежнему
+	// нет права записи в модель. «Ноль у оператора» получен не из пустого посева.
+	var gatewayName string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT name FROM kacho_iam.service_accounts WHERE id = $1`,
-		svaID("vpc-operator")).Scan(&name))
-	require.Equal(t, "kacho-vpc-operator", name,
-		"учётка оператора — его личность на внутреннем периметре; снятие выдачи её не касается")
-
-	// No fga_writer tuple for operator (read-only sync, registers nothing).
-	requireFGAWriterTuple(t, ctx, pool, svaID("vpc-operator"), false)
-	// api-gateway also has no fga_writer tuple.
+		svaID("api-gateway")).Scan(&gatewayName))
+	require.Equal(t, "kacho-api-gateway", gatewayName,
+		"контроль: учётка парадной двери обязана остаться — снимается ОДИН субъект, а не класс")
 	requireFGAWriterTuple(t, ctx, pool, svaID("api-gateway"), false)
 }
 
@@ -261,7 +275,10 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	// снятия это утверждение требовало бы возвращения снятого.
 	//
 	// Перечень — ОСЬ по всем семи учёткам, а не по тем, что остались: клетка,
-	// выпавшая из перечня, перестала бы проверяться молча.
+	// выпавшая из перечня, перестала бы проверяться молча. Оператор сети в оси
+	// сохранён НАМЕРЕННО, хотя его учётки больше нет (0081): клетка ловит именно
+	// тот случай, ради которого её стоило бы удалить, — воскрешённую учётку с
+	// привязкой.
 	allModuleSAs := []string{"vpc", "compute", "nlb", "vpc-operator", "api-gateway", "registry", "storage"}
 	requireAllUnbound := func(t *testing.T, when string) {
 		t.Helper()
@@ -307,10 +324,19 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 			`SELECT count(*) FROM kacho_iam.roles WHERE id = $1`, rolID(svc)).Scan(&roleCnt))
 		require.Zerof(t, roleCnt, "повторный посев не должен воскрешать снятую backing-роль %s", roleName(svc))
 
+		// Учётка сетевого оператора снята (0081), и повторный посев обязан её НЕ
+		// воскрешать: тело посева её больше не содержит. Клетка стоит рядом с
+		// остальными и ждёт ноль там, где они ждут единицу, — именно этой парой
+		// проверяется, что путь повторного посева не возвращает снятое.
+		wantSA := 1
+		if svc == "vpc-operator" {
+			wantSA = 0
+		}
 		var saCnt int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM kacho_iam.service_accounts WHERE id = $1`, svaID(svc)).Scan(&saCnt))
-		require.Equalf(t, 1, saCnt, "повторный посев не должен ни удвоить, ни потерять учётку kacho-%s", svc)
+		require.Equalf(t, wantSA, saCnt,
+			"повторный посев не должен ни удвоить, ни потерять, ни воскресить учётку kacho-%s", svc)
 	}
 }
 

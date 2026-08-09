@@ -14,8 +14,7 @@
 // :9090 is not gateway-only, though. Five consumer services dial it on their
 // request path (ProjectService.Get — project existence + owning account before a
 // Create) and four of them ask it the per-page visibility question behind their
-// own List (AuthorizeService.BatchCheck); the namespace operator fans out over
-// AccountService.List → ProjectService.List. All of them present a client
+// own List (AuthorizeService.BatchCheck). All of them present a client
 // certificate from the same
 // internal authority as the gateway, and the port is an ordinary Service inside
 // the namespace with no NetworkPolicy of its own. So before this policy, ANY
@@ -49,6 +48,14 @@
 // list), not of what an operator happened to configure. A new service that needs
 // a public iam RPC adds itself here, in a reviewed change — a config omission
 // must never widen this.
+//
+// And membership is a property of an edge that EXISTS. An entry naming a caller
+// with no module in the tree has the same shape as a live one, yet it admits
+// nobody today and admits everything it names on the day someone issues a
+// certificate with that SAN — an open surface reserved for a name.
+// TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree derives the
+// admissible callers from `services/*` and fails on the difference; the
+// allowance for a module returns by itself once the module does.
 package authzguard
 
 import (
@@ -68,11 +75,6 @@ const (
 	// consumer performs before creating a placement-scoped resource
 	// (services/*/internal/clients/iam*: ProjectServiceClient.Get).
 	publicProjectGetMethod = "/kacho.cloud.iam.v1.ProjectService/Get"
-	// publicProjectListMethod / publicAccountListMethod — the namespace
-	// operator's fan-out read (SEC-G): membership-scoped accounts, then the
-	// projects it may view.
-	publicProjectListMethod = "/kacho.cloud.iam.v1.ProjectService/List"
-	publicAccountListMethod = "/kacho.cloud.iam.v1.AccountService/List"
 	// publicBatchCheckMethod — the per-object visibility filter every List
 	// handler in vpc/compute/nlb/storage runs (internal/authzfilter): it asks,
 	// for the ids of ONE page, which the end user may see. The service→service
@@ -86,12 +88,11 @@ const (
 // Module service short-names (as ServiceNameFromSAN resolves them) that appear in
 // the peer-callable table.
 const (
-	svcVPC         = "vpc"
-	svcCompute     = "compute"
-	svcNLB         = "nlb"
-	svcStorage     = "storage"
-	svcRegistry    = "registry"
-	svcVPCOperator = "vpc-operator"
+	svcVPC      = "vpc"
+	svcCompute  = "compute"
+	svcNLB      = "nlb"
+	svcStorage  = "storage"
+	svcRegistry = "registry"
 )
 
 // PublicPeerCallableRPCs returns the public RPCs a NON-gateway module may call,
@@ -111,14 +112,6 @@ const (
 //   - ProjectService/Get — vpc, compute, nlb, storage and registry each hold a
 //     ProjectServiceClient pointed at iam's PUBLIC address and call Get on the
 //     request path of their own Create (project existence + owning account).
-//   - AccountService/List → ProjectService/List — the namespace operator's
-//     read-only fan-out (SEC-G). This admits the operator as a CALLER; it says
-//     nothing about what it may see. The role that once backed the fan-out is
-//     retired (0076): its four resource names were absent from the closed
-//     object-type table, so it materialized no tuple, and the cascade it relied
-//     on is out of the model. The operator now sees exactly what it was granted
-//     per object, which today is nothing — reviving the fan-out means granting
-//     names the table carries, not re-adding the retired role.
 //   - AuthorizeService/BatchCheck — the per-page visibility filter in
 //     vpc/compute/nlb/storage (internal/authzfilter, the sole AuthorizeService
 //     method any of them calls). Its edge belongs on the internal listener and
@@ -127,10 +120,8 @@ const (
 //     tenant's own List.
 func PublicPeerCallableRPCs() map[string][]string {
 	return map[string][]string{
-		publicProjectGetMethod:  {svcVPC, svcCompute, svcNLB, svcStorage, svcRegistry},
-		publicAccountListMethod: {svcVPCOperator},
-		publicProjectListMethod: {svcVPCOperator},
-		publicBatchCheckMethod:  {svcVPC, svcCompute, svcNLB, svcStorage},
+		publicProjectGetMethod: {svcVPC, svcCompute, svcNLB, svcStorage, svcRegistry},
+		publicBatchCheckMethod: {svcVPC, svcCompute, svcNLB, svcStorage},
 	}
 }
 

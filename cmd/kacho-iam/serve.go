@@ -313,8 +313,10 @@ func runServe(cfg config.Config) error {
 	// Check (INV-FLOOR-5), secret-authed OnRecoveryCompleted + hot-path IsRevoked
 	// (INV-FLOOR-6), and all mutations (fga_writer / system_admin / gateway-only;
 	// INV-FLOOR-8). Chained AFTER internalCallerPolicy, mirroring its prod-mode
-	// gating. The legitimate reader SAs (api-gateway/vpc/compute) are seeded
-	// system_viewer@cluster by migration 0014 (vpc-operator already by SEC-L 0010).
+	// gating. The legitimate reader SAs — api-gateway, vpc and compute, and those
+	// three only — are seeded system_viewer@cluster by migration 0014. The network
+	// operator held one too, from SEC-L 0010; migration 0081 revoked it together
+	// with the identity, so exactly three subjects can pass this floor.
 	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(openfgaClient, authzguard.ReadFloorRPCs()).
 		WithProductionMode(productionMode)
 

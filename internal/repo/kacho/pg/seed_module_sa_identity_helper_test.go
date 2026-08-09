@@ -45,9 +45,16 @@ INSERT INTO kacho_iam.service_accounts (id, account_id, name, description) VALUE
   ('sva' || substr(md5('kacho-vpc'), 1, 17), 'acc' || substr(md5('kacho-system'), 1, 17), 'kacho-vpc', 'Module SA: kacho-vpc (SEC-C least-priv)'),
   ('sva' || substr(md5('kacho-compute'), 1, 17), 'acc' || substr(md5('kacho-system'), 1, 17), 'kacho-compute', 'Module SA: kacho-compute (SEC-C least-priv)'),
   ('sva' || substr(md5('kacho-nlb'), 1, 17), 'acc' || substr(md5('kacho-system'), 1, 17), 'kacho-nlb', 'Module SA: kacho-nlb (SEC-C least-priv)'),
-  ('sva' || substr(md5('kacho-vpc-operator'), 1, 17), 'acc' || substr(md5('kacho-system'), 1, 17), 'kacho-vpc-operator', 'Module SA: kacho-vpc-operator (SEC-C read-only)'),
   ('sva' || substr(md5('kacho-api-gateway'), 1, 17), 'acc' || substr(md5('kacho-system'), 1, 17), 'kacho-api-gateway', 'Module SA: kacho-api-gateway (SEC-C identity-only)')
 ON CONFLICT (id) DO NOTHING;
+
+-- THE NETWORK OPERATOR'S IDENTITY IS DELIBERATELY ABSENT from the list above.
+-- Migration 0081 retired it: there is no module directory, no repository and no
+-- chart issuing its certificate, so nothing can present it. Re-inserting it here
+-- would be exactly what the paragraph below forbids — a re-apply path
+-- reintroducing what a migration removed — and it would be silent, because the
+-- ON CONFLICT DO NOTHING clause reads the same whether the row was already there
+-- or has just been resurrected.
 
 -- NO ROLES AND NO BINDINGS ARE RE-SEEDED HERE.
 --
