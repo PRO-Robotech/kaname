@@ -202,6 +202,18 @@ type AuthNConfig struct {
 	// Validate refuses to start (fail-closed, mirroring geo/compute/nlb/storage/
 	// registry).
 	TrustedForwarderSANs []string `mapstructure:"trusted-forwarder-sans"`
+
+	// TrustAnyForwarder — ЯВНЫЙ опт-ин «круг не сужаем», действующий ТОЛЬКО вне
+	// боевого режима. Нужен для локальных in-process фикстур, где ни сертификатов,
+	// ни шлюза нет.
+	//
+	// Он существует потому, что стража круга срабатывает на ЛЮБОМ старте, а не
+	// только в боевом режиме: контроль, чья ветка на локальном стенде не
+	// исполняется ни разу, обнаруживает «забыл выставить круг» только на боевом
+	// профиле, где цена ошибки максимальна. Оставленный незаданным (false) = отказ
+	// старта на пустом круге. В боевом режиме НЕ действует — иначе это была бы
+	// ручка, снимающая защиту на развёрнутом стенде.
+	TrustAnyForwarder bool `mapstructure:"trust-any-forwarder"`
 }
 
 // TrustedForwarders — the circle of senders that REALLY reaches

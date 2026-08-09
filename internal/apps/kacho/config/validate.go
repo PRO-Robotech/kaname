@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"go.uber.org/multierr"
+
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
 // Validate checks Config invariants (pure function — no logger, no
@@ -53,10 +55,14 @@ func (c Config) Validate() error {
 			fmt.Errorf("repository.postgres.url is empty"))
 	}
 
+	// Круг отправителей чужой личности проверяется на ЛЮБОМ старте, а не только в
+	// боевом режиме, — поэтому стоит ВНЕ ветки IsProduction (см.
+	// validateTrustedForwarders).
+	errs = multierr.Append(errs, c.validateTrustedForwarders())
+
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
-		errs = multierr.Append(errs, c.validateProductionTrustedForwarders())
 		errs = multierr.Append(errs, c.validateProductionProviderAdminHop())
 		errs = multierr.Append(errs, c.validateProductionProviderPublicHops())
 
@@ -117,20 +123,19 @@ func (c Config) validateProductionBootstrapMint() error {
 		c.AuthN.BootstrapMint.ResolveSigningKeyEnv())
 }
 
-// validateProductionTrustedForwarders refuses to start a production binary that
-// has not narrowed the circle of senders permitted to FORWARD an end-user
-// identity.
+// validateTrustedForwarders refuses to start a binary that has not narrowed the
+// circle of senders permitted to FORWARD an end-user identity.
 //
 // Both listeners build CertIdentityExtract →
 // TrustedPrincipalExtract(WithTrustedForwarders(cfg.AuthN.TrustedForwarders())).
 // The corelib contract (pkg/grpcsrv principalIsTrusted) narrows that circle ONLY
-// on a non-empty list; on an empty one it answers "trusted" for ANY peer that
-// passed client-certificate verification, and the forwarded metadata identity
-// becomes the subject of every authorization decision iam then makes. Both ports
-// are ordinary Services in the namespace, the TLS layer checks the issuing
-// authority rather than the name, and the only NetworkPolicy that selects the iam
-// pod covers the internal port and is off outside production — so this list is the
-// only thing that narrows.
+// on a non-empty circle; on an unnarrowed one it answers "trusted" for ANY peer
+// that passed client-certificate verification, and the forwarded metadata
+// identity becomes the subject of every authorization decision iam then makes.
+// Both ports are ordinary Services in the namespace, the TLS layer checks the
+// issuing authority rather than the name, and the only NetworkPolicy that selects
+// the iam pod covers the internal port and is off outside production — so this
+// circle is the only thing that narrows.
 //
 // The consequence is not abstract: on :9090 iam deliberately does NOT re-ReBAC
 // the end user (the api-gateway is the single authZ front door), so a neighbour
@@ -138,23 +143,19 @@ func (c Config) validateProductionBootstrapMint() error {
 // accounts, projects, groups, roles and grants, and mint personal tokens and
 // service-account keys, as the named victim.
 //
-// The guard asks the SAME object and the SAME predicate the wiring and the
-// self-report ask (grpcsrv.TrustedForwarders.IsNarrowed), not the raw field
-// length: blank entries are dropped in the very place the narrowing happens, so
-// `SANS=","` must not pass the guard and hand back the hole.
-//
-// dev deliberately tolerates empty (in-process fixtures) — and only there: on a
-// DEPLOYED stand the dev posture is forbidden by a separate rule
-// (production-mode EVERYWHERE).
-func (c Config) validateProductionTrustedForwarders() error {
-	if c.AuthN.TrustedForwarders().IsNarrowed() {
-		return nil
-	}
-	return fmt.Errorf(
-		"production mode: authn.trusted-forwarder-sans is empty (env override " +
-			"KACHO_IAM_AUTHN__TRUSTED_FORWARDER_SANS) — an empty list lets ANY certificate-verified peer " +
-			"forward an end-user identity, so a neighbouring service can act as any tenant; " +
-			"pin the api-gateway SAN plus the peers that legitimately speak for a user")
+// The guard fires on ANY start, not only in production: a guard whose branch
+// never executes on the local stand finds "the circle was left open" only on the
+// production profile, where the cost of the mistake is highest. Outside
+// production an unnarrowed circle stays possible, but as an EXPLICIT opt-in.
+// The shared guard is grpcsrv.TrustedForwarders.Require — one outcome and one
+// refusal text across all seven services; only the knob names differ.
+func (c Config) validateTrustedForwarders() error {
+	return c.AuthN.TrustedForwarders().Require(grpcsrv.ForwarderGate{
+		Production:   c.AuthN.Mode.IsProduction(),
+		DevTrustAny:  c.AuthN.TrustAnyForwarder,
+		SANsKnob:     "authn.trusted-forwarder-sans (env KACHO_IAM_AUTHN__TRUSTED_FORWARDER_SANS)",
+		TrustAnyKnob: "authn.trust-any-forwarder (env KACHO_IAM_AUTHN__TRUST_ANY_FORWARDER)",
+	})
 }
 
 // validateProductionProviderAdminHop refuses to start a production binary whose

@@ -108,11 +108,35 @@ func TestValidate_ProductionAcceptsPinnedForwarderAllowList(t *testing.T) {
 	}
 }
 
-// TestValidate_DevToleratesEmptyForwarderAllowList — dev осознанно терпит
-// insecure-дефолты (in-process фикстуры). На РАЗВЁРНУТОМ стенде dev-посадка
-// запрещена отдельным правилом (production-mode ВЕЗДЕ).
-func TestValidate_DevToleratesEmptyForwarderAllowList(t *testing.T) {
-	if err := forwarderCfg(config.ModeDev).Validate(); err != nil {
-		t.Fatalf("dev must tolerate an empty allow-list (in-process fixtures), got: %v", err)
+// TestValidate_DevRefusesAnUnnarrowedCircleWithoutTheOptIn — вне боевого режима
+// пустой круг ВОЗМОЖЕН, но только как явный опт-ин. Стража, молчащая вне боевого
+// режима, — контроль, чья ветка на локальном стенде не исполняется ни разу.
+func TestValidate_DevRefusesAnUnnarrowedCircleWithoutTheOptIn(t *testing.T) {
+	err := forwarderCfg(config.ModeDev).Validate()
+	if err == nil {
+		t.Fatal("dev with an unnarrowed circle and no opt-in must refuse to start")
+	}
+	if !strings.Contains(err.Error(), forwarderKnobName) {
+		t.Fatalf("the refusal must name the knob %q, got: %v", forwarderKnobName, err)
+	}
+}
+
+// TestValidate_DevToleratesAnUnnarrowedCircleWithTheExplicitOptIn — положительный
+// контроль к предыдущему: без него отрицание зеленело бы и на «отказывать всегда».
+func TestValidate_DevToleratesAnUnnarrowedCircleWithTheExplicitOptIn(t *testing.T) {
+	cfg := forwarderCfg(config.ModeDev)
+	cfg.AuthN.TrustAnyForwarder = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("dev with the explicit opt-in must boot (in-process fixtures), got: %v", err)
+	}
+}
+
+// TestValidate_ProductionIgnoresTheDevOptIn — опт-ин не действует в боевом
+// режиме: иначе он был бы ручкой, снимающей защиту на развёрнутом стенде.
+func TestValidate_ProductionIgnoresTheDevOptIn(t *testing.T) {
+	cfg := forwarderCfg(config.ModeProduction)
+	cfg.AuthN.TrustAnyForwarder = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("production must refuse an unnarrowed circle even with the dev opt-in set")
 	}
 }
