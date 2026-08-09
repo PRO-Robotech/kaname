@@ -253,7 +253,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icCrudId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icCrudId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -697,7 +710,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icDupId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icDupId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -1513,7 +1539,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icRedId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icRedId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -1924,7 +1963,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icAbsentId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icAbsentId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -2615,7 +2667,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icImmId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icImmId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -3477,7 +3542,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icUnkId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icUnkId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -4243,7 +4321,20 @@
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
                   "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('icDelId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom icDelId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
