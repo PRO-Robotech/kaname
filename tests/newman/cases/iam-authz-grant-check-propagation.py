@@ -703,6 +703,20 @@ CASES.append(Case(
 # subject — proves account-admin can delete any binding on their resource.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ИДЕНТИФИКАТОР ПРИВЯЗКИ В ЭТИХ ДВУХ КЕЙСАХ БЕРЁТСЯ ТОЛЬКО ИЗ ЛИСТИНГА
+# (resolve_binding_id_step), НИ ИЗ МЕТАДАННЫХ ОПЕРАЦИИ, НИ ИЗ ЕЁ ОТВЕТА.
+#
+# Область здесь — долгоживущая общая фикстура, поэтому на каждом прогоне после
+# первого создание законно идёт путём «уже существует»: операция несёт ошибку, а
+# идентификатор в её метаданных выделен ДО отказа и указывает на несозданное.
+# Прежняя редакция публиковала его и опрашивала операцию, утверждая одно лишь
+# `done`, — то есть уносила координату фантома дальше, и предмет проверки (кто
+# вправе снять чужую привязку) подменялся отказом харнесса.
+#
+# Утверждать здесь успех операции НЕЛЬЗЯ: её ошибка на повторном прогоне
+# законна. Поэтому снят не контроль, а ИСТОЧНИК фантома — публиковать нечего, а
+# разрешение из листинга верно на обоих путях, и на только что созданном, и на
+# уже существовавшем.
 CASES.append(Case(
     id="AUTHZGCP-BIND-DELETE-BY-ADMIN-ALLOW",
     title="account-admin deletes stranger's binding on own resource → 200",
@@ -730,8 +744,6 @@ CASES.append(Case(
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.id", "_adminDel_opId"),
-                *save_from_response(
-                    "j.metadata && j.metadata.accessBindingId", "_adminDel_abId"),
             ],
         ),
         # Poll the Create op until done; pick up acb id from response when needed.
@@ -752,9 +764,6 @@ CASES.append(Case(
                 "}",
                 "pm.environment.unset('_pollCount');",
                 "pm.environment.unset('_pollStarted');",
-                "if (j.response && j.response.id && !pm.environment.get('_adminDel_abId')) {",
-                "  pm.environment.set('_adminDel_abId', j.response.id);",
-                "}",
                 "pm.test('create op done', () => pm.expect(j.done).to.eql(true));",
             ],
         ),
@@ -820,8 +829,6 @@ CASES.append(Case(
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.id", "_strangerDel_opId"),
-                *save_from_response(
-                    "j.metadata && j.metadata.accessBindingId", "_strangerDel_abId"),
             ],
         ),
         Step(
@@ -841,9 +848,6 @@ CASES.append(Case(
                 "}",
                 "pm.environment.unset('_pollCount');",
                 "pm.environment.unset('_pollStarted');",
-                "if (j.response && j.response.id && !pm.environment.get('_strangerDel_abId')) {",
-                "  pm.environment.set('_strangerDel_abId', j.response.id);",
-                "}",
             ],
         ),
         # Resolve the PERSISTED binding id — same reason as in

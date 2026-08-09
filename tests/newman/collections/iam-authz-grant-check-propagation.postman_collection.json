@@ -1048,16 +1048,6 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_adminDel_opId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.accessBindingId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_adminDel_abId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "  if (_pv.indexOf('_adminDel_abId') === -1) _pv.push('_adminDel_abId');",
-                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1136,23 +1126,7 @@
                   "}",
                   "pm.environment.unset('_pollCount');",
                   "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('_adminDel_abId')) {",
-                  "  pm.environment.set('_adminDel_abId', j.response.id);",
-                  "}",
-                  "pm.test('create op done', () => pm.expect(j.done).to.eql(true));",
-                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
-                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
-                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
-                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
-                  "(function () {",
-                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
-                  "  if (_po.error) {",
-                  "    pm.environment.unset('_adminDel_abId');",
-                  "  }",
-                  "  pm.test('operation succeeded (no phantom _adminDel_abId)', function () {",
-                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
+                  "pm.test('create op done', () => pm.expect(j.done).to.eql(true));"
                 ]
               }
             }
@@ -1529,16 +1503,6 @@
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
                   "  if (v !== undefined && v !== null) pm.environment.set('_strangerDel_opId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.accessBindingId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('_strangerDel_abId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "  if (_pv.indexOf('_strangerDel_abId') === -1) _pv.push('_strangerDel_abId');",
-                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
                   "} catch (e) {}"
                 ]
               }
@@ -1616,26 +1580,7 @@
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "if (j.response && j.response.id && !pm.environment.get('_strangerDel_abId')) {",
-                  "  pm.environment.set('_strangerDel_abId', j.response.id);",
-                  "}",
-                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
-                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
-                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
-                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
-                  "(function () {",
-                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('operation done', function () {",
-                  "    pm.expect(_po.done, JSON.stringify(_po)).to.eql(true);",
-                  "  });",
-                  "  if (_po.error) {",
-                  "    pm.environment.unset('_strangerDel_abId');",
-                  "  }",
-                  "  pm.test('operation succeeded (no phantom _strangerDel_abId)', function () {",
-                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
+                  "pm.environment.unset('_pollStarted');"
                 ]
               }
             }
