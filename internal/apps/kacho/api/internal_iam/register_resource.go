@@ -563,8 +563,10 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 
 // residualTuples names what a teardown must take away IN ADDITION to the tuple the
 // request carries: every relationship still standing on the object that this proxy is
-// permitted to write (`project`/`account`/`parent`/`owner`, plus the public-read
-// wildcard). Returns nil for a pure-grant withdrawal and when no reader is wired.
+// permitted to write. The set is not re-spelled here — it is asked of the declaration
+// (pkg/authz/proxytuple.IsProxyWritable), so a set that changes cannot leave a residue
+// behind a comment that still names the old one. Returns nil for a pure-grant
+// withdrawal and when no reader is wired.
 //
 // WHY THE SET IS EXACTLY THE PROXY-WRITABLE ONE, AND NOT "EVERYTHING ON THE OBJECT".
 // The per-object verbs are NOT ours to remove: they are derived from grants and the
