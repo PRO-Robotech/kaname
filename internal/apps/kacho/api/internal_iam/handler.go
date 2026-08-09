@@ -32,6 +32,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -167,12 +168,27 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 //
 // authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
 // (cert-cert→SA → `fga_writer@iam_fgaproxy:system`). cluster-internal :9091.
+// validateProxyTuple applies the shared proxy-write rule and maps its verdict to the
+// transport. This is the ONE place the refusal becomes a gRPC status, so the code and
+// the text cannot drift between the three RPCs that share the rule; the rule itself is
+// transport-free by design (pkg/authz/proxytuple.ErrRefused) so a consumer's domain
+// layer can import it without taking a dependency on gRPC.
+//
+// The refusal carries no reason: which clause refused is deliberately not observable
+// (fail-closed, no oracle). Locked by TestProxyTupleRefusalMapsToPermissionDenied.
+func validateProxyTuple(callerDomain, subject, relation, object string) error {
+	if err := proxytuple.ValidateTuple(callerDomain, subject, relation, object); err != nil {
+		return status.Error(codes.PermissionDenied, "permission denied")
+	}
+	return nil
+}
+
 func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (*iamv1.RegisterResourceResponse, error) {
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := authzguard.ValidateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
 		return nil, err
 	}
 	if h.registrar == nil {
@@ -197,7 +213,7 @@ func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterR
 	if err != nil {
 		return nil, err
 	}
-	if err := authzguard.ValidateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
 		return nil, err
 	}
 	if h.registrar == nil {
@@ -250,7 +266,7 @@ func (h *Handler) WriteCreatorTuple(ctx context.Context, req *iamv1.WriteCreator
 	// Least-privilege guard: creator-tuple must be an owner-hierarchy relation on
 	// an object of the caller's own domain — never a privilege relation or a
 	// cluster/iam object (otherwise a module SA could mint cluster-admin).
-	if err := authzguard.ValidateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
 		return nil, err
 	}
 	if h.relations == nil {
