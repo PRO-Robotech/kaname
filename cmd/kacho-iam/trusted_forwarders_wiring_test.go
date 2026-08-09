@@ -34,12 +34,12 @@ var unconditionalExtract = regexp.MustCompile(`grpcsrv\.(Unary|Stream)PrincipalE
 // ложное падение.
 var identityBuilderCall = regexp.MustCompile(`(?s)\bidentity(Unary|Stream)\(\s*cfg\s*\)`)
 
-// forwardersArg — то, ЧТО уезжает в corelib как allow-list. Ищем все вхождения, а
-// не первое: одного вызова с литералом достаточно, чтобы круг снова не сужался.
-// Аргумент сам содержит скобки (`cfg.AuthN.TrustedForwarders()...`), поэтому
-// класс «что угодно, кроме скобки» здесь не годится — берём нежадное совпадение
-// до многоточия.
-var forwardersArg = regexp.MustCompile(`WithTrustedForwarders\(\s*(.*?)\s*\.\.\.\s*\)`)
+// forwardersArg — то, ЧТО уезжает в общий конструктор пары как круг отправителей.
+// Ищем все вхождения, а не первое: одного вызова с литералом достаточно, чтобы
+// круг снова не сужался. Аргумент сам содержит скобки
+// (`cfg.AuthN.TrustedForwarders()`), поэтому класс «что угодно, кроме скобки»
+// здесь не годится — берём нежадное совпадение до закрывающей скобки строки.
+var forwardersArg = regexp.MustCompile(`(?m)grpcsrv\.PrincipalExtract(?:Unary|Stream)\(\s*(.*?)\s*\)\s*$`)
 
 // chainAssign — ЛЮБОЕ присваивание переменной, которая уезжает в листенер.
 // Оператор захватывается отдельной группой: `:=` — заведение, `=` — дополнение,
@@ -104,8 +104,9 @@ func TestServe_ForwarderAllowListComesFromConfig(t *testing.T) {
 
 	all := forwardersArg.FindAllStringSubmatch(src, -1)
 	if len(all) == 0 {
-		t.Fatal("serve.go: WithTrustedForwarders не вызывается вовсе — круг отправителей " +
-			"чужой личности ничем не сужается")
+		t.Fatal("serve.go: пара извлечения личности не собирается общим конструктором " +
+			"grpcsrv.PrincipalExtract* — круг отправителей чужой личности ничем не сужается " +
+			"(либо страж перестал читать проводку и его надо обновить вместе с ней)")
 	}
 	for _, m := range all {
 		arg := strings.TrimSpace(m[1])
@@ -115,25 +116,27 @@ func TestServe_ForwarderAllowListComesFromConfig(t *testing.T) {
 	}
 }
 
-// TestServe_IdentityChainOrdersCertBeforePrincipal — контракт порядка: сначала
-// классифицируется транспорт и снимается личность сертификата, и только потом
-// принимается переданная личность. Обратный порядок оставил бы решение о доверии
-// без входных данных.
-func TestServe_IdentityChainOrdersCertBeforePrincipal(t *testing.T) {
+// TestServe_IdentityChainComesFromTheSharedConstructor — пара извлечения личности
+// обязана приезжать у ОБЩЕГО конструктора, а не пересобираться здесь.
+//
+// Раньше на этом месте стоял контракт порядка («сначала личность сертификата,
+// потом переданная»), проверяемый по позициям строк в исходнике. Порядок теперь
+// держит сам конструктор, и он заперт исходом в pkg/grpcsrv
+// (TestPrincipalExtractPairOrderIsLoadBearing: перевёрнутая пара доказательно
+// теряет личность). Текстовая проверка позиций на его месте была бы вторым местом
+// об одном предмете — и именно она устарела бы молча, когда конструктор поменяют.
+// Здесь остаётся то, что конструктор гарантировать не может: что его позвали.
+func TestServe_IdentityChainComesFromTheSharedConstructor(t *testing.T) {
 	src := serveSrc(t)
-	for _, pair := range [][2]string{
-		{"grpcsrv.UnaryCertIdentityExtract()", "grpcsrv.UnaryTrustedPrincipalExtract("},
-		{"grpcsrv.StreamCertIdentityExtract()", "grpcsrv.StreamTrustedPrincipalExtract("},
-	} {
-		bi, ai := strings.Index(src, pair[0]), strings.Index(src, pair[1])
-		if bi < 0 {
-			t.Fatalf("serve.go: %q отсутствует", pair[0])
+	for _, want := range []string{"grpcsrv.PrincipalExtractUnary(", "grpcsrv.PrincipalExtractStream("} {
+		if !strings.Contains(src, want) {
+			t.Errorf("serve.go: %q отсутствует — пара извлечения личности собирается мимо общего конструктора", want)
 		}
-		if ai < 0 {
-			t.Fatalf("serve.go: %q отсутствует", pair[1])
-		}
-		if bi >= ai {
-			t.Fatalf("serve.go: %q обязан идти до %q", pair[0], pair[1])
+	}
+	for _, manual := range []string{"grpcsrv.UnaryTrustedPrincipalExtract(", "grpcsrv.StreamTrustedPrincipalExtract("} {
+		if strings.Contains(src, manual) {
+			t.Errorf("serve.go: пара пересобирается вручную (%s) — её полнота и порядок снова "+
+				"держатся текстом, а не конструкцией", manual)
 		}
 	}
 }

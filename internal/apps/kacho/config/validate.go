@@ -138,15 +138,16 @@ func (c Config) validateProductionBootstrapMint() error {
 // accounts, projects, groups, roles and grants, and mint personal tokens and
 // service-account keys, as the named victim.
 //
-// The result of TrustedForwarders() is checked, not the raw field length: blank
-// entries are dropped in the very place the narrowing happens, so `SANS=","`
-// must not pass the guard and hand back the hole.
+// The guard asks the SAME object and the SAME predicate the wiring and the
+// self-report ask (grpcsrv.TrustedForwarders.IsNarrowed), not the raw field
+// length: blank entries are dropped in the very place the narrowing happens, so
+// `SANS=","` must not pass the guard and hand back the hole.
 //
 // dev deliberately tolerates empty (in-process fixtures) — and only there: on a
 // DEPLOYED stand the dev posture is forbidden by a separate rule
 // (production-mode EVERYWHERE).
 func (c Config) validateProductionTrustedForwarders() error {
-	if len(c.AuthN.TrustedForwarders()) > 0 {
+	if c.AuthN.TrustedForwarders().IsNarrowed() {
 		return nil
 	}
 	return fmt.Errorf(

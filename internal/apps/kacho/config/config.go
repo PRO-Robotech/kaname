@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
 // Config — root configuration struct for kacho-iam.
@@ -202,35 +204,21 @@ type AuthNConfig struct {
 	TrustedForwarderSANs []string `mapstructure:"trusted-forwarder-sans"`
 }
 
-// TrustedForwarders — the certificate identities that REALLY reach
+// TrustedForwarders — the circle of senders that REALLY reaches
 // grpcsrv.WithTrustedForwarders on both listeners.
 //
-// Single source of this value per process: the wiring
-// (cmd/kacho-iam/serve.go), the boot guard (validateProductionTrustedForwarders)
-// and the boot self-report (cmd/kacho-iam/bootposture.go) all read this one
-// accessor. So "the guard passed" ⟺ "the circle is really narrowed" — by
-// construction, not by coincidence.
+// Single source of this value per process: the wiring (cmd/kacho-iam/serve.go),
+// the boot guard (validateProductionTrustedForwarders) and the boot self-report
+// (cmd/kacho-iam/bootposture.go) all read this one object and ask its ONE
+// predicate. So "the guard passed" ⟺ "the circle is really narrowed" — by
+// construction, not by three separately written bodies happening to agree.
 //
-// Blank entries are dropped because corelib drops them too
-// (WithTrustedForwarders keeps only s != ""): a list of blank strings
-// (`SANS=","`) degenerates there into the empty set, i.e. back to "trust
-// anybody". Counting such a list as filled would let the hole through the guard.
-//
-// Surrounding whitespace is trimmed — deliberately NOT mirroring corelib, which
-// compares the SAN byte-for-byte (CertIdentity returns it verbatim), so an entry
-// " spiffe://…" would match no certificate there. Without the trim an operator
-// who wrote the list as "comma-space" would get a silent denial of service to a
-// legitimate sender instead of a boot refusal. The circle is not widened by
-// this: exactly the strings the operator listed get in — only the surrounding
-// spaces are removed.
-func (a AuthNConfig) TrustedForwarders() []string {
-	out := make([]string, 0, len(a.TrustedForwarderSANs))
-	for _, san := range a.TrustedForwarderSANs {
-		if s := strings.TrimSpace(san); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
+// Normalisation of the circle (blank entries, surrounding whitespace,
+// duplicates) lives in the type's constructor and is not restated here: two
+// places about one subject drift apart silently. See
+// grpcsrv.NewTrustedForwarders.
+func (a AuthNConfig) TrustedForwarders() grpcsrv.TrustedForwarders {
+	return grpcsrv.NewTrustedForwarders(a.TrustedForwarderSANs...)
 }
 
 // BootstrapMintConfig — authn.bootstrap-mint section: the non-interactive

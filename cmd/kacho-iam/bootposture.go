@@ -41,6 +41,6 @@ func bootPosture(cfg config.Config, mtlsCfg config.MTLSConfig, authzCheckWired b
 		PublicMTLS:        mtlsCfg.PublicServerMTLS.Enable,
 		InternalMTLS:      mtlsCfg.InternalServerMTLS.Enable,
 		AuthZCheck:        authzCheckWired,
-		TrustedForwarders: len(cfg.AuthN.TrustedForwarders()) > 0,
+		TrustedForwarders: cfg.AuthN.TrustedForwarders().IsNarrowed(),
 	}
 }

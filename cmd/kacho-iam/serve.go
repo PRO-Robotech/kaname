@@ -1149,19 +1149,11 @@ func runServe(cfg config.Config) error {
 // решают пер-RPC политики вызывающего (authzguard.PublicCallerPolicy на :9090,
 // authzguard.CallerPolicy на :9091) — это ортогональный, второй слой.
 func identityUnary(cfg config.Config) []grpc.UnaryServerInterceptor {
-	return []grpc.UnaryServerInterceptor{
-		grpcsrv.UnaryCertIdentityExtract(),
-		grpcsrv.UnaryTrustedPrincipalExtract(
-			grpcsrv.WithTrustedForwarders(cfg.AuthN.TrustedForwarders()...)),
-	}
+	return grpcsrv.PrincipalExtractUnary(cfg.AuthN.TrustedForwarders())
 }
 
 func identityStream(cfg config.Config) []grpc.StreamServerInterceptor {
-	return []grpc.StreamServerInterceptor{
-		grpcsrv.StreamCertIdentityExtract(),
-		grpcsrv.StreamTrustedPrincipalExtract(
-			grpcsrv.WithTrustedForwarders(cfg.AuthN.TrustedForwarders()...)),
-	}
+	return grpcsrv.PrincipalExtractStream(cfg.AuthN.TrustedForwarders())
 }
 
 // requireRegistryTokenTLS — слушатель docker-token (`/iam/token`, :9096) в

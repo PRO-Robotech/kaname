@@ -50,7 +50,7 @@ func forwarderCfg(mode config.Mode, sans ...string) config.Config {
 // стража пропустит дыру.
 func TestTrustedForwarders_DropsBlankEntries(t *testing.T) {
 	cfg := forwarderCfg(config.ModeProduction, "", "  ", "\t")
-	if got := cfg.AuthN.TrustedForwarders(); len(got) != 0 {
+	if got := cfg.AuthN.TrustedForwarders(); got.IsNarrowed() {
 		t.Fatalf("blank-only list resolved to %v — corelib drops empty strings, so the circle stays open", got)
 	}
 }
@@ -62,7 +62,7 @@ func TestTrustedForwarders_DropsBlankEntries(t *testing.T) {
 // него попадают ровно перечисленные строки.
 func TestTrustedForwarders_TrimsSurroundingSpace(t *testing.T) {
 	cfg := forwarderCfg(config.ModeProduction, " "+gatewaySAN+" ")
-	got := cfg.AuthN.TrustedForwarders()
+	got := cfg.AuthN.TrustedForwarders().SANs()
 	if len(got) != 1 || got[0] != gatewaySAN {
 		t.Fatalf("TrustedForwarders() = %#v, want exactly [%q]", got, gatewaySAN)
 	}
