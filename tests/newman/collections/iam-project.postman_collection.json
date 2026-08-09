@@ -5209,7 +5209,23 @@
                   "pm.environment.unset('_pollStarted');",
                   "if (j.response && j.response.id && !pm.environment.get('lsopPrjId')) {",
                   "  pm.environment.set('lsopPrjId', j.response.id);",
-                  "}"
+                  "}",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('operation done', function () {",
+                  "    pm.expect(_po.done, JSON.stringify(_po)).to.eql(true);",
+                  "  });",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('lsopPrjId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom lsopPrjId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }

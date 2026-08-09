@@ -1595,6 +1595,252 @@ def _assert_delete_operation_outcome(steps: List[Step]) -> List[Step]:
     return out
 
 
+def _js_code_and_literals(src: str):
+    """Разложить скрипт на ИСПОЛНЯЕМУЮ часть и значения строковых литералов.
+
+    Комментарии снимаются, каждый строковый литерал заменяется меткой `@S<k>@`, а
+    его значение уходит в список под индексом `k`. Так решение о публикации
+    принимается по коду (текст внутри литерала им не является — иначе
+    `pm.test('has metadata', …)` сошло бы за захват идентификатора), а ИМЯ
+    переменной окружения всё-таки читается: в скелете, где содержимое литералов
+    погашено, его бы уже не было.
+
+    Разбор один на обе надобности намеренно: два разборщика расходятся молча и
+    расходятся там, где расхождение не видно.
+    """
+    out, lits, i, n = [], [], 0, len(src)
+    while i < n:
+        ch, nxt = src[i], (src[i + 1] if i + 1 < n else "")
+        if ch == "/" and nxt == "/":
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            i += 2
+            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
+                if src[i] == "\n":
+                    out.append("\n")
+                i += 1
+            i += 2
+            continue
+        if ch in ("'", '"', "`"):
+            q, j, buf = ch, i + 1, []
+            while j < n:
+                if src[j] == "\\" and j + 1 < n:
+                    buf.append(src[j + 1]); j += 2; continue
+                if src[j] == q:
+                    break
+                buf.append(src[j]); j += 1
+            out.append("@S%d@" % len(lits))
+            lits.append("".join(buf))
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), lits
+
+
+_PUB_SET_RE = re.compile(r"pm\.environment\.set\(\s*@S(\d+)@\s*,")
+_PUB_BIND_RE = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=")
+
+
+def _published_resource_vars(src: str, op_var: str) -> List[str]:
+    """Имена окружения, которым шаг присваивает значение ИЗ `metadata` операции.
+
+    Одного вхождения слова `metadata` в скрипт мало: один и тот же шаг захватывает
+    и идентификатор ОПЕРАЦИИ (`j.id`), и идентификатор РЕСУРСА
+    (`j.metadata.<res>Id`), причём оба — через локальную `const v` в СВОЁМ блоке
+    (`save_from_response`). Без учёта области видимости ручка операции сошла бы за
+    координату ресурса, и проход дописывал бы защиту там, где публиковать нечего.
+
+    `op_var` — имя, которым цепочка адресует саму операцию (берётся из адреса
+    опроса). Оно исключается: это ручка, а не координата ресурса.
+    """
+    code, lits = _js_code_and_literals(src)
+    depth, cur = [0] * (len(code) + 1), 0
+    for i, ch in enumerate(code):
+        depth[i] = cur
+        if ch == "{":
+            cur += 1
+        elif ch == "}":
+            cur -= 1
+    depth[len(code)] = cur
+
+    binds = []  # (offset, depth, name, derived)
+
+    def visible(at: int, expr: str) -> bool:
+        for off, d, name, derived in binds:
+            if off >= at or not derived:
+                continue
+            if any(depth[k] < d for k in range(off, at)):
+                continue  # блок объявления уже закрыт — имя не видно
+            if re.search(r"\b" + re.escape(name) + r"\b", expr):
+                return True
+        return False
+
+    for m in _PUB_BIND_RE.finditer(code):
+        semi = code.find(";", m.end())
+        expr = code[m.end():semi if semi >= 0 else len(code)]
+        binds.append((m.start(), depth[m.start()], m.group(1),
+                      "metadata" in expr or visible(m.start(), expr)))
+
+    def arg_tail(pos: int) -> str:
+        lvl = 1
+        for k in range(pos, len(code)):
+            if code[k] == "(":
+                lvl += 1
+            elif code[k] == ")":
+                lvl -= 1
+                if lvl == 0:
+                    return code[pos:k]
+        return code[pos:]
+
+    names: List[str] = []
+    for m in _PUB_SET_RE.finditer(code):
+        name = lits[int(m.group(1))]
+        if not name or name == op_var or name in names:
+            continue
+        expr = arg_tail(m.end())
+        if "metadata" in expr or visible(m.start(), expr):
+            names.append(name)
+    return sorted(names)
+
+
+def _published_id_outcome_assert(names: List[str], need_done: bool,
+                                 need_assert: bool = True) -> List[str]:
+    """Снятие фантомного идентификатора и (по надобности) утверждение об ИСХОДЕ.
+
+    Дописывается в КОНЕЦ скрипта: у опроса есть ранние выходы — «поллить нечего»
+    (мутация отвергнута синхронно), «ответ не 200» и «ещё не done, повторяем».
+    Дописанное в конец исполняется ровно тогда, когда исход уже известен.
+
+    СНЯТИЕ ИМЕНИ НУЖНО ДАЖЕ ТАМ, ГДЕ ИСХОД УЖЕ УТВЕРЖДЁН. newman не прекращает
+    кейс на упавшем утверждении: без снятия фантомный идентификатор всё равно
+    уезжает в следующие шаги, и к настоящей находке добавляется каскад чужих
+    отказов вокруг несуществующего объекта. Поэтому `need_assert=False` — форма
+    для синхронной операции, чей шаг сам назвал исход: утверждать второй раз
+    нечего, а снимать — надо.
+
+    На успешной операции ветка не берётся вовсе: зелёный прогон эта правка не
+    меняет ничем.
+
+    Носитель ответа читается ЗАНОВО (`_po`), а не переиспользуется: имя переменной
+    у каждого поллера своё, и опираться на него значило бы связать проход с формой.
+    """
+    lines = [
+        "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+        "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+        "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+        "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+        "(function () {",
+        "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+    ]
+    if need_done:
+        lines += [
+            "  pm.test('operation done', function () {",
+            "    pm.expect(_po.done, JSON.stringify(_po)).to.eql(true);",
+            "  });",
+        ]
+    lines += ["  if (_po.error) {"]
+    lines += ["    pm.environment.unset('%s');" % v for v in names]
+    lines += ["  }"]
+    if need_assert:
+        lines += [
+            "  pm.test('operation succeeded (no phantom %s)', function () {" % ", ".join(names),
+            "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error')"
+            ".to.eql(undefined);",
+            "  });",
+        ]
+    lines += ["})();"]
+    return lines
+
+
+def _assigns_env_var(src: str, name: str) -> bool:
+    """Шаг ПРИСВАИВАЕТ это имя окружения (любым значением, включая сброс в пустое)."""
+    code, lits = _js_code_and_literals(src)
+    return any(lits[int(m.group(1))] == name for m in _PUB_SET_RE.finditer(code))
+
+
+def _assert_published_id_outcome(steps: List[Step]) -> List[Step]:
+    """Опубликовал идентификатор ресурса из metadata — назови ИСХОД операции.
+
+    Операция несёт предвыделенный идентификатор в `metadata` ДАЖЕ когда завершилась
+    ошибкой: он чеканится до того, как отработает воркер. Шаг, сохранивший
+    `metadata.<res>Id`, и опрос, утверждающий только `done`, вместе публикуют
+    координату ресурса, которого нет, — `done` у провалившейся операции такой же
+    `true`. Дальше по этой координате идут привязки прав (край отвечает успехом) и
+    межсервисные запросы (владелец отвечает «не найдено»), и падает не тот шаг,
+    который ошибся: симптом к причине отношения не имеет.
+
+    Ставится ПО СВОЙСТВУ шага, а не по перечню имён: ручная пометка неотличима от
+    решения не помечать, и класс возвращался ровно так — закрыт в одном кейсе,
+    через несколько часов проявился в соседнем.
+
+    ОПРОС ПРИНАДЛЕЖИТ ТОМУ, ЧЬЮ ОПЕРАЦИЮ ЧИТАЕТ, а не просто предыдущей мутации.
+    Между созданием и его опросом законно стоит другая мутация — отмена той же
+    операции (`/operations/{{opId}}:cancel`), — и правило «последняя мутация»
+    отдало бы опрос ей, оставив создание без единого читателя исхода. Поэтому
+    опрос отходит ближайшей предшествующей мутации, которая ПРИСВАИВАЕТ имя,
+    стоящее в адресе опроса; если такой нет — ближайшей предшествующей мутации.
+
+    Вопрос задаётся ОДИН НА ЦЕПОЧКУ: если исход называет сам шаг мутации (так
+    устроена синхронная операция без опроса вовсе) или ЛЮБОЙ её опрос — успехом
+    или отказом, — дописывать нечего. Иначе проход дописал бы «операция успешна»
+    кейсу, чей ПРЕДМЕТ — отказ операции, и кейс утверждал бы обе взаимоисключающие
+    вещи разом.
+
+    Держит свойство по дереву гейт `internal/repohygiene`
+    `TestPublishedResourceIdIsGuardedByOperationOutcome` — он читает
+    СГЕНЕРИРОВАННЫЕ коллекции, поэтому правка мимо генератора его не обходит.
+    """
+    out = list(steps)
+    muts = [i for i, st in enumerate(out)
+            if st.method in _MUTATION_METHODS and not _OP_POLL_PATH.search(st.path)]
+    chains = {i: [] for i in muts}
+    for idx, st in enumerate(out):
+        if st.method != "GET":
+            continue
+        m = _OP_POLL_PATH.search(st.path)
+        if not m:
+            continue
+        owner = None
+        for i in muts:
+            if i >= idx:
+                break
+            if _assigns_env_var("\n".join(out[i].test_script), m.group(1)):
+                owner = i
+        if owner is None:
+            owner = max((i for i in muts if i < idx), default=None)
+        if owner is not None:
+            chains[owner].append(idx)
+    for sidx, polls in chains.items():
+        if not polls:
+            continue  # операцию никто не опрашивает — вписать утверждение некуда
+        op_var = "opId"
+        for k in polls:
+            m = _OP_POLL_PATH.search(out[k].path)
+            if m:
+                op_var = m.group(1)
+        own = "\n".join(out[sidx].test_script)
+        names = _published_resource_vars(own, op_var)
+        if not names:
+            continue
+        if _asserts_outcome(_strip_js_comments(own)):
+            # Исход назван самой мутацией — так устроена СИНХРОННАЯ операция
+            # (`done:true` в ответе, опрашивать нечего). Утверждать второй раз
+            # нечего, но снять опубликованное имя на ошибке всё равно надо.
+            out[sidx] = replace(out[sidx], test_script=list(out[sidx].test_script)
+                                + _published_id_outcome_assert(names, False, need_assert=False))
+            continue
+        code = "\n".join(_strip_js_comments("\n".join(out[k].test_script)) for k in polls)
+        if _asserts_outcome(code):
+            continue
+        k = polls[0]
+        out[k] = replace(out[k], test_script=list(out[k].test_script)
+                         + _published_id_outcome_assert(names, not _asserts_done(code)))
+    return out
+
+
 def step_to_postman(step: Step) -> Dict:
     item: Dict = {
         "name": step.name,
@@ -1757,8 +2003,9 @@ def case_to_postman(case: Case) -> Dict:
     # обработкой имён: `rename=False` — iam сам делает имена глобально
     # уникальными (`<case-id> :: <шаг>`) и переписывает буквальные переходы
     # по БАЗОВЫМ именам, поэтому переименование обёрткой сломало бы резолв.
-    case = replace(case, steps=_assert_delete_operation_outcome(
-        _wrap_own_fresh_reads(case.steps, rename=False)))
+    case = replace(case, steps=_assert_published_id_outcome(
+        _assert_delete_operation_outcome(
+            _wrap_own_fresh_reads(case.steps, rename=False))))
     tags = [f"class:{c}" for c in case.classes] + [f"priority:{case.priority}"]
 
     # HARNESS FIX: step names MUST be globally UNIQUE across the whole collection.
