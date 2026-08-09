@@ -210,6 +210,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// fga_outbox enqueue + async drainer remain the at-least-once backstop (idempotent
 		// re-apply). relationStore is always non-nil here (composition root fails fast).
 		WithSyncFGA(kachopg.NewSyncFGAWriter(relationStore, logger))
+	if metricsReg != nil {
+		// Размер материализации привязки — измерение, не потолок. Он ничего не
+		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
+		// назначенный до замера, либо отвергнет законную выдачу, либо не отвергнет
+		// ничего, оставаясь на вид контролем.
+		rsabReconciler = rsabReconciler.WithSizeRecorder(metricsReg.NewBindingMaterializationRecorder())
+	}
 
 	// AccountService.
 	accountCreate := accountapp.NewCreateAccountUseCase(kachoRepo, opsRepo).

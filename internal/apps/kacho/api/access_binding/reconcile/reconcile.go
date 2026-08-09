@@ -356,6 +356,23 @@ type Reconciler struct {
 	// async drain of the SAME rows is an idempotent no-op (WriteTuples treats
 	// already_exists as applied).
 	syncFGA SyncFGAWriter
+	// size — OPTIONAL recorder of how big one binding's materialization is. nil ⇒ the
+	// observation is a no-op; the pass itself does not depend on it.
+	size SizeRecorder
+}
+
+// SizeRecorder receives the SIZE of one binding's desired set: how many objects its
+// selectors matched, and how many tuples those objects produce.
+//
+// A grant below the three cascading levels expands PER OBJECT, so its cost is «matched
+// objects × the verbs of the rule». Nothing counted that expansion, which left «this
+// grant grew large» indistinguishable from «this grant is ordinary» — and the
+// difference surfaces not where the grant is issued but later, on somebody else's
+// request, along a path that never mentions the binding. No ceiling is enforced here:
+// the reachable size has not been measured, and a limit chosen before the measurement
+// either refuses legitimate grants or refuses nothing while looking like a control.
+type SizeRecorder interface {
+	ObserveBindingMaterialization(objects, tuples int)
 }
 
 // SyncFGAWriter — the narrow direct-apply port the reconciler uses to close the
@@ -401,6 +418,33 @@ func New(tx TxRunner, logger *slog.Logger) *Reconciler {
 func (r *Reconciler) WithSyncFGA(w SyncFGAWriter) *Reconciler {
 	r.syncFGA = w
 	return r
+}
+
+// WithSizeRecorder wires the OPTIONAL materialization-size recorder. nil-safe: an
+// unwired recorder leaves the pass byte-identical, it only stops being measured.
+func (r *Reconciler) WithSizeRecorder(rec SizeRecorder) *Reconciler {
+	r.size = rec
+	return r
+}
+
+// observeSize reports the size of a binding's desired set. Objects are counted as
+// DISTINCT (type, id): the same object matched by two rules of one role is two members
+// but ONE object, and counting members instead would inflate the object figure by the
+// rule count, which the tuple figure already carries.
+//
+// A pass that matched nothing is reported as zero rather than skipped — a selector that
+// stopped matching would otherwise look exactly like a binding nobody reconciles.
+func (r *Reconciler) observeSize(desired []DesiredMember) {
+	if r.size == nil {
+		return
+	}
+	objects := make(map[string]struct{}, len(desired))
+	tuples := 0
+	for _, d := range desired {
+		objects[d.ObjectType+":"+d.ObjectID] = struct{}{}
+		tuples += len(d.Tuples)
+	}
+	r.size.ObserveBindingMaterialization(len(objects), tuples)
 }
 
 // syncFGACollector accumulates, across a single reconcile pass, the per-object tuples a
@@ -795,6 +839,11 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 	if err != nil {
 		return err
 	}
+	// Размер материализации привязки — до диффа: величина относится к тому, что
+	// привязка ТРЕБУЕТ, а не к тому, сколько строк изменилось в этом проходе.
+	// Иначе повторный проход по неизменившейся привязке докладывал бы ноль, и
+	// «крупная привязка» стала бы неотличима от «привязка ничего не материализует».
+	r.observeSize(desired)
 
 	current, err := s.CurrentMembers(ctx, bindingID)
 	if err != nil {
