@@ -15,8 +15,25 @@ this suite exists to keep true:
     Exactly one direct path stays legitimate: the final standard client-assertion →
     token exchange.
 
-Four lanes and one exception, therefore four positive lanes and the negatives that
-make each of them mean something:
+Four lanes and one exception. THREE of them are probed here; the fourth — the
+docker lane, IBT-14 — lives in the registry suite
+(`services/registry/tests/newman/cases/registry-docker-facade-lane.py`) and is
+named here so the rule is not read as three-quarters covered:
+
+    Every lane below dials CORE only — api-gateway, iam, the signing provider —
+    and every stand carries those. The docker lane dials the registry DATA PLANE,
+    a shard-gated component that `deploy/e2e-shards.json` deploys on the `edge`
+    shard alone; the iam suite runs on the shard that deliberately removes it.
+    Written here, that lane asked for a service its own runner does not deploy —
+    and the shape it took was worse than a red case: the runner opened the
+    port-forward unconditionally, a forward to a service that is not there exits,
+    and the run was declared INVALID before the first suite started (four shards
+    of five, `0/16 collections`, run 31344367968). It now lives with its subject.
+    The pairing is asserted, not remembered: `deploy/scripts/assert-shard-coverage.py`
+    check 9 requires that a suite dialling a component transport runs only on
+    shards declaring that component.
+
+Three lanes and the negatives that make each of them mean something:
 
   verification  IBT-04 — the Bearer the edge accepts is verified by key material the
                          FACADE serves (its `kid` is in iam's JWKS), and the edge
@@ -30,9 +47,6 @@ make each of them mean something:
                          is the one iam's token-hook stamped into its claims. Without
                          the hook the `sub` is a raw OAuth client id and resolves to
                          nothing.
-  docker token  IBT-14 — the data-plane's own WWW-Authenticate challenge names the
-                         FACADE handle (`/iam/token`), not the provider's
-                         `/oauth2/token`; and that handle is a live gate, not a hole.
   negatives     IBT-06 — the bootstrap mint has no REST door on any api-gateway listener.
                 IBT-15 — the provider's own surfaces (admin client registration, token
                          endpoint, JWKS) are not reachable through the platform edge,
@@ -100,11 +114,17 @@ Bearer is accepted therefore already witnesses the exception working.
 
 HOW THE PROBES REACH WHAT THEY PROBE
 ====================================
-Four endpoints of this stand are not the api-gateway and are addressed through their
+Two endpoints of this stand are not the api-gateway and are addressed through their
 own base-URL variables, injected by the newman runner (`--env-var`) exactly like
 `internalBaseUrl`. A missing variable is a BROKEN HARNESS, never a legal mode:
 `require_env_url` fails naming the variable and only then skips, so losing one turns
 the suite RED instead of silently deleting a lane.
+
+Both belong to CORE, which is why they are addressable on every shard. The two
+addresses of the docker lane (iam's :9096 handle and the registry data plane)
+moved out with IBT-14 and are declared by the registry suite instead — the second
+of them reaches a shard-gated component, and that is precisely why the lane could
+not stay here.
 
   {{iamJwksBaseUrl}}          iam JWKS-proxy listener (:9097). Cluster-internal,
                               server-TLS with an internal-CA leaf → the steps carry
@@ -115,9 +135,6 @@ the suite RED instead of silently deleting a lane.
                               is the one place a direct provider read is legitimate,
                               and it is legitimate because it is the measurement, not
                               a client path.
-  {{iamRegistryTokenBaseUrl}} iam docker-token handle listener (:9096), server-TLS.
-  {{registryDataPlaneBaseUrl}} the registry data plane (:8080), whose challenge must
-                              name the facade handle.
 
 Idempotence: every fixture this file creates carries `{{runId}}` in its name and is
 torn down by the case that made it (SA created → key issued → key revoked → SA
@@ -689,135 +706,6 @@ CASES.append(Case(
                 "  pm.expect(_j.subject, JSON.stringify(_j)).to.match(/^(user|service_account):(usr|sva)[a-z0-9-]+$/);",
                 "});",
                 *assert_created_at_seconds("pm.response.json().checkedAt"),
-            ],
-        ),
-    ],
-))
-
-
-# ===========================================================================
-# IBT-14 — the docker lane is addressed at the FACADE handle.
-#
-# A docker client never chooses its token server: it follows the `realm` in the
-# data plane's WWW-Authenticate challenge. So the black-box statement of "the
-# docker token goes through iam's handle" is exactly: the challenge names the
-# handle, and the handle is a live gate at that address.
-#
-# The negative half is the point. A challenge naming the provider's `/oauth2/token`
-# would route every docker client around the facade — with no error anywhere, since
-# the provider would happily answer.
-# ===========================================================================
-
-CASES.append(Case(
-    id="IBT-14-DOCKER-CHALLENGE-NAMES-THE-FACADE-HANDLE",
-    title="Registry data-plane 401 challenge advertises the iam /iam/token handle (never the provider token endpoint), and that handle is a live gate",
-    classes=["SEC", "CONF", "NEG"],
-    priority="P0",
-    steps=[
-        Step(
-            name="dataplane-anonymous-challenge",
-            method="GET",
-            path="/v2/",
-            auth="anonymous",
-            pre_script=require_env_url(
-                "registryDataPlaneBaseUrl", "/v2/",
-                "docker lane — the challenge a docker client actually follows"),
-            test_script=[
-                *assert_answered("registry data-plane challenge"),
-                "pm.test('anonymous /v2/ is challenged with 401 (a 200 here would mean the data '",
-                "  + 'plane needs no token at all)', () => pm.expect(pm.response.code, pm.response.text()).to.eql(401));",
-                "const _wa = pm.response.headers.get('WWW-Authenticate') || '';",
-                "pm.test('the challenge is a Bearer token-auth challenge', () => {",
-                "  pm.expect(_wa, 'WWW-Authenticate header').to.match(/^Bearer /);",
-                "  pm.expect(_wa, _wa).to.match(/service=\"[^\"]+\"/);",
-                "});",
-                "const _m = _wa.match(/realm=\"([^\"]+)\"/);",
-                "pm.test('the challenge names a realm', () => pm.expect(_m && _m[1], _wa).to.be.a('string'));",
-                "const _realm = (_m && _m[1]) || '';",
-                "const _path = _realm.replace(/^[a-z]+:\\/\\/[^/]+/i, '');",
-                "pm.test('the realm PATH is the facade docker-token handle', () => {",
-                "  pm.expect(_path, 'realm ' + _realm + ' — the docker client follows this address; "
-                "it must be iam\\'s handle').to.eql('/iam/token');",
-                "});",
-                "pm.test('the realm is NOT the provider token endpoint (that would route every '",
-                "  + 'docker client around the facade, silently)', () => {",
-                "  pm.expect(_realm.toLowerCase(), _realm).to.not.contain('/oauth2/');",
-                "});",
-                "pm.environment.set('ibtRealmPath', _path);",
-            ],
-        ),
-        Step(
-            name="facade-token-handle-is-a-gate",
-            method="GET",
-            path="/iam/token?service=registry.kacho.local&scope=repository:ibt/{{runId}}:pull",
-            auth="anonymous",
-            insecure_tls=True,
-            pre_script=require_env_url(
-                "iamRegistryTokenBaseUrl",
-                "/iam/token?service=registry.kacho.local&scope=repository:ibt/{{runId}}:pull",
-                "docker lane — the facade handle the challenge points at"),
-            test_script=[
-                *assert_answered("facade docker-token handle"),
-                # 401 and not 404 is the whole assertion: 404 would mean the handle the
-                # data plane advertises is not served at that address at all, and every
-                # docker client would fail with a confusing "not found" instead of a
-                # credential prompt.
-                "pm.test('the handle EXISTS and refuses an anonymous caller (404 = advertised but '",
-                "  + 'not served; 200 = anonymous issuance)', () => pm.expect(pm.response.code, pm.response.text()).to.eql(401));",
-                "const _wa = pm.response.headers.get('WWW-Authenticate') || '';",
-                "pm.test('the handle re-challenges with its own realm, and it is the same handle', () => {",
-                "  const m = _wa.match(/realm=\"([^\"]+)\"/);",
-                "  pm.expect(m && m[1], _wa).to.be.a('string');",
-                "  const p = (m && m[1] || '').replace(/^[a-z]+:\\/\\/[^/]+/i, '');",
-                "  pm.expect(p, 'the facade advertises ' + p + ' while the data plane advertises '",
-                "    + pm.environment.get('ibtRealmPath')).to.eql(pm.environment.get('ibtRealmPath'));",
-                "});",
-            ],
-        ),
-        Step(
-            name="facade-token-handle-rejects-garbage-credentials",
-            method="GET",
-            path="/iam/token?service=registry.kacho.local&scope=repository:ibt/{{runId}}:pull",
-            auth="anonymous",
-            insecure_tls=True,
-            pre_script=require_env_url(
-                "iamRegistryTokenBaseUrl",
-                "/iam/token?service=registry.kacho.local&scope=repository:ibt/{{runId}}:pull",
-                "docker lane — the handle must verify credentials, not merely accept them") + [
-                # Deliberately unmistakable as a real credential: a plausible-looking one
-                # would make a passing substitution indistinguishable from a correct flow
-                # ([[realistic-fixture-hides-the-defect-it-feeds]]).
-                "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' +",
-                "  CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
-                "    'ibt-not-a-real-key:ibt-not-a-real-secret'))});",
-            ],
-            test_script=[
-                *assert_answered("facade docker-token handle, garbage credentials"),
-                "pm.test('unverifiable credentials are refused, never brokered into a token',",
-                "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(401));",
-                "pm.test('no token was handed out', () => {",
-                "  let j = null; try { j = pm.response.json(); } catch (e) { j = null; }",
-                "  pm.expect(j && j.token, JSON.stringify(j)).to.be.oneOf([undefined, null]);",
-                "});",
-            ],
-        ),
-        Step(
-            name="facade-token-listener-serves-only-its-handle",
-            method="GET",
-            path="/ibt-nonsense-{{runId}}",
-            auth="anonymous",
-            insecure_tls=True,
-            pre_script=require_env_url(
-                "iamRegistryTokenBaseUrl", "/ibt-nonsense-{{runId}}",
-                "docker lane — control proving the 401s above are the HANDLE answering, "
-                "not a listener that refuses everything"),
-            test_script=[
-                *assert_answered("facade token listener, nonsense path"),
-                # Without this control, "401 on /iam/token" is satisfied by a listener
-                # that 401s every path, including ones that do not exist — i.e. by a
-                # handle that is not there.
-                "pm.test('a path that is NOT the handle is 404, so the 401s above came from the "
-                "handle itself', () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
             ],
         ),
     ],
