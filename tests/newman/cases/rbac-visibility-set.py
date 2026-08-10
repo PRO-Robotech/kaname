@@ -498,30 +498,26 @@ def robust_revoke_binding(name, acb_var, auth="jwtAccountAdminA"):
     не «уже нет») либо её снёс кто-то посторонний (дефект). Принимать 404 значит зеленеть
     на том, что док этой же функции объявляет обязательным: «revoke itself must commit».
     Устойчивый 403 остаётся отказом по-прежнему — он и означает «выдача осталась
-    активной»."""
-    return Step(
-        name=name, method="DELETE", path="/iam/v1/accessBindings/{{" + acb_var + "}}",
-        auth=auth,
-        pre_script=[
-            f"if (pm.environment.get('_rv{acb_var}Started') !== pm.info.requestName) {{ pm.environment.set('_rv{acb_var}Count', '0'); pm.environment.set('_rv{acb_var}Started', pm.info.requestName); }}",
-        ],
-        test_script=[
-            f"const _rc = parseInt(pm.environment.get('_rv{acb_var}Count') || '0', 10);",
-            # Real inter-poll delay (~500ms) between the 403-retries (Koren #1): the admin's
-            # v_delete on the FRESH binding object materializes via fga_outbox a beat AFTER
-            # Create→done, and each re-fire is only a ~round-trip apart, so without the
-            # busy-wait the POLL_CAP retries burn out in well under the materialization
-            # window → the DELETE stays 403 at the cap and the revoke never commits (leaving
-            # the leaked {get,list} grant that flips the v_list-only detail Get to 200).
-            f"if (pm.response.code === 403 && _rc < {POLL_CAP}) {{ pm.environment.set('_rv{acb_var}Count', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) {{ /* inter-poll delay ~500ms (Koren #1) */ }} pm.execution.setNextRequest(pm.info.requestName); return; }}",
-            f"pm.environment.unset('_rv{acb_var}Count'); pm.environment.unset('_rv{acb_var}Started');",
-            "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-            "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-            "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-            "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-            "});",
-        ],
-    )
+    активной».
+
+    ИМЯ БЫЛО ШИРЕ ТЕЛА, И ЭТО НЕ ОФОРМЛЕНИЕ. Здесь стояла собственная реализация,
+    утверждавшая `200 + Operation` под именем «revoke COMMITTED» — то есть ПРИЁМ запроса
+    под именем ИСПОЛНЕНИЯ мутации. Мутации Kachō асинхронны (`api-conventions.md`), и
+    следующий шаг цепочки сносит роль, на которую эта выдача ссылается: пока отзыв в
+    полёте, владелец честно отвечает `FAILED_PRECONDITION "role is in use by …"`, и
+    падает утверждение об исходе УДАЛЕНИЯ РОЛИ — то есть дефект показывается не там, где
+    он живёт, и читается как дефект продукта, каковым не является. Ловится редко (один
+    упавший ассерт из 3951 на прогоне 2026-08-10), потому что отзыв обычно успевает.
+
+    Теперь это ОБЩИЙ `reliable_delete`: он тем же кодом ретраит 403 и ДОЖИДАЕТСЯ операции,
+    а проход генератора, видя пару DELETE→опрос, дописывает ей утверждение об ИСХОДЕ —
+    поэтому отзыв, завершившийся ошибкой, больше не читается как отзыв. Строгость к 404
+    (обоснование выше) сохранена `terminal_codes=(200,)`, требование самой операции —
+    `require_operation=True`; без него `200` без тела дал бы ожиданию ранний выход
+    «ждать нечего», и отсутствие отзыва снова стало бы зелёным."""
+    return reliable_delete(
+        name, "/iam/v1/accessBindings/{{" + acb_var + "}}", auth=auth,
+        op_key=acb_var, terminal_codes=(200,), require_operation=True)
 
 
 # ===========================================================================
@@ -597,7 +593,7 @@ CASES.append(Case(
         # Teardown — revoke the grant (committed, not best-effort) + role; delete the run's
         # projects AND the project `default`, заведённый сагой создания аккаунта, и только
         # затем сам аккаунт: он не удаляется, пока в нём есть хоть один проект.
-        robust_revoke_binding("teardown-binding", "visSetAcb", auth=_HUMAN_STEPUP),
+        *robust_revoke_binding("teardown-binding", "visSetAcb", auth=_HUMAN_STEPUP),
         *teardown("teardown-role", "/iam/v1/roles/{{visSetRole}}", auth=_HUMAN_STEPUP),
         *teardown("teardown-pp1", "/iam/v1/projects/{{visPP1}}", auth=_HUMAN_STEPUP),
         *teardown("teardown-pp2", "/iam/v1/projects/{{visPP2}}", auth=_HUMAN_STEPUP),
@@ -705,8 +701,8 @@ CASES.append(Case(
                 "() => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
             ],
         ),
-        robust_revoke_binding("teardown-binding", "visVlAcb"),
-        robust_revoke_binding("teardown-binding-ctl", "visVcAcb"),
+        *robust_revoke_binding("teardown-binding", "visVlAcb"),
+        *robust_revoke_binding("teardown-binding-ctl", "visVcAcb"),
         *teardown("teardown-role", "/iam/v1/roles/{{visVlRole}}"),
         *teardown("teardown-role-ctl", "/iam/v1/roles/{{visVcRole}}"),
         *teardown("teardown-proj", "/iam/v1/projects/{{visVlProj}}"),
@@ -882,7 +878,7 @@ def exact_set_case_steps(kind, pfx, role_name):
             + bz + ".map(v => pm.environment.get(v)); pm.expect(bz.some(w => ids.indexOf(w) !== -1), 'ids: ' + JSON.stringify(ids)).to.be.false; });",
         ],
     )
-    teardowns = [robust_revoke_binding("teardown-binding", pfx + "Acb"),
+    teardowns = [*robust_revoke_binding("teardown-binding", pfx + "Acb"),
                  *teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "Role}}")]
     for v in pp + mm + bq:
         teardowns.extend(teardown("teardown-" + v, spec["path"] + "/{{" + v + "}}"))
@@ -978,8 +974,8 @@ def list_read_parity_case_steps(kind, pfx, role_name):
                  "(404 здесь означал бы, что 404 выше про сломанную фикстуру, а не про предикат)', "
                  "() => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
              ]),
-        robust_revoke_binding("teardown-binding", pfx + "VlAcb"),
-        robust_revoke_binding("teardown-binding-ctl", pfx + "VcAcb"),
+        *robust_revoke_binding("teardown-binding", pfx + "VlAcb"),
+        *robust_revoke_binding("teardown-binding-ctl", pfx + "VcAcb"),
         *teardown("teardown-role", "/iam/v1/roles/{{" + pfx + "VlRole}}"),
         *teardown("teardown-role-ctl", "/iam/v1/roles/{{" + pfx + "VcRole}}"),
         *teardown("teardown-obj", spec["path"] + "/{{" + neg + "}}"),

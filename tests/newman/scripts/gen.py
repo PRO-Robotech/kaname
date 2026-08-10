@@ -2269,13 +2269,30 @@ def assert_phantom_drop(collections_dir: Path, out=sys.stderr) -> int:
 
 def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
                     op_key: Optional[str] = None,
-                    terminal_codes=(200, 404)) -> List[Step]:
+                    terminal_codes=(200, 404),
+                    require_operation: bool = False) -> List[Step]:
     """RELIABLE teardown DELETE: retry PAST the 403 window, then AWAIT the operation.
 
     ONE implementation, shared — because six copies of this teardown existed and five of
     them carried the defect the sixth had already fixed. Duplication was the mechanism:
     the fix landed in the copy where the leak was observed, and the neighbours kept
     accepting a denial as cleanup.
+
+    Седьмая копия нашлась позже — снаружи этого сведения, в кейс-файле, и несла тот же
+    дефект в чистом виде: она утверждала `200 + Operation` под именем «revoke COMMITTED»
+    и на этом заканчивалась. Приём запроса не есть исполнение мутации (мутации Kachō
+    асинхронны), поэтому следующий шаг сносил роль, пока отзыв выдачи был ещё в полёте, и
+    владелец честно отвечал `FAILED_PRECONDITION "role is in use by …"`. Гонка редкая:
+    ловится примерно раз на прогон и выглядит как дефект продукта, каковым не является.
+
+    `require_operation` — то единственное, что было у седьмой копии и чего не было
+    здесь: при 200 потребовать саму операцию. Без него `200` без тела прошёл бы, а
+    ожидание ниже смолчало бы по раннему выходу «нечего ждать» — то есть отсутствие
+    отзыва читалось бы как отзыв.
+
+    `terminal_codes=(200,)` — для полосы, где ресурс заводится ЭТИМ же кейсом под
+    уникальным `runId` и сносится только этим шагом: там `404` означает не «уже нет», а
+    сорванную фикстуру либо постороннего писателя, и принимать его нельзя.
 
     WHY 403 IS NOT AN ACCEPTABLE CLEANUP RESULT. The binding is created by the account
     admin, but the admin's `v_delete` on that fresh iam_access_binding OBJECT materialises
@@ -2306,6 +2323,11 @@ def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
                 f"pm.environment.unset('{op_var}');",
                 "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', "
                 f"() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([{', '.join(str(c) for c in terminal_codes)}]));",
+            ] + ([
+                "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, "
+                "и отсутствие отзыва прочиталось бы как отзыв)', "
+                "() => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+            ] if require_operation else []) + [
                 f"if (pm.response.code === 200 && j && j.id) pm.environment.set('{op_var}', j.id);",
             ],
         ),

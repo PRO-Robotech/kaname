@@ -2112,7 +2112,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvvisSetAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvvisSetAcbCount', '0'); pm.environment.set('_rvvisSetAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -2137,14 +2142,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvvisSetAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvvisSetAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvvisSetAcbCount'); pm.environment.unset('_rvvisSetAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_visSetAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_visSetAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LABEL-EXACT-OK :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_visSetAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_visSetAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
+                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__visSetAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__visSetAcbRevOpCount', '0'); pm.environment.set('__visSetAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_visSetAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__visSetAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__visSetAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__visSetAcbRevOpCount'); pm.environment.unset('__visSetAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -5703,7 +5804,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvvisVlAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvvisVlAcbCount', '0'); pm.environment.set('_rvvisVlAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -5728,14 +5834,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvvisVlAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvvisVlAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvvisVlAcbCount'); pm.environment.unset('_rvvisVlAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_visVlAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_visVlAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_visVlAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_visVlAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__visVlAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__visVlAcbRevOpCount', '0'); pm.environment.set('__visVlAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_visVlAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__visVlAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__visVlAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__visVlAcbRevOpCount'); pm.environment.unset('__visVlAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -5780,7 +5982,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvvisVcAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvvisVcAcbCount', '0'); pm.environment.set('_rvvisVcAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding_ctl', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -5805,14 +6012,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvvisVcAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvvisVcAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvvisVcAcbCount'); pm.environment.unset('_rvvisVcAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_binding_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_visVcAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_visVcAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-PRJ-LIST-READ-PARITY :: teardown-binding-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_visVcAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_visVcAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__visVcAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__visVcAcbRevOpCount', '0'); pm.environment.set('__visVcAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_visVcAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__visVcAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__visVcAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__visVcAcbRevOpCount'); pm.environment.unset('__visVcAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -8657,7 +8960,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetSvaAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetSvaAcbCount', '0'); pm.environment.set('_rvsetSvaAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -8682,14 +8990,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetSvaAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetSvaAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetSvaAcbCount'); pm.environment.unset('_rvsetSvaAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setSvaAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setSvaAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LABEL-EXACT-OK :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setSvaAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setSvaAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setSvaAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setSvaAcbRevOpCount', '0'); pm.environment.set('__setSvaAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setSvaAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setSvaAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setSvaAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setSvaAcbRevOpCount'); pm.environment.unset('__setSvaAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -12419,7 +12823,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetRolAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetRolAcbCount', '0'); pm.environment.set('_rvsetRolAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -12444,14 +12853,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetRolAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetRolAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetRolAcbCount'); pm.environment.unset('_rvsetRolAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setRolAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setRolAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-ROL-LABEL-EXACT-OK :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setRolAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setRolAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setRolAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setRolAcbRevOpCount', '0'); pm.environment.set('__setRolAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setRolAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setRolAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setRolAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setRolAcbRevOpCount'); pm.environment.unset('__setRolAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -16181,7 +16686,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetGrpAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetGrpAcbCount', '0'); pm.environment.set('_rvsetGrpAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -16206,14 +16716,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetGrpAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetGrpAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetGrpAcbCount'); pm.environment.unset('_rvsetGrpAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setGrpAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setGrpAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LABEL-EXACT-OK :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setGrpAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setGrpAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setGrpAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setGrpAcbRevOpCount', '0'); pm.environment.set('__setGrpAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setGrpAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setGrpAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setGrpAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setGrpAcbRevOpCount'); pm.environment.unset('__setGrpAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -19418,7 +20024,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetSvaVlAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetSvaVlAcbCount', '0'); pm.environment.set('_rvsetSvaVlAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -19443,14 +20054,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetSvaVlAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetSvaVlAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetSvaVlAcbCount'); pm.environment.unset('_rvsetSvaVlAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setSvaVlAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setSvaVlAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setSvaVlAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setSvaVlAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setSvaVlAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setSvaVlAcbRevOpCount', '0'); pm.environment.set('__setSvaVlAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setSvaVlAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setSvaVlAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setSvaVlAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setSvaVlAcbRevOpCount'); pm.environment.unset('__setSvaVlAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -19495,7 +20202,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetSvaVcAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetSvaVcAcbCount', '0'); pm.environment.set('_rvsetSvaVcAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding_ctl', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -19520,14 +20232,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetSvaVcAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetSvaVcAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetSvaVcAcbCount'); pm.environment.unset('_rvsetSvaVcAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_binding_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setSvaVcAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setSvaVcAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-SVA-LIST-READ-PARITY :: teardown-binding-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setSvaVcAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setSvaVcAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setSvaVcAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setSvaVcAcbRevOpCount', '0'); pm.environment.set('__setSvaVcAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setSvaVcAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setSvaVcAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setSvaVcAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setSvaVcAcbRevOpCount'); pm.environment.unset('__setSvaVcAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -21847,7 +22655,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetGrpVlAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetGrpVlAcbCount', '0'); pm.environment.set('_rvsetGrpVlAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -21872,14 +22685,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetGrpVlAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetGrpVlAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetGrpVlAcbCount'); pm.environment.unset('_rvsetGrpVlAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding');",
+                  "pm.environment.unset('_poll200_started_teardown_binding');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setGrpVlAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setGrpVlAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-binding-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setGrpVlAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setGrpVlAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setGrpVlAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setGrpVlAcbRevOpCount', '0'); pm.environment.set('__setGrpVlAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setGrpVlAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setGrpVlAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setGrpVlAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setGrpVlAcbRevOpCount'); pm.environment.unset('__setGrpVlAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -21924,7 +22833,12 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_rvsetGrpVcAcbStarted') !== pm.info.requestName) { pm.environment.set('_rvsetGrpVcAcbCount', '0'); pm.environment.set('_rvsetGrpVcAcbStarted', pm.info.requestName); }",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_binding_ctl') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_binding_ctl', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_binding_ctl', pm.info.requestName);",
+                  "}",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -21949,14 +22863,110 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _rc = parseInt(pm.environment.get('_rvsetGrpVcAcbCount') || '0', 10);",
-                  "if (pm.response.code === 403 && _rc < 50) { pm.environment.set('_rvsetGrpVcAcbCount', String(_rc + 1)); const _rvd = Date.now(); while (Date.now() - _rvd < 500) { /* inter-poll delay ~500ms (Koren #1) */ } pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "pm.environment.unset('_rvsetGrpVcAcbCount'); pm.environment.unset('_rvsetGrpVcAcbStarted');",
-                  "pm.test('by-label binding revoke COMMITTED (200 + Operation)', () => {",
-                  "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200);",
-                  "  let _rj; try { _rj = pm.response.json(); } catch (e) { _rj = null; }",
-                  "  pm.expect(_rj && _rj.id, JSON.stringify(_rj)).to.match(/^iop[a-z0-9]+$/);",
-                  "});"
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_binding_ctl') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_binding_ctl', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_binding_ctl');",
+                  "pm.environment.unset('_poll200_started_teardown_binding_ctl');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_setGrpVcAcbRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
+                  "pm.test('teardown: DELETE вернул саму операцию (200 без неё = ждать нечего, и отсутствие отзыва прочиталось бы как отзыв)', () => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_setGrpVcAcbRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-SET-GRP-LIST-READ-PARITY :: teardown-binding-ctl-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_setGrpVcAcbRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_setGrpVcAcbRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__setGrpVcAcbRevOpStarted') !== pm.info.requestName) { pm.environment.set('__setGrpVcAcbRevOpCount', '0'); pm.environment.set('__setGrpVcAcbRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_setGrpVcAcbRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__setGrpVcAcbRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__setGrpVcAcbRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__setGrpVcAcbRevOpCount'); pm.environment.unset('__setGrpVcAcbRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
