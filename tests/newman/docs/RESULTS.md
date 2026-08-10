@@ -619,3 +619,75 @@ the **ungated** behavior and do NOT assert the gated part:
 `coverage.py` reports **57%** RPC→case coverage (≥ the CI `--min 30` gate, exit 0); no
 duplicate case-ids; **no product code touched** (diff is `tests/newman/**` + this doc).
 Runtime GREEN is validated by the `newman-e2e` CI job (local env blocked).
+
+---
+
+## IBT conformance — iam as the SINGLE FACADE to the signing provider (#59, Phase C)
+
+`cases/iam-token-facade-conformance.py` → `collections/iam-token-facade-conformance.postman_collection.json`,
+run by `scripts/run.sh` (registered next to `iam-permission-catalog`). Eight cases:
+IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) and IBT-12/13/14/15 (the
+mirror / hook / docker-handle / provider-surface lanes the acceptance has no scenario for).
+
+### The run this section is about
+
+Production-posture kind stand (`kind-kacho`, `https://127.0.0.1`), api-gateway
+`authn.mode=production-strict`, RS256 Bearer minted through the facade
+(`InternalBootstrapTokenService.MintBootstrapToken` over mTLS gRPC → OAuth2
+client-assertion exchange). Verdict as `scripts/run.sh` prints it:
+
+| collection | assert | failed | requests | unanswered | rc |
+|---|---:|---:|---:|---:|---:|
+| iam-token-facade-conformance | 169 | **0** | 45 | **0** | 0 |
+
+`TOTAL: 1/1 коллекций отчиталось — 45 запрос(ов), 0 без ответа, 169 утверждени(й), 0 упавших, 0 немых отчёт(ов)`
+
+`scripts/exec-coverage.py` on the same report: **executed 45/45 (100%)**, `SKIPS: 0` —
+no step was skipped, silently or otherwise. That number is the one that matters here:
+a conformance suite whose steps quietly do not run would report the same zero failures.
+
+### Why the green is believable — injection, in both directions
+
+A suite that is green on its first run has not yet shown it can be red. Five injections
+were run against the SAME collection (copies of the environment / collection; the
+committed artefacts were not modified), each expected to break exactly one lane:
+
+| injection | expected | measured |
+|---|---|---|
+| A · facade Bearer replaced by an HS256 alg-confusion forgery of its own payload | verification + enrichment + issuance lanes red | **25 failed** — IBT-04 (`edge did NOT reject authN`), IBT-13, IBT-05 (`Operation envelope returned`, step-up assertion) |
+| B · `iamJwksBaseUrl` lost from the harness | RED naming the variable, never a silent skip | **10 failed** — five `harness config: iamJwksBaseUrl is set …` failures across IBT-04/10/12/15 plus the mirror comparisons |
+| C · `registryDataPlaneBaseUrl` pointed at the provider | docker lane red | **5 failed** — `anonymous /v2/ is challenged with 401`, `the realm PATH is the facade docker-token handle`, … |
+| D · `iamJwksBaseUrl` pointed at the provider (the mis-set that would make the mirror comparison compare the provider with itself) | mirror lane red | **2 failed** — both narrow-proxy steps of IBT-12 |
+| E · the IBT-06 / IBT-15 probes re-pointed at a **routed** endpoint (`/iam/v1/me`) | the "no door here" family red | **6 failed** — `NEVER 2xx`, `SAME SHAPE as a nonsense path`, `EMPTY action`, on both cases |
+| — · unmodified collection and environment (the legal twin) | silent | **0 failed** |
+
+Injection E is the one that matters for IBT-06/IBT-15: it shows the probes distinguish a
+**routed** address from an unrouted one, rather than merely observing that this platform
+fail-closes on everything.
+
+### Divergences from the acceptance text, recorded rather than papered over
+
+1. **IBT-06 predicts 404; the stand answers 403.** MintBootstrapToken carries no
+   `google.api.http` binding, so there is no route to miss and the fail-closed authz gate
+   answers before the mux — identically for the mint, for the path the acceptance spells,
+   and for a typo. 404 can never arrive, so the case asserts what is witnessable (NEVER
+   2xx · same refusal shape as a typo · empty `action`) with a positive control proving
+   the same listeners do serve routes.
+2. **The advertised external TLS listener (:8443) is not probed.** Measured: it requests a
+   client certificate, completes the handshake, opens the HTTP/2 stream and answers
+   nothing — with no client cert and with the gateway's own; nothing reaches the gateway
+   access log. A probe that cannot be answered must not be written as a passing check, so
+   the isolation statements are made on the two listeners that answer.
+3. **IBT-05 does not exchange the issued user credential for a Bearer.** A user
+   client-credentials token carries no `acr` and its client is provisioned without the api
+   audience, so that exchange cannot authenticate the edge. That limit is #59's remaining
+   open item (the interactive principal), not something a black-box case can assert around.
+
+### Harness requirement
+
+Four base URLs beyond the gateway ones, injected by
+`deploy/scripts/newman-{e2e,parallel}.sh` as `--env-var` and port-forwarded there:
+`iamJwksBaseUrl` (iam :9097), `providerPublicBaseUrl` (provider :4444),
+`iamRegistryTokenBaseUrl` (iam :9096), `registryDataPlaneBaseUrl` (registry :8080).
+A missing one turns the case RED naming the variable (`require_env_url`) — injection B
+above is the proof, not the promise.

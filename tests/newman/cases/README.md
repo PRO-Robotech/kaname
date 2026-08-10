@@ -3,31 +3,60 @@
 Декларативные case-наборы на Python — **источник истины** для newman E2E.
 `gen.py` собирает их в Postman-коллекции в `../collections/`.
 
-Структура (parity с `kacho-vpc/tests/newman/`):
+Структура:
 
 ```
 cases/                — декларативные case-наборы на Python (ИСТОЧНИК ИСТИНЫ)
-  iam-account.py
-  iam-project.py
-  iam-user.py
-  iam-service-account.py
-  iam-group.py
-  iam-role.py
-  iam-access-binding.py
-  iam-jit-pending.py
-  iam-compliance-report.py
-  iam-internal-only-check.py
-  iam-authz-grant-check-propagation.py
-  authz-deny.py
-  authz-sa-apitoken.py
 collections/          — СГЕНЕРИРОВАННЫЕ Postman-коллекции (НЕ править руками)
-environments/{local,yc}.postman_environment.json
-scripts/{gen.py,run.sh,coverage.py}
+environments/         — local.postman_environment.template.json (+ gitignored local)
+docs/RESULTS.md       — вердикты прогонов и разбор известного красного
+scripts/{gen.py,run.sh,coverage.py,exec-coverage.py,assert-suites-green.sh}
 ```
 
-Workflow добавления нового кейса — workspace `CLAUDE.md` §«Newman-author»
-(reused от vpc-newman-author):
+> [!note] Здесь стоял ПЕРЕЧЕНЬ файлов кейсов — он пережил свой предмет
+> Замер 2026-08-09 по этому же дереву: перечень называл **три** файла, которых нет
+> (`iam-access-binding.py`, `iam-jit-pending.py`, `iam-compliance-report.py`), и молчал
+> о **двадцати одном** существующем. Рукописный список файлов в каталоге, который эти
+> файлы и содержит, устаревает молча — расхождение прозы с деревом не даёт конфликта
+> при мёрже. Перечень поэтому **выводится**, а не выписывается:
+>
+> ```
+> ls cases/*.py            # набор кейсов
+> ls collections/*.json    # что из них сгенерировано
+> ```
+>
+> Соответствие «кейс → прогон» держит не этот файл, а `scripts/run.sh` (каждая
+> коллекция обязана иметь свой `run_one`, иначе вердикт гейта — `MISSING`) и
+> `deploy/scripts/assert-shard-coverage.py` (каждая коллекция назначена ровно одному
+> шарду). Оба падают; список в README — нет.
 
-1. Валидация уникальности — `validate-cases.py`
-2. Запись в `CASES-INDEX.md` если кейс — новый паттерн
-3. `gen.py` для перегенерации коллекций
+## Workflow добавления нового кейса
+
+> [!warning] Здесь стояли ДВА шага, у которых в этой суите нет предмета
+> Прежняя редакция велела прогнать `validate-cases.py` и дописать `CASES-INDEX.md`.
+> Ни того, ни другого в `services/iam/tests/newman/` **нет** (замер 2026-08-09:
+> `ls scripts/validate-cases.py docs/CASES-INDEX.md` → оба отсутствуют; они есть у
+> vpc / geo / storage / registry, откуда текст и был скопирован). Указание, ведущее
+> к несуществующему инструменту, читается как «шаг пропущен по невнимательности», а
+> не как «шага нет», — поэтому оно заменено на то, что в этой суите действительно
+> исполняется и действительно падает.
+
+1. **Уникальность идентификатора** — её проверяет сам `gen.py`: дубль внутри файла
+   роняет генерацию (`FAIL — duplicate case-id`). Между файлами:
+   `grep -rho 'id="[A-Z0-9-]*"' cases/*.py | sort | uniq -d` (пусто = OK).
+2. **`python3 scripts/gen.py [<stem>]`** — перегенерация коллекций. Заодно исполняется
+   страж провизорного идентификатора (`phantom-drop`), и он печатает объём осмотренного.
+3. **`node ../../../../deploy/scripts/assert-generated-scripts-parse.js collections/*.json`** —
+   ни один сгенерированный скрипт не должен разбираться с ошибкой. Апостроф в тексте
+   кейса, попавший в JS-литерал, ломает ПРЕД-скрипт целиком, шаг уходит по неверному
+   адресу и падает совсем в другом месте.
+4. **`run_one "<stem>"` в `scripts/run.sh`** — обязательно. Коллекция без вызова не
+   гоняется, а гейт `assert-suites-green.sh` считает её `MISSING` и роняет прогон.
+5. **Прогон и вердикт по числам** — `./scripts/run.sh --service <stem>`; вердикт
+   называет исполненные коллекции, запросы, **без ответа**, утверждения и **упавшие**.
+   `python3 scripts/exec-coverage.py` дополнительно отвечает, сколько шагов
+   действительно исполнилось: суита, чьи шаги молча не выполнились, отчитается теми же
+   нулевыми падениями.
+6. **Инъекция** — прежде чем считать новый кейс проверкой, сломай то, что он охраняет,
+   и убедись, что он краснеет и называет полосу; рядом оставь законный близнец, на
+   котором он молчит. Пример такой пары с числами — `docs/RESULTS.md`, §IBT.
