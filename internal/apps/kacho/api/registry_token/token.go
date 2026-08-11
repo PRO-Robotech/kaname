@@ -20,6 +20,7 @@ package registry_token
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytoken"
@@ -251,7 +252,12 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 	})
 	if err != nil {
 		if errors.Is(err, ErrIssuerUnavailable) {
-			return IssueOutput{}, ErrIssuerUnavailable
+			// Причина ОБОРАЧИВАЕТСЯ: наружу обработчик всё равно отдаст
+			// фиксированное тело (`{"error":"unavailable"}`), а вот в журнал
+			// без неё не уходило НИЧЕГО — ни здесь, ни этажом выше. Тогда
+			// «провайдер лежит», «стучимся не туда» и «имя не резолвится»
+			// выглядят одинаково, а чинятся противоположно.
+			return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, err)
 		}
 		// Hydra rejected the exchange (bad/expired/revoked key) — fail-closed 401.
 		return IssueOutput{}, ErrUnauthenticated

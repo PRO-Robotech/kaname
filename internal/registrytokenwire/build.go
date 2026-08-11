@@ -4,6 +4,7 @@
 package registrytokenwire
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,6 +17,10 @@ import (
 
 // BuildConfig — the composition inputs for the registry `/iam/token` shim.
 type BuildConfig struct {
+	// Logger — журнал причин отказа выдачи. Наружу тело фиксировано; без этого
+	// поля причина не уходила никуда, и разные по природе отказы выглядели
+	// одинаково. nil допустим — тогда журналирования нет.
+	Logger *slog.Logger
 	// Realm — the WWW-Authenticate realm URL advertised to docker clients
 	// (e.g. https://api.kacho.local/iam/token). Must match the data-plane's
 	// advertised Bearer realm.
@@ -90,7 +95,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (http.Handler, error) {
 	tokenHandler := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
 		Realm:          cfg.Realm,
 		DefaultService: cfg.Service,
-	}, useCase)
+	}, useCase).WithLogger(cfg.Logger)
 
 	return registrytokenhttp.NewMux(tokenHandler), nil
 }

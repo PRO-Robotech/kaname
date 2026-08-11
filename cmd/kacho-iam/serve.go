@@ -577,6 +577,7 @@ func runServe(cfg config.Config) error {
 			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
 			HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
 			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
+			Logger:            logger,
 		})
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)

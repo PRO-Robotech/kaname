@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -73,11 +74,25 @@ type Config struct {
 type TokenHandler struct {
 	cfg    Config
 	issuer TokenIssuer
+	// logger — единственное место, где причина отказа вообще попадает в трейл.
+	// Наружу тело фиксировано, и это правильно; но до этой строки причина не
+	// уходила НИКУДА, и «провайдер лежит», «стучимся не туда», «имя не
+	// резолвится» выглядели одинаково — при том что чинятся противоположно.
+	// nil допустим (пробы), тогда журналирования нет.
+	logger *slog.Logger
 }
 
 // NewTokenHandler — builder.
 func NewTokenHandler(cfg Config, issuer TokenIssuer) *TokenHandler {
 	return &TokenHandler{cfg: cfg, issuer: issuer}
+}
+
+// WithLogger провязывает журнал причин отказа. Отдельным методом, а не полем
+// Config: Config описывает то, что видит КЛИЕНТ (realm, имя службы), а журнал —
+// то, что видим мы.
+func (h *TokenHandler) WithLogger(l *slog.Logger) *TokenHandler {
+	h.logger = l
+	return h
 }
 
 // tokenResponse — the Docker Registry v2 token-endpoint body. `access_token`
@@ -140,6 +155,12 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err error) {
 	switch {
 	case errors.Is(err, registrytokenuc.ErrIssuerUnavailable):
+		// Причина — в журнал, тело — фиксированное. Разные адресаты, разные
+		// требования: клиенту различать нечего (оракул), нам различать
+		// обязательно.
+		if h.logger != nil {
+			h.logger.Error("docker token: issuer unavailable", "err", err, "service", service)
+		}
 		http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
 	case errors.Is(err, registrytokenuc.ErrUnauthenticated):
 		h.challenge(w, service)

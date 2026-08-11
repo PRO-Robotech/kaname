@@ -107,7 +107,13 @@ func (a *HydraExchangeAdapter) Exchange(ctx context.Context, in registrytokenuc.
 	})
 	if err != nil {
 		if errors.Is(err, clients.ErrHydraUnavailable) {
-			return registrytokenuc.ExchangeOutput{}, registrytokenuc.ErrIssuerUnavailable
+			// Причина ОБОРАЧИВАЕТСЯ, а не подменяется: наружу отказ всё равно
+			// уйдёт фиксированным текстом (собирает use-case), а в журнал
+			// попадёт то, что ответила сеть. Голый sentinel здесь означал бы
+			// пересказ собственного решения об отказе — ровно то, что стоило
+			// двадцати минут разбора на живом стенде у соседней выдачи.
+			return registrytokenuc.ExchangeOutput{}, fmt.Errorf("%w: %w",
+				registrytokenuc.ErrIssuerUnavailable, err)
 		}
 		// Hydra rejection (invalid_client / invalid_grant) — collapsed to 401
 		// upstream; no raw Hydra detail is propagated.

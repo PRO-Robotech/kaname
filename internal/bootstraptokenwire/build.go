@@ -11,6 +11,7 @@ package bootstraptokenwire
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,21 +48,40 @@ type BuildConfig struct {
 	Logger *slog.Logger
 }
 
-// hydraExchange adapts *clients.HydraTokenClient to
-// bootstraptoken.TokenExchanger, mapping issuer-unavailability to the use-case's
-// fail-closed sentinel. The raw Hydra body never rides in the returned error.
+// tokenExchanger — порт обмена: ровно тот метод провайдерского клиента, который
+// нужен адаптеру.
+//
+// Заведён узким намеренно. Классификация отказа ниже — решение о ПОЛОСЕ ответа,
+// и проверять его надо на настоящем адаптере, а не на копии его логики в пробе;
+// без порта подставить сюда отвечающего было нечем.
+type tokenExchanger interface {
+	ClientCredentials(context.Context, clients.ClientCredentialsRequest) (clients.TokenResponse, error)
+}
+
+// hydraExchange adapts the provider token client to bootstraptoken.TokenExchanger,
+// mapping issuer-unavailability to the use-case's fail-closed sentinel. The raw
+// provider body never rides in the returned error.
 type hydraExchange struct {
-	client *clients.HydraTokenClient
+	exchange tokenExchanger
 }
 
 func (a hydraExchange) Exchange(ctx context.Context, in bootstraptoken.ExchangeInput) (bootstraptoken.ExchangeOutput, error) {
-	out, err := a.client.ClientCredentials(ctx, clients.ClientCredentialsRequest{
+	out, err := a.exchange.ClientCredentials(ctx, clients.ClientCredentialsRequest{
 		ClientAssertion: in.ClientAssertion,
 		Audience:        in.Audience,
 	})
 	if err != nil {
 		if errors.Is(err, clients.ErrHydraUnavailable) {
-			return bootstraptoken.ExchangeOutput{}, bootstraptoken.ErrIssuerUnavailable
+			// Причина ОБОРАЧИВАЕТСЯ, а не подменяется. Наружу отказ всё равно
+			// уйдёт фиксированным текстом (собирается в use-case) — здесь
+			// оракула нет; а в журнал попадёт то, что ответила сеть.
+			//
+			// Прежде тут стоял голый sentinel, и журнал получал пересказ
+			// собственного решения об отказе. На живом стенде это стоило двадцати
+			// минут разбора: провайдер был здоров, а имя, по которому шёл обмен,
+			// не резолвилось — одна строка «no such host» закрыла бы вопрос сразу.
+			return bootstraptoken.ExchangeOutput{}, fmt.Errorf("%w: %w",
+				bootstraptoken.ErrIssuerUnavailable, err)
 		}
 		// A 4xx rejection (bad/expired assertion) — the use-case fails closed too.
 		return bootstraptoken.ExchangeOutput{}, err
@@ -82,7 +102,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*bootstraptoken.Handler, error)
 	if err != nil {
 		return nil, err
 	}
-	exchanger := hydraExchange{client: tokenClient}
+	exchanger := hydraExchange{exchange: tokenClient}
 
 	uc := bootstraptoken.NewMintUseCase(store, txb, hydraAdmin, exchanger, bootstraptoken.Config{
 		SigningKeyPEM:     cfg.SigningKeyPEM,
