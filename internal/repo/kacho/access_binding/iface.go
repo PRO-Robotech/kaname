@@ -208,10 +208,16 @@ type WriterIface interface {
 	// current transaction, used to drive api-gateway authz-cache invalidation.
 	// Serialises the SubjectChangeEvent into the payload jsonb column AND
 	// writes denormalised columns (subject_id, op, event_type, resource_type,
-	// resource_id) in a single INSERT (atomic by construction). op MUST be one
-	// of: binding_upsert, binding_delete, group_member_change (DB CHECK
-	// subject_change_op_check); event_type/op are cross-derived when one is
-	// omitted.
+	// resource_id) in a single INSERT (atomic by construction). event_type/op
+	// are cross-derived when one is omitted.
+	//
+	// The admissible values of op are closed by DB CHECK subject_change_op_check
+	// and listed IN FULL on the SubjectChangeEvent.Op field below — deliberately
+	// not repeated here. The previous wording repeated three of the seven and
+	// attributed that shorter set to the constraint itself: a caller reading it
+	// would take the remaining four for illegal, while the very same file listed
+	// them correctly 130 lines down. Two places about one subject, one of them
+	// wrong, and the wrong one sat in the interface people read first.
 	//
 	// Caller MUST invoke inside the same Writer-tx as the domain state-change
 	// (запрет #10). Drainer (kacho-iam/internal/clients.NewSubjectChangeApplier)
