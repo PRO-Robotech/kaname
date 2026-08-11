@@ -48,7 +48,12 @@ type ResourceMirrorRow struct {
 	ObjectID        string
 	ParentProjectID string
 	ParentAccountID string
-	Labels          map[string]string
+	// ParentChain — цепь предков от ближайшего к дальнему, каждый элемент
+	// `"<type>:<id>"`. Двух колонок выше хватает не всякому объекту: модель
+	// требует цепи произвольной формы, а объект без предка молча выпадает из
+	// области выдачи и из каскада.
+	ParentChain []string
+	Labels      map[string]string
 	// SourceVersion — monotonic per-object marker from the owner.
 	// The mirror UPSERT applies a register only when this is strictly newer than
 	// the stored version (last-source-state-wins). Zero → '-infinity' (legacy).

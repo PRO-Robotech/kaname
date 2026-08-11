@@ -37,6 +37,7 @@ func (e *ResourceMirrorEmitter) UpsertTx(ctx context.Context, tx service.Tx, row
 		ObjectID:        row.ObjectID,
 		ParentProjectID: row.ParentProjectID,
 		ParentAccountID: row.ParentAccountID,
+		ParentChain:     row.ParentChain,
 		Labels:          row.Labels,
 		SourceVersion:   row.SourceVersion,
 	})

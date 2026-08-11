@@ -70,6 +70,11 @@ type regReq struct {
 	subject  string
 	relation string
 	object   string
+	// chain — цепь предков. Поле дублёра, а не заглушка: проба, которой цепь
+	// безразлична, оставляет его пустым и получает поведение legacy-вызывающего;
+	// проба про цепь задаёт его явно. Дублёр обязан уметь то же, что настоящий
+	// запрос, иначе он делает невидимым тот самый вход, ради которого его ставят.
+	chain []string
 }
 
 func (r *regReq) GetSubjectId() string                     { return r.subject }
@@ -79,6 +84,7 @@ func (r *regReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
 func (r *regReq) GetLabels() map[string]string             { return nil }
 func (r *regReq) GetParentProjectId() string               { return "" }
 func (r *regReq) GetParentAccountId() string               { return "" }
+func (r *regReq) GetParentChain() []string                 { return r.chain }
 
 // smObjectReconciler records post-commit forward calls (the create-path additive
 // fast-path the register use-case drives post-commit), regardless of which entry point

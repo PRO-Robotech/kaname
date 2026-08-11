@@ -169,6 +169,7 @@ func (r *routeReq) GetSourceVersion() *timestamppb.Timestamp {
 func (r *routeReq) GetLabels() map[string]string { return r.labels }
 func (r *routeReq) GetParentProjectId() string   { return r.project }
 func (r *routeReq) GetParentAccountId() string   { return r.account }
+func (r *routeReq) GetParentChain() []string     { return nil }
 
 // TestRegisterResource_DrainerWonTheRace_StaysOnAdditivePath — ГОНКА, из-за которой
 // окно материализации выходило за клиентский бюджет чтения-своих-записей.

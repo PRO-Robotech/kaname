@@ -345,6 +345,7 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		ObjectID:        objID,
 		ParentProjectID: in.GetParentProjectId(),
 		ParentAccountID: in.GetParentAccountId(),
+		ParentChain:     in.GetParentChain(),
 		Labels:          labels,
 		SourceVersion:   sourceVersion(in),
 	}, true)
@@ -636,6 +637,9 @@ type registerInput interface {
 	GetLabels() map[string]string
 	GetParentProjectId() string
 	GetParentAccountId() string
+	// GetParentChain — цепь предков произвольной формы. Пусто у вызывающего,
+	// который её не шлёт; тогда предки читаются из двух полей выше, как раньше.
+	GetParentChain() []string
 }
 
 // unregisterInput — Unregister consumes the tuple + the tombstone source_version.

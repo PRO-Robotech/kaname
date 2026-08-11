@@ -106,6 +106,7 @@ func (r *grantReq) GetSourceVersion() *timestamppb.Timestamp {
 func (r *grantReq) GetLabels() map[string]string { return r.labels }
 func (r *grantReq) GetParentProjectId() string   { return r.parentProject }
 func (r *grantReq) GetParentAccountId() string   { return "" }
+func (r *grantReq) GetParentChain() []string     { return nil }
 
 const publicGrantObject = "registry_repository:reg53eeeg3578y4ah0q9/team/app"
 

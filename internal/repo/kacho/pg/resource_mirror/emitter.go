@@ -33,6 +33,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,6 +54,16 @@ type Row struct {
 	// empty producer) is normalized to '-infinity' so the register still applies
 	// unconditionally (back-compat).
 	SourceVersion time.Time
+
+	// ParentChain — цепь предков от БЛИЖАЙШЕГО к дальнему, каждый элемент в форме
+	// `"<type>:<id>"`. Пусто у вызывающего, который её не шлёт (legacy), — тогда
+	// рёбра не пишутся и предки читаются из двух колонок выше, как раньше.
+	//
+	// Пишется В ТОЙ ЖЕ транзакции, что и строка зеркала: объект и его цепь —
+	// один факт, и разъехаться на сбое они не вправе. Объект без цепи молча
+	// выпадает из области выдачи и из каскада, то есть отказ по нему неотличим
+	// от честного.
+	ParentChain []string
 }
 
 // negInfinity — the sentinel a zero/legacy SourceVersion maps to ('-infinity'),
@@ -164,7 +175,64 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: upsert: %w", err)
 	}
-	return Outcome{Applied: tag.RowsAffected() > 0}, nil
+	applied := tag.RowsAffected() > 0
+	if applied {
+		if err := upsertParentEdges(ctx, tx, row, version); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return Outcome{Applied: applied}, nil
+}
+
+// upsertParentEdges записывает цепь предков объекта рёбрами, в ТОЙ ЖЕ транзакции.
+//
+// Полная замена, а не досыпка: цепь — это состояние, а не приращение. Владелец
+// прислал ту цепь, которая верна сейчас; ребро, которого в ней нет, обязано
+// исчезнуть, иначе объект останется под областью, из которой его вынесли, — то
+// есть право переживёт перенос.
+//
+// Зовётся ТОЛЬКО когда зеркало реально применилось: устаревшая доставка не
+// проходит монотонную защиту строки и не должна переписывать цепь свежей.
+func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, version any) error {
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM kacho_iam.resource_parent_edge
+		  WHERE object_type = $1 AND object_id = $2`,
+		row.ObjectType, row.ObjectID,
+	); err != nil {
+		return fmt.Errorf("resource_parent_edge: clear: %w", err)
+	}
+	for i, ancestor := range row.ParentChain {
+		typ, id, ok := splitObjectRef(ancestor)
+		if !ok {
+			// Непонятая форма — ОТКАЗ, а не пропуск: пропущенное звено делает цепь
+			// короче настоящей, и объект оказывается под тем предком, под которым
+			// он не находится. Молчаливое проглатывание здесь дало бы область
+			// выдачи, «совпавшую» с ожиданием ровно потому, что про звено не
+			// спросили.
+			return fmt.Errorf("resource_parent_edge: непонятая форма предка %q "+
+				"(ожидается \"<type>:<id>\")", ancestor)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO kacho_iam.resource_parent_edge
+			   (object_type, object_id, parent_type, parent_id, depth, source_version, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, now())`,
+			row.ObjectType, row.ObjectID, typ, id, i+1, version,
+		); err != nil {
+			return fmt.Errorf("resource_parent_edge: insert depth %d: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
+// splitObjectRef разбирает `"<type>:<id>"`. Разделитель — ПЕРВОЕ двоеточие:
+// идентификаторы продукта его не содержат, а тип — тем более, поэтому разбор
+// однозначен; при этом форма проверяется, а не предполагается.
+func splitObjectRef(ref string) (typ, id string, ok bool) {
+	i := strings.IndexByte(ref, ':')
+	if i <= 0 || i == len(ref)-1 {
+		return "", "", false
+	}
+	return ref[:i], ref[i+1:], true
 }
 
 // DeleteTx conditionally removes the mirror row for (objectType, objectID). The

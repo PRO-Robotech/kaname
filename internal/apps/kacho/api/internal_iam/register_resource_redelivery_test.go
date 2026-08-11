@@ -163,6 +163,7 @@ func (r *versionedReq) GetSourceVersion() *timestamppb.Timestamp {
 func (r *versionedReq) GetLabels() map[string]string { return r.labels }
 func (r *versionedReq) GetParentProjectId() string   { return "prj-1" }
 func (r *versionedReq) GetParentAccountId() string   { return "acc-1" }
+func (r *versionedReq) GetParentChain() []string     { return nil }
 
 type redeliveryRig struct {
 	uc      *RegisterResourceUseCase
