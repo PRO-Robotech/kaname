@@ -29,7 +29,7 @@ type stubAsker struct {
 	calls int
 }
 
-func (s *stubAsker) Allowed(ctx context.Context, _, _, _, _ string) (bool, error) {
+func (s *stubAsker) Allowed(ctx context.Context, _, _, _, _ string, _ map[string]any) (bool, error) {
 	s.calls++
 	if s.delay > 0 {
 		select {
@@ -48,7 +48,7 @@ func quiet() *slog.Logger {
 // Согласие: счётчик сравнений растёт, расхождений — нет.
 func TestCompare_AgreementCountsAsComparedOnly(t *testing.T) {
 	c := New(&stubAsker{allow: true}, quiet())
-	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get")
+	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get", nil)
 
 	got := c.Counters()
 	if got.Compared != 1 || got.Diverged != 0 || got.Unfinished != 0 {
@@ -61,7 +61,7 @@ func TestCompare_AgreementCountsAsComparedOnly(t *testing.T) {
 // Это направление и доказывает, что сравнитель вообще способен покраснеть.
 func TestCompare_InjectedDivergenceIsCounted(t *testing.T) {
 	c := New(&stubAsker{allow: false}, quiet())
-	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get")
+	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get", nil)
 
 	got := c.Counters()
 	if got.Diverged != 1 {
@@ -77,7 +77,7 @@ func TestCompare_InjectedDivergenceIsCounted(t *testing.T) {
 // Ошибка формы — третья корзина, ни согласие, ни расхождение.
 func TestCompare_ErrorIsItsOwnBucket(t *testing.T) {
 	c := New(&stubAsker{err: errors.New("БД недоступна")}, quiet())
-	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get")
+	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get", nil)
 
 	got := c.Counters()
 	if got.Unfinished != 1 {
@@ -96,7 +96,7 @@ func TestCompare_OwnDeadlineDoesNotHoldTheCaller(t *testing.T) {
 	c := New(form, quiet()).WithTimeout(20 * time.Millisecond)
 
 	start := time.Now()
-	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get")
+	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get", nil)
 	elapsed := time.Since(start)
 
 	if elapsed > 150*time.Millisecond {
@@ -112,12 +112,12 @@ func TestCompare_OwnDeadlineDoesNotHoldTheCaller(t *testing.T) {
 // Выключенное сравнение — дешёвый no-op, а не паника и не ложные счётчики.
 func TestCompare_DisabledIsANoOp(t *testing.T) {
 	c := New(nil, quiet())
-	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get")
+	c.Compare(context.Background(), true, "user:usr-1", "vpc_network", "net-1", "get", nil)
 	if got := c.Counters(); got != (Snapshot{}) {
 		t.Fatalf("выключенное сравнение что-то посчитало: %+v — «ноль расхождений» тогда "+
 			"означало бы «сравнение не работает»", got)
 	}
 	// И на nil-приёмнике: сборка без сравнителя ведёт себя как прежняя.
 	var nilComparator *Comparator
-	nilComparator.Compare(context.Background(), true, "s", "t", "i", "v")
+	nilComparator.Compare(context.Background(), true, "s", "t", "i", "v", nil)
 }

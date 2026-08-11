@@ -44,7 +44,7 @@ func NewAsker(pool *pgxpool.Pool) *Asker {
 // обязан отличить «форма сказала нет» от «форма не ответила», иначе недоступная
 // БД читалась бы как поток расхождений либо как согласие — в зависимости от
 // вердикта движка, то есть случайно.
-func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, verb string) (bool, error) {
+func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, relation string, condCtx map[string]any) (bool, error) {
 	if a == nil || a.pool == nil {
 		return false, fmt.Errorf("relverdict: источник не собран")
 	}
@@ -55,7 +55,8 @@ func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, verb
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	v, err := Ask(ctx, tx, Query{
-		Subject: subject, ObjectType: objectType, ObjectID: objectID, Verb: verb,
+		Subject: subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
+		Context: condCtx,
 	})
 	if err != nil {
 		return false, err

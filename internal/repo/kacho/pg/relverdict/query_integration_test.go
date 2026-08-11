@@ -123,10 +123,10 @@ func TestAsk_DirectFactAllows(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject)
-			 VALUES ('vpc_network', 'net-1', 'get', 'user:usr-1')`)
+			 VALUES ('vpc_network', 'net-1', 'v_get', 'user:usr-1')`)
 
 		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -138,7 +138,7 @@ func TestAsk_DirectFactAllows(t *testing.T) {
 		// Отрицание рядом: другой субъект права не получает. Без него «allow»
 		// выше зеленело бы и на запросе, который разрешает всем.
 		other, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-2", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-2", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -167,7 +167,7 @@ func TestAsk_BindingOnAncestorAllows(t *testing.T) {
 			 VALUES ('acb-1', 'user', 'usr-1')`)
 
 		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -179,7 +179,7 @@ func TestAsk_BindingOnAncestorAllows(t *testing.T) {
 
 		// Отрицание: глагол, которого роль не даёт.
 		noVerb, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "delete",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_delete",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -194,7 +194,7 @@ func TestAsk_BindingOnAncestorAllows(t *testing.T) {
 			   (object_type, object_id, parent_type, parent_id, depth)
 			 VALUES ('vpc_network', 'net-2', 'project', 'prj-2', 1)`)
 		outside, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-2", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-2", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -225,7 +225,7 @@ func TestAsk_LabelSelectorFollowsTheObjectLabels(t *testing.T) {
 			`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
 			 VALUES ('acb-2', 'user', 'usr-1')`)
 		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -241,7 +241,7 @@ func TestAsk_LabelSelectorFollowsTheObjectLabels(t *testing.T) {
 			`UPDATE kacho_iam.resource_mirror SET labels = '{"env":"dev"}'::jsonb
 			  WHERE object_type = 'vpc_network' AND object_id = 'net-1'`)
 		after, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -277,7 +277,7 @@ func TestAsk_GroupMembershipAllows(t *testing.T) {
 			 VALUES ('grp-1', 'user', 'usr-1')`)
 
 		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -289,7 +289,7 @@ func TestAsk_GroupMembershipAllows(t *testing.T) {
 		// Отрицание: не член группы права не получает — иначе выдача группе
 		// означала бы выдачу всем.
 		outsider, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-9", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-9", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -323,7 +323,7 @@ func TestAsk_RevokedAndExpiredBindingsDoNotAllow(t *testing.T) {
 			 VALUES ('acb-r', 'user', 'usr-1')`)
 
 		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -338,7 +338,7 @@ func TestAsk_RevokedAndExpiredBindingsDoNotAllow(t *testing.T) {
 func TestAsk_IncompleteQuestionIsAnErrorNotADenial(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "", ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get",
+			Subject: "", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
 		if err == nil {
 			t.Fatal("пустой субъект принят — отдавать за него Deny значит выдавать незнание " +

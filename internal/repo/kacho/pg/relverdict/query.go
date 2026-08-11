@@ -10,7 +10,8 @@
 // Ответ складывается из четырёх источников, и все четыре живут в схеме iam:
 //
 //  1. ПРЯМОЙ ФАКТ — владение, поставленное при создании, иерархический
-//     указатель, подстановочный субъект (`relation_fact`);
+//     указатель, подстановочный субъект (`relation_fact`) — на самом объекте
+//     ЛИБО на его предке, если так велит модель;
 //  2. ВЫДАЧА РОЛИ на область — сама область объекта либо любой его предок
 //     (`access_bindings` × `role_verb`, цепь из `resource_parent_edge`);
 //  3. ВЫДАЧА ПО МЕТКАМ — то же, плюс совпадение меток объекта с селектором
@@ -27,6 +28,17 @@
 // котором спросили, поэтому смена метки — один UPDATE, а не пересчёт.
 //
 // ─────────────────────────────────────────────────────────────────────────────
+// ВЫВОД ОТНОШЕНИЙ БЕРЁТСЯ ИЗ МОДЕЛИ, А НЕ ИЗ ИМЕНИ
+//
+// Модель выводит право: право читателя следует из права редактора, право
+// редактора — из права администратора, право администратора аккаунта
+// распространяется на всё внутри аккаунта. Форма, ищущая имя отношения
+// БУКВАЛЬНО, ответила бы «нет» держателю права, которое модель ему даёт, — и это
+// не оттенок, а отказ. Поэтому вопрос сначала компилируется в набор источников
+// (`authzplan.Plan`), и запрос спрашивает про КАЖДЫЙ из них: где искать факт
+// (на объекте или на предке названного типа) и какие глаголы засчитывать у роли.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦА ЭТОЙ ФАЗЫ, НАЗВАННАЯ ЯВНО
 //
 // Отвечает по-прежнему движок. Этот запрос спрашивается РЯДОМ и только
@@ -34,17 +46,39 @@
 // принимает не он. Это и есть безопасное место ошибиться — и единственное, где
 // расхождение видно раньше, чем становится инцидентом.
 //
-// Условие на кортеже (свежесть аутентификации) здесь НЕ вычисляется: оно
-// зависит от «сейчас» и приезжает контекстом запроса — отдельная фаза. Пока
-// отношение с условием встречено, запрос обязан сказать «не знаю», а не «нет»:
-// молчаливое «нет» слилось бы с честным отказом.
+// # ВЫВОД ПРИМЕНЯЕТСЯ К ПРЯМОМУ ВОПРОСУ, НО ПОКА НЕ К ОБРАТНЫМ
+//
+// `Ask` спрашивает по плану модели. Обратные вопросы — `List` (что мне
+// доступно), `Subjects` (кто имеет право), `Expand` (из чего оно складывается) —
+// пока читают источники ПО ИМЕНИ ОТНОШЕНИЯ и вывода не применяют. Следствие
+// названо прямо, чтобы его не приняли за оттенок: они НЕДОотвечают ровно на те
+// права, которые выводятся, — администратор облака не увидит себя в списке
+// субъектов, а его объекты не попадут в перечисление доступного.
+//
+// Сегодня это никого не отсекает: обратные вопросы не являются источником ни
+// одного решения о доступе (решает движок), а прямой вопрос — тот, по которому
+// идёт сравнение, — вывод применяет. Снимается это тем же приёмом: раскладкой
+// вопроса на источники плана, только обход цепи идёт в обратную сторону — от
+// области к объектам. До тех пор ни один из трёх не вправе стать источником
+// вердикта.
+//
+// Условие на кортеже (свежесть подтверждения личности) вычисляется ЗДЕСЬ, по
+// доводам, приезжающим с вопросом: оно зависит от «сейчас» и не материализуемо
+// ни в какой форме. Условие лежит на самой записи факта, поэтому запросу не надо
+// знать модель, чтобы его соблюсти, — см. `condition.go`. Условие, которого эта
+// форма не умеет вычислять, даёт «не знаю», а не «нет»: молчаливое «нет» слилось
+// бы с честным отказом.
 package relverdict
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
 )
 
 // MaxAncestorDepth — предел обхода цепи предков.
@@ -91,9 +125,28 @@ type Query struct {
 	// в зеркале.
 	ObjectType string
 	ObjectID   string
-	// Verb — глагол в канонической форме, БЕЗ приставки отношения.
-	Verb string
+	// Relation — отношение в том виде, в каком его называет МОДЕЛЬ (`v_get`,
+	// `ssh`, `admin`). Не глагол: приставку снимает компилятор плана там, где
+	// источником служит роль, а факт хранится под модельным именем.
+	Relation string
+	// Context — доводы запроса для условий на записях: «сейчас», уровень
+	// уверенности подтверждения личности, применённые методы.
+	//
+	// Собирается ВЫЗЫВАЮЩИМ и обязан быть уже очищен от значений, присланных
+	// клиентом: здесь довод принимается как проверенный. Заводить очистку второй
+	// раз тут значило бы завести второе место, знающее, чему можно верить, — и
+	// разойтись с первым в сторону лишнего доступа.
+	Context map[string]any
 }
+
+// maxConditionRows — предел числа различных условий, рассматриваемых на один
+// вопрос.
+//
+// Предел есть, потому что число строк ограничивать обязано что-то; но усечение
+// НЕ становится отказом. Достигнут предел ⇒ вердикт «не знаю» с названной
+// причиной: тихое «нет» на усечении означало бы отказ, объяснимый только объёмом
+// данных, и искали бы его в правах.
+const maxConditionRows = 256
 
 // verdictSQL — единственный запрос, отвечающий на вопрос.
 //
@@ -101,7 +154,14 @@ type Query struct {
 // затем субъекты, за которых говорит вызывающий (он сам, его группы,
 // подстановка), затем четыре источника права через OR.
 //
-// $1 subject · $2 object_type · $3 object_id · $4 verb · $5 max_depth
+// Отдаёт НЕ «да/нет», а условия совпавших источников. Разница существенная:
+// свернуть совпадение с условием в «да» значило бы выдать право, действующее при
+// невыполненном условии, — то есть ровно то, от чего условие и защищает. Порядок
+// по имени условия ставит безусловное совпадение (пустое имя) первым, поэтому
+// самый частый случай решается первой же строкой.
+//
+// $1 subject · $2 object_type · $3 object_id · $4 типы предков атомов-фактов ·
+// $5 отношения атомов-фактов · $6 глаголы атомов-выдачи · $7 max_depth · $8 limit
 const verdictSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
     -- Сам объект — тоже область: выдача, сделанная НА него, действует.
@@ -113,7 +173,7 @@ WITH RECURSIVE scope(s_type, s_id, depth) AS (
       FROM scope s
       JOIN kacho_iam.resource_parent_edge e
         ON e.object_type = s.s_type AND e.object_id = s.s_id
-     WHERE s.depth < $5::int
+     WHERE s.depth < $7::int
 ),
 speaker(subject) AS (
     -- За вызывающего говорит он сам…
@@ -131,14 +191,25 @@ speaker(subject) AS (
     -- НАМЕРЕННО (глобальный справочник читает всякий аутентифицированный), и
     -- потому перечислена здесь явно, а не выведена из формы имени.
     SELECT 'user:*'
+),
+fact_atom(parent_type, relation) AS (
+    -- Источники-факты плана: где искать и что искать. Пустой тип предка означает
+    -- «на самом объекте», непустой — «на предке этого типа».
+    SELECT * FROM unnest($4::text[], $5::text[])
 )
-SELECT EXISTS (
-    -- (1) прямой факт
-    SELECT 1
+SELECT DISTINCT cond_name, cond_params FROM (
+    -- (1) прямой факт. Условие берётся С САМОЙ ЗАПИСИ: она самоописательна, и
+    -- читателю не нужно знать модель, чтобы соблюсти ограничение.
+    SELECT f.condition_name AS cond_name, f.condition_params AS cond_params
       FROM kacho_iam.relation_fact f
       JOIN speaker sp ON sp.subject = f.subject
-     WHERE f.object_type = $2::text AND f.object_id = $3::text
-       AND f.relation = $4::text
+      JOIN scope sc ON sc.s_type = f.object_type AND sc.s_id = f.object_id
+      JOIN fact_atom fa
+        ON fa.relation = f.relation
+       AND CASE WHEN fa.parent_type = ''
+                THEN sc.depth = 0
+                ELSE fa.parent_type = sc.s_type
+           END
   UNION ALL
     -- (2) выдача роли на область объекта или любого его предка.
     --
@@ -147,12 +218,19 @@ SELECT EXISTS (
     -- меткам объекта). Ветвь выбирает колонка arm, и разбирать её обязан ЗАПРОС, а не
     -- вызывающий: правило — состояние роли, и вычислять его снаружи значило бы
     -- завести второе место, знающее, что такое «подходит».
-    SELECT 1
+    --
+    -- Выдача условия НЕ несёт, и это свойство, а не упущение: роль раздаёт
+    -- ГЛАГОЛЫ, а условие в модели стоит на отношениях, глаголами не являющихся.
+    -- Пустое имя здесь — утверждение «действует всегда», проверяемое гейтом
+    -- TestNoConditionedRelationIsAVerb: появится глагол с условием — гейт
+    -- покраснеет, потому что вот эта строка молча потеряла бы его условие.
+    SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params
       FROM kacho_iam.access_bindings b
       JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
       JOIN speaker sp ON sp.subject = bs.subject_type || ':' || bs.subject_id
       JOIN kacho_iam.role_verb rv
-        ON rv.role_id = b.role_id AND rv.object_type = $2::text AND rv.verb = $4::text
+        ON rv.role_id = b.role_id AND rv.object_type = $2::text
+       AND rv.verb = ANY ($6::text[])
       JOIN kacho_iam.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $2::text = ANY (rs.object_types)
       JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
@@ -170,7 +248,9 @@ SELECT EXISTS (
           OR (rs.arm = 'labels' AND m.labels IS NOT NULL
                                 AND m.labels @> rs.match_labels)
        )
-) AS allowed`
+) src
+ORDER BY cond_name
+LIMIT $8::int`
 
 // Ask задаёт вопрос форме E.
 //
@@ -178,18 +258,110 @@ SELECT EXISTS (
 // сказать «прав нет» там, где ответ не получен, и сравнение с движком показало
 // бы согласие вместо расхождения. Вызывающий обязан отличать одно от другого.
 func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, error) {
-	if in.Subject == "" || in.ObjectType == "" || in.ObjectID == "" || in.Verb == "" {
+	if in.Subject == "" || in.ObjectType == "" || in.ObjectID == "" || in.Relation == "" {
 		return Unknown, fmt.Errorf("relverdict: неполный вопрос %+v — пустая часть делает "+
 			"ответ бессмысленным, и отдавать за него Deny значит выдавать незнание за отказ", in)
 	}
-	var allowed bool
-	if err := q.QueryRow(ctx, verdictSQL,
-		in.Subject, in.ObjectType, in.ObjectID, in.Verb, MaxAncestorDepth,
-	).Scan(&allowed); err != nil {
+	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
+	if err != nil {
+		return Unknown, err
+	}
+
+	rows, err := q.Query(ctx, verdictSQL,
+		in.Subject, in.ObjectType, in.ObjectID,
+		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
+	)
+	if err != nil {
 		return Unknown, fmt.Errorf("relverdict: запрос: %w", err)
 	}
-	if allowed {
-		return Allow, nil
+	defer rows.Close()
+
+	type source struct {
+		name   string
+		params map[string]any
+	}
+	var sources []source
+	for rows.Next() {
+		var s source
+		if err := rows.Scan(&s.name, &s.params); err != nil {
+			return Unknown, fmt.Errorf("relverdict: разбор источника: %w", err)
+		}
+		sources = append(sources, s)
+	}
+	if err := rows.Err(); err != nil {
+		return Unknown, fmt.Errorf("relverdict: чтение источников: %w", err)
+	}
+	if len(sources) >= maxConditionRows {
+		// Усечение — не отказ. См. maxConditionRows.
+		return Unknown, fmt.Errorf("relverdict: различных условий на вопрос %d и более — "+
+			"набор усечён, и вердикт по нему давать нельзя", maxConditionRows)
+	}
+
+	// Первым идёт безусловное совпадение: порядок задан запросом, и здесь он
+	// только используется — проверка на пустое имя выполняется для КАЖДОЙ строки,
+	// поэтому смена порядка запросом сделала бы ответ медленнее, но не неверным.
+	var notUnderstood error
+	for _, s := range sources {
+		if s.name == "" {
+			return Allow, nil
+		}
+		ok, err := evalCondition(s.name, s.params, in.Context)
+		if err != nil {
+			// Не понято — запоминаем, но продолжаем: другой источник может дать
+			// право безусловно, и тогда незнание про этот ничего не меняет.
+			notUnderstood = err
+			continue
+		}
+		if ok {
+			return Allow, nil
+		}
+	}
+	if notUnderstood != nil {
+		return Unknown, notUnderstood
 	}
 	return Deny, nil
+}
+
+// sourcesOf раскладывает вопрос на источники, которые запрос обязан спросить.
+//
+// Раскладку делает КОМПИЛЯТОР МОДЕЛИ, а не это место: вывод отношений — свойство
+// модели, и второе место, знающее его, разошлось бы с первым молча и в сторону
+// отказа человеку с законным правом.
+func sourcesOf(objectType, relation string) (parents, relations, verbs []string, err error) {
+	plans, err := authzmodel.Shared()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	plan, err := plans.Plan(objectType, relation)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// Непустые срезы даже при нуле источников: пустой `nil` уезжает в запрос как
+	// NULL, а `unnest(NULL)` — не пустое множество, а отсутствие строки, и
+	// соединение с ним ведёт себя иначе, чем с пустым массивом.
+	parents, relations, verbs = []string{}, []string{}, []string{}
+	for _, a := range plan.Atoms {
+		switch a.Kind {
+		case authzplan.AtomFact:
+			parents = append(parents, a.ParentType)
+			relations = append(relations, a.Relation)
+		case authzplan.AtomBinding:
+			// Обе предпосылки проверяются здесь, а не предполагаются: нарушенная
+			// молча превратила бы источник в ненайденный, то есть в отказ.
+			if a.ParentType != "" {
+				return nil, nil, nil, fmt.Errorf("relverdict: источник-выдача %s.%s назван "+
+					"на предке %q, а запрос ищет выдачу по всей цепи областей без различения "+
+					"типа предка — источник был бы учтён шире объявленного",
+					objectType, relation, a.ParentType)
+			}
+			if !authzplan.IsVerb(a.Relation) {
+				return nil, nil, nil, fmt.Errorf("relverdict: источник-выдача %s.%s назван "+
+					"отношением %q, которое не является глаголом; роль раздаёт глаголы, и "+
+					"такой источник не совпал бы ни с одной строкой — то есть исчез бы молча",
+					objectType, relation, a.Relation)
+			}
+			verbs = append(verbs, strings.TrimPrefix(a.Relation, authzplan.VerbPrefix))
+		}
+	}
+	return parents, relations, verbs, nil
 }

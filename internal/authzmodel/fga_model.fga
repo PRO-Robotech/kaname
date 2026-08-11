@@ -1,0 +1,777 @@
+model
+  schema 1.1
+
+# OpenFGA Authorization Model v2 — Kachō (rbac-2026 Contract-A: FLAT INDEX).
+#
+# This file is the **canonical source** of the authorization model. It is
+# bundled into kacho-proto so every consumer (kacho-iam, openfga-bootstrap-job,
+# admin-UI catalog) reads from the same artifact. Helm umbrella's
+# `openfga-model-stub-configmap.yaml` is generated from this file at
+# image-build time (acceptance §5.1) — `make openfga-model-json`.
+#
+# rbac-2026 Contract-A (Explicit RBAC model 2026, acceptance §0 D-5 / §9):
+# for TENANT roles the model is a **FLAT INDEX** (Zanzibar-as-storage). There is
+# no `scope_grant` carrier (`type scope_grant` + `sg_*` pointers + `g_*_<type>`
+# grant-resolvers, #177 — all removed), and tenant access is materialized
+# PER-OBJECT by the iam reconciler; Check is a direct tuple lookup.
+#
+# THE THREE TOP LEVELS ARE THE EXCEPTION, AND THEY CASCADE (owner directive
+# 2026-07-27, .claude/rules/security.md "Три уровня супер-доступа — КАСКАДОМ"):
+#
+#   1. cloud administrator  — `cluster:cluster_kacho_root#system_admin`, over everything;
+#   2. bootstrap identity   — the SAME relation (migration 0058 seeds it for the
+#                             bootstrap SA, seed/bootstrap_admin.go for the root
+#                             user), so it needs no separate carrier;
+#   3. account administrator — `account:<id>#admin` (which derives `or owner`),
+#                             WITHIN its own account only.
+#
+# Why these three cascade while everything below stays flat: materializing them
+# breaks the exact scenario they exist for. With a lagging or broken drainer the
+# person who has to repair the platform would himself be locked out, precisely
+# when he is needed. A cascade resolves at request time and works regardless of
+# the state of the materialization pipeline. There are also only a handful of
+# such principals and their rights are never revoked selectively, so paying for
+# per-object materialization buys nothing. Incident it fixes (2026-07-26): every
+# verb on `iam_access_binding` was a direct userset with no `or`, so a cluster
+# administrator saw every grant but could revoke only his own — 652 denials
+# against 32 allows in one run; an employee left and his colleague's access could
+# not be revoked except by editing the database by hand.
+#
+# The cascade is carried by ONE computed relation per verb-bearing type:
+#
+#	define super_admin: <derivation over this type's OWN structural pointer>
+#
+# unioned into every verb the type declares and into its `admin` tier (the other
+# tiers derive from `admin`, so they follow). `project.super_admin` is derived
+# from its ACCOUNT
+# and the CLUSTER and deliberately NOT from `project.admin` — project scope and
+# below stay flat, which keeps the anti-over-grant boundary of data-integrity.md
+# intact. Behavioural lock: authzmap/super_admin_cascade_test.go.
+#
+# THE ACCOUNT OWNER IS A STRUCTURAL SOURCE ON HIS OWN ACCOUNT OBJECT (owner
+# refinement 2026-07-27, same rules section). An account is created by
+# self-service, so tearing it down must be as reliable as creating it — and it was
+# not: the right to delete arrived with the owner ROLE BINDING, materialized per
+# object by the reconciler, so a just-created account could not be deleted until
+# the queue caught up, while the cloud administrator's equivalent right cascaded
+# and always worked. `account`'s verbs therefore read `or owner` directly.
+# NOT via the `admin` tier: `account.admin` also accepts DIRECT subjects, so
+# reading it would hand the DELEGATED account administrator the account object
+# itself — and the recorded picture puts him inside the account, not over it
+# (levels: cloud → everything; owner → structurally his own account; account
+# administrator → cascade WITHIN the account, never onto it; below → flat, by
+# grant). Locks: authzmap/account_owner_structural_test.go.
+#
+# Deliberately NOT cascaded (they are not CRUD authority): `owner` and `subject`
+# (identity facts — no tier ever CONFERS ownership; the refinement above reads
+# `owner` as a source of verbs, it never grants the relation itself),
+# `member` (membership), `announce_writer` (data plane only),
+# `fga_writer` (proxy), `use` / `token_creator` / `ssh` / `console` (these derive
+# from `admin`/`editor` on their own types and so follow the tier, by their
+# pre-existing definition — not by anything added here).
+#
+# What is KEPT and why:
+#   - direct relation-tuples on every type (`v_*`, tier viewer/editor/admin) —
+#     the materialized flat index for tenant roles;
+#   - cluster super-admin relations (system_admin/system_viewer/...) — both the
+#     D-9 Go short-circuit anchor and, now, the root of the cascade above;
+#   - STRUCTURAL parent-pointer relations (`account: [account]`,
+#     `project: [project]`, `cluster: [cluster]`, `parent: [...]`) — needed for
+#     list-by-account, owner-binding lifecycle and the cluster-singleton
+#     write-enforcement. Only `super_admin` derives over them; no tenant access
+#     cascade reads them. Each one on a consumer-owned type must have a producer
+#     in the tree or an explicit `# kacho:latent` marker;
+#   - CEL conditions (unchanged).
+#
+# `v_create` IS NOT PART OF THE OBJECT VERB-SET, AND THAT IS THE WHOLE POINT.
+# A verb relation names an operation performed ON the object the tuple points at.
+# "Create" is not one: at the moment authority is decided the object does not yet
+# exist, so the question is always asked of a PARENT. Kachō answers it with the
+# write tier on that parent — `editor@project` gates every resource Create in the
+# permission catalog — which is why a per-object `v_create` had no reader anywhere.
+# It was nonetheless declared by 24 types and materialized on every one of them:
+# 41087 tuples on the reference stand, 9.05% of the whole store, all of them
+# answering a question nothing asks. Worse than the cost, a relation that is
+# granted, written and never checked is a right nobody reviews, and the role editor
+# offered `create` on 23 resources where authoring it delivered exactly nothing.
+#
+# ONE type keeps it, on container semantics: `registry_registry`. "Create a
+# repository in this namespace" IS an operation on the registry object, and it is
+# really asked — control plane (CreateRepository / RenameRepository) and data plane
+# (docker push to a new repo, cross-repo mount, first-push blob-reveal guard).
+#
+# Both directions are locked by authzmap/verb_relation_has_reader_test.go: a
+# reader-less carrier reappearing reds with the type name, and so does an exemption
+# that outlived its subject.
+#
+# Contract-B (acceptance D-12) REMOVED the B2B `type organization` and every
+# `... from organization` derivation — Organization is fully gone.
+#
+# DSL conventions (acceptance §4):
+#   - `cluster:cluster_kacho_root`     — singleton enforced on write-side
+#     (P3-D17). One global cluster object.
+#   - `account` / `project` — STRUCTURAL parents
+#     (cluster ▶ account ▶ project ▶ <domain resource>);
+#     parent-pointers only, no access cascade (Contract-A flat).
+#   - per-domain object types — `vpc_network`, `vpc_subnet`, `vpc_address`,
+#     `vpc_security_group`, `vpc_route_table`, `vpc_gateway`,
+#     `vpc_network_interface`, `vpc_address_pool`,
+#     `compute_instance`,
+#     `storage_volume`, `storage_snapshot`, `storage_image`,
+#     `nlb_network_load_balancer`, `nlb_target_group`,
+#     `nlb_listener` (KAC-178 §4 — Listener as first-class FGA object),
+#     `registry_registry`, `registry_repository`,
+#     `iam_role`, `iam_access_binding`, `iam_service_account`, `iam_group`,
+#     `iam_user`.
+#   - relations: `viewer` / `editor` / `admin` / `owner` / `member` per the
+#     Kachō roles vocabulary (KAC-121).
+#   - conditional relations: `with` clause names a Condition (built-in or
+#     custom) — FGA pre-compiles CEL on `WriteAuthorizationModel`.
+#
+# The per-domain enumeration above is DERIVED from the type declarations below,
+# not a hand-kept summary, and it is pinned in BOTH directions by
+# authzmap/fga_model_header_census_test.go. That bullet must stay a bare list:
+# the gate reads every backticked identifier in it, so prose belongs here, in a
+# paragraph of its own. Before the gate existed the list had drifted both ways at
+# once — it named a type retired long ago (its tombstone is further down) and
+# omitted an entire domain the body declares. A list nobody verifies drifts from
+# its subject; this one now expires with it.
+
+# ---------------------------------------------------------------------------
+# Generic principal / subject types.
+# ---------------------------------------------------------------------------
+
+type user
+
+type service_account
+
+type federated_subject
+
+# group — subject-grouping type. `group#member` usersets are accepted as
+# direct subjects on hierarchy + resource relations.
+type group
+  relations
+    define member: [user, service_account, federated_subject, group#member]
+
+# ---------------------------------------------------------------------------
+# Cluster — singleton "cluster_kacho_root". Write-side enforcement rejects
+# tuples with any other object id (P3-D17).
+#   - system_admin  — standing cluster administrator.
+#   - system_viewer — read-only cluster catalog viewer.
+#   - billing_admin — cluster-wide billing.
+#   - console       — cluster console access, MFA-gated.
+#   - any_admin     — alias for system_admin (kept as a relation name so
+#                     hierarchy `any_admin from cluster` references stay
+#                     valid across many downstream type definitions).
+# ---------------------------------------------------------------------------
+
+type cluster
+  relations
+    define system_admin: [user, service_account]
+    define system_viewer: [user, service_account]
+    define billing_admin: [user, service_account]
+    define console: [user with mfa_fresh, service_account with mfa_fresh]
+    define any_admin: system_admin
+    # KAC-178 §3: viewer — общий read-relation для глобальных reference-данных
+    # (compute.Region, compute.Zone, …), к которым каталог permissions
+    # привязан через scope_extractor {object_type: cluster, from_request_field: '*'}.
+    # `user:*` userset делает справочные данные читаемыми ЛЮБЫМ authenticated
+    # subject'ом (как и должно быть для tenant-facing reference-data). Также
+    # включает system_viewer / any_admin transitively. До этого relation'а на
+    # cluster не было `viewer` вообще → catalog `required_relation: "viewer"`
+    # на cluster-scope'ed RPC всегда возвращал deny → UI dashboard падал.
+    define viewer: [user, user:*, service_account] or system_viewer or any_admin
+    # KAC-198 follow-up: editor + admin — derived-relation aliases.
+    # iam/internal/service/authorize_service.go::resolveActionToRelation
+    # maps verbs to canonical relations:
+    #   get / list      → viewer    (covered above)
+    #   create / update → editor
+    #   delete          → admin
+    # Cluster-scoped Internal admin RPCs (compute.regions.delete, etc.)
+    # land on object cluster:cluster_kacho_root with derived relation
+    # admin/editor. Without these aliases, FGA Check returned no-path for
+    # every system_admin user even though their tuple was correct.
+    # `system_admin` covers BOTH editor + admin so a single tuple grants
+    # full mutation rights. `any_admin` is an alias for system_admin.
+    define editor: [user, service_account] or system_admin or any_admin
+    define admin: [user, service_account] or system_admin or any_admin
+
+# ---------------------------------------------------------------------------
+# Identity & hierarchy — account → project. (B2B Organization fully removed in
+# RBAC-2026 Contract-B; cluster is the only structural parent above account.)
+# ---------------------------------------------------------------------------
+
+type account
+  relations
+    define cluster: [cluster]
+    # Levels 1-2 (cloud administrator / bootstrap identity, both carried by
+    # cluster#system_admin) reach the account over its structural cluster pointer.
+    # The account's OWN admin is deliberately absent: level 3 cascades WITHIN the
+    # account, and the account object is the boundary of that scope, not inside it.
+    define super_admin: any_admin from cluster
+    define owner: [user]
+    define admin: [user, service_account, group#member] or owner or super_admin
+    define editor: [user, service_account, group#member] or admin
+    # Contract-A (flat): the SEC-L `or system_viewer from cluster` read-cascade is
+    # REMOVED — account.viewer is no longer derived from a cluster relation.
+    # Visibility is materialized per-object by the iam reconciler (direct viewer
+    # tuples on each account).
+    #
+    # This note used to name the network operator as the consumer of that
+    # materialization, in the present tense. It outlived its subject: the
+    # component never existed in the tree, its service account and grants were
+    # retired by migration 0081, and its trusted-forwarder pins were removed the
+    # same day. A comment that keeps naming a retired consumer sends the next
+    # reader looking for a caller that cannot be found — and the model is the one
+    # place where that search costs the most.
+    # Contract-B: the `... from organization` disjuncts and the `organization`
+    # parent-pointer are REMOVED — B2B Organization is fully gone (D-12).
+    define viewer: [user, service_account, group#member] or editor
+    define billing_admin: [user, service_account] or admin
+    # rbac-2026 P2 (D-6): account is a verb-bearing resource. These v_* relations
+    # are object-level read/write on the account OBJECT ITSELF; a grant of e.g.
+    # `iam.account.get` materializes `account:<id> # v_get @ subj` → "see the
+    # account in a selector without any access to its contents" (D-2: no implicit
+    # hierarchy cascade into content). Object verb-set, in parity with leaf types
+    # (see the `v_create` note in the header: creating an account is not an
+    # operation ON an account, so no `v_create` here).
+    #
+    # Exactly two derivations, and no others:
+    #   `owner`       — the account is created by SELF-SERVICE, so deleting it must
+    #                   be as reliable as creating it. Structural, so it holds the
+    #                   instant the account exists and never waits for the
+    #                   reconciler to materialize the owner binding (2026-07-27).
+    #   `super_admin` — levels 1-2 (cloud administrator / bootstrap identity).
+    # NOT the `admin` tier: it accepts DIRECT subjects, so reading it would give the
+    # DELEGATED account administrator the account object itself — he governs what is
+    # INSIDE the account, and the account is the boundary of that scope, not a thing
+    # within it. Structural lock: authzmap/account_owner_structural_test.go.
+    define v_get: [user, service_account, group#member] or owner or super_admin
+    define v_list: [user, service_account, group#member] or owner or super_admin
+    define v_update: [user, service_account, group#member] or owner or super_admin
+    define v_delete: [user, service_account, group#member] or owner or super_admin
+
+type project
+  relations
+    define account: [account]
+    # Contract-A (flat): `cluster` is kept ONLY as a structural parent-pointer
+    # (project:<id>#cluster@cluster tuple written on Create) — the SEC-L
+    # `system_viewer from cluster` read-cascade is removed (per-object now).
+    define cluster: [cluster]
+    # Levels 1-3. `admin from account` is the level-3 disjunct and already contains
+    # levels 1-2 (account.admin derives super_admin); `any_admin from cluster` is the
+    # direct path over the project's own cluster pointer. The project's OWN admin is
+    # NOT a source — project scope and below stay flat (anti-over-grant, D-2).
+    define super_admin: admin from account or any_admin from cluster
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    # rbac-2026 P2 (D-6): project becomes a verb-bearing resource. Same contract
+    # as account.v_* — DIRECT subjects only, NO cascade, NOT implied by tiers.
+    # A grant materializes `project:<id> # v_get @ subj` (object-level access to
+    # the project itself, never to its contents — D-2). Object verb-set, in parity
+    # with leaf resource types. Creating resources IN a project is authorized by
+    # the write tier on the project (`editor@project`), not by a per-object
+    # `v_create` — see the `v_create` note in the header.
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+# ---------------------------------------------------------------------------
+# IAM resources. Group / ServiceAccount / Role / User are account-scoped
+# (their `parent` relation cascades from the owning Account); AccessBinding
+# / Condition are project-scoped (their `parent` cascades from the Project
+# the binding is attached to).
+# ---------------------------------------------------------------------------
+
+type iam_user
+  relations
+    define account: [account]
+    define super_admin: admin from account
+    define subject: [user]
+    define admin: [user, service_account, group#member] or super_admin
+    # editor / viewer — directly-assignable (subject-list), а не computed-only:
+    # reconciler пишет back-compat tier-tuple (`iam_user:<id> # viewer @ subj`),
+    # и computed-only relation (`viewer: subject or editor`) отверг бы такую запись
+    # (poison). v_* НЕ union-ятся в tier (Design B развязка, D-6a).
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or subject or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type iam_service_account
+  relations
+    define account: [account]
+    define super_admin: admin from account
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define user: [user, service_account] or editor
+    define token_creator: [user, service_account] or admin
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type iam_group
+  relations
+    define account: [account]
+    define super_admin: admin from account
+    define member: [user, service_account]
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type iam_role
+  relations
+    define account: [account]
+    define super_admin: admin from account
+    define admin: [user, service_account, group#member] or super_admin
+    # editor / viewer — directly-assignable (poison-fix): reconciler пишет
+    # back-compat tier-tuple, computed-only relation отверг бы запись. v_* НЕ
+    # union-ятся в tier (Design B развязка, D-6a).
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type iam_access_binding
+  relations
+    define project: [project]
+    define account: [account]
+    define cluster: [cluster]
+    # A binding carries exactly ONE parent-pointer, named after its own scope
+    # (access_binding/tuples.go::hierarchyParentTuple), so all three are needed:
+    # project-scoped bindings resolve over `project`, account-scoped over `account`,
+    # cluster-scoped over `cluster`. This is the type the 2026-07-26 incident hit.
+    define super_admin: super_admin from project or admin from account or any_admin from cluster
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+# TOMBSTONE — `type iam_condition` жил здесь ради тенантского ресурса условия.
+# Ресурс снят целиком (сервис, хранилище, наложение на привязку), поэтому у типа
+# не осталось ни одного производителя кортежей. Порядок снятия — сначала
+# производитель, потом тип: обратный порядок превратил бы каждую его запись в
+# отказ, который дренаж считает временным, и заклинил бы голову партиции.
+#
+# Условия на кортеже (`condition …` в конце этого файла и ограничения
+# `… with mfa_fresh`) к снятому типу отношения не имеют и остаются живыми.
+
+# SEC-A/SEC-C — FGA-proxy authority object. Modules (kacho-vpc / kacho-compute /
+# kacho-nlb) NEVER write to FGA directly; they call InternalIAMService.
+# RegisterResource/UnregisterResource, gated by a ReBAC Check
+# `service_account:<sva>#fga_writer@iam_fgaproxy:system` (authzguard.FGAProxyGate,
+# fgaProxyObject="iam_fgaproxy:system"). Without this type the Check is rejected
+# by OpenFGA ("object type is undefined in the authorization model" → status 400),
+# the gate denies every module, and NO owner-hierarchy tuple is ever written — so
+# resource creators cannot view their own resources once real authz is enforced.
+# The fga_writer tuples are seeded by kacho-iam migration 0009 (least-priv).
+type iam_fgaproxy
+  relations
+    define fga_writer: [service_account]
+
+# ---------------------------------------------------------------------------
+# VPC domain.
+# ---------------------------------------------------------------------------
+
+type vpc_network
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_subnet
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define use: [user, service_account] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_security_group
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_route_table
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_address
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define use: [user, service_account] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_gateway
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_network_interface
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_address_pool
+  relations
+    # kacho:latent — cluster-anchored admin resource; its RPCs gate on
+    # cluster:cluster_kacho_root#system_admin directly, so no module registers an
+    # address pool and nothing writes this pointer today. Declared ahead of that
+    # producer deliberately: the type is admin-curated and the anchor is what the
+    # super-admin cascade below derives over. The marker expires by itself — the
+    # moment a producer appears, the gate demands it be removed.
+    define cluster: [cluster]
+    define super_admin: any_admin from cluster
+    define admin: [user, service_account] or super_admin
+    define viewer: [user, service_account] or admin
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+# ---------------------------------------------------------------------------
+# Compute domain.
+#
+# `compute_disk` / `compute_image` / `compute_snapshot` were declared here and are
+# not any more. Block storage belongs to kacho-storage — see `storage_volume` /
+# `storage_snapshot` / `storage_image` below — and compute's duplicate of those
+# resources is retired: no tables, no services, no routes, no catalog entries.
+# Declaring an authorization type for a resource nothing serves is not harmless
+# housekeeping: it stays grantable, bindable and materializable, so a binding on
+# it writes per-object tuples for objects that will never exist.
+#
+# Do not re-add them without the resource. If some future compute-owned disk ever
+# arrives, it declares its own type together with its tables, its RPCs and its
+# catalog entries — and the roles/selectors that grant it, which migration 0074
+# withdrew.
+# ---------------------------------------------------------------------------
+
+type compute_instance
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define ssh: [user with mfa_fresh, service_account] or admin
+    define console: [user with mfa_fresh] or admin
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type nlb_network_load_balancer
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+    # announce_writer — inbound data-plane feedback gate for
+    # `InternalLoadBalancerAnnounceService/ReportAnnounceState` (:9091, mTLS).
+    # The permission catalog REQUIRED this relation on this type while the model
+    # never declared it, so OpenFGA rejected the Check as a model validation
+    # error and the RPC was denied for EVERY subject — a broken-by-construction
+    # gate, not a least-priv default (same defect class as #68 nlb_listener
+    # `project` and #71 storage_* types).
+    #
+    # Bearer — the DATA PLANE announcer only: it is the sole producer of
+    # announce-state (BGP session up/down, route/VRF id, kernel-programming
+    # status, numeric infra id). That state is infra-sensitive (security.md) and
+    # tenants neither produce nor read it. Hence, deliberately:
+    #   * `[service_account]` ONLY — no `user`, no `group#member`, no `user:*`.
+    #     A human/tenant principal cannot even be WRITTEN as the subject of this
+    #     tuple (OpenFGA rejects the write), so it can never be handed out via a
+    #     custom role or a group;
+    #   * NO `or admin|editor|viewer` derivation — a project editor must NOT be
+    #     able to forge the announce-state of a load balancer;
+    #   * nothing derives FROM it — the data-plane writer gains no CRUD.
+    # It is also outside the closed verb set {get,list,create,update,delete} the
+    # iam reconciler materializes from role permissions, so no AccessBinding can
+    # produce it: the only way to hold it is an explicit per-load-balancer tuple
+    # written for the data-plane service account when the data plane is
+    # provisioned. Until then the RPC stays uniformly fail-closed — which is the
+    # correct state, since nothing legitimately reports announce-state yet.
+    define announce_writer: [service_account]
+
+type nlb_target_group
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+    # NLB-TGT-1 — управление СОСТАВОМ группы отделено от изменения самой группы.
+    # Первый тип платформы, чей набор глаголов ШИРЕ канонического CRUD: набор — атрибут
+    # типа (authzmap.typeVerbRelations), и гейт дрейфа сверяет его с этими строками
+    # потипово (TestDrift_TypeVerbSetsMatchModelExactly).
+    #
+    # Зачем отдельные отношения: роль `loadbalancer.target_manager` объявляет
+    # `addTargets`/`removeTargets` и показывает их как то, что даёт. Пока оба RPC
+    # гейтились на `v_update`, выдать право управлять составом, не выдав права менять
+    # саму группу, было НЕЛЬЗЯ — роль была читательской вопреки своему имени.
+    #
+    # Почему НАДМНОЖЕСТВО `v_update`, а не самостоятельные отношения: у сегодняшнего
+    # редактора лежит прямой кортеж `v_update`, и ветвь `or v_update` разрешает ему
+    # новый вопрос ТЕМ ЖЕ кортежем. Значит переключение гейтинга не требует
+    # ре-материализации ни одной выдачи и не имеет окна, в котором прежний держатель
+    # отказан. `v_update` уже включает `super_admin`, поэтому каскад трёх верхних
+    # уровней наследуется без отдельного упоминания. Надмножество ОДНОСТОРОННЕ:
+    # держатель управления составом права менять саму группу не получает.
+    #
+    # Имена не выбраны, а выведены: реконсайлер собирает имя как
+    # `"v_" + domain.NormalizeVerb(<авторский глагол>)`, поэтому `addTargets` даёт
+    # ровно `v_addtargets`. Написать здесь иначе значило бы объявить отношение, по
+    # которому эмиттер никогда не постучится.
+    define v_addtargets: [user, service_account, group#member] or v_update
+    define v_removetargets: [user, service_account, group#member] or v_update
+
+# KAC-178 §4: nlb_listener — first-class FGA object для Listener (design §3.3).
+# Contract-A (flat model): listener does not INHERIT permissions from its parent
+# load balancer — access is materialized per-object (reconciler).
+#
+# A `load_balancer: [nlb_network_load_balancer]` parent-pointer stood here and is
+# gone. It was the residue of a closed incident: nlb used to emit it, the proxy
+# rule refuses it (a module writes ownership links, and this was not one), so it
+# was refused on every delivery and nlb stopped emitting it. What remained was a
+# declaration NOBODY WROTE, while the comment above it described it as a live
+# structural pointer — and nothing derived over it either. A relation no producer
+# writes still reads as a working link to the next author. Held by
+# TestConsumerOwnedStructuralRelationsHaveProducers: it reddens with the
+# coordinate of any structural relation on a consumer-owned type that has no
+# producer and no explicit latency marker.
+#
+# api-gateway permission_catalog.json keyed на этот type для
+# Listener Get/Update/Delete/ListOperations (PR PRO-Robotech/kacho-api-gateway#37).
+type nlb_listener
+  relations
+    # #68: nlb emits `nlb_listener #project @project` (fga_intent.go) parity with
+    # nlb_network_load_balancer / nlb_target_group; without this relation OpenFGA
+    # rejected the tuple → drainer dead-lettered it → listener hierarchy never
+    # materialized → listener authz broke. Contract-A direct project link.
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+# ---------------------------------------------------------------------------
+# registry (kacho-registry) — namespace-реестр (registry_registry) и per-repo
+# authz-объект (registry_repository). Flat verb-bearing (как vpc/lb): v_* —
+# прямые, развязаны от tier. `project` линкует реестр к проекту, `owner` несёт
+# creator-tuple (registry пишет owner через RegisterResource). Репозиторий —
+# child реестра (`parent`), доступ материализуется per-object реконсайлером.
+# ---------------------------------------------------------------------------
+
+type registry_registry
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define owner: [user, service_account]
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    # #64 Defect A: v_* derive from `owner` so a registry's CREATOR/OWNER (the
+    # RegisterResource `owner` tuple) holds the full CRUD verb-set on their own
+    # registry — esp. v_create (create repositories). Without this the owner got
+    # only editor-tier v_get/v_list/v_update/v_delete (the `edit` role authors no
+    # `create` verb) and CreateRepository denied → 404 for the owner. Per-OBJECT
+    # computed relation (like `editor: this or admin`), NOT a hierarchy cascade.
+    #
+    # `v_create` LIVES HERE AND NOWHERE ELSE — do not "restore parity" by adding it
+    # back to the other types. A registry is a CONTAINER: "create a repository in
+    # this namespace" is a real operation on the registry object, and it is really
+    # asked — by the control plane (CreateRepository / RenameRepository) and by the
+    # data plane (docker push to a new repo, cross-repo mount into a new dst, and
+    # the first-push blob-reveal guard). Every other type answered a question no
+    # request ever asks: "create" is not an operation on an already-existing object,
+    # and creating a resource inside a scope is authorized by the write tier on that
+    # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the
+    # type name if a reader-less carrier reappears.
+    define v_get: [user, service_account, group#member] or owner or super_admin
+    define v_list: [user, service_account, group#member] or owner or super_admin
+    define v_create: [user, service_account, group#member] or owner or super_admin
+    define v_update: [user, service_account, group#member] or owner or super_admin
+    define v_delete: [user, service_account, group#member] or owner or super_admin
+
+type registry_repository
+  relations
+    define parent: [registry_registry]
+    # A repository has no project pointer of its own — it is a child of its
+    # registry, and the registry is the one anchored to a project.
+    define super_admin: super_admin from parent
+    define owner: [user, service_account]
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.
+    # The wildcard grants v_get ONLY on repos that ALSO carry an explicit
+    # `user:* v_get` tuple emitted by the registry overlay (visibility=PUBLIC);
+    # absent that tuple `user:*` has no access → uniform 404. ONLY v_get gains
+    # the wildcard — no write relation does (anon is a read-only floor, B14).
+    # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
+    # the repo owner fully manages their own repository; `user:*` wildcard stays
+    # on v_get ONLY (anonymous public-read floor, B14).
+    define v_get: [user:*, user, service_account, group#member] or owner or super_admin
+    define v_list: [user, service_account, group#member] or owner or super_admin
+    define v_update: [user, service_account, group#member] or owner or super_admin
+    define v_delete: [user, service_account, group#member] or owner or super_admin
+
+# ---------------------------------------------------------------------------
+# storage (kacho-storage) — Volume / Snapshot / Image per-object authz types.
+# #71: the storage owner-registration edge (storage→iam RegisterResource,
+# SEC-D / CS-1 GAP-D) emits `storage_<t>:<id> #project @project:<proj>` for every
+# Volume/Snapshot/Image (services/storage/.../fgaregister.go). These TYPES were
+# ABSENT from the model → OpenFGA rejected every storage owner-tuple ("type
+# 'storage_volume' not found") → drainer permanent-poison → the resource's
+# project hierarchy never materialized → the gateway anti-BOLA scope_extractor
+# {storage_volume,volume_id} / {storage_snapshot,snapshot_id} / {storage_image,
+# image_id} on Get/Update/Delete could not resolve target→project → the object-
+# self Check errored → production fail-closed → 403 for the OWNER on their OWN
+# volume (verified live: owner-GET 403, cross-GET 403 — fail-CLOSED gap, NOT BOLA).
+# Fix = flat Contract-A parity with nlb_network_load_balancer / nlb_listener:
+# `project: [project]` (structural link, reconciler materializes per-object v_*
+# from the creator's project binding) + DIRECT v_*. Storage emits ONLY the
+# `project` tuple (no `owner` tuple — unlike registry), so NO `or owner`
+# derivation: it would be an inert dead relation (LEAN / ban #11).
+# ---------------------------------------------------------------------------
+
+type storage_volume
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type storage_snapshot
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type storage_image
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+# ---------------------------------------------------------------------------
+# Conditions catalog — 7 frozen built-ins (acceptance §4.5).
+# ---------------------------------------------------------------------------
+
+condition mfa_fresh(amr_claims: list<string>, acr_value: string, current_time: timestamp, mfa_at: timestamp) {
+  acr_value == "3" &&
+  "webauthn" in amr_claims &&
+  current_time - mfa_at < duration("15m")
+}
+
+condition non_expired(current_time: timestamp, valid_until: timestamp) {
+  current_time < valid_until
+}
+
+condition source_ip_in_range(client_ip: ipaddress, allowed_cidrs: list<string>) {
+  allowed_cidrs.exists(c, client_ip.in_cidr(c))
+}
+
+condition jit_window(current_time: timestamp, activated_at: timestamp, ttl_seconds: int) {
+  current_time - activated_at < duration(string(ttl_seconds) + "s")
+}
+
+condition business_hours(current_time: timestamp, tz: string, start_h: int, end_h: int) {
+  current_time.getHours(tz) >= start_h && current_time.getHours(tz) < end_h
+}
+
+condition device_compliant(device_attestation: string, allowed_attestations: list<string>) {
+  device_attestation in allowed_attestations
+}

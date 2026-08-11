@@ -32,17 +32,17 @@ func (s stubAuthz) CheckRelation(context.Context, service.CheckRelationRequest) 
 
 // recordingComparator запоминает, о чём его спросили.
 type recordingComparator struct {
-	calls  int
-	engine bool
-	verb   string
-	objTyp string
-	objID  string
+	calls    int
+	engine   bool
+	relation string
+	objTyp   string
+	objID    string
 }
 
-func (r *recordingComparator) Compare(_ context.Context, engineAllowed bool, _, objectType, objectID, verb string) {
+func (r *recordingComparator) Compare(_ context.Context, engineAllowed bool, _, objectType, objectID, relation string, _ map[string]any) {
 	r.calls++
 	r.engine = engineAllowed
-	r.objTyp, r.objID, r.verb = objectType, objectID, verb
+	r.objTyp, r.objID, r.relation = objectType, objectID, relation
 }
 
 func TestCheck_AsksTheShadowFormAndKeepsItsOwnAnswer(t *testing.T) {
@@ -64,11 +64,13 @@ func TestCheck_AsksTheShadowFormAndKeepsItsOwnAnswer(t *testing.T) {
 			t.Fatalf("форма E спрошена %d раз, ожидался 1 — провязка, которой нет, "+
 				"удовлетворяет утверждению «ответ не изменился» даром", rec.calls)
 		}
-		// Вопрос переведён: движок спрашивается отношением `v_get`, форма E —
-		// глаголом `get`, потому что приставка живёт у компилятора модели.
-		if rec.verb != "get" || rec.objTyp != "vpc_network" || rec.objID != "net-1" {
-			t.Errorf("форме E задан не тот вопрос: тип=%q id=%q глагол=%q",
-				rec.objTyp, rec.objID, rec.verb)
+		// Вопрос задаётся ТОТ ЖЕ, что ушёл движку, — отношением модели, без
+		// перевода. Приставку снимает компилятор плана и только там, где
+		// источником служит роль: снять её раньше значило бы спросить форму E о
+		// другом предмете и записать расхождение между двумя разными вопросами.
+		if rec.relation != "v_get" || rec.objTyp != "vpc_network" || rec.objID != "net-1" {
+			t.Errorf("форме E задан не тот вопрос: тип=%q id=%q отношение=%q",
+				rec.objTyp, rec.objID, rec.relation)
 		}
 		if rec.engine != engineAllows {
 			t.Errorf("сравнению передан не тот вердикт движка: %v", rec.engine)

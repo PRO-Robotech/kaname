@@ -132,6 +132,18 @@ func TestConditionedRelationHasAProducer(t *testing.T) {
 // added quietly. An entry leaves this table when its condition gains a producer
 // (and then the relation gets a behavioural test), or when the clause is dropped.
 //
+// WHICH SIDE THIS TABLE SPEAKS ABOUT. It states a fact about the ENGINE, and
+// only about it: the engine's tuple has no place for a condition, so the direct
+// branch is unwritable there. The relational form inside iam (XC-12 Ф4) carries
+// the condition ON THE FACT ROW and evaluates it against the request context —
+// `relverdict.evalCondition`, locked by TestAsk_ConditionDecidesTheOutcomeBothWays
+// and TestConditionRegistryMatchesTheModel. So this table must NOT be read as
+// "the freshness requirement is unimplementable"; it says the engine cannot
+// express it. The entries leave when the engine stops being the source of the
+// verdict for these types (Ф6) — at which point the requirement IS in force and
+// there is nothing left to excuse, which TestNoStaleConditionExceptions turns
+// into a finding on its own.
+//
 // All three are `mfa_fresh`, whose parameters (`acr_value`, `amr_claims`,
 // `mfa_at`, `current_time`) are supplied per REQUEST rather than per tuple — so
 // only the condition NAME would have to reach the tuple for these to work. Even

@@ -358,8 +358,14 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 	if h.shadow != nil {
 		objType, objID, ok := splitCheckObject(req.GetObject())
 		if ok {
+			// Доводов условия на этом пути НЕТ, и это свойство пути, а не пропуск:
+			// сюда приходят сервисы со своими глаголами, а условия в модели стоят
+			// на отношениях, глаголами не являющихся (гейт
+			// relverdict.TestNoConditionedRelationIsAVerb). Появится условие на
+			// глаголе — гейт покраснеет раньше, чем этот nil начнёт значить
+			// «условие не выполнено» на живом запросе.
 			h.shadow.Compare(ctx, res.Allowed,
-				req.GetSubjectId(), objType, objID, relationToVerb(req.GetRelation()))
+				req.GetSubjectId(), objType, objID, req.GetRelation(), nil)
 		}
 	}
 
@@ -373,7 +379,7 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 // verdictComparator — узкий порт теневого сравнения. Объявлен здесь, в
 // use-case: направление зависимостей идёт внутрь.
 type verdictComparator interface {
-	Compare(ctx context.Context, engineAllowed bool, subject, objectType, objectID, verb string)
+	Compare(ctx context.Context, engineAllowed bool, subject, objectType, objectID, relation string, condCtx map[string]any)
 }
 
 // WithShadowVerdict подключает теневое сравнение.
@@ -396,16 +402,6 @@ func splitCheckObject(ref string) (typ, id string, ok bool) {
 		return "", "", false
 	}
 	return ref[:i], ref[i+1:], true
-}
-
-// relationToVerb снимает приставку отношения-глагола.
-//
-// Движок спрашивается ОТНОШЕНИЕМ (`v_get`), форма E — глаголом (`get`): её
-// проекция ролей хранит глагол без приставки, чтобы приставка жила в одном
-// месте — у компилятора модели. Отношение без приставки (иерархический
-// указатель, владение) передаётся как есть.
-func relationToVerb(relation string) string {
-	return strings.TrimPrefix(relation, "v_")
 }
 
 // PollSubjectChanges — drains subject_change_outbox by ascending-id cursor.

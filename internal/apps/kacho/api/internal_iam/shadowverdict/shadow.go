@@ -50,8 +50,15 @@ import (
 const DefaultTimeout = 50 * time.Millisecond
 
 // Asker — форма E. Узкий порт: сравнителю нужен ровно один вопрос.
+//
+// condCtx — доводы для условий на записях («сейчас», уровень уверенности
+// подтверждения личности). Приезжают ОТ ВЫЗЫВАЮЩЕГО уже очищенными от значений,
+// присланных клиентом: собрать их здесь второй раз значило бы завести второе
+// место, знающее, чему можно верить, — и разойтись с первым в сторону лишнего
+// доступа. Путь, у которого доводов нет, передаёт nil: условие тогда не
+// выполнено, а не проигнорировано.
 type Asker interface {
-	Allowed(ctx context.Context, subject, objectType, objectID, verb string) (allowed bool, err error)
+	Allowed(ctx context.Context, subject, objectType, objectID, relation string, condCtx map[string]any) (allowed bool, err error)
 }
 
 // Counters — то, что сравнение обязано уметь предъявить.
@@ -113,7 +120,7 @@ func (c *Comparator) Counters() Snapshot { return c.counts.Read() }
 // Ничего не возвращает НАМЕРЕННО: у вызывающего не должно быть соблазна прочесть
 // теневой исход и на него опереться. Пока движок жив, единственный законный
 // потребитель этого сравнения — счётчики и журнал.
-func (c *Comparator) Compare(ctx context.Context, engineAllowed bool, subject, objectType, objectID, verb string) {
+func (c *Comparator) Compare(ctx context.Context, engineAllowed bool, subject, objectType, objectID, relation string, condCtx map[string]any) {
 	if c == nil || c.form == nil {
 		return
 	}
@@ -122,12 +129,12 @@ func (c *Comparator) Compare(ctx context.Context, engineAllowed bool, subject, o
 	sctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	formAllowed, err := c.form.Allowed(sctx, subject, objectType, objectID, verb)
+	formAllowed, err := c.form.Allowed(sctx, subject, objectType, objectID, relation, condCtx)
 	if err != nil {
 		// Ответа не получено — отдельная корзина. Ни согласие, ни расхождение.
 		c.counts.unfinished.Add(1)
 		c.logger.Warn("shadow verdict: не выполнилось",
-			"err", err, "object_type", objectType, "verb", verb)
+			"err", err, "object_type", objectType, "relation", relation)
 		return
 	}
 	c.counts.compared.Add(1)
@@ -139,5 +146,5 @@ func (c *Comparator) Compare(ctx context.Context, engineAllowed bool, subject, o
 	// можно только зная, на каком вопросе.
 	c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком",
 		"engine", engineAllowed, "form_e", formAllowed,
-		"subject", subject, "object_type", objectType, "object_id", objectID, "verb", verb)
+		"subject", subject, "object_type", objectType, "object_id", objectID, "relation", relation)
 }
