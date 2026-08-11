@@ -1,0 +1,8 @@
+node_modules
+build
+.docusaurus
+.git
+*.log
+# инженерные записки компонента: сайт их не собирает (страницы — в content/),
+# и в контекст образа они не едут
+engineering

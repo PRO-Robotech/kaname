@@ -3,7 +3,7 @@
 bin
 go.work
 go.work.sum
-docs-site/node_modules
-docs-site/build
+docs/node_modules
+docs/build
 *.log
 tests/**/results
