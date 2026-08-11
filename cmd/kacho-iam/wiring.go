@@ -27,6 +27,7 @@ import (
 	interactiveclientapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/interactive_client"
 	internalauthorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_authorize"
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 	internaloperationsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_operations"
 	permissioncatalogapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/permission_catalog"
 	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
@@ -46,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -568,6 +570,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// per-resource creator-tuple (vpc/compute/nlb после Create).
 		// Local relationStore (line ~522) is in scope here within buildServices.
 		WithRelationWriter(relationStore).
+		// Теневое сравнение формы E с движком (XC-12, Ф2). Отвечает по-прежнему
+		// движок; форма E спрашивается рядом, и ни один её исход не меняет ответа
+		// вызывающему. Провязка здесь и есть то, ради чего фаза делалась: без неё
+		// форма умеет ответить, но её никто не спрашивает, и «расхождений нет»
+		// означало бы «сравнений не было».
+		WithShadowVerdict(shadowverdict.New(relverdict.NewAsker(pool), logger)).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// ForceLogout records a session revocation.

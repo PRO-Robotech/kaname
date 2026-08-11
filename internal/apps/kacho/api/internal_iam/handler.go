@@ -102,6 +102,11 @@ type Handler struct {
 	relations     relationWriter
 	roleCompiled  roleCompiledReader
 
+	// shadow — теневое сравнение формы E с движком. nil — сравнение выключено,
+	// и путь ведёт себя ровно как прежде: ни один исход сравнения не меняет
+	// ответа вызывающему (XC-12, Ф2).
+	shadow verdictComparator
+
 	// Resource-registration gate. Both nil when the registration
 	// stack is not wired (degraded/dev) — RegisterResource then returns
 	// Unavailable, fail-closed.
@@ -344,11 +349,63 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 		}
 	}
 
+	// Теневое сравнение — ПОСЛЕ того как вердикт движка получен, и до возврата.
+	// Порядок несущий: спросить форму E раньше значило бы платить её сроком за
+	// запрос, который мог отказать раньше по формату.
+	//
+	// Ответ не меняется ни при каком исходе сравнения — Compare ничего не
+	// возвращает by construction.
+	if h.shadow != nil {
+		objType, objID, ok := splitCheckObject(req.GetObject())
+		if ok {
+			h.shadow.Compare(ctx, res.Allowed,
+				req.GetSubjectId(), objType, objID, relationToVerb(req.GetRelation()))
+		}
+	}
+
 	resp := &iamv1.CheckResponse{Allowed: res.Allowed}
 	if !res.Allowed {
 		resp.Reason = strings.Join(res.DenyReasons, "; ")
 	}
 	return resp, nil
+}
+
+// verdictComparator — узкий порт теневого сравнения. Объявлен здесь, в
+// use-case: направление зависимостей идёт внутрь.
+type verdictComparator interface {
+	Compare(ctx context.Context, engineAllowed bool, subject, objectType, objectID, verb string)
+}
+
+// WithShadowVerdict подключает теневое сравнение.
+//
+// Отдельным методом, а не аргументом конструктора: отсутствие провязки означает
+// ровно прежнее поведение, а не тихое сравнение с пустой формой.
+func (h *Handler) WithShadowVerdict(c verdictComparator) *Handler {
+	h.shadow = c
+	return h
+}
+
+// splitCheckObject разбирает объект вопроса `"<type>:<id>"`.
+//
+// Непонятая форма — НЕ повод спрашивать форму E наугад: она получила бы вопрос
+// о несуществующем объекте и честно ответила «нет», а сравнение записало бы
+// расхождение там, где расхождения нет.
+func splitCheckObject(ref string) (typ, id string, ok bool) {
+	i := strings.IndexByte(ref, ':')
+	if i <= 0 || i == len(ref)-1 {
+		return "", "", false
+	}
+	return ref[:i], ref[i+1:], true
+}
+
+// relationToVerb снимает приставку отношения-глагола.
+//
+// Движок спрашивается ОТНОШЕНИЕМ (`v_get`), форма E — глаголом (`get`): её
+// проекция ролей хранит глагол без приставки, чтобы приставка жила в одном
+// месте — у компилятора модели. Отношение без приставки (иерархический
+// указатель, владение) передаётся как есть.
+func relationToVerb(relation string) string {
+	return strings.TrimPrefix(relation, "v_")
 }
 
 // PollSubjectChanges — drains subject_change_outbox by ascending-id cursor.
