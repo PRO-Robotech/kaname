@@ -35,16 +35,32 @@ type Source struct {
 	// Subject — кому основание даёт право.
 	Subject string
 	// Detail — что именно: для выдачи это её идентификатор и ветвь правила, для
-	// членства — группа, для факта — отношение.
+	// членства — группа, для факта — отношение (и условие, если запись его несёт).
 	Detail string
-	// ScopeType/ScopeID — область, на которой сделана выдача. Пусто у факта.
+	// ScopeType/ScopeID — НОСИТЕЛЬ основания: объект, на котором сделана выдача,
+	// либо объект, на котором лежит строка факта.
+	//
+	// У факта это поле раньше пустовало, и пока факт искали только на самом
+	// объекте, пустота была честной. С выводом по модели факт лежит и на ПРЕДКЕ —
+	// администратор облака держит строку на кластере, — и основание, названное
+	// без носителя, отправляет снимать её на самом объекте, где её нет. Вопрос
+	// задают именно ради «что снять», поэтому носитель называется всегда.
 	ScopeType string
 	ScopeID   string
 }
 
-// expandSQL — перечисляет ОСНОВАНИЯ, а не субъектов.
+// expandSQL — перечисляет ОСНОВАНИЯ, а не субъектов, и раскладывает вопрос тем
+// же планом модели, что вердикт.
 //
-// $1 object_type · $2 object_id · $3 verb · $4 max_depth
+// Прямые основания собираются в `ground`, а членство разворачивается ОДИН раз
+// поверх них — как в перечислении субъектов и по той же причине: разворот,
+// приписанный к одной ветви, молча теряет остальные. Заодно у членства пропала
+// прежняя оговорка «только якорная ветвь правила»: она делала невидимым право
+// членов группы, которой выдано по именам или по меткам, — то есть скрывала
+// основание ровно там, где оно менее очевидно.
+//
+// $1 object_type · $2 object_id · $3 max_depth ·
+// $4 типы предков атомов-фактов · $5 отношения атомов-фактов · $6 глаголы атомов-выдачи
 const expandSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
     SELECT $1::text, $2::text, 0
@@ -53,60 +69,75 @@ WITH RECURSIVE scope(s_type, s_id, depth) AS (
       FROM scope s
       JOIN kacho_iam.resource_parent_edge e
         ON e.object_type = s.s_type AND e.object_id = s.s_id
-     WHERE s.depth < $4::int
+     WHERE s.depth < $3::int
+),
+fact_atom(parent_type, relation) AS (
+    SELECT * FROM unnest($4::text[], $5::text[])
+),
+ground(kind, subject, detail, scope_type, scope_id) AS (
+    -- Факт на объекте ЛИБО на предке названного планом типа. Условие записи
+    -- называется рядом с отношением: обратный вопрос его не вычисляет (доводов
+    -- запроса у него нет), и промолчать о нём значило бы выдать условное
+    -- основание за безусловное.
+    SELECT 'fact'::text, f.subject,
+           f.relation || CASE WHEN f.condition_name <> ''
+                              THEN ' (условие ' || f.condition_name || ')'
+                              ELSE '' END,
+           sc.s_type, sc.s_id
+      FROM kacho_iam.relation_fact f
+      JOIN scope sc ON sc.s_type = f.object_type AND sc.s_id = f.object_id
+      JOIN fact_atom fa
+        ON fa.relation = f.relation
+       AND CASE WHEN fa.parent_type = ''
+                THEN sc.depth = 0
+                ELSE fa.parent_type = sc.s_type
+           END
+  UNION
+    SELECT 'binding'::text,
+           bs.subject_type || ':' || bs.subject_id,
+           b.id || ' (' || rs.arm || ')',
+           b.resource_type, b.resource_id
+      FROM kacho_iam.access_bindings b
+      JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
+      JOIN kacho_iam.role_verb rv
+        ON rv.role_id = b.role_id AND rv.object_type = $1::text
+       AND rv.verb = ANY ($6::text[])
+      JOIN kacho_iam.role_rule_selectors rs
+        ON rs.role_id = b.role_id AND $1::text = ANY (rs.object_types)
+      JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
+      LEFT JOIN kacho_iam.resource_mirror m
+        ON m.object_type = $1::text AND m.object_id = $2::text
+     WHERE b.status = 'ACTIVE'
+       AND (b.expires_at IS NULL OR b.expires_at > now())
+       AND b.revoked_at IS NULL
+       AND (
+             rs.arm = 'anchor'
+          OR (rs.arm = 'names'  AND $2::text = ANY (rs.resource_names))
+          OR (rs.arm = 'labels' AND m.labels IS NOT NULL AND m.labels @> rs.match_labels)
+       )
 )
-SELECT 'fact'::text, f.subject, f.relation, ''::text, ''::text
-  FROM kacho_iam.relation_fact f
- WHERE f.object_type = $1::text AND f.object_id = $2::text AND f.relation = $3::text
-UNION ALL
-SELECT 'binding'::text,
-       bs.subject_type || ':' || bs.subject_id,
-       b.id || ' (' || rs.arm || ')',
-       b.resource_type, b.resource_id
-  FROM kacho_iam.access_bindings b
-  JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
-  JOIN kacho_iam.role_verb rv
-    ON rv.role_id = b.role_id AND rv.object_type = $1::text AND rv.verb = $3::text
-  JOIN kacho_iam.role_rule_selectors rs
-    ON rs.role_id = b.role_id AND $1::text = ANY (rs.object_types)
-  JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
-  LEFT JOIN kacho_iam.resource_mirror m
-    ON m.object_type = $1::text AND m.object_id = $2::text
- WHERE b.status = 'ACTIVE'
-   AND (b.expires_at IS NULL OR b.expires_at > now())
-   AND b.revoked_at IS NULL
-   AND (
-         rs.arm = 'anchor'
-      OR (rs.arm = 'names'  AND $2::text = ANY (rs.resource_names))
-      OR (rs.arm = 'labels' AND m.labels IS NOT NULL AND m.labels @> rs.match_labels)
-   )
-UNION ALL
+SELECT g.kind, g.subject, g.detail, g.scope_type, g.scope_id FROM ground g
+UNION
 SELECT 'group'::text,
        gm.member_type || ':' || gm.member_id,
-       'через group:' || gm.group_id,
-       b.resource_type, b.resource_id
-  FROM kacho_iam.access_bindings b
-  JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
-  JOIN kacho_iam.group_members gm ON gm.group_id = bs.subject_id
-  JOIN kacho_iam.role_verb rv
-    ON rv.role_id = b.role_id AND rv.object_type = $1::text AND rv.verb = $3::text
-  JOIN kacho_iam.role_rule_selectors rs
-    ON rs.role_id = b.role_id AND $1::text = ANY (rs.object_types)
-  JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
- WHERE bs.subject_type = 'group'
-   AND b.status = 'ACTIVE'
-   AND (b.expires_at IS NULL OR b.expires_at > now())
-   AND b.revoked_at IS NULL
-   AND rs.arm = 'anchor'
+       'через ' || g.subject || ' → ' || g.detail,
+       g.scope_type, g.scope_id
+  FROM ground g
+  JOIN kacho_iam.group_members gm ON 'group:' || gm.group_id = g.subject
  ORDER BY 1, 2, 3`
 
 // Expand перечисляет основания права на объекте.
-func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, verb string) ([]Source, error) {
-	if objectType == "" || objectID == "" || verb == "" {
+func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string) ([]Source, error) {
+	if objectType == "" || objectID == "" || relation == "" {
 		return nil, fmt.Errorf("relverdict: неполный вопрос разбора (%q,%q,%q) — пустой "+
-			"список за него неотличим от честного «оснований нет»", objectType, objectID, verb)
+			"список за него неотличим от честного «оснований нет»", objectType, objectID, relation)
 	}
-	rows, err := q.Query(ctx, expandSQL, objectType, objectID, verb, MaxAncestorDepth)
+	factParents, factRelations, bindVerbs, err := sourcesOf(objectType, relation)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, expandSQL, objectType, objectID, MaxAncestorDepth,
+		factParents, factRelations, bindVerbs)
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)
 	}

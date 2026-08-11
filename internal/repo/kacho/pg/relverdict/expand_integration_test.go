@@ -32,10 +32,12 @@ func TestExpand_NamesEverySourceNotJustTheFirst(t *testing.T) {
 			   (object_type, object_id, parent_type, parent_id, depth)
 			 VALUES ('vpc_network', 'net-1', 'project', 'prj-1', 1)`)
 
-		// Основание 1: прямой факт (владение).
+		// Основание 1: прямой факт (владение). Отношение названо так, как его
+		// называет МОДЕЛЬ (`v_get`): в этой таблице лежат модельные имена, а не
+		// глаголы роли — глагол живёт в `role_verb`, и это разные словари.
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject)
-			 VALUES ('vpc_network', 'net-1', 'get', 'user:usr-1')`)
+			 VALUES ('vpc_network', 'net-1', 'v_get', 'user:usr-1')`)
 		// Основание 2: своя выдача на проект.
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.access_bindings
@@ -59,7 +61,7 @@ func TestExpand_NamesEverySourceNotJustTheFirst(t *testing.T) {
 			`INSERT INTO kacho_iam.group_members (group_id, member_type, member_id)
 			 VALUES ('grp-1', 'user', 'usr-1')`)
 
-		got, err := relverdict.Expand(ctx, tx, "vpc_network", "net-1", "get")
+		got, err := relverdict.Expand(ctx, tx, "vpc_network", "net-1", "v_get")
 		if err != nil {
 			t.Fatalf("разбор: %v", err)
 		}

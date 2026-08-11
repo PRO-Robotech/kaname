@@ -63,7 +63,7 @@ func TestList_PagesThroughEverythingTheSubjectMaySee(t *testing.T) {
 		after := ""
 		for page := 0; page < 10; page++ {
 			ids, next, err := relverdict.List(ctx, tx, relverdict.ListQuery{
-				Subject: "user:usr-1", ObjectType: "vpc_network", Verb: "get",
+				Subject: "user:usr-1", ObjectType: "vpc_network", Relation: "v_get",
 				AfterID: after, Limit: 3,
 			})
 			if err != nil {
@@ -90,7 +90,7 @@ func TestList_PagesThroughEverythingTheSubjectMaySee(t *testing.T) {
 		// Отрицание рядом: субъект без выдачи не видит ничего. Без него «семь»
 		// зеленело бы и на запросе, который отдаёт весь тип всем.
 		other, _, err := relverdict.List(ctx, tx, relverdict.ListQuery{
-			Subject: "user:usr-9", ObjectType: "vpc_network", Verb: "get", Limit: 100,
+			Subject: "user:usr-9", ObjectType: "vpc_network", Relation: "v_get", Limit: 100,
 		})
 		if err != nil {
 			t.Fatalf("перечисление для чужого: %v", err)
@@ -107,7 +107,7 @@ func TestList_PagesThroughEverythingTheSubjectMaySee(t *testing.T) {
 func TestList_IncompleteQuestionIsAnErrorNotAnEmptyPage(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		if _, _, err := relverdict.List(ctx, tx, relverdict.ListQuery{
-			Subject: "user:usr-1", ObjectType: "", Verb: "get",
+			Subject: "user:usr-1", ObjectType: "", Relation: "v_get",
 		}); err == nil {
 			t.Fatal("пустой тип принят — пустой список за него неотличим от честного " +
 				"«ничего не доступно»")

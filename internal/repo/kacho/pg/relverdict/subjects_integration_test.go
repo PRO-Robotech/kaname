@@ -51,7 +51,7 @@ func TestSubjects_NamesBothTheGrantedGroupAndItsMembers(t *testing.T) {
 			 VALUES ('grp-1', 'user', 'usr-1')`)
 
 		got, _, err := relverdict.Subjects(ctx, tx, relverdict.SubjectsQuery{
-			ObjectType: "vpc_network", ObjectID: "net-1", Verb: "get", Limit: 100,
+			ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get", Limit: 100,
 		})
 		if err != nil {
 			t.Fatalf("перечисление субъектов: %v", err)
@@ -83,7 +83,7 @@ func TestSubjects_NamesBothTheGrantedGroupAndItsMembers(t *testing.T) {
 func TestSubjects_IncompleteQuestionIsAnError(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		if _, _, err := relverdict.Subjects(ctx, tx, relverdict.SubjectsQuery{
-			ObjectType: "vpc_network", ObjectID: "", Verb: "get",
+			ObjectType: "vpc_network", ObjectID: "", Relation: "v_get",
 		}); err == nil {
 			t.Fatal("пустой объект принят — пустой список за него неотличим от честного " +
 				"«никто не имеет»")
