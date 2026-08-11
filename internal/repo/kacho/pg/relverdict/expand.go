@@ -123,7 +123,7 @@ SELECT 'group'::text,
        'через ' || g.subject || ' → ' || g.detail,
        g.scope_type, g.scope_id
   FROM ground g
-  JOIN kacho_iam.group_members gm ON 'group:' || gm.group_id = g.subject
+  JOIN kacho_iam.group_members gm ON g.subject IN ('group:' || gm.group_id, 'group:' || gm.group_id || '#member')
  ORDER BY 1, 2, 3`
 
 // Expand перечисляет основания права на объекте.

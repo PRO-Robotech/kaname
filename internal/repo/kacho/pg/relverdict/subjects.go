@@ -104,7 +104,7 @@ granted(subject) AS (
     -- и группа (адресат, который отзывают), и члены (те, кто правом пользуется).
     SELECT gm.member_type || ':' || gm.member_id
       FROM named n
-      JOIN kacho_iam.group_members gm ON 'group:' || gm.group_id = n.subject
+      JOIN kacho_iam.group_members gm ON n.subject IN ('group:' || gm.group_id, 'group:' || gm.group_id || '#member')
 )
 SELECT g.subject
   FROM granted g

@@ -81,7 +81,18 @@ const listSQL = `
 WITH RECURSIVE speaker(subject) AS (
     SELECT $1::text
   UNION
+    -- Форма имени группы — ОБЕ, и это не перестраховка.
+    -- Канонический производитель кортежей (domain.FGASubjectRef) пишет
+    -- group:<id>#member: хвост отношения раскрывает членство на стороне
+    -- модели. Голая форма group:<id> тоже встречается — ею адресуется сама
+    -- группа как субъект выдачи. Признать одну и промолчать о другой значит
+    -- НЕДОотвечать ровно на права, выданные каноническим путём, — тихо, потому
+    -- что неполный ответ выглядит как честное «ничего нет».
     SELECT 'group:' || gm.group_id
+      FROM kacho_iam.group_members gm
+     WHERE gm.member_type || ':' || gm.member_id = $1::text
+  UNION
+    SELECT 'group:' || gm.group_id || '#member'
       FROM kacho_iam.group_members gm
      WHERE gm.member_type || ':' || gm.member_id = $1::text
   UNION
