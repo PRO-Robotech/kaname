@@ -96,11 +96,11 @@ in-flight операции. Долгоживущего Watch-стрима в API
 <CodeBlock language="json">
   {dedent`
     {
-      "id": "acc_2k9f3qw8x7m2n",
+      "id": "acc2bkd71802av7dywa8",
       "name": "acme",
       "description": "ACME production account",
       "labels": { "env": "prod" },
-      "ownerUserId": "usr_5m1p7rt4b9k3d",
+      "ownerUserId": "usrbr69ze0ftz3jf7396",
       "createdAt": "2026-06-24T10:00:00Z"
     }
   `}
@@ -206,10 +206,10 @@ flowchart LR
 <CodeBlock language="bash">
   {dedent`
     # первая страница проектов аккаунта
-    curl 'http://localhost:18080/iam/v1/projects?accountId=acc_2k9f3qw8x7m2n&pageSize=50' \\
+    curl 'http://localhost:18080/iam/v1/projects?accountId=acc2bkd71802av7dywa8&pageSize=50' \\
       -H 'Authorization: Bearer <JWT>'
     # следующая страница — подставить nextPageToken из ответа
-    curl 'http://localhost:18080/iam/v1/projects?accountId=acc_2k9f3qw8x7m2n&pageSize=50&pageToken=<nextPageToken>' \\
+    curl 'http://localhost:18080/iam/v1/projects?accountId=acc2bkd71802av7dywa8&pageSize=50&pageToken=<nextPageToken>' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>

@@ -58,7 +58,7 @@ import dedent from 'ts-dedent'
 
 <CodeBlock language="bash">
   {dedent`
-    curl 'http://localhost:18080/iam/v1/groups?accountId=acc_2k9f3qw8x7m2n&pageSize=50' \\
+    curl 'http://localhost:18080/iam/v1/groups?accountId=acc2bkd71802av7dywa8&pageSize=50' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>
@@ -76,7 +76,7 @@ import dedent from 'ts-dedent'
     curl -X POST 'http://localhost:18080/iam/v1/groups' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
-      -d '{ "accountId": "acc_2k9f3qw8x7m2n", "name": "platform-team" }'
+      -d '{ "accountId": "acc2bkd71802av7dywa8", "name": "platform-team" }'
   `}
 </CodeBlock>
 
@@ -106,10 +106,10 @@ import dedent from 'ts-dedent'
 
 <CodeBlock language="bash">
   {dedent`
-    curl -X POST 'http://localhost:18080/iam/v1/groups/grp_3n8w5e2q9k1m4:addMember' \\
+    curl -X POST 'http://localhost:18080/iam/v1/groups/grp3nn2wfrz9k658c2tj:addMember' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
-      -d '{ "memberType": "user", "memberId": "usr_5m1p7rt4b9k3d" }'
+      -d '{ "memberType": "user", "memberId": "usrbr69ze0ftz3jf7396" }'
   `}
 </CodeBlock>
 
@@ -124,10 +124,10 @@ import dedent from 'ts-dedent'
 
 <CodeBlock language="bash">
   {dedent`
-    curl -X POST 'http://localhost:18080/iam/v1/groups/grp_3n8w5e2q9k1m4:removeMember' \\
+    curl -X POST 'http://localhost:18080/iam/v1/groups/grp3nn2wfrz9k658c2tj:removeMember' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
-      -d '{ "memberType": "user", "memberId": "usr_5m1p7rt4b9k3d" }'
+      -d '{ "memberType": "user", "memberId": "usrbr69ze0ftz3jf7396" }'
   `}
 </CodeBlock>
 
@@ -143,8 +143,8 @@ import dedent from 'ts-dedent'
   {dedent`
     {
       "members": [
-        { "memberType": "user", "memberId": "usr_5m1p7rt4b9k3d", "addedAt": "2026-06-24T10:20:00Z" },
-        { "memberType": "service_account", "memberId": "sva_9q2r5t8k1m4p7", "addedAt": "2026-06-24T10:21:00Z" }
+        { "memberType": "user", "memberId": "usrbr69ze0ftz3jf7396", "addedAt": "2026-06-24T10:20:00Z" },
+        { "memberType": "service_account", "memberId": "svavn8sraky9vgh0ygc8", "addedAt": "2026-06-24T10:21:00Z" }
       ],
       "nextPageToken": ""
     }

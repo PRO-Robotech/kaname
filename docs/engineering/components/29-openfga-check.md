@@ -26,9 +26,15 @@
 
 ## DB tables
 
-- `kacho_iam.fga_outbox(id, user, relation, object, op, created_at)` — миграция 0001:769.
-- `kacho_iam.subject_change_outbox(id, subject_id, change_type, created_at, ledger_id)` — миграция 0001:1159.
-- Каждая со своим `NOTIFY` channel: `kacho_iam_fga_outbox`, `kacho_iam_subject_change_outbox`.
+- `kacho_iam.fga_outbox(id, event_type, payload, created_at, sent_at, last_error, attempt_count)`
+  — `CREATE TABLE kacho_iam.fga_outbox` в `0001_initial.sql`. Ключ tuple лежит **внутри**
+  `payload` (jsonb), отдельных колонок `user`/`relation`/`object` у таблицы нет.
+- `kacho_iam.subject_change_outbox(id, subject_id, op, created_at, notified_at, event_type,
+  resource_type, resource_id, sent_at, attempt_count)` — `CREATE TABLE
+  kacho_iam.subject_change_outbox` в `0001_initial.sql`.
+- Каждая со своим `NOTIFY` channel: `kacho_iam_fga_outbox` и
+  **`kacho_iam_subject_outbox_added`** (имя канала не повторяет имя таблицы — так его
+  объявляет триггерная функция `subject_change_outbox_notify()`).
 
 ## Sequence diagram — полный propagation chain
 
@@ -141,8 +147,9 @@ OpenFGA-specific timeouts:
 ### Этап 1 (atomic emit-in-tx)
 
 `access_binding/create.go` использует
-`writerSession.AccessBindingsW().EmitFGAWrite(ctx, tuples)` внутри
-writer-tx — это INSERT в `fga_outbox`. Аналогично `EmitSubjectChange()`.
+`writerSession.AccessBindingsW().EmitRelationWrite(ctx, …)` внутри
+writer-tx — это INSERT в `fga_outbox`. Аналогично `EmitSubjectChangeEvent()`
+(`internal/repo/kacho/pg/access_binding_repo.go`) — INSERT в `subject_change_outbox`.
 
 ### Этап 2 (fga_outbox drainer)
 
@@ -202,5 +209,6 @@ events с `id > since_id` — api-gateway держит ledger.
 - `internal/repo/kacho/pg/subject_change_repo.go`, `subject_state_reader.go`, `fga_outbox_emitter.go`
 - `cmd/kacho-iam/serve.go` (fga drainer wiring)
 - `cmd/kacho-iam/subject_change_wiring.go`
-- `internal/migrations/0001_initial.sql:769-803, 1159-1198`
+- `internal/migrations/0001_initial.sql` — DDL обеих очередей (искать по `CREATE TABLE
+  kacho_iam.fga_outbox` и `CREATE TABLE kacho_iam.subject_change_outbox`)
 - `pkg/outbox/drainer/`

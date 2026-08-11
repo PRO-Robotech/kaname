@@ -211,7 +211,7 @@ Tracked as a dedicated refactor-only change.
 описывать, — находка, а не наследство: она вычеркнута, а не оставлена «на всякий
 случай».
 
-Приёмка снятия — `services/iam/docs/acceptance/retire-tenant-condition-surface.md`.
+Приёмка снятия — `services/iam/docs/engineering/acceptance/retire-tenant-condition-surface.md`.
 
 ---
 
@@ -286,7 +286,7 @@ _Reviewed 2026-07-06 (r7b security-hardening audit)._
 по RPC. Сервиса нет: тенантская поверхность условного доступа снята.
 
 Номер сохранён по той же причине, что и у §7. Приёмка снятия —
-`services/iam/docs/acceptance/retire-tenant-condition-surface.md`.
+`services/iam/docs/engineering/acceptance/retire-tenant-condition-surface.md`.
 
 ---
 ## 11. iam's own pages ask the relation store in batches; the RPC it publishes for siblings still does not

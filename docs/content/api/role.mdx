@@ -93,8 +93,8 @@ system-only).
 <CodeBlock language="json">
   {dedent`
     {
-      "id": "rol_6t4v9x2k8m1p5",
-      "accountId": "acc_2k9f3qw8x7m2n",
+      "id": "rolkw55v2z363gpqath1",
+      "accountId": "acc2bkd71802av7dywa8",
       "name": "vpc-viewer",
       "description": "Read-only VPC networks",
       "isSystem": false,
@@ -140,7 +140,7 @@ system-only).
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{
-            "accountId": "acc_2k9f3qw8x7m2n",
+            "accountId": "acc2bkd71802av7dywa8",
             "name": "compute-operator",
             "description": "Manage compute instances in prod project",
             "rules": [
@@ -163,7 +163,7 @@ system-only).
 
 <CodeBlock language="bash">
   {dedent`
-    curl -X PATCH 'http://localhost:18080/iam/v1/roles/rol_6t4v9x2k8m1p5' \\
+    curl -X PATCH 'http://localhost:18080/iam/v1/roles/rolkw55v2z363gpqath1' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{

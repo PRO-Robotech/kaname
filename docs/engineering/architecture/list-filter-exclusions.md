@@ -59,7 +59,7 @@ storage, vpc. iam в перечень не попал — при том что �
 материализуемых; условия не лежали, и допущение соседей на них не переносилось.
 Проверять это надо у каждого нового типа отдельно.
 
-Приёмка снятия — `services/iam/docs/acceptance/retire-tenant-condition-surface.md`.
+Приёмка снятия — `services/iam/docs/engineering/acceptance/retire-tenant-condition-surface.md`.
 
 ## Осознанные исключения: `sa_keys`, `user_tokens`
 

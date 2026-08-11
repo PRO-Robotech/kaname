@@ -45,7 +45,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 - [`21-internal-iam.md`](21-internal-iam.md) — InternalIAMService (UpsertFromIdentity / PollSubjectChanges / WriteCreatorTuple).
 
 ### Cross-cutting / infrastructure
-- [`28-fgahook.md`](28-fgahook.md) — `fgahook.WriteHierarchyTuple` (best-effort post-commit FGA-tuple emit).
+- [`28-relationhook.md`](28-relationhook.md) — `relationhook.WriteHierarchyTuple`: родительский указатель для СВОИХ ресурсов iam.
 - [`29-openfga-check.md`](29-openfga-check.md) — OpenFGA REBAC Check + `fga_outbox` drainer + propagation chain.
 
 ### Operations / Runbook / Deployment

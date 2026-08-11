@@ -181,7 +181,7 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
 
 ## Ссылки на код
 
-- corelib: `kacho-corelib/observability/` (slog), `kacho-corelib/operations` (Recorder).
+- общий фундамент: `pkg/observability/` (slog + OTel), `pkg/operations/` (Recorder).
 - `internal/observability/metrics/{metrics,lro_recorder,authz_decorator}.go`
 - `cmd/kacho-iam/serve.go` — wiring logger / metrics-listener / интерсепторов.
 - `internal/handler/iamhooks/http_server.go` — `/healthz` / `/readyz`.

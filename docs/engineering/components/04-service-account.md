@@ -36,7 +36,7 @@ kacho-iam держит только запись с id, именем и account_
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                              |
 
 **ID prefix:** `sva`.
-**DB table:** `kacho_iam.service_accounts` (миграция 0001:1124).
+**DB table:** `kacho_iam.service_accounts` (`CREATE TABLE kacho_iam.service_accounts` в `0001_initial.sql`).
 
 **FK contract:**
 
@@ -68,8 +68,8 @@ sequenceDiagram
     GW-->>Admin: 200 {operationId} → poll → {sva_id}
 
     Note over Admin,Hydra: ─── Создаем первый OAuth-ключ ───
-    Admin->>GW: POST /iam/v1/serviceAccounts/sva_id:issueKey
-    GW->>IAM: SAKeyService.IssueKey
+    Admin->>GW: POST /iam/v1/serviceAccounts/{sva_id}/keys
+    GW->>IAM: SAKeyService.Issue
     IAM->>DB: BEGIN
     IAM->>DB: INSERT operations (done=false)
     IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"], scope:"kacho.api", audience:[...]}
@@ -241,4 +241,4 @@ go test -short -count=1 -timeout 120s -run TestServiceAccount \
 - `internal/domain/service_account.go`
 - `internal/apps/kacho/api/service_account/`
 - `internal/repo/kacho/pg/service_account_repo.go`
-- `internal/migrations/0001_initial.sql:1104-1140`
+- `internal/migrations/0001_initial.sql` — DDL `service_accounts`

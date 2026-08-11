@@ -89,7 +89,7 @@ OpenFGA — иначе сервис откажется стартовать (fai
       -d '{
             "name": "acme",
             "description": "ACME production account",
-            "ownerUserId": "usr_5m1p7rt4b9k3d"
+            "ownerUserId": "usrbr69ze0ftz3jf7396"
           }'
   `}
 </CodeBlock>
@@ -103,11 +103,11 @@ OpenFGA — иначе сервис откажется стартовать (fai
       "id": "iop_8b0c4d2e6f1a3",
       "description": "create account acme",
       "done": true,
-      "metadata": { "accountId": "acc_2k9f3qw8x7m2n" },
+      "metadata": { "accountId": "acc2bkd71802av7dywa8" },
       "response": {
-        "id": "acc_2k9f3qw8x7m2n",
+        "id": "acc2bkd71802av7dywa8",
         "name": "acme",
-        "ownerUserId": "usr_5m1p7rt4b9k3d",
+        "ownerUserId": "usrbr69ze0ftz3jf7396",
         "createdAt": "2026-06-24T10:00:00Z"
       }
     }
@@ -123,7 +123,7 @@ OpenFGA — иначе сервис откажется стартовать (fai
     curl -X POST 'http://localhost:18080/iam/v1/projects' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
-      -d '{ "accountId": "acc_2k9f3qw8x7m2n", "name": "web-prod" }'
+      -d '{ "accountId": "acc2bkd71802av7dywa8", "name": "web-prod" }'
   `}
 </CodeBlock>
 
@@ -139,7 +139,7 @@ OpenFGA — иначе сервис откажется стартовать (fai
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{
-            "accountId": "acc_2k9f3qw8x7m2n",
+            "accountId": "acc2bkd71802av7dywa8",
             "email": "dev@acme.example",
             "displayName": "Dev One"
           }'
@@ -161,7 +161,7 @@ OpenFGA — иначе сервис откажется стартовать (fai
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{
-            "accountId": "acc_2k9f3qw8x7m2n",
+            "accountId": "acc2bkd71802av7dywa8",
             "name": "vpc-viewer",
             "description": "Read-only VPC networks",
             "rules": [
@@ -186,9 +186,9 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{
-            "subjects": [ { "type": "SUBJECT_TYPE_USER", "id": "usr_5m1p7rt4b9k3d" } ],
-            "roleId": "rol_6t4v9x2k8m1p5",
-            "scopeRef": { "tier": "PROJECT", "id": "prj_7d3h5j9q2w4e6" }
+            "subjects": [ { "type": "SUBJECT_TYPE_USER", "id": "usrbr69ze0ftz3jf7396" } ],
+            "roleId": "rolkw55v2z363gpqath1",
+            "scopeRef": { "tier": "PROJECT", "id": "prj7mfpj2my52k5a06kg" }
           }'
   `}
 </CodeBlock>

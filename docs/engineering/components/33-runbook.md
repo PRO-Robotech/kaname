@@ -96,7 +96,7 @@ kubectl -n kacho logs -l app=kacho-iam --since=10m | grep -E "fga_outbox|fga.app
    Если не помогает — `kubectl rollout restart deploy/kacho-iam` (drainer
    переустановит `LISTEN` и сделает poll-catch-up на старте).
 
-Детали grant→tuple-цепочки — [`28-fgahook.md`](28-fgahook.md); latency-бюджет
+Детали grant→tuple-цепочки — [`28-relationhook.md`](28-relationhook.md); latency-бюджет
 Check — [`29-openfga-check.md`](29-openfga-check.md).
 
 ## P2 — Ory Hydra / Kratos hooks недоступны
@@ -292,5 +292,5 @@ kubectl rollout status  deploy/kacho-iam -n kacho --timeout=120s
 
 - [`32-observability.md`](32-observability.md) — где смотреть metrics/logs.
 - [`31-deployment.md`](31-deployment.md) — env vars / secrets / listener-порты.
-- [`28-fgahook.md`](28-fgahook.md) — grant → FGA-tuple цепочка (fga_outbox).
+- [`28-relationhook.md`](28-relationhook.md) — grant → FGA-tuple цепочка (fga_outbox).
 - [`29-openfga-check.md`](29-openfga-check.md) — Check latency budget (sub-second).

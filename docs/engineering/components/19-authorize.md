@@ -32,7 +32,8 @@ conditions не прошли).
 **Ограничения:**
 - Sync (нет Operation envelope) — read-only RPC.
 - Fail-closed: OpenFGA недоступен → Unavailable.
-- ListObjects опционально (gate `KACHO_AUTHZ_LISTOBJECTS=on`).
+- ListObjects **не гейтится** — переключателя, который бы его выключал, в коде нет
+  (см. предупреждение ниже).
 
 ## API surface
 
@@ -42,10 +43,28 @@ conditions не прошли).
 |-------------------|------------|-------------------------------------------------------------------|
 | `Check`           | sync       | Bool allow/deny + `deny_reasons`.                                |
 | `BatchCheck`      | sync       | До 100 проверок в одном RPC; per-item результат в порядке запроса. |
-| `ListObjects`     | sync       | Все объекты типа T, на которых subject имеет relation R. Гейт `KACHO_AUTHZ_LISTOBJECTS=on`. |
+| `ListObjects`     | sync       | Объекты типа T, на которых subject имеет relation R. Включён безусловно. `page_token` отвергается (продолжения нет), `wildcard_grant` сервером не заполняется. |
 | `ListSubjects`    | sync       | Inverse: все subjects с action на ресурсе (admin-UI «who can access»). |
 | `ExpandRelations` | sync       | Zanzibar userset-tree для (resource, relation) — audit/explain.   |
 | `WhoAmI`          | sync       | Identity + permission-snapshot caller'а (UI bootstrap).           |
+
+> [!warning] Здесь стоял переключатель `KACHO_AUTHZ_LISTOBJECTS` — его никто не читает
+> Перепись 2026-08-11: имя встречается в дереве **четыре** раза, и ни одно вхождение не
+> является чтением. Два — комментарий контракта (`authorize_service.proto` и его
+> сгенерированное зеркало в `pkg/api`), одно — значение в профиле dev-развёртывания
+> (`deploy/helm/umbrella/values.dev.yaml`), одно — было здесь. Читателей в Go — **ноль**
+> (предикат: `grep -rn AUTHZ_LISTOBJECTS --include='*.go' services/ gateway/ pkg/ | grep -v pkg/api`
+> → пусто). `Handler.ListObjects` вызывает use-case безусловно, ветки `Unimplemented` в нём нет.
+>
+> Прежняя редакция объявляла RPC **выключенным по умолчанию**. Это худшее направление ошибки:
+> доступная поверхность описывалась как закрытая. Три места говорили одно и то же (эта глава,
+> страница арендатора, комментарий контракта) — и ни одно из них не было кодом.
+>
+> Осталось предметом **вне этой главы**, потому что это не документация: (а) ручка в профиле
+> развёртывания, которую никто не читает, — принято-и-проигнорировано на уровне настройки;
+> (б) комментарий в `.proto` правится вместе с перегенерацией `pkg/api`, то есть отдельным
+> изменением.
+
 
 ### Request shape
 
@@ -106,7 +125,6 @@ sequenceDiagram
 | `KACHO_IAM_OPENFGA_MODEL_ID`            | —                             | Model id (опционально pin).               |
 | `KACHO_IAM_FGA_CHECK_TIMEOUT_MS`        | 200                           | Per-Check timeout.                        |
 | `KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS` | 1000                          | ListObjects timeout.                      |
-| `KACHO_AUTHZ_LISTOBJECTS`               | `off`                         | `on` → enable ListObjects RPC.            |
 
 ## Как пользоваться
 

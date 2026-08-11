@@ -51,7 +51,7 @@ Grant-идентичность AccessBinding (5-tuple subject↔role↔resource)
 | `created_at`        | `time.Time`                  | да (server)  | да        | UTC.                                                |
 
 **ID prefix:** `acb`.
-**DB table:** `kacho_iam.access_bindings` (миграция 0001:235).
+**DB table:** `kacho_iam.access_bindings` (`CREATE TABLE kacho_iam.access_bindings` в `0001_initial.sql`).
 
 **UNIQUE constraint:** partial UNIQUE `access_bindings_active_grant_uniq ON
 (subject_type, subject_id, role_id, resource_type, resource_id) WHERE
@@ -284,12 +284,17 @@ go test -short -count=1 -timeout 120s \
 - **DB:** `access_bindings(id, subject_type, subject_id, role_id, resource_type,
   resource_id, status, condition_id, builtin_condition, expires_at, granted_by,
   revoked_at, revoked_by, deletion_protection, labels, created_at)`.
-- **Indexes:** PK; partial UNIQUE `access_bindings_active_grant_uniq` ON 5-tuple
-  `WHERE revoked_at IS NULL`; INDEX по subject; INDEX по resource.
-- **CHECK:** `access_bindings_status_check`; `access_bindings_resource_type_check` (whitelist).
+- **Indexes:** PK; partial UNIQUE `access_bindings_active_grant_uniq` ON 6-tuple
+  `(subject_id, subject_type, role_id, resource_type, resource_id, target_digest)`
+  `WHERE revoked_at IS NULL` (миграция `0055_access_binding_target.sql` — шестым членом
+  добавлен `target_digest`); INDEX по subject; INDEX по resource.
+- **CHECK:** `access_bindings_status_ck` (`PENDING`/`ACTIVE`/`REVOKED`);
+  `access_bindings_resource_ck` — **регулярное выражение** `^[a-z][a-z0-9_]*$` либо `*`,
+  не перечень допустимых типов; `access_bindings_subject_ck`;
+  `access_bindings_revoked_consistency_ck`; `access_bindings_scope_ck` (миграция 0005).
 - **Grant authority:** `requireGrantAuthority` → FGA Check (admin) на scope.
   Bootstrap-bypass через owner_user_id check на Account (см. `create.go`).
-- **FGA emit-in-tx:** через `EmitFGAWrite(ctx, tuples)` внутри writer-tx;
+- **FGA emit-in-tx:** через `AccessBindingsW().EmitRelationWrite(ctx, …)` внутри writer-tx;
   tuples приходят из `authzmap.PermissionsToRelations(role.permissions)`.
 - **Subject-change emit:** `subject_change_outbox` row для invalidate
   api-gateway authz cache на subject_id (см. [`29-openfga-check.md`](29-openfga-check.md)).
@@ -323,4 +328,4 @@ go test -short -count=1 -timeout 120s \
 - `internal/apps/kacho/api/access_binding/`
 - `internal/repo/kacho/pg/access_binding_repo.go`, `access_binding_fga_outbox_integration_test.go`, `access_binding_subject_change_integration_test.go`
 - `internal/authzmap/`
-- `internal/migrations/0001_initial.sql:235-263`
+- `internal/migrations/0001_initial.sql` — DDL `access_bindings`

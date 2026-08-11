@@ -58,7 +58,7 @@ is_system=false + (account_id XOR project_id) NOT NULL → custom role
 
 **ID prefix:** `rol`. System-role IDs: `rol` + `substr(md5(name), 1, 17)`.
 
-**DB table:** `kacho_iam.roles` (миграция 0001:1015 + seed-блок).
+**DB table:** `kacho_iam.roles` (`CREATE TABLE kacho_iam.roles` в `0001_initial.sql` + seed-блок).
 
 **Permissions validation:** через PL/pgSQL функцию
 `kacho_iam.iam_permissions_valid(jsonb)`:
@@ -271,4 +271,4 @@ go test -short -count=1 -timeout 120s \
 - `internal/repo/kacho/pg/role_repo.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
 - `internal/authzmap/permissions_to_relations.go`
 - `internal/authzmap/permissions_to_relations.go`
-- `internal/migrations/0001_initial.sql:1015-1037` + seed-блок
+- `internal/migrations/0001_initial.sql` — DDL `roles` + seed-блок

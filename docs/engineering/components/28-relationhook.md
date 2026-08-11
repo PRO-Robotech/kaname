@@ -1,122 +1,103 @@
-# 28. fgahook — post-commit FGA Tuple Emit Helper
+# 28. relationhook — запись родительского указателя в OpenFGA
 
 ## Назначение
 
-> [!warning] Пакет под этим именем в дереве отсутствует — глава описывает ДВА разных механизма
-> Замер 2026-08-06: каталога с именем из заголовка в сервисе нет. Под то, что глава
-> описывает, сегодня приходятся **две разные** вещи, и путать их нельзя:
-> **(а)** регистрация ресурса чужим сервисом идёт RPC `InternalIAMService.RegisterResource`
-> (`internal/apps/kacho/api/internal_iam/register_resource.go`) — по внутреннему листенеру,
-> идемпотентно, через собственный outbox вызывающего (см. правило топологии, раздел про
-> рёбра рантайма); **(б)** IAM пишет родительские tuple **своим** ресурсам помощником
-> `internal/apps/kacho/api/relationhook/` — он именно про Group / ServiceAccount / Role /
-> AccessBinding и наружу не предназначен.
-> Имя из заголовка не воспроизводится в тексте как путь: процитированное, оно читается как
-> живой пакет. Ниже — прежнее описание; читать как историю замысла, сверяя с двумя адресами
-> выше.
+> [!warning] Глава называлась «fgahook» и описывала пакет, которого в дереве нет
+> Прежняя редакция описывала помощник, через который **чужие** сервисы (vpc, compute, nlb)
+> публикуют иерархический tuple после создания своего ресурса: сигнатуру
+> `WriteHierarchyTuple(ctx, writer fga.TupleWriter, user, resource, parent string, logger) error`,
+> диаграмму этого потока, отдельную ночную задачу дозаписи пропущенных tuple и указание, что
+> caller сам выбирает между помощником и прямым RPC.
+>
+> **Ни одного из этих предметов в дереве нет** — ни пакета с тем именем, ни типа
+> `fga.TupleWriter`, ни задачи дозаписи. Сигнатура была выдумана целиком: у настоящей функции
+> восемь параметров, а не шесть, и она **ничего не возвращает** — вызывающий не может ни
+> проверить исход, ни обернуть его. Глава при этом уже несла предупреждение «читать как историю
+> замысла», то есть была объявлена недостоверной и оставлена — это и есть документ-обещание:
+> он занимает место работающей главы и отчитывается за неё.
+>
+> Ниже — описание того, что в дереве действительно есть. Механизм для **чужих** сервисов —
+> другой и живёт в [`21-internal-iam.md`](21-internal-iam.md): RPC `RegisterResource` по
+> внутреннему слушателю, идемпотентный, с очередью на стороне вызывающего.
 
-Помощник, через который
-**другие Kachō-сервисы** (vpc/compute/loadbalancer) могут опубликовать
-FGA-hierarchy tuple после создания собственного ресурса. Это
-post-commit best-effort — failure НЕ rollback'ит исходную DB-операцию
-(она уже COMMIT'ed в чужой БД).
+`relationhook` — помощник, которым **iam пишет родительский указатель своим собственным
+ресурсам** в OpenFGA. Наружу он не предназначен и чужими сервисами не вызывается.
 
-Главный метод — `WriteHierarchyTuple(user, resource_type, resource_id, parent_type, parent_id)`.
-Под капотом вызывает `InternalIAMService.WriteCreatorTuple` (см.
-[`21-internal-iam.md`](21-internal-iam.md)) или напрямую `clients.OpenFGAClient`.
+Зачем он нужен: промежуточный слой шлюза резолвит область запроса в пообъектный FGA-объект
+(`iam_user:<id>`, `iam_access_binding:<id>`, …) по `scope_extractor` каталога прав. Чтобы
+каскад `<отношение> from account` (соотв. `from project`) разрешился, у объекта обязан
+существовать tuple-указатель на родителя:
 
-**Use-cases:**
-- `kacho-vpc` после INSERT Network → emit `(iam_account:acc_x, parent, vpc_network:vpn_y)`.
-- `kacho-compute` после INSERT Instance → emit hierarchy.
-- Backfill для existing ресурсов.
+```
+iam_user:<id>            #account  @account:<account_id>
+iam_access_binding:<id>  #project  @project:<project_id>
+```
 
-**Ограничения:**
-- Best-effort: failure logged как WARN, не fatal.
-- Lazy validation — id-prefix check (но без deep validation).
-- Каждый caller-сервис сам решает, использовать ли fgahook или прямо
-  `InternalIAMService.WriteCreatorTuple` (предпочтительно).
+Без него шлюз **никогда** не авторизует пообъектный Get/Update/Delete: у каскада нет пути к
+аккаунту или проекту, где лежит привязка роли принципала.
 
-## API
+## API — то, что объявлено в пакете
+
+`internal/apps/kacho/api/relationhook/relationhook.go`, единственная экспортируемая функция:
 
 ```go
-// fgahook.WriteHierarchyTuple emits a parent/owner tuple after a peer's
-// resource Create commit. Non-fatal on failure (logs WARN).
-//
-//   user        — "user:usr_alice" or "service_account:sva_*"
-//   resource    — e.g. "vpc_network:vpn_xxx"
-//   parent      — e.g. "iam_project:prj_yyy"
-//   logger      — for failure trace
 func WriteHierarchyTuple(
     ctx context.Context,
-    writer fga.TupleWriter,
-    user, resource, parent string,
+    relations clients.RelationStore,
     logger *slog.Logger,
-) error
+    parentType, parentID, relation, childType, childID string,
+)
 ```
 
-## Sequence diagram — типичный flow (kacho-vpc после Network.Create)
+**Возвращаемого значения нет** — это часть контракта, а не упущение: строка ресурса на момент
+вызова уже закоммичена, откатывать нечего, и «обработать ошибку» вызывающему было бы нечем.
+Исход виден только в журнале (`Info` на успехе, `Warn` на отказе).
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant VPCSvc as kacho-vpc Network.Create UseCase
-    participant DB_VPC as kacho_vpc DB
-    participant Hook as fgahook.WriteHierarchyTuple
-    participant IAM as InternalIAMService
-    participant FGA as OpenFGA
+Две защитные ветки, обе — тихий no-op:
 
-    VPCSvc->>DB_VPC: BEGIN; INSERT vpc_networks; COMMIT
-    VPCSvc->>VPCSvc: после commit — post-emit
-    VPCSvc->>Hook: WriteHierarchyTuple(user:usr_alice, vpc_network:vpn_xxx, iam_project:prj_yyy)
-    Hook->>IAM: WriteCreatorTuple {user_id, resource_type, resource_id}
-    IAM->>FGA: WriteTuples [(user:usr_alice, creator, vpc_network:vpn_xxx)]
-    FGA-->>IAM: 200 (или 400 already_exists — GREEN idempotent)
-    IAM-->>Hook: Operation done=true
-    Hook-->>VPCSvc: nil (success) | WARN logged on failure
-    Note over VPCSvc: VPC mutation остается applied даже при FGA fail
-```
+- `relations == nil` — держится ради unit-тестов; в производственной сборке композиционный
+  корень не поднимается без OpenFGA, поэтому клиент провязан всегда;
+- пустой `parentID` или `childID` — иначе в хранилище завёлся бы висячий объект `<тип>:`.
 
-## Что делать при failure (operator)
+## Где он вызывается на самом деле
 
-Backfill через admin tooling:
+Вызовов в не-тестовом дереве **два**, оба в приглашении пользователя
+(`internal/apps/kacho/api/user/invite.go`):
+
+| Дочерний объект | Отношение | Родитель |
+|---|---|---|
+| `iam_user:<user_id>` | `account` | `account:<account_id>` |
+| `iam_access_binding:<binding_id>` | `project` | `project:<project_id>` |
+
+> [!note] Комментарий самого пакета называет другой набор ресурсов
+> Шапка `relationhook.go` перечисляет Group / ServiceAccount / Role / AccessBinding. По дереву
+> помощник зовут для `iam_user` и `iam_access_binding`; Group / ServiceAccount / Role свои
+> родительские tuple получают иначе. Расхождение — в **прод-коде**, а не здесь, и правится
+> вместе с ним; воспроизводить перечень из шапки как факт нельзя.
+
+## Что делать оператору, если tuple не доехал
+
+Отсутствие родительского указателя выглядит как отказ в доступе владельцу на **своём** свежем
+ресурсе, не проходящий сам собой (в отличие от короткого окна согласованности).
 
 ```bash
-# 1. Список ресурсов без owner-tuple в OpenFGA (через ReadTuples filter).
-grpcurl ... ReadTuples '{"object":"vpc_network:vpn_xxx"}' → ничего
+# 1. Убедиться, что указателя нет.
+grpcurl ... ReadTuples '{"object":"iam_user:<user_id>"}'
 
-# 2. Re-emit:
-grpcurl ... WriteCreatorTuple '{"user_id":"usr_alice","resource_type":"vpc_network","resource_id":"vpn_xxx"}'
+# 2. Дописать через внутренний слушатель.
+grpcurl ... WriteTuples '{...}'
 ```
 
-Альтернатива — общий **fgahook backfill job** (отдельный CRON), который
-сканирует БД пиров и компенсирует missing tuples.
+Оба RPC — `InternalAuthorizeService`, внутренний слушатель `:9091`, mTLS обязателен; их
+поверхность описана в [`20-internal-authorize.md`](20-internal-authorize.md).
 
-## Подробности реализации
-
-- **Package:** см. предупреждение в начале главы — под этим именем каталога нет.
-- **Caller responsibility:** caller-сервис сам строит `user` / `resource` /
-  `parent` строки в FGA-notation.
-- **Idempotency:** OpenFGA `WriteTuples` возвращает 400 `already-exists` на
-  дубликат — обрабатывается как GREEN.
-
-## Gotchas / известные ограничения
-
-- **Best-effort means возможна потеря tuple** — при agressive network
-  partition; план — outbox-pattern (`fga_outbox`) для guaranteed.
-- **fgahook НЕ участвует** в kacho-iam writes (там — `fga_outbox` через
-  drainer).
-- **Per-call latency** — добавляет 1 RTT на kacho-iam; для high-throughput
-  Create операций — async-fire-and-forget pattern в caller.
+Отдельной задачи дозаписи в дереве нет. Регулярная сходимость обеспечивается **очередью и
+реконсайлером** (`fga_outbox` + дренаж), а не помощником из этой главы — см.
+[`29-openfga-check.md`](29-openfga-check.md).
 
 ## Связанные компоненты
 
-- [`21-internal-iam.md`](21-internal-iam.md) — WriteCreatorTuple host.
-- [`29-openfga-check.md`](29-openfga-check.md) — общая propagation chain.
-
-## Ссылки на код
-
-- `internal/apps/kacho/api/internal_iam/register_resource.go` — регистрация ресурса
-  чужим сервисом (то, ради чего глава заводилась).
-- `internal/apps/kacho/api/relationhook/relationhook.go` — родительские tuple для
-  собственных ресурсов IAM.
-- Вызывающие — сервисы vpc / compute / nlb / storage / registry монорепо.
+- [`21-internal-iam.md`](21-internal-iam.md) — `RegisterResource`: как это делают **чужие** сервисы.
+- [`20-internal-authorize.md`](20-internal-authorize.md) — прямые `WriteTuples` / `ReadTuples`.
+- [`29-openfga-check.md`](29-openfga-check.md) — очередь, дренаж и бюджет задержки.
+- [`08-access-binding.md`](08-access-binding.md) — привязка, для которой пишется указатель на проект.

@@ -45,7 +45,7 @@ per-subject/per-resource решение принимает handler.
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{
-            "subject": "user:usr_5m1p7rt4b9k3d",
+            "subject": "user:usrbr69ze0ftz3jf7396",
             "resource": { "type": "vpc_network", "id": "enp_2f9k3qw8x7m2n" },
             "action": "vpc.networks.get"
           }'
@@ -85,13 +85,26 @@ per-subject/per-resource решение принимает handler.
 
 <ApiOperation method="POST" endpoint="/iam/v1/authorize:listObjects">
 
-Возвращает все id типа `resourceType`, на которых субъект имеет `action`. Признак
-`wildcardGrant=true` означает неограниченный охват (cluster-wildcard) — тогда клиент пропускает
-WHERE-IN-фильтр и возвращает все строки.
+Возвращает id типа `resourceType`, на которых субъект имеет `action`. Ответ — объединение
+read-отношений типа, `maxResults` сужает его на нашей стороне (по умолчанию 1000, потолок
+10000) и **никогда не расширяет**: собственный потолок OpenFGA лежит ниже и снять его отсюда
+нельзя.
 
-:::note Skeleton-интеграция
-`ListObjects` — предварительная интеграция; при `KACHO_AUTHZ_LISTOBJECTS=off` (по умолчанию)
-метод возвращает `Unimplemented`. Полное per-handler-подключение планируется.
+:::caution `pageToken` не поддерживается, `wildcardGrant` сервером не выставляется
+`ListObjects` реализован и включён безусловно — переключателя, который бы его отключал, нет.
+Две границы ответа, о которых надо знать вызывающему:
+
+- **Продолжения нет.** У `ListObjects` в OpenFGA нет курсора, поэтому непустой `pageToken`
+  отвергается сразу: `INVALID_ARGUMENT`, `"Illegal argument page_token: ListObjects does not
+  paginate"`. Принять и проигнорировать было бы хуже: вызывающий получил бы первую страницу,
+  считая её второй. Поле `nextPageToken` в ответе объявлено, но **всегда пусто**.
+- **`wildcardGrant` объявлен в контракте, но сервер его не заполняет** — в ответе он всегда
+  `false`. Отличить неограниченный охват по этому признаку сегодня нельзя; полагаться на него
+  как на короткое замыкание нельзя тем более.
+
+Признак усечения — **`truncated`**: он и есть единственный работающий сигнал «ответ обрезан»
+(либо потолком OpenFGA, либо вашим `maxResults`). Вызывающий, который его игнорирует, примет
+префикс за полный набор.
 :::
 
 </ApiOperation>
@@ -128,14 +141,14 @@ computed-usersets (`#admin → #viewer`) и tuple-to-userset. Используе
 <CodeBlock language="json">
   {dedent`
     {
-      "subject": "user:usr_5m1p7rt4b9k3d",
-      "userId": "usr_5m1p7rt4b9k3d",
+      "subject": "user:usrbr69ze0ftz3jf7396",
+      "userId": "usrbr69ze0ftz3jf7396",
       "email": "dev@acme.example",
       "displayName": "Dev One",
       "systemAdmin": false,
       "clusterViewer": true,
       "accounts": [
-        { "accountId": "acc_2k9f3qw8x7m2n", "accountName": "acme", "roles": ["editor"] }
+        { "accountId": "acc2bkd71802av7dywa8", "accountName": "acme", "roles": ["editor"] }
       ],
       "checkedAt": "2026-06-24T10:30:00Z"
     }

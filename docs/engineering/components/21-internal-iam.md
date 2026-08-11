@@ -134,7 +134,7 @@ grpcurl -plaintext -d '{
 # UpsertFromIdentity (api-gateway после OIDC).
 grpcurl -plaintext -d '{
   "external_id":"ory-sub-xyz","email":"alice@example.com","display_name":"Alice"
-}' localhost:9091 kacho.cloud.iam.v1.InternalIAMService/UpsertFromIdentity
+}' localhost:9091 kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 
 # WriteCreatorTuple (peer-call от vpc).
 grpcurl -plaintext -d '{
@@ -155,7 +155,9 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
   обработчика нет; имя не воспроизводится как координата.
 - **Check delegation:** narrow port `authorizer` over `*service.AuthorizeService`.
 - **PollSubjectChanges:** narrow port `subjectChanger` over `*service.SubjectChangeService`.
-- **WriteCreatorTuple:** narrow port `fgaWriter` over `*clients.OpenFGAHTTPClient`.
+- **WriteCreatorTuple:** narrow port `relationWriter` over `*clients.OpenFGAHTTPClient`
+  (соседние порты того же обработчика — `Authorizer`, `subjectChanger`, `relationWriteGate`,
+  `resourceRegistrar`, `roleCompiledReader`).
 - **Auth-interceptor:** реализован на стороне api-gateway (валидация JWT +
   propagation principal в backend).
 
@@ -165,14 +167,14 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 - **LookupSubject — hot-path** — рекомендуется api-gateway cache на ~30s.
 - **WriteCreatorTuple — best-effort** — failure НЕ rollback'ит Create в
   vpc/compute (peer-call после COMMIT); потеря tuple восстанавливается
-  через fgahook backfill (см. [`28-fgahook.md`](28-fgahook.md)).
+  через прямой `WriteTuples` по внутреннему слушателю (см. [`28-relationhook.md`](28-relationhook.md)).
 - **Check без principal context** — caller обязан передать subject параметром.
 
 ## Связанные компоненты
 
 - [`03-user.md`](03-user.md) — User mirror.
 - [`19-authorize.md`](19-authorize.md) — Public Check.
-- [`28-fgahook.md`](28-fgahook.md) — sister mechanism для post-commit.
+- [`28-relationhook.md`](28-relationhook.md) — как iam пишет родительский указатель своим ресурсам.
 - [`29-openfga-check.md`](29-openfga-check.md) — subject_change push chain.
 
 ## Ссылки на код

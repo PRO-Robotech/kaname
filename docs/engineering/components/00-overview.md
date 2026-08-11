@@ -301,7 +301,7 @@ sequenceDiagram
 - Authz-плоскость → [`19-authorize.md`](19-authorize.md),
   [`20-internal-authorize.md`](20-internal-authorize.md),
   [`21-internal-iam.md`](21-internal-iam.md),
-  [`28-fgahook.md`](28-fgahook.md),
+  [`28-relationhook.md`](28-relationhook.md),
   [`29-openfga-check.md`](29-openfga-check.md).
 - Conditions (CEL ABAC) — Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - Production deploy / эксплуатация → [`31-deployment.md`](31-deployment.md),

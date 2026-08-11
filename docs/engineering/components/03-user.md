@@ -47,7 +47,7 @@ PENDING ⇔ external_id = '';  ACTIVE/BLOCKED ⇔ external_id <> ''
 **Partial UNIQUE:** `users_account_external_id_unique ON (account_id, external_id) WHERE external_id <> ''`.
 
 **ID prefix:** `usr`.
-**DB table:** `kacho_iam.users` (миграция 0001:1199).
+**DB table:** `kacho_iam.users` (`CREATE TABLE kacho_iam.users` в `0001_initial.sql`).
 
 **FK contract:**
 
@@ -310,8 +310,10 @@ go test -short -count=1 -timeout 120s \
   `external_id := <new sub>`.
 - **DB:** таблица `users` со столбцами `id, account_id, external_id, email,
   display_name, invite_status, invited_by, created_at`.
-- **Indexes:** PK; partial UNIQUE `users_account_external_id_unique`; INDEX
-  `users_account_email_idx`.
+- **Indexes:** PK `users_pkey(id)`; partial UNIQUE `users_account_external_id_unique`
+  `WHERE external_id <> ''`; UNIQUE `users_account_email_unique(account_id, lower(email))`;
+  INDEX `users_email_idx(lower(email))`, partial `users_email_pending_idx`,
+  `users_active_external_id_idx`.
 - **CHECK:** `users_invite_status_consistency` (PENDING ⇔ external_id='').
 
 ## Gotchas / известные ограничения

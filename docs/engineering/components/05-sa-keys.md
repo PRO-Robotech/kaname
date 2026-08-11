@@ -91,7 +91,8 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 **`NULL` = бессрочный, а не невалидный.** Так лежит bootstrap-admin-маппинг (#58)
 и все строки, созданные до появления TTL-ручек. Ограничивать их время — работа
-выдающей стороны (`SAKEY_DEFAULT_TTL`), а не проверяющей.
+выдающей стороны (конфигурационный ключ `sakey-default-ttl`, поле `AuthN.SAKeyDefaultTTL`),
+а не проверяющей.
 
 Уже выданный access-token переживает истечение ключа: он живёт свой
 `access_token_lifespan` (per-client, `KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL`). Гейт
@@ -294,8 +295,9 @@ go test -short -count=1 -timeout 120s \
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/sa_keys/usecases.go` — `IssueSAKey`, `RevokeSAKey`, `ListSAKeys`.
-- **Handler:** `internal/apps/kacho/api/sa_keys/handler.go`.
+- **Handler и use-case живут в одном пакете** `internal/apps/kacho/api/sa_keys/`: точки входа
+  `Handler.Issue` / `Handler.List` / `Handler.Revoke` в `handler.go`, выпуск ключа — `keys.go`,
+  журналирование — `audit.go`. Отдельного файла со сводкой use-case'ов у пакета нет.
 - **Hydra клиент:** `internal/clients/hydra_admin_client.go` + `hydra_oauth_clients.go`.
 - **Repo:** SA-OAuth-clients-репо в `internal/repo/kacho/pg/` (через `NewSAOAuthClientRepo`).
 - **Redactor:** `internal/repo/kacho/pg/ops_response_redactor.go`. SELECT

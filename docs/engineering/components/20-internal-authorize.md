@@ -110,7 +110,8 @@ grpcurl -plaintext -d '{}' localhost:9091 \
 ## Подробности реализации
 
 - **Handler:** `internal/apps/kacho/api/internal_authorize/handler.go`.
-- **FGATupleWriter:** `internal/service/fga_tuple_writer.go` — обертка над `OpenFGAClient`.
+- **FGATupleWriter:** `internal/service/fga_tuple_writer.go` — обертка над
+  `clients.OpenFGAHTTPClient`.
 - **Cluster-admin short-circuit:** `internal/service/authorize_service.go`
   (`cluster_admin_grants` lookup перед FGA Check).
 - **OpenFGA HTTP client:** `internal/clients/openfga_*.go`

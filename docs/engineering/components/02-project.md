@@ -8,37 +8,54 @@ instances, VPC networks, NLBs) внутри Account. Project — второй (�
 сущностей. Он обеспечивает второй уровень изоляции внутри Account (например,
 prod / staging / dev — это три Project одного Account).
 
-Project поддерживает уникальную операцию **Move** — атомарный перенос Project из
-одного Account в другой через CAS.
+> [!warning] Здесь была описана операция `Move` — её нет ни в одном слое дерева
+> Перепись 2026-08-11 по пяти осям, каждая независима: RPC в `project_service.proto` — **нет**
+> (объявлено шесть: `Get`, `List`, `Create`, `Update`, `Delete`, `ListOperations`);
+> HTTP-правила с суффиксом-действием у этого сервиса — **нет** (шесть правил, все на
+> `/iam/v1/projects…`); маршрута с этим суффиксом в таблице маршрутов шлюза под доменом iam —
+> **нет** (два маршрута такой формы в дереве принадлежат nlb); файла use-case и метода
+> репозитория — **нет**; истории у обоих (`git log -S`) — **пустая**, то есть операция не была
+> снята, её здесь не было никогда.
+>
+> Прежняя редакция описывала её как «самый интересный flow»: диаграмма последовательности,
+> строка в таблице RPC, строка в REST-отображении, команда `curl`, разбор идемпотентности,
+> два замечания о конкурентности и имя метода репозитория — **семь мест**, ни одно из которых
+> не имело предмета. Страница арендатора (`content/api/project.mdx`) про `Move` не говорит
+> ничего и была права; расходились не два документа между собой, а один документ с деревом.
+>
+> `account_id` **hard-immutable**: он отвергается в `updateMask` сообщением
+> `"accountId is immutable after Project.Create"`. Пути сменить владеющий аккаунт у проекта
+> сегодня **не существует** — ни обычного, ни специального. Если такой путь понадобится, он
+> заводится приёмкой и контрактом, а не возвращением этого раздела.
 
 **Use-cases:**
 - Управление группами ресурсов внутри Account (Compute/VPC/LB-ресурсы
   ссылаются на `project_id` как scope).
 - AccessBinding на `project` resource_type грантит права на все
   ресурсы внутри Project (через FGA hierarchy).
-- Move — миграция Project между Account'ами (требует владельца обоих
-  Account'ов).
 
 **Ограничения:**
-- **Имя уникально per-Account** (`UNIQUE projects_account_id_name`).
+- **Имя уникально per-Account** (`UNIQUE projects_account_name_unique`).
 - Удаление RESTRICT — нельзя удалить Project, пока в нем есть workload
   (это проверяется на стороне Compute/VPC через peer-API; на DB-уровне
   Project — leaf-ресурс в `kacho_iam`).
-- `account_id` immutable через обычный Update — менять только через **Move**.
+- `account_id` **hard-immutable**: в `updateMask` отвергается `INVALID_ARGUMENT`
+  (`"accountId is immutable after Project.Create"`). Операции переноса проекта между
+  аккаунтами в дереве нет.
 
 ## Доменная модель
 
 | Поле          | Тип                       | Обязательное | Immutable | Описание / валидация                                  |
 |---------------|---------------------------|--------------|-----------|--------------------------------------------------------|
 | `id`          | `ProjectID` (`prj_...`)   | да           | да        | `prj<17-char>`. Длина 20.                              |
-| `account_id`  | `AccountID`               | да           | через Move| FK → `accounts(id) ON DELETE RESTRICT`.                |
+| `account_id`  | `AccountID`               | да           | да        | FK → `accounts(id) ON DELETE RESTRICT`.                |
 | `name`        | `ProjectName`             | да           | нет       | `^[a-z][-a-z0-9]{2,62}$`.                              |
 | `description` | `Description`             | нет          | нет       | `len ≤ 256`.                                            |
 | `labels`      | `Labels`                  | нет          | нет       | ≤64 пар, ключ regex, val ≤63.                          |
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                                   |
 
 **ID prefix:** `prj` (`domain.PrefixProject`).
-**DB table:** `kacho_iam.projects` (миграция `0001_initial.sql:983`).
+**DB table:** `kacho_iam.projects` (`CREATE TABLE kacho_iam.projects` в `0001_initial.sql`).
 
 **Sentinel errors:**
 
@@ -46,7 +63,7 @@ Project поддерживает уникальную операцию **Move** 
 |-------------------------|-------------------------|----------------------------------------------------|
 | `ErrNotFound`           | `NOT_FOUND`             | id не найден                                       |
 | `ErrAlreadyExists`      | `ALREADY_EXISTS`        | name занят в данном Account                        |
-| `ErrFailedPrecondition` | `FAILED_PRECONDITION`   | Delete с зависимыми ресурсами; Move CAS-mismatch   |
+| `ErrFailedPrecondition` | `FAILED_PRECONDITION`   | Delete с зависимыми ресурсами                      |
 | `ErrInvalidArg`         | `INVALID_ARGUMENT`      | domain.Validate / immutable-field в UpdateMask     |
 
 **FK contract:**
@@ -55,44 +72,6 @@ Project поддерживает уникальную операцию **Move** 
 accounts(id) ──RESTRICT── projects.account_id
 projects(id) ──RESTRICT── (cross-service: vpc_network.project_id,
                            compute_instance.project_id, nlb.project_id)
-```
-
-## Sequence diagram — Move (атомарный CAS)
-
-Перенос Project из Account A в Account B — самый интересный flow, потому
-что требует **атомарного** UPDATE с проверкой ожидаемого state (CAS).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Cli as Tenant CLI
-    participant GW as api-gateway
-    participant IAM as kacho-iam :9090
-    participant DB as Postgres
-    participant Out as fga_outbox
-
-    Cli->>GW: POST /iam/v1/projects/{prjId}:move<br/>{"destination_account_id":"acc_B"}
-    GW->>IAM: gRPC ProjectService.Move<br/>{project_id, dest_account_id, expected_account_id}
-    IAM->>IAM: AntiAnonymous + RequireAuth
-    IAM->>IAM: domain.Validate (account_id non-empty)
-    IAM->>DB: BEGIN
-    IAM->>DB: INSERT INTO operations (id=iop_..., principal_*, done=false)
-    Note over IAM,DB: Atomic CAS UPDATE
-    IAM->>DB: UPDATE kacho_iam.projects<br/>SET account_id=$dest<br/>WHERE id=$id AND account_id=$expected<br/>RETURNING ...
-    alt 0 rows
-        DB-->>IAM: pgx.ErrNoRows
-        IAM->>DB: ROLLBACK
-        IAM-->>GW: FailedPrecondition (project changed state)
-        GW-->>Cli: 400 {error:"project state changed"}
-    else 1 row
-        DB-->>IAM: project row
-        IAM->>Out: INSERT INTO fga_outbox<br/>(delete old hierarchy + insert new hierarchy)
-        IAM->>DB: COMMIT
-        IAM-->>GW: Operation (done=false, metadata={project_id, new_account_id})
-        GW-->>Cli: 200 {operationId}
-    end
-
-    Note over Cli: Tenant polls operation → done=true
 ```
 
 ## Sequence diagram — Create
@@ -129,7 +108,7 @@ sequenceDiagram
 | `List`   | sync       | Список (filter by `account_id`, paging).                  |
 | `Update` | async      | UpdateMask: `name`, `description`, `labels`.              |
 | `Delete` | async      | Удаление (RESTRICT-FK на cross-service ссылки — мягко).   |
-| `Move`   | async      | Атомарный CAS-перенос между Account.                      |
+| `ListOperations` | sync | Журнал операций над этим Project.                        |
 
 ### REST mapping
 
@@ -140,7 +119,7 @@ sequenceDiagram
 | GET     | `/iam/v1/projects?account_id=...`     | `ProjectService.List`     |
 | PATCH   | `/iam/v1/projects/{projectId}`        | `ProjectService.Update`   |
 | DELETE  | `/iam/v1/projects/{projectId}`        | `ProjectService.Delete`   |
-| POST    | `/iam/v1/projects/{projectId}:move`   | `ProjectService.Move`     |
+| GET     | `/iam/v1/projects/{projectId}/operations` | `ProjectService.ListOperations` |
 
 ## Конфигурация
 
@@ -160,12 +139,6 @@ OP_ID=$(echo "$RESP" | jq -r .id)
 # poll операцию ...
 PRJ_ID=$(echo "$R" | jq -r .response.id)
 
-# Move в другой Account (требует expected_account_id для CAS).
-curl -X POST "http://localhost:18080/iam/v1/projects/$PRJ_ID:move" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"destination_account_id":"acc_YYY","expected_account_id":"acc_xxx"}'
-
 # List в Account.
 curl "http://localhost:18080/iam/v1/projects?account_id=acc_xxx" \
   -H "Authorization: Bearer $TOKEN" | jq
@@ -181,10 +154,8 @@ grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
 
 ### Идемпотентность
 
-Project.Create — не идемпотентен (повторный вызов с тем же name → AlreadyExists).
-Move идемпотентен в особом смысле: повторный Move с тем же
-`expected_account_id` после успешного первого Move вернет `FailedPrecondition`
-(state уже изменен).
+Project.Create — не идемпотентен (повторный вызов с тем же name в том же аккаунте →
+`AlreadyExists`).
 
 ### Типичные ошибки
 
@@ -211,38 +182,31 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 make -C deploy psql SVC=iam
 # > SELECT id, account_id, name FROM kacho_iam.projects;
 
-# Integration tests + Move CAS race test.
+# Integration tests.
 go test -short -count=1 -timeout 120s -run TestProject \
   ./services/iam/internal/repo/kacho/pg/...
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/project/{create,get,list,update,delete,move}.go`.
+- **Use-cases:** `internal/apps/kacho/api/project/{create,get,list,update,delete}.go`.
 - **Handler:** `internal/apps/kacho/api/project/handler.go`.
 - **Repo iface:** `internal/repo/kacho/project/iface.go`.
-- **Repo impl:** `internal/repo/kacho/pg/project_repo.go`. Метод
-  `MoveAtomicCAS` использует single-statement `UPDATE ... WHERE id=$1 AND account_id=$expected RETURNING ...` —
-  zero TOCTOU (within-service инвариант на DB-уровне).
+- **Repo impl:** `internal/repo/kacho/pg/project_repo.go`.
 - **DB:** таблица `projects` со столбцами `id, account_id, name, description, labels JSONB, created_at`.
-- **Indexes:** PK, UNIQUE `projects_account_id_name`, INDEX `projects_account_id_idx`.
-- **FK:** `projects_account_id_fkey → accounts(id) ON DELETE RESTRICT`.
+- **Indexes:** PK `projects_pkey(id)`, UNIQUE `projects_account_name_unique(account_id, name)`,
+  INDEX `projects_account_idx(account_id)`.
+- **FK:** `projects_account_fk → accounts(id) ON DELETE RESTRICT`.
 - **CHECK:** `projects_labels_valid`.
-- **FGA hierarchy:** при Create — tuple `(iam_account:acc_*, parent, iam_project:prj_*)`;
-  при Move — удаление старого parent + INSERT нового parent в одном fga_outbox batch.
+- **FGA hierarchy:** при Create — tuple `(iam_account:acc…, parent, iam_project:prj…)`.
+  Родитель проекта не меняется в течение его жизни: `account_id` immutable.
 
 ## Gotchas / известные ограничения
 
-- **Move concurrency**: при параллельном Move того же Project одна транзакция
-  получит `pgx.ErrNoRows` (CAS mismatch). Это **корректное** поведение —
-  retry с обновленным `expected_account_id` от Get.
 - **Delete не cascade'ит cross-service** — Compute / VPC / LB будут сообщать
   «project имеет workload»; на стороне kacho-iam Delete пройдет без проблем,
   но workload останется orphan-ed (consumer-сервис обязан грациозно переживать
   dangling-ref — деградированный статус, не паника).
-- **FGA migration during Move** — старая иерархия и новая попадают в один
-  fga_outbox batch (atomic emit-in-tx). До drain'а Check может вернуть allowed для
-  обоих parent'ов; обычно это окно < 1с.
 
 ## Связанные компоненты
 
@@ -256,4 +220,4 @@ go test -short -count=1 -timeout 120s -run TestProject \
 - `internal/domain/project.go`
 - `internal/apps/kacho/api/project/`
 - `internal/repo/kacho/pg/project_repo.go`
-- `internal/migrations/0001_initial.sql:983-1000`
+- `internal/migrations/0001_initial.sql` — DDL `projects`

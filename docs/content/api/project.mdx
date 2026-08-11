@@ -47,8 +47,8 @@ VPC-сети и подсети, вычислительные инстансы, �
 <CodeBlock language="json">
   {dedent`
     {
-      "id": "prj_7d3h5j9q2w4e6",
-      "accountId": "acc_2k9f3qw8x7m2n",
+      "id": "prj7mfpj2my52k5a06kg",
+      "accountId": "acc2bkd71802av7dywa8",
       "name": "web-prod",
       "createdAt": "2026-06-24T10:05:00Z"
     }
@@ -67,7 +67,7 @@ handler оставляет только те проекты, которые вы
 
 <CodeBlock language="bash">
   {dedent`
-    curl 'http://localhost:18080/iam/v1/projects?accountId=acc_2k9f3qw8x7m2n&pageSize=50' \\
+    curl 'http://localhost:18080/iam/v1/projects?accountId=acc2bkd71802av7dywa8&pageSize=50' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>
@@ -85,7 +85,7 @@ handler оставляет только те проекты, которые вы
     curl -X POST 'http://localhost:18080/iam/v1/projects' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
-      -d '{ "accountId": "acc_2k9f3qw8x7m2n", "name": "web-prod" }'
+      -d '{ "accountId": "acc2bkd71802av7dywa8", "name": "web-prod" }'
   `}
 </CodeBlock>
 
@@ -100,7 +100,7 @@ Update (задан при Create). Требует `v_update`. Асинхронн
 
 <CodeBlock language="bash">
   {dedent`
-    curl -X PATCH 'http://localhost:18080/iam/v1/projects/prj_7d3h5j9q2w4e6' \\
+    curl -X PATCH 'http://localhost:18080/iam/v1/projects/prj7mfpj2my52k5a06kg' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{ "updateMask": "labels", "labels": { "tier": "frontend" } }'

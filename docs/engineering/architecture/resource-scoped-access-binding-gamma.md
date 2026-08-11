@@ -5,6 +5,33 @@ resource-scoped AccessBinding. Builds on the per-object targets
 (`resource-scoped-access-binding-alpha.md`) and the resource mirror
 (`resource-mirror-source-version.md`).
 
+> [!warning] Состояние на 2026-08-11: описанный здесь механизм СНЯТ миграцией 0030
+> Заголовок обещает «by-design notes … записывают решения реализации kacho-iam», то есть
+> настоящее время. По дереву это уже не так, и перепись по четырём осям это показывает:
+>
+> - **таблицы**: `access_binding_targets` (заводилась миграцией 0018) и
+>   `access_binding_selector` (0022) **дропнуты** миграцией
+>   `0030_drop_legacy_target_selector.sql`. Осталась только
+>   `access_binding_target_members` — её миграция 0030 сохраняет явно, и владеет ею
+>   реконсайлер правил роли, а не привязка;
+> - **контракт**: имена `selector` и `target_ref` в `AccessBinding` стоят в `reserved`;
+>   теги 16 и 18 — надгробия и никогда не переиспользуются как номера;
+> - **RPC**: `AddTargetResources` / `RemoveTargetResources` в `access_binding_service.proto`
+>   **нет**; из всей поверхности выбора объектов у сервиса не осталось ни одного метода
+>   с этим предметом;
+> - **место решения**: «какой объект» решает теперь **роль** (`role.rules[]`, ветви
+>   `ARM_NAMES` / `ARM_LABELS`, материализуемые реконсайлером), а не привязка.
+>
+> Что от предмета **живо и в другой форме**: пообъектная адресация вернулась как
+> `AccessTarget target = 22` (миграция `0055_access_binding_target.sql`) с **двумя** ветвями —
+> `resources` и `all_in_scope`. Ветви по меткам среди них нет.
+>
+> Записка **сохранена как обоснование**, а не как описание кода: разбор трёх независимых
+> гейтов, довод про цикл `iam→compute` и правило «эмиссия и вставка в одной транзакции»
+> пережили свой механизм и применяются к нынешней форме. Имена функций и RPC внутри
+> читать как имена **снятого** механизма: в дереве их нет.
+
+
 ## What this adds
 
 1. **`target.selector`** — a label-based grant. `selector{types, matchLabels}`

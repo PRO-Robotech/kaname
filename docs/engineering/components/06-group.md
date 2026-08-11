@@ -46,7 +46,8 @@ N бесконтрольных bindings.
 **PK:** `(group_id, member_type, member_id)`.
 
 **ID prefix:** `grp`.
-**DB tables:** `kacho_iam.groups`, `kacho_iam.group_members` (миграция 0001:840+853).
+**DB tables:** `kacho_iam.groups`, `kacho_iam.group_members` (`CREATE TABLE kacho_iam.groups`
+и `CREATE TABLE kacho_iam.group_members` в `0001_initial.sql`).
 
 ### Trigger `group_members_member_exists_trg`
 
@@ -271,4 +272,4 @@ go test -short -count=1 -timeout 120s \
 - `internal/apps/kacho/api/group/`
 - `internal/repo/kacho/pg/group_repo.go`
 - `internal/repo/kacho/pg/group_ismember_integration_test.go`
-- `internal/migrations/0001_initial.sql:840-869`
+- `internal/migrations/0001_initial.sql` — DDL `groups` / `group_members`

@@ -24,8 +24,9 @@ Account замещает связку `Organization` + `Cloud` из устаре
 - Удаление RESTRICT: нельзя удалить Account, пока существует хотя бы один
   Project / ServiceAccount / Group / custom-Role / AccessBinding в нем
   (`23503 foreign_key_violation` → `FailedPrecondition`).
-- Изменить `owner_user_id` через обычный Update нельзя — это отдельный flow
-  (не реализован публично; admin-only).
+- `owner_user_id` **hard-immutable**: в `updateMask` отвергается синхронно
+  (`"ownerUserId is immutable after Account.Create"`). Пути сменить владельца аккаунта
+  в дереве **нет вообще** — ни публичного, ни административного.
 
 ## Доменная модель
 
@@ -40,7 +41,7 @@ Account замещает связку `Organization` + `Cloud` из устаре
 
 **ID prefix:** `acc` (см. `internal/domain/constants.go::PrefixAccount`).
 
-**DB table:** `kacho_iam.accounts` (миграция `0001_initial.sql:379`).
+**DB table:** `kacho_iam.accounts` (`CREATE TABLE kacho_iam.accounts` в `0001_initial.sql`).
 
 **Sentinel errors → gRPC:**
 
@@ -235,8 +236,11 @@ make -C deploy logs-svc SVC=iam
 - **Repo iface:** `internal/repo/kacho/account/iface.go` (Reader/Writer split).
 - **Repo impl:** `internal/repo/kacho/pg/account_repo.go` (pgx + dto-mapping).
 - **DB:** таблица `accounts` со столбцами `id, name, description, labels JSONB, owner_user_id, created_at`.
-- **Indexes:** PK `accounts_pkey(id)`, UNIQUE `accounts_name_unique(name)`, INDEX `accounts_owner_user_id_idx`.
-- **FK:** `accounts_owner_user_id_fkey(owner_user_id) → users(id) ON DELETE RESTRICT`.
+- **Indexes:** PK `accounts_pkey(id)`, UNIQUE `accounts_name_unique(name)`, INDEX
+  `accounts_owner_idx(owner_user_id)`.
+- **FK:** `accounts_owner_fk(owner_user_id) → users(id) ON DELETE RESTRICT`, объявлен
+  **`DEFERRABLE INITIALLY DEFERRED`** (порядок посева не важен). Следствие для маппинга
+  ошибок: `23503` по этому ключу приходит из `Commit()`, а не из `INSERT`.
 - **CHECK:** `accounts_labels_valid CHECK (kacho_labels_valid(labels))`.
 - **OpenFGA tuple emit:** Create-use-case вызывает
   `CreateAccountUseCase.WithOpenFGA(fga, logger)` — выпускает owner-tuple
@@ -249,8 +253,12 @@ make -C deploy logs-svc SVC=iam
 
 - **Глобально-уникальное имя** — namespace конфликтует между tenant'ами. В
   multi-tenant prod рекомендуется добавлять префикс tenant'а к `name`.
-- **owner_user_id immutable** — для смены владельца нужен отдельный admin-flow
-  (не реализован публично; план — `TransferAccountOwnership` RPC).
+- **owner_user_id immutable, и заменить его нечем.** Здесь стояло обещание отдельного RPC
+  передачи владения — такого RPC в контракте нет, тикета за ним не стоит, и «не реализован
+  публично» читалось как «есть административный путь», которого тоже нет. Единственный способ
+  сменить владельца сегодня — завести новый аккаунт: аккаунт создаётся самообслуживанием, и
+  его владелец задаётся на создании навсегда. Понадобится передача владения — она заводится
+  приёмкой и контрактом, а не строкой в этом перечне.
 - **Delete cascade** — НЕТ. Все child-ресурсы (Project, SA, Group, ...) надо
   удалить вручную, иначе RESTRICT-блок. Каскадное удаление через границу
   сервиса не выполняется (только same-DB FK cascade).
@@ -273,5 +281,5 @@ make -C deploy logs-svc SVC=iam
 - `internal/domain/types.go::AccountID, AccountName, validateKebabName` — newtypes.
 - `internal/apps/kacho/api/account/` — use-cases.
 - `internal/repo/kacho/pg/account_repo.go` — pg-impl.
-- `internal/migrations/0001_initial.sql:379-396` — DDL `accounts`.
+- `internal/migrations/0001_initial.sql` — DDL `accounts`.
 - `tests/newman/cases/iam-account-*.py` — black-box scenarios.

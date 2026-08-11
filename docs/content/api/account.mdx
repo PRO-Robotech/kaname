@@ -25,7 +25,7 @@ import dedent from 'ts-dedent'
   <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
   <tbody>
     <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор аккаунта (префикс <code>acc</code>)</td></tr>
-    <tr><td><code>name</code></td><td>string</td><td>mutable</td><td>Уникальное в домене имя, 3–63 симв., <code>&#91;a-z&#93;(&#91;-a-z0-9&#93;&#123;0,61&#125;&#91;a-z0-9&#93;)?</code></td></tr>
+    <tr><td><code>name</code></td><td>string</td><td>mutable</td><td><strong>Глобально уникальное</strong> имя (одно пространство имён на всю платформу, не на аккаунт), 3–63 симв., <code>^&#91;a-z&#93;&#91;-a-z0-9&#93;&#123;2,62&#125;$</code></td></tr>
     <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов</td></tr>
     <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64; аккаунт label-selectable для scoped-грантов</td></tr>
     <tr><td><code>ownerUserId</code></td><td>string</td><td>immutable</td><td>User-владелец (админ аккаунта). Задаётся при Create, не меняется</td></tr>
@@ -46,7 +46,7 @@ import dedent from 'ts-dedent'
 
 <CodeBlock language="bash">
   {dedent`
-    curl 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n' \\
+    curl 'http://localhost:18080/iam/v1/accounts/acc2bkd71802av7dywa8' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>
@@ -54,10 +54,10 @@ import dedent from 'ts-dedent'
 <CodeBlock language="json">
   {dedent`
     {
-      "id": "acc_2k9f3qw8x7m2n",
+      "id": "acc2bkd71802av7dywa8",
       "name": "acme",
       "description": "ACME production account",
-      "ownerUserId": "usr_5m1p7rt4b9k3d",
+      "ownerUserId": "usrbr69ze0ftz3jf7396",
       "createdAt": "2026-06-24T10:00:00Z"
     }
   `}
@@ -84,7 +84,7 @@ handler возвращает 200 и только те аккаунты, где �
   {dedent`
     {
       "accounts": [
-        { "id": "acc_2k9f3qw8x7m2n", "name": "acme", "ownerUserId": "usr_5m1p7rt4b9k3d", "createdAt": "2026-06-24T10:00:00Z" }
+        { "id": "acc2bkd71802av7dywa8", "name": "acme", "ownerUserId": "usrbr69ze0ftz3jf7396", "createdAt": "2026-06-24T10:00:00Z" }
       ],
       "nextPageToken": ""
     }
@@ -109,7 +109,7 @@ handler возвращает 200 и только те аккаунты, где �
       -d '{
             "name": "acme",
             "description": "ACME production account",
-            "ownerUserId": "usr_5m1p7rt4b9k3d"
+            "ownerUserId": "usrbr69ze0ftz3jf7396"
           }'
   `}
 </CodeBlock>
@@ -126,7 +126,7 @@ immutable** — его наличие в `updateMask` вернёт `INVALID_ARGU
 
 <CodeBlock language="bash">
   {dedent`
-    curl -X PATCH 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n' \\
+    curl -X PATCH 'http://localhost:18080/iam/v1/accounts/acc2bkd71802av7dywa8' \\
       -H 'Authorization: Bearer <JWT>' \\
       -H 'Content-Type: application/json' \\
       -d '{ "updateMask": "description", "description": "ACME prod (EU)" }'
@@ -144,7 +144,7 @@ immutable** — его наличие в `updateMask` вернёт `INVALID_ARGU
 
 <CodeBlock language="bash">
   {dedent`
-    curl -X DELETE 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n' \\
+    curl -X DELETE 'http://localhost:18080/iam/v1/accounts/acc2bkd71802av7dywa8' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>
@@ -170,7 +170,7 @@ account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Тре�
 
 <CodeBlock language="bash">
   {dedent`
-    curl 'http://localhost:18080/iam/v1/accounts/acc_2k9f3qw8x7m2n/operations:all?pageSize=50' \\
+    curl 'http://localhost:18080/iam/v1/accounts/acc2bkd71802av7dywa8/operations:all?pageSize=50' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>
@@ -183,6 +183,7 @@ account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Тре�
   <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
   <tbody>
     <tr><td>Get/Update/Delete несуществующего аккаунта</td><td><code>NOT_FOUND</code></td><td><code>"Account &lt;id&gt; not found"</code></td></tr>
+    <tr><td><code>name</code> уже занят <strong>любым</strong> аккаунтом платформы</td><td><code>ALREADY_EXISTS</code></td><td><code>"Account with name &lt;name&gt; already exists"</code>. Пространство имён общее для всех арендаторов — занятое имя занято глобально</td></tr>
     <tr><td><code>ownerUserId</code> ≠ вызывающий при Create</td><td><code>INVALID_ARGUMENT</code></td><td>Self-service anti-hijacking</td></tr>
     <tr><td><code>ownerUserId</code> ссылается на несуществующего User</td><td><code>FAILED_PRECONDITION</code></td><td>Проверяется в async-операции</td></tr>
     <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"owner_user_id is immutable after Account.Create"</code></td></tr>

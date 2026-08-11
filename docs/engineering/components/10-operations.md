@@ -38,7 +38,7 @@ RPC в kacho-iam возвращают `*operation.Operation` (никогда н�
 | `principal_id`             | TEXT (IAM-extension) | да           | да        | id или `bootstrap`.                            |
 | `principal_display_name`   | TEXT (IAM-extension) | да           | да        | Email / SA-name / `kacho-iam-bootstrap`.       |
 
-**DB table:** `kacho_iam.operations` (миграция 0001:892).
+**DB table:** `kacho_iam.operations` (`CREATE TABLE kacho_iam.operations` в `0001_initial.sql`).
 
 ## Sequence diagram — типичный async RPC
 
