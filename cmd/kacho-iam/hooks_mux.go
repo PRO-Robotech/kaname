@@ -108,10 +108,23 @@ func buildHooksMux(
 		logger,
 	)
 
+	// Recovery hook: завершение восстановления пароля. До этой проводки провайдер
+	// бил в ЛЕГАСИ gRPC-порт с REST-подобным путём — тот же дефект, что чинили у
+	// заведения пользователя: событие не доезжало никогда, а восстановивший
+	// доступ оставался заблокированным, и прежние сессии переживали
+	// восстановление. Use-case существовал всё это время; не хватало маршрута.
+	recoveryUC := userapp.NewOnRecoveryCompletedUseCase(kachoRepo, opsRepo).WithLogger(logger)
+	recoveryHook := handlerinternal.NewRecoveryHookHandler(
+		handlerinternal.RecoveryHookConfig{HookSharedSecret: hookSecret},
+		&userRecoveryAdapter{uc: recoveryUC},
+		logger,
+	)
+
 	mux := handlerinternal.NewMux(handlerinternal.Handlers{
 		TokenHook:     tokenHook,
 		RefreshHook:   refreshHook,
 		ProvisionHook: provisionHook,
+		RecoveryHook:  recoveryHook,
 		// /readyz отражает доступность критичных зависимостей: коннект к БД и
 		// поднятый LRO-worker. /healthz остается чистым liveness.
 		Readiness: []handlerinternal.ReadinessChecker{
@@ -145,6 +158,22 @@ func (a *userProvisionAdapter) Provision(ctx context.Context, in handlerinternal
 		ExternalID:  domain.ExternalSubject(in.ExternalID),
 		Email:       domain.Email(in.Email),
 		DisplayName: domain.DisplayName(in.DisplayName),
+	})
+	return err
+}
+
+// userRecoveryAdapter — узкий адаптер порта завершения восстановления. Тот же
+// приём, что у заведения пользователя: транспорт не тянет типы бизнес-слоя, а
+// composition root переводит DTO обработчика во вход use-case.
+type userRecoveryAdapter struct {
+	uc *userapp.OnRecoveryCompletedUseCase
+}
+
+func (a *userRecoveryAdapter) CompleteRecovery(ctx context.Context, in handlerinternal.RecoveryInput) error {
+	_, err := a.uc.Execute(ctx, userapp.OnRecoveryCompletedInput{
+		ExternalID:  domain.ExternalSubject(in.ExternalID),
+		RecoveryJTI: in.RecoveryJTI,
+		Email:       domain.Email(in.Email),
 	})
 	return err
 }

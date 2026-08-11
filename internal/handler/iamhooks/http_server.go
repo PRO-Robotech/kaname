@@ -32,6 +32,10 @@ type Handlers struct {
 	TokenHook     http.Handler
 	RefreshHook   http.Handler
 	ProvisionHook http.Handler
+	// RecoveryHook — завершение восстановления пароля. Появился позже трёх
+	// соседних: до него провайдер бил в легаси gRPC-порт с REST-подобным путём,
+	// и событие не доезжало никогда (см. recovery_hook_handler.go).
+	RecoveryHook http.Handler
 	// Readiness — проверки зависимостей для /readyz (DB-ping, LRO-worker, …).
 	// Пустой список → /readyz деградирует до liveness (200), как было раньше.
 	Readiness []ReadinessChecker
@@ -51,6 +55,9 @@ func NewMux(h Handlers) *http.ServeMux {
 	}
 	if h.ProvisionHook != nil {
 		mux.Handle("/iam/v1/hooks/provision", h.ProvisionHook)
+	}
+	if h.RecoveryHook != nil {
+		mux.Handle("/iam/v1/hooks/recovery", h.RecoveryHook)
 	}
 	return mux
 }
