@@ -18,7 +18,7 @@ verifies: gateway→geo "no children to pick from" 503 regression — the
 
 The bug — and why no existing case caught it:
   The api-gateway dialed the kacho-geo gRPC backend at the wrong DNS host
-  (`geo.kacho.svc.cluster.local` — NXDOMAIN; the Service is `kacho-geo`) AND the
+  (`geo.kacho.svc` — NXDOMAIN; the Service is `kacho-geo`) AND the
   gateway→geo mTLS edge was disabled. So every AUTHENTICATED /geo/v1/* request
   reached an empty sub-conn balancer → grpc UNAVAILABLE (code 14)
   "no children to pick from" → REST 503. It slipped through because the suite had

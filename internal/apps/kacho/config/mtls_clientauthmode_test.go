@@ -251,7 +251,7 @@ func TestMTLS_55_12_HooksServerTLSOnly_HandshakeOK_HMACIndependent(t *testing.T)
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
-			ServerName: "kacho-iam.kacho.svc.cluster.local",
+			ServerName: "kacho-iam.kacho.svc",
 			MinVersion: tls.VersionTLS12,
 			// NO Certificates → no client cert presented.
 		}},
@@ -351,7 +351,7 @@ func TestMTLS_55_14b_ProvisionNoHMAC_401(t *testing.T) {
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
-			ServerName: "kacho-iam.kacho.svc.cluster.local",
+			ServerName: "kacho-iam.kacho.svc",
 			MinVersion: tls.VersionTLS12,
 		}},
 	}
@@ -397,7 +397,7 @@ func TestMTLS_55_15_MetricsServerTLSOnly_ScrapeNoClientCert(t *testing.T) {
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
-			ServerName: "kacho-iam.kacho.svc.cluster.local",
+			ServerName: "kacho-iam.kacho.svc",
 			MinVersion: tls.VersionTLS12,
 		}},
 	}
@@ -456,7 +456,7 @@ func TestMTLS_55_16_MetricsMutual_ClientCertRequired(t *testing.T) {
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:      pool,
 			Certificates: []tls.Certificate{clientCert},
-			ServerName:   "kacho-iam.kacho.svc.cluster.local",
+			ServerName:   "kacho-iam.kacho.svc",
 			MinVersion:   tls.VersionTLS12,
 		}},
 	}
@@ -470,7 +470,7 @@ func TestMTLS_55_16_MetricsMutual_ClientCertRequired(t *testing.T) {
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
-			ServerName: "kacho-iam.kacho.svc.cluster.local",
+			ServerName: "kacho-iam.kacho.svc",
 			MinVersion: tls.VersionTLS12,
 		}},
 	}

@@ -63,7 +63,7 @@ class Step:
     # Used by the external-isolation negatives, which talk to the api-gateway TLS
     # listener through a `kubectl port-forward`. That listener's certificate is
     # issued by the internal CA for its in-cluster names
-    # (api-gateway.kacho.svc.cluster.local); a forwarded socket is reached as
+    # (api-gateway.kacho.svc); a forwarded socket is reached as
     # 127.0.0.1, which no certificate on the stand names — and adding a name to the
     # host's resolver is exactly the manual, privileged step this harness must not
     # require. What these steps assert is WHICH ROUTES THE LISTENER SERVES, not the

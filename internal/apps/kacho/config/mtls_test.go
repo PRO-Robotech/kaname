@@ -35,7 +35,7 @@ func writeTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		DNSNames:              []string{"kacho-iam.kacho.svc.cluster.local"},
+		DNSNames:              []string{"kacho-iam.kacho.svc"},
 		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
