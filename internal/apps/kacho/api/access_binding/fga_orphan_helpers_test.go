@@ -293,6 +293,13 @@ func (w *fakeRoleWtr) ReplaceRuleSelectors(_ context.Context, _ domain.RoleID, _
 	return nil
 }
 
+// ReplaceRoleVerbs — дублёр умеет то же, что настоящий писатель: проекция
+// глаголов пишется рядом с селекторами. Дублёр, не умеющий метода, делает
+// невидимым ровно тот путь, ради которого его ставят.
+func (w *fakeRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.RoleVerb) error {
+	return nil
+}
+
 // ─── Role.Update use-case wiring ─────────────────────────────────────────────
 
 // newRoleUpdateUseCaseForTest builds the REAL UpdateRoleUseCase with the REAL

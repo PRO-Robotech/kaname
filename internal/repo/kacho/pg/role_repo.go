@@ -473,6 +473,41 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 // tx, so a removed/edited rule drops/replaces its selector atomically with the rules
 // change (ban #10). A rule whose dotted-types are empty (wildcard `*.*` system form,
 // served by the cluster super-admin short-circuit) is NOT persisted — it materializes nothing.
+// ReplaceRoleVerbs заменяет проекцию «роль → тип объекта × глагол».
+//
+// ПОЛНАЯ ЗАМЕНА, а не досыпка: проекция есть СОСТОЯНИЕ роли, и глагол, снятый из
+// разрешений, обязан исчезнуть отсюда. Досыпка означала бы, что отзыв права не
+// применяется, — причём молча, потому что добавление проходит успешно и ни одна
+// проверка «строки записаны» этого не заметит.
+//
+// Пары приходят от вызывающего уже переведёнными: перевод «точечное разрешение →
+// тип модели + глагол» — это код (закрытый каталог типов, приведение имени), и
+// повторять его в SQL значило бы завести второе место, знающее соответствие.
+func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID, pairs []domain.RoleVerb) error {
+	if _, err := w.tx.Exec(ctx,
+		`DELETE FROM kacho_iam.role_verb WHERE role_id = $1`, string(roleID)); err != nil {
+		return mapErr(err, "", string(roleID))
+	}
+	for _, pv := range pairs {
+		if pv.ObjectType == "" || pv.Verb == "" {
+			// Пустая пара — отказ, а не пропуск: она означает, что перевод у
+			// вызывающего дал ничего, и записать «ничего» тихо значит потерять
+			// право, которое роль объявляет.
+			return mapErr(fmt.Errorf("role_verb: пустая пара (%q,%q)", pv.ObjectType, pv.Verb),
+				"", string(roleID))
+		}
+		if _, err := w.tx.Exec(ctx,
+			`INSERT INTO kacho_iam.role_verb (role_id, object_type, verb)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (role_id, object_type, verb) DO NOTHING`,
+			string(roleID), pv.ObjectType, pv.Verb,
+		); err != nil {
+			return mapErr(err, "", string(roleID))
+		}
+	}
+	return nil
+}
+
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kacho_iam.role_rule_selectors WHERE role_id = $1`, string(roleID)); err != nil {

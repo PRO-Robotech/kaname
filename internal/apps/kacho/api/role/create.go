@@ -180,6 +180,15 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			if serr := w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, inserted.Rules.MaterializingSelectors()); serr != nil {
 				return domain.Role{}, serr
 			}
+			// Проекция глаголов — ВТОРАЯ сторона того же правила, и пишется она в
+			// той же транзакции: селекторы отвечают «подходит ли объект», проекция
+			// — «разрешено ли действие». Записать одну без другой значит оставить
+			// вердикт наполовину определённым, а расхождение проявится не отказом,
+			// а неверным ответом.
+			if verr := w.RolesW().ReplaceRoleVerbs(ctx, inserted.ID,
+				domain.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors())); verr != nil {
+				return domain.Role{}, verr
+			}
 			// Role audit payload carries id + name + actor — NOT the full
 			// permissions matrix (avoid payload blow-up; 5.2-17).
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{

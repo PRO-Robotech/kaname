@@ -66,6 +66,15 @@ type WriterIface interface {
 	// permissions-only role clears its selectors (DELETE then no INSERT). Idempotent
 	// re-sync (same rules → same set).
 	ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
+
+	// ReplaceRoleVerbs syncs kacho_iam.role_verb — проекцию «роль → тип объекта ×
+	// глагол», которой отвечает форма E.
+	//
+	// Отдельно от ReplaceRuleSelectors, потому что это ДРУГАЯ сторона того же
+	// правила: та отвечает «подходит ли объект» (типы и метки), эта — «разрешено
+	// ли действие» (глаголы). Спутать их дорого: запрос вердикта присоединяет обе,
+	// и подмена одной другой даёт ответ, верный по форме и неверный по существу.
+	ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID, pairs []domain.RoleVerb) error
 }
 
 type ListFilter struct {

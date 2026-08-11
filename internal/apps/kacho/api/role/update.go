@@ -284,6 +284,13 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID, upd.Rules.MaterializingSelectors()); serr != nil {
 					return domain.Role{}, serr
 				}
+				// Та же пара, что на создании: снятый из правил глагол обязан
+				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
+				// потому что добавление проходит успешно.
+				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
+					domain.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
+					return domain.Role{}, verr
+				}
 			}
 			// changed_fields records WHAT changed (e.g. ["permissions"]) — the
 			// full permissions set is intentionally NOT embedded.
