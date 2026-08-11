@@ -105,7 +105,7 @@ func TestMTLS_Metrics_EnabledRejectsPlaintext(t *testing.T) {
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:      pool,
 			Certificates: []tls.Certificate{clientCert},
-			ServerName:   "kacho-iam.kacho.svc.cluster.local",
+			ServerName:   "kacho-iam.kacho.svc",
 			MinVersion:   tls.VersionTLS12,
 		}},
 	}

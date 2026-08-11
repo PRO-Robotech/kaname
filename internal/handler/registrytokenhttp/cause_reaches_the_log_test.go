@@ -54,7 +54,7 @@ func (s issuerStub) ExecuteAnonymous(context.Context, string) (registrytokenuc.I
 func (s issuerStub) AnonymousEnabled() bool { return false }
 
 func TestUnavailabilityCauseReachesTheLogButNotTheBody(t *testing.T) {
-	cause := errors.New("dial tcp: lookup kacho-umbrella-hydra-public.kacho.svc.cluster.local: no such host")
+	cause := errors.New("dial tcp: lookup kacho-umbrella-hydra-public.kacho.svc: no such host")
 	wrapped := errors.Join(registrytokenuc.ErrIssuerUnavailable, cause)
 
 	var log bytes.Buffer

@@ -23,7 +23,7 @@ package bootstraptokenwire
 // На живом стенде выдача первого токена отказывала, и разбор занял двадцать
 // минут: провайдер здоров, issuer согласован, ключ подписи на месте, сеть есть.
 // Причина оказалась в том, что адрес обмена задан полным доменным именем, а на
-// той машине суффиксы хоста протекли в поды и полная форма `*.svc.cluster.local`
+// той машине суффиксы хоста протекли в поды и полная форма `*.svc`
 // не резолвилась — три коротких формы работали. Одна строка «no such host» в
 // журнале закрыла бы вопрос сразу; вместо неё стоял пересказ собственного
 // решения об отказе.
@@ -54,7 +54,7 @@ func (s exchangeStub) ClientCredentials(context.Context, clients.ClientCredentia
 
 func TestUnavailabilityKeepsItsCauseForTheLog(t *testing.T) {
 	// Форма, в которой причину отдаёт клиент: sentinel + текст сети.
-	cause := errors.New("dial tcp: lookup kacho-umbrella-hydra-public.kacho.svc.cluster.local: no such host")
+	cause := errors.New("dial tcp: lookup kacho-umbrella-hydra-public.kacho.svc: no such host")
 	wrapped := errors.Join(clients.ErrHydraUnavailable, cause)
 
 	a := hydraExchange{exchange: exchangeStub{err: wrapped}}
