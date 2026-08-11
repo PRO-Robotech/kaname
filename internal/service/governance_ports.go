@@ -39,6 +39,24 @@ type RelationOutboxEmitter interface {
 	EmitDeleteTx(ctx context.Context, tx Tx, tuples []RelationTuple) error
 }
 
+// RelationFactWriter — port for recording DIRECT relation facts in
+// kacho_iam.relation_fact from writer-tx-owning code paths.
+//
+// ЗАЧЕМ ОТДЕЛЬНО ОТ RelationOutboxEmitter. Тот кладёт НАМЕРЕНИЕ доставить кортеж
+// наружу; этот записывает ФАКТ в собственную БД. Пока движок жив, оба нужны:
+// наружу доставляется то же, что записано у себя, и записать обязано в ТОЙ ЖЕ
+// транзакции — иначе откат оставит одно без другого, и своя БД разойдётся с
+// чужой молча.
+//
+// Прямой факт — это владение, поставленное при создании объекта, иерархический
+// указатель и подстановочный субъект: то, что НЕ выводится ни из одной выдачи.
+// Выводимое сюда не пишется: дублировать выдачу фактом значило бы завести второе
+// место об одном предмете, расходящееся при первом же отзыве.
+type RelationFactWriter interface {
+	WriteFactsTx(ctx context.Context, tx Tx, tuples []RelationTuple, version time.Time) error
+	DeleteFactsTx(ctx context.Context, tx Tx, tuples []RelationTuple, tombstone time.Time) error
+}
+
 // ResourceMirrorRow — service-layer payload for one kacho_iam.resource_mirror
 // row. OUTPUT-ONLY mirror of the labels + parent-scope of a
 // resource owned by another service (source of truth = owner). Labels nil →
