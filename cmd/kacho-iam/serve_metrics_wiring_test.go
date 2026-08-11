@@ -45,8 +45,14 @@ func TestServeWiresMetricsInterceptorAndListener(t *testing.T) {
 		"metricsReg.UnaryServerInterceptor()",
 		"cfg.APIServer.MetricsListenAddress()",
 		`metricsMux.Handle("/metrics", metricsReg.Handler())`,
-		"metricsHTTPServer.Serve(metricsListener)",
-		"metricsHTTPServer.Shutdown(",
+		// Подъём и гашение слушателя ЗДЕСЬ БОЛЬШЕ НЕ ИЩУТСЯ, и это не ослабление:
+		// они переехали в профиль не-gRPC поверхности, а искать в исходнике имя
+		// снятого поля значит требовать дефекта. Что поверхность действительно
+		// поднимается и действительно гасится, утверждают ДВЕ пробы на поведении:
+		// `TestIAMSurfacesServeAndReleaseTheirPorts` (в этом же пакете) и
+		// `TestSurfaceReleasesItsPortBeforeReturning` (pkg/servicehost). Обе
+		// проверяют исход на проводе, а не наличие строки.
+		"servicehost.ServeSurface(",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("serve.go: missing metrics wiring %q", want)

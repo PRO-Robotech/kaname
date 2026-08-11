@@ -28,10 +28,32 @@ func TestHooksMetricsMTLS_ServeWiresTLSListeners(t *testing.T) {
 		}
 	}
 
-	// The hooks + metrics listeners must be conditionally wrapped with
-	// tls.NewListener (only when the per-edge *tls.Config is non-nil).
-	if got := strings.Count(src, "tls.NewListener("); got < 2 {
-		t.Errorf("serve.go: tls.NewListener( appears %d times, want >=2 (hooks + metrics)", got)
+	// Обёртка слушателя транспортом ЗДЕСЬ БОЛЬШЕ НЕ ИЩЕТСЯ, и это усиление, а не
+	// послабление. Прежняя проверка считала вхождения имени функции в ИСХОДНИКЕ:
+	// она осталась бы зелёной, напиши кто-нибудь это имя в комментарии, и
+	// покраснела бы, переедь обёртка на этаж ниже — что и произошло. Транспорт
+	// теперь надевает профиль не-gRPC поверхности, а что объявленный транспорт
+	// РЕАЛЬНО доезжает до слушателя, утверждается на проводе:
+	// `TestSurfaceDeclaredTLSReachesTheListener` (pkg/servicehost) — открытым
+	// текстом до обработчика не достучаться, по TLS ответ штатный.
+	//
+	// Здесь остаётся то, что принадлежит именно этому корню: транспорт каждой
+	// поверхности СОБИРАЕТСЯ своим построителем и ДОВОЗИТСЯ до объявления.
+	//
+	// Проверяется ПОИМЕННО, а не счётчиком вхождений подстроки «TLS:»: та стоит и
+	// в трёх соседних комментариях этого же файла, и счётчик по ней был бы зелен
+	// при любой утерянной проводке. Каждое имя ниже — присваивание конкретного
+	// собранного транспорта конкретному объявлению, и в прозе оно не встречается.
+	for _, want := range []string{
+		"TLS: hooksTLSConfig,",
+		"TLS: metricsTLSConfig,",
+		"TLS: registryTokenTLSConfig,",
+		"TLS: jwksProxyTLSConfig,",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("serve.go: собранный транспорт не доехал до объявления поверхности (%q) — "+
+				"построитель отработал, а слушатель остался бы открытым", want)
+		}
 	}
 
 	// MTLSConfig.Validate() must be called so an enabled-but-no-cert edge fails

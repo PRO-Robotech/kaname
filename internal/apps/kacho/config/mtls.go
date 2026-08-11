@@ -48,9 +48,12 @@ const mtlsEnvPrefix = "KACHO_IAM"
 //   - RegistryTokenServerMTLS — HTTP docker-token shim (:9096), *tls.Config.
 //
 // gRPC-ребра отдают grpc.ServerOption (передается в grpcsrv.NewServer);
-// HTTP-ребра отдают *tls.Config (оборачивает net.Listener через tls.NewListener
-// в composition root). Default-off у HTTP-ребер → builder возвращает (nil, nil)
-// → listener остается PLAINTEXT, byte-identical к текущему поведению.
+// HTTP-ребра отдают *tls.Config, который composition root ОБЪЯВЛЯЕТ полем
+// профиля не-gRPC поверхности (`servicecontract.Surface.TLS`), а надевает на
+// слушатель сам профиль (`servicehost.ServeSurface`). Прежде обёртку писал
+// корень; после XC-7/Ф8 это решение стало объявлением и попадает в самоотчёт при
+// старте. Default-off у HTTP-ребер → builder возвращает (nil, nil) → слушатель
+// остаётся PLAINTEXT.
 type MTLSConfig struct {
 	// PublicServerMTLS — server-creds для публичного listener (:9090,
 	// tenant-facing RPC через api-gateway).
@@ -196,7 +199,7 @@ func (m MTLSConfig) InternalServerCreds() (grpc.ServerOption, error) {
 }
 
 // HooksServerTLSConfig возвращает *tls.Config для HTTP hooks listener (:9092),
-// который composition root оборачивает через tls.NewListener.
+// который composition root объявляет полем TLS профиля поверхности.
 //
 // Контракт (per-edge ClientAuth mode):
 //   - enable=false → (nil, nil): cert-файлы НЕ читаются, listener остается
@@ -310,8 +313,8 @@ func validateServerEdge(cfg grpcsrv.TLSServer, mode string) error {
 
 // serverTLSConfig собирает *tls.Config для HTTP-listener'а из per-edge
 // grpcsrv.TLSServer value-структуры + resolved clientAuthMode.
-// MinVersion TLS1.2 на всех режимах. Возвращает *tls.Config (для http.Server /
-// tls.NewListener) вместо grpc.ServerOption.
+// MinVersion TLS1.2 на всех режимах. Возвращает *tls.Config (он уезжает полем
+// TLS профиля не-gRPC поверхности) вместо grpc.ServerOption.
 //
 //   - server-tls-only → ClientAuth=tls.NoClientCert, client-CA не читается;
 //   - mutual          → ClientAuth=tls.RequireAndVerifyClientCert + client-CA pool;

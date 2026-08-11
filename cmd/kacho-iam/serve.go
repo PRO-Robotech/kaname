@@ -9,7 +9,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -33,6 +32,8 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
+	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
+	"github.com/PRO-Robotech/kacho/pkg/servicehost"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
@@ -214,7 +215,8 @@ func runServe(cfg config.Config) error {
 	// PLAINTEXT. Per-edge, default-off TLS (mirror SEC-H grpcsrv.TLSServer):
 	// enable=false → nil *tls.Config → net.Listener stays plaintext
 	// (byte-identical to today, dev/newman stand unchanged); enable=true →
-	// per-edge clientAuthMode via tls.NewListener (server-tls-only = encryption
+	// per-edge clientAuthMode, объявленный полем TLS профиля поверхности
+	// (server-tls-only = encryption
 	// only, the default for both the HMAC-authed hooks edge and the no-scrape-cert
 	// metrics edge; mutual = RequireAndVerifyClientCert). mtlsCfg.Validate()
 	// fail-closes at boot if ANY edge is enabled with an incomplete cert-set for
@@ -496,232 +498,173 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 
-	// HTTP webhook listener (Hydra token/refresh hooks + Kratos provision hook).
-	// Cluster-internal-only (запрет #6); отдельный порт от gRPC public/internal.
+	// ── НЕ-gRPC ПОВЕРХНОСТИ: четыре профиля ТОЙ ЖЕ функции ──────────────────
+	//
+	// Решение владельца (XC-7, в-1): не-gRPC слушатели входят в контур ОТДЕЛЬНЫМ
+	// профилем, а не полями общего дескриптора. У iam их четыре, и предметы у них
+	// РАЗНЫЕ — приём вебхуков провайдера личности, выдача docker-токена, зеркало
+	// публичных ключей проверки, скрейп. Профиль их не смешивает: разницу несут
+	// значения двух осей — откуда поверхность досягаема и чем аутентифицирует, — и
+	// именно их пара судится (снаружи досягаемая поверхность с объявленным
+	// ОТСУТСТВИЕМ аутентификации не поднимается вовсе).
+	//
+	// Что ушло вместе с ручной сборкой: каскад закрытий уже привязанных
+	// слушателей на каждом последующем отказе (пять вложенных лестниц, из которых
+	// одна теряла слушатель скрейпа), четыре одинаковых блока гашения в общем
+	// триггере и четыре набора одних и тех же сроков, выписанных по месту.
+	surfaceMode, merr := servicecontract.ParseMode(cfg.AuthN.Mode.String())
+	if merr != nil {
+		return fmt.Errorf("посадка процесса для профиля поверхностей: %w", merr)
+	}
+
+	// Контекст ЧЕТЫРЁХ поверхностей. Отдельный от корневого: гасить их надо по
+	// общему триггеру остановки, который срабатывает и от сигнала, и от краха
+	// любого из двух gRPC-слушателей.
+	surfaceCtx, stopSurfaces := context.WithCancel(context.Background())
+	defer stopSurfaces()
+
+	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
+	// provision). Cluster-internal-only (запрет #6), отдельный порт от gRPC.
 	hooksAddr := cfg.AuthN.HooksHTTPListenAddress()
-	var hooksListener net.Listener
-	if hooksAddr != "" {
-		hooksListener, err = net.Listen("tcp", hooksAddr)
-		if err != nil {
-			_ = listener.Close()
-			_ = internalListener.Close()
-			return fmt.Errorf("hooks http listener: %w", err)
-		}
-		// Default-off: hooksTLSConfig is nil → plaintext (unchanged). When the
-		// per-edge TLS is enabled the raw TCP listener is wrapped so every hooks
-		// connection is encrypted; the clientAuthMode (server-tls-only by default
-		// for the HMAC-authed Hydra/Kratos webhooks) is baked into hooksTLSConfig.
-		if hooksTLSConfig != nil {
-			hooksListener = tls.NewListener(hooksListener, hooksTLSConfig)
-		}
+	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
+		Name:    "вебхуки провайдера личности",
+		Mode:    surfaceMode,
+		Logger:  logger,
+		Addr:    addrAxis(hooksAddr, "KACHO_IAM_HOOKS_HTTP_ADDR не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
+		Handler: buildHooksMux(pool, kachoRepo, opsRepo, openfgaClient, cfg, logger),
+		Reach:   servicecontract.ReachClusterInternal,
+		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
+			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
+		TLS: hooksTLSConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("профиль поверхности вебхуков: %w", err)
 	}
 
-	// Prometheus /metrics HTTP listener — SEPARATE cluster-internal port
-	// (default :9095). Never the public tenant gRPC surface: exposing the
-	// registry there would leak internal cardinality (security.md). Empty
-	// endpoint disables it.
+	// (2) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
+	// кардинальность туда не выносится (security.md).
 	metricsAddr := cfg.APIServer.MetricsListenAddress()
-	var metricsListener net.Listener
-	if metricsAddr != "" {
-		metricsListener, err = net.Listen("tcp", metricsAddr)
-		if err != nil {
-			_ = listener.Close()
-			_ = internalListener.Close()
-			if hooksListener != nil {
-				_ = hooksListener.Close()
-			}
-			return fmt.Errorf("metrics http listener: %w", err)
-		}
-		// Default-off: metricsTLSConfig is nil → plaintext (unchanged). When
-		// enabled the listener is wrapped so /metrics is served over TLS; the
-		// clientAuthMode (server-tls-only by default — no scrape client cert yet)
-		// is baked into metricsTLSConfig.
-		if metricsTLSConfig != nil {
-			metricsListener = tls.NewListener(metricsListener, metricsTLSConfig)
-		}
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", metricsReg.Handler())
+	metricsSurface, err := iamHTTPSurface(servicecontract.Surface{
+		Name:    "диагностика (/metrics)",
+		Mode:    surfaceMode,
+		Logger:  logger,
+		Addr:    addrAxis(metricsAddr, "KACHO_IAM_METRICS_ADDR не задан профилем развёртывания: скрейпа на этой посадке нет"),
+		Handler: metricsMux,
+		Reach:   servicecontract.ReachClusterInternal,
+		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
+			"снята осознанно: поверхность выставлена только на внутренний Service и несёт " +
+				"счётчики процесса — ни секретов, ни данных арендатора на проводе нет"),
+		TLS: metricsTLSConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("профиль поверхности диагностики: %w", err)
 	}
 
-	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
-	// EXTERNAL-reachable port (default :9096; TLS terminated at the ingress, like
-	// hooks/metrics). Docker clients hit `/iam/token` through the edge; the shim
-	// verifies the SA-key and BROKERS a token from Ory Hydra (the issuer). The
-	// data-plane verifies the returned token against Hydra's JWKS — which it now
-	// fetches from the cluster-internal jwks-proxy mirror below (:9097), NOT from
-	// this `/iam/token` listener (which carries no JWKS endpoint). Distinct from the
-	// cluster-internal hooks (:9092) / metrics (:9095) / jwks-proxy (:9097)
-	// listeners. Disabled (WARN-skip, never a boot block) only when the endpoint is
-	// empty — the shim needs no JWKS encryption key (it mints nothing).
+	// (3) Выдача docker-токена (`/iam/token`, Registry v2 auth-server).
+	//
+	// Единственная ВНЕШНЕ досягаемая поверхность iam: `docker login` приходит
+	// через вход кластера. Её аутентификация — предъявление приватного ключа
+	// служебной учётки, которого сервер не хранит; объявлена значением, и именно
+	// поэтому пара осей проходит проверку.
 	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
-	var registryTokenListener net.Listener
-	var registryTokenHTTPServer *http.Server
+	var registryTokenHandler http.Handler
 	if registryTokenAddr != "" {
-		registryTokenListener, err = net.Listen("tcp", registryTokenAddr)
-		if err != nil {
-			_ = listener.Close()
-			_ = internalListener.Close()
-			if hooksListener != nil {
-				_ = hooksListener.Close()
-			}
-			if metricsListener != nil {
-				_ = metricsListener.Close()
-			}
-			return fmt.Errorf("registry token http listener: %w", err)
-		}
-		// Default-off: registryTokenTLSConfig == nil → plaintext (dev). Включённое
-		// ребро оборачивает listener, и `docker login` едет по TLS — на этом хопе
-		// предъявляется приватный ключ ключа служебной учётки, который сервер не
-		// хранит и который не истекает.
-		if registryTokenTLSConfig != nil {
-			registryTokenListener = tls.NewListener(registryTokenListener, registryTokenTLSConfig)
-		}
-		registryTokenMux, err := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
+		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
 			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
 			Service:           cfg.APIServer.RegistryToken.TokenService(),
 			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
 			HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
 			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 		})
-		if err != nil {
-			_ = listener.Close()
-			_ = internalListener.Close()
-			if hooksListener != nil {
-				_ = hooksListener.Close()
-			}
-			if metricsListener != nil {
-				_ = metricsListener.Close()
-			}
-			_ = registryTokenListener.Close()
-			return fmt.Errorf("registry token shim: %w", err)
+		if berr != nil {
+			return fmt.Errorf("registry token shim: %w", berr)
 		}
-		registryTokenHTTPServer = &http.Server{
-			Handler:           registryTokenMux,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       90 * time.Second,
-		}
+		registryTokenHandler = mux
+	}
+	registryTokenSurface, err := iamHTTPSurface(servicecontract.Surface{
+		Name:    "выдача docker-токена (/iam/token)",
+		Mode:    surfaceMode,
+		Logger:  logger,
+		Addr:    addrAxis(registryTokenAddr, "KACHO_IAM_REGISTRY_TOKEN_ADDR не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
+		Handler: registryTokenHandler,
+		Reach:   servicecontract.ReachExternal,
+		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
+			"подпись ключом служебной учётки, проверяется обработчиком на каждом запросе; " +
+				"сам токен чеканит провайдер, iam его только брокерит"),
+		TLS: registryTokenTLSConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
 	}
 
-	// jwksUpstreamTimeout — per-call ceiling on the mirror's upstream fetch, named
-	// here because the client is now assembled at this root and the handler must be
-	// given the SAME value it was built with (architecture.md: every outbound call
-	// carries its own deadline, and two places holding two numbers is how they drift).
+	// jwksUpstreamTimeout — потолок ОДНОГО обращения зеркала к верхнему хопу.
+	// Назван здесь потому, что клиент собирается в этом корне, а обработчику
+	// обязана достаться ТА ЖЕ величина, с которой клиент построен: два места с
+	// двумя числами — то, как они расходятся.
 	const jwksUpstreamTimeout = 5 * time.Second
 
-	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (default :9097) — a SEPARATE
-	// cluster-internal port serving GET /.well-known/jwks.json as a short-TTL
-	// caching reverse-proxy of Hydra's PUBLIC JWKS. The data-plane (kacho-registry)
-	// fetches its verification keys from iam here instead of dialing Hydra directly;
-	// Hydra stays the token issuer/signer (iam mints NOTHING — the served kids are
-	// Hydra's actual signing kids; iam has no keyset of its own).
-	// Served ONLY on the kacho-iam-internal Service (never external, ban #6; the
-	// Service wiring lives in kacho-deploy) over ONE-WAY server-TLS. The route is
-	// UNAUTHENTICATED-BY-DESIGN (public OIDC verification keys) — a conscious,
-	// documented exception to authN-on-every-listener (security.md), justified by
-	// internal-only surface + server-TLS + only-public-material. Empty endpoint
-	// disables it (WARN-skip, never a boot block).
+	// (4) Зеркало ПУБЛИЧНЫХ ключей проверки (`GET /.well-known/jwks.json`).
+	//
+	// Здесь аутентификация снята — и это ЗАДОКУМЕНТИРОВАННОЕ исключение, а не
+	// упущение (security.md §AuthN+AuthZ ВЕЗДЕ): поверхность выставлена только на
+	// внутренний Service, идёт по односторонней TLS и несёт исключительно
+	// публичный материал. Профиль требует, чтобы это было СКАЗАНО — и говорит это
+	// в журнале на каждом старте, а не только в чужом документе.
+	//
+	// Проверить обоснование можно по паре осей: снятие принято потому, что
+	// досягаемость объявлена внутренней. Объяви кто-нибудь эту поверхность
+	// внешней — старт бы отказал.
 	jwksProxyAddr := cfg.APIServer.JWKSProxy.ListenAddress()
-	var jwksProxyListener net.Listener
-	var jwksProxyHTTPServer *http.Server
+	var jwksProxyHandler http.Handler
 	if jwksProxyAddr != "" {
-		jwksProxyListener, err = net.Listen("tcp", jwksProxyAddr)
-		if err != nil {
-			_ = listener.Close()
-			_ = internalListener.Close()
-			if hooksListener != nil {
-				_ = hooksListener.Close()
-			}
-			if metricsListener != nil {
-				_ = metricsListener.Close()
-			}
-			if registryTokenListener != nil {
-				_ = registryTokenListener.Close()
-			}
-			return fmt.Errorf("jwks-proxy http listener: %w", err)
-		}
-		// Default-off: jwksProxyTLSConfig is nil → plaintext (dev). When enabled the
-		// listener is wrapped so /.well-known/jwks.json is served over one-way
-		// server-TLS (internal-CA leaf; the leaf serverHosts already covers
-		// kacho-iam-internal).
-		if jwksProxyTLSConfig != nil {
-			jwksProxyListener = tls.NewListener(jwksProxyListener, jwksProxyTLSConfig)
-		}
-		// The upstream client is assembled HERE, not inside the mirror, because the
-		// anchor of the hop is deployment configuration and an unusable one must
-		// refuse the start rather than degrade a mirror the whole data-plane depends
-		// on. Empty anchor ⇒ the plain default transport, which is what the provider's
-		// plaintext in-cluster listener needs; production refuses to claim https
-		// without pinning one (config.validateProductionProviderPublicHops).
-		jwksUpstreamClient, jwksErr := clients.ProviderHopHTTPClient(
+		// Клиент верхнего хопа собирается ЗДЕСЬ, а не внутри зеркала: якорь хопа —
+		// настройка развёртывания, и непригодная обязана отказать в старте, а не
+		// деградировать зеркало, от которого зависит вся плоскость данных.
+		jwksUpstreamClient, jerr := clients.ProviderHopHTTPClient(
 			jwksUpstreamTimeout, cfg.AuthN.ResolveHydraJWKSCAFile(), clients.JWKSHopCASetting)
-		if jwksErr != nil {
-			_ = listener.Close()
-			_ = internalListener.Close()
-			if hooksListener != nil {
-				_ = hooksListener.Close()
-			}
-			if metricsListener != nil {
-				_ = metricsListener.Close()
-			}
-			if registryTokenListener != nil {
-				_ = registryTokenListener.Close()
-			}
-			_ = jwksProxyListener.Close()
-			return fmt.Errorf("jwks-proxy upstream: %w", jwksErr)
+		if jerr != nil {
+			return fmt.Errorf("jwks-proxy upstream: %w", jerr)
 		}
-		jwksProxyHandler := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
+		jwksProxyHandler = jwksproxyhttp.NewMux(jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
 			UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
 			Client:      jwksUpstreamClient,
 			Timeout:     jwksUpstreamTimeout,
 			Logger:      logger.With(slog.String("component", "jwks_proxy")),
-		})
-		jwksProxyHTTPServer = &http.Server{
-			Handler:           jwksproxyhttp.NewMux(jwksProxyHandler),
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       90 * time.Second,
-		}
+		}))
+	}
+	jwksProxySurface, err := iamHTTPSurface(servicecontract.Surface{
+		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",
+		Mode:    surfaceMode,
+		Logger:  logger,
+		Addr:    addrAxis(jwksProxyAddr, "KACHO_IAM_JWKS_PROXY_ADDR не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
+		Handler: jwksProxyHandler,
+		Reach:   servicecontract.ReachClusterInternal,
+		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
+			"снята ОСОЗНАННО и задокументированно (security.md §AuthN+AuthZ ВЕЗДЕ): внутренний " +
+				"Service, односторонняя TLS, на проводе только публичный материал проверки " +
+				"подписи — ни секретов, ни данных арендатора"),
+		TLS: jwksProxyTLSConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("профиль поверхности зеркала ключей: %w", err)
 	}
 
+	httpSurfaces := []servicecontract.SurfaceDescriptor{
+		hooksSurface, metricsSurface, registryTokenSurface, jwksProxySurface,
+	}
+
+	// Про четыре не-gRPC поверхности здесь больше не сообщается: о себе
+	// докладывает каждая сама при подъёме, и доклад несёт то, чего эта строка не
+	// несла никогда, — откуда поверхность досягаема и чем аутентифицирует.
 	logger.Info("kacho-iam listening",
 		"public_endpoint", publicAddr,
-		"internal_endpoint", internalAddr,
-		"hooks_http_endpoint", hooksAddr,
-		"metrics_http_endpoint", metricsAddr,
-		"registry_token_http_endpoint", registryTokenAddr,
-		"jwks_proxy_http_endpoint", jwksProxyAddr)
+		"internal_endpoint", internalAddr)
 
 	gracefulTimeout := cfg.APIServer.GracefulShutdown
 	if gracefulTimeout <= 0 {
 		gracefulTimeout = 10 * time.Second
-	}
-
-	// Build HTTP hooks mux.
-	var hooksHTTPServer *http.Server
-	if hooksListener != nil {
-		hooksMux := buildHooksMux(pool, kachoRepo, opsRepo, openfgaClient, cfg, logger)
-		hooksHTTPServer = &http.Server{
-			Handler:           hooksMux,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       90 * time.Second,
-		}
-	}
-
-	// Build the /metrics HTTP server (promhttp over the shared registry).
-	var metricsHTTPServer *http.Server
-	if metricsListener != nil {
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", metricsReg.Handler())
-		metricsHTTPServer = &http.Server{
-			Handler:           metricsMux,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       90 * time.Second,
-		}
 	}
 
 	// Enterprise SSO HTTP listeners (SCIM + SAML) are not part of this service;
@@ -739,26 +682,11 @@ func runServe(cfg config.Config) error {
 		shutdownOnce.Do(func() {
 			stopGRPCBounded(internalSrv, gracefulTimeout)
 			stopGRPCBounded(grpcSrv, gracefulTimeout)
-			if hooksHTTPServer != nil {
-				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancelShutdown()
-				_ = hooksHTTPServer.Shutdown(shutdownCtx)
-			}
-			if metricsHTTPServer != nil {
-				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancelShutdown()
-				_ = metricsHTTPServer.Shutdown(shutdownCtx)
-			}
-			if registryTokenHTTPServer != nil {
-				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancelShutdown()
-				_ = registryTokenHTTPServer.Shutdown(shutdownCtx)
-			}
-			if jwksProxyHTTPServer != nil {
-				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancelShutdown()
-				_ = jwksProxyHTTPServer.Shutdown(shutdownCtx)
-			}
+			// Четыре не-gRPC поверхности гасятся ОДНОЙ отменой их общего контекста.
+			// Прежде здесь стояли четыре одинаковых блока со своим сроком в каждом,
+			// и каждая новая поверхность требовала пятого — то есть место, где
+			// поверхность забывают погасить, воспроизводилось при каждом добавлении.
+			stopSurfaces()
 		})
 	}
 
@@ -796,53 +724,17 @@ func runServe(cfg config.Config) error {
 		},
 	}
 
-	// HTTP hooks listener + DPoP-cleanup loop.
-	if hooksHTTPServer != nil && hooksListener != nil {
+	// Четыре не-gRPC поверхности — по задаче на каждую, и задача ставится ВСЕГДА,
+	// даже когда поверхность объявлена выключенной: тогда профиль сразу
+	// возвращается, назвав причину в журнале. Условная постановка вернула бы то
+	// самое молчание, ради устранения которого выключение стало объявлением.
+	for _, surface := range httpSurfaces {
 		tasks = append(tasks, func() error {
-			logger.Info("kacho-iam HTTP hooks listener serving", "addr", hooksListener.Addr().String())
-			err := hooksHTTPServer.Serve(hooksListener)
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if serr := servicehost.ServeSurface(surfaceCtx, surface); serr != nil {
+				logger.Error("не-gRPC поверхность остановлена с ошибкой",
+					"surface", string(surface.Spec().Name), "err", serr)
 				triggerShutdown()
-				return fmt.Errorf("hooks http server: %w", err)
-			}
-			return nil
-		})
-	}
-
-	// Prometheus /metrics HTTP listener (separate internal port).
-	if metricsHTTPServer != nil && metricsListener != nil {
-		tasks = append(tasks, func() error {
-			logger.Info("kacho-iam /metrics listener serving", "addr", metricsListener.Addr().String())
-			err := metricsHTTPServer.Serve(metricsListener)
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				triggerShutdown()
-				return fmt.Errorf("metrics http server: %w", err)
-			}
-			return nil
-		})
-	}
-
-	// Registry v2 `/iam/token` auth-server HTTP listener (separate external port).
-	if registryTokenHTTPServer != nil && registryTokenListener != nil {
-		tasks = append(tasks, func() error {
-			logger.Info("kacho-iam registry token listener serving", "addr", registryTokenListener.Addr().String())
-			err := registryTokenHTTPServer.Serve(registryTokenListener)
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				triggerShutdown()
-				return fmt.Errorf("registry token http server: %w", err)
-			}
-			return nil
-		})
-	}
-
-	// Cluster-internal Hydra-JWKS proxy HTTP listener (separate internal port :9097).
-	if jwksProxyHTTPServer != nil && jwksProxyListener != nil {
-		tasks = append(tasks, func() error {
-			logger.Info("kacho-iam jwks-proxy listener serving", "addr", jwksProxyListener.Addr().String())
-			err := jwksProxyHTTPServer.Serve(jwksProxyListener)
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				triggerShutdown()
-				return fmt.Errorf("jwks-proxy http server: %w", err)
+				return fmt.Errorf("поверхность %q: %w", surface.Spec().Name, serr)
 			}
 			return nil
 		})
@@ -872,15 +764,6 @@ func runServe(cfg config.Config) error {
 	if derr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		if hooksListener != nil {
-			_ = hooksListener.Close()
-		}
-		if registryTokenListener != nil {
-			_ = registryTokenListener.Close()
-		}
-		if jwksProxyListener != nil {
-			_ = jwksProxyListener.Close()
-		}
 		return fmt.Errorf("fga_outbox drainer init: %w", derr)
 	}
 	tasks = append(tasks, func() (err error) {
@@ -916,15 +799,6 @@ func runServe(cfg config.Config) error {
 	if err != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		if hooksListener != nil {
-			_ = hooksListener.Close()
-		}
-		if registryTokenListener != nil {
-			_ = registryTokenListener.Close()
-		}
-		if jwksProxyListener != nil {
-			_ = jwksProxyListener.Close()
-		}
 		return fmt.Errorf("subject_change drainer wiring: %w", err)
 	}
 	tasks = append(tasks, subjectChangeDrainerTask)
@@ -939,15 +813,6 @@ func runServe(cfg config.Config) error {
 	if cerr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		if hooksListener != nil {
-			_ = hooksListener.Close()
-		}
-		if registryTokenListener != nil {
-			_ = registryTokenListener.Close()
-		}
-		if jwksProxyListener != nil {
-			_ = jwksProxyListener.Close()
-		}
 		return fmt.Errorf("provider compensation drainer wiring: %w", cerr)
 	}
 	tasks = append(tasks, func() (err error) {

@@ -69,9 +69,11 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 		// without the other is how https ends up verified against the system roots.
 		"cfg.AuthN.ResolveHydraTokenCAFile()",
 		"cfg.AuthN.ResolveHydraTokenEndpoint()",
-		"registryTokenHTTPServer.Serve(registryTokenListener)",
-		"registryTokenHTTPServer.Shutdown(",
-		"registry_token_http_endpoint",
+		// Подъём, гашение и строка самоотчёта переехали в профиль не-gRPC
+		// поверхности: докладывает о себе она сама, и доклад несёт то, чего прежняя
+		// строка не несла никогда, — досягаемость и решение об аутентификации.
+		// Свойство утверждает `TestIAMSurfacesServeAndReleaseTheirPorts`.
+		"servicehost.ServeSurface(",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("serve.go: missing registry token wiring %q", want)

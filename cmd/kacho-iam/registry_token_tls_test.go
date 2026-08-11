@@ -148,19 +148,25 @@ func TestRegistryTokenListener_TLSRefusesCleartextClient(t *testing.T) {
 	}
 }
 
-// TestServeWrapsRegistryTokenListenerInTLS — гейт композиционного корня: обёртка
-// обязана стоять в serve.go (в стиле соседнего wiring-гейта). Снять её — значит
-// вернуть открытый провод при включённом ребре, и один config-тест этого не
-// заметил бы.
-func TestServeWrapsRegistryTokenListenerInTLS(t *testing.T) {
+// TestServeCarriesRegistryTokenTLSIntoItsSurface — гейт композиционного корня:
+// собранный транспорт обязан ДОЕХАТЬ до объявления поверхности выдачи токена.
+//
+// Прежняя редакция искала здесь литерал обёртки слушателя. Обёртка переехала на
+// этаж ниже — её надевает профиль не-gRPC поверхности, — и продолжать искать имя
+// снятого поля значило бы требовать дефекта. Предмет при этом не изменился и не
+// ослаблен: снять транспорт с этого хопа по-прежнему нельзя, а доказывается это
+// теперь ДВУМЯ пробами вместо одной текстовой —
+// `TestSurfaceDeclaredTLSReachesTheListener` (pkg/servicehost, на проводе) и той
+// частью проверки ниже, которая принадлежит именно этому корню.
+func TestServeCarriesRegistryTokenTLSIntoItsSurface(t *testing.T) {
 	src := readFileT(t, "serve.go")
 	for _, want := range []string{
 		"mtlsCfg.RegistryTokenServerTLSConfig()",
-		"tls.NewListener(registryTokenListener, registryTokenTLSConfig)",
+		"TLS: registryTokenTLSConfig,",
 		"requireRegistryTokenTLS(",
 	} {
 		if !strings.Contains(src, want) {
-			t.Errorf("serve.go: missing registry-token TLS wiring %q", want)
+			t.Errorf("serve.go: транспорт поверхности выдачи docker-токена не доехал: нет %q", want)
 		}
 	}
 }
