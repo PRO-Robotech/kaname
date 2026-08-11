@@ -62,8 +62,12 @@ func TestIAMSurfacesServeAndReleaseTheirPorts(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	wait, serr := servicehost.ServeSurface(ctx, d)
+	if serr != nil {
+		t.Fatalf("поверхность не поднялась: %v", serr)
+	}
 	done := make(chan error, 1)
-	go func() { done <- servicehost.ServeSurface(ctx, d) }()
+	go func() { done <- wait() }()
 
 	// Положительный контроль: пока контекст жив, порт ЗАНЯТ. Без него «порт
 	// свободен» ниже было бы верно и для поверхности, которая не поднялась вовсе.
@@ -152,8 +156,12 @@ func TestIAMSurfaceDisabledByDeclarationCarriesItsReason(t *testing.T) {
 	// Выключенная поверхность есть ИСХОД, а не пропуск: функция возвращается сразу.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if serr := servicehost.ServeSurface(ctx, d); serr != nil {
+	wait, serr := servicehost.ServeSurface(ctx, d)
+	if serr != nil {
 		t.Fatalf("выключенная поверхность вернула ошибку: %v", serr)
+	}
+	if werr := wait(); werr != nil {
+		t.Fatalf("ожидание выключенной поверхности вернуло ошибку: %v", werr)
 	}
 }
 

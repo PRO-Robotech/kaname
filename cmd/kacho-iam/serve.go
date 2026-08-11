@@ -724,17 +724,28 @@ func runServe(cfg config.Config) error {
 		},
 	}
 
-	// Четыре не-gRPC поверхности — по задаче на каждую, и задача ставится ВСЕГДА,
-	// даже когда поверхность объявлена выключенной: тогда профиль сразу
-	// возвращается, назвав причину в журнале. Условная постановка вернула бы то
-	// самое молчание, ради устранения которого выключение стало объявлением.
+	// Четыре не-gRPC поверхности. Порты привязываются ЗДЕСЬ, до постановки задач:
+	// занятый адрес есть ошибка посадки, и узнать о ней надо до того, как процесс
+	// объявит себя поднявшимся. Прежде подъём целиком уезжал в задачу супервизора,
+	// и отказ привязки становился кодом возврата процесса, успевшего сколько
+	// угодно проработать.
+	//
+	// Ожидание ставится задачей ВСЕГДА, даже когда поверхность объявлена
+	// выключенной: тогда оно сразу возвращается, а причина уже названа в журнале.
+	// Условная постановка вернула бы то самое молчание, ради устранения которого
+	// выключение стало объявлением.
 	for _, surface := range httpSurfaces {
+		wait, serr := servicehost.ServeSurface(surfaceCtx, surface)
+		if serr != nil {
+			stopSurfaces()
+			return fmt.Errorf("поверхность %q: %w", surface.Spec().Name, serr)
+		}
 		tasks = append(tasks, func() error {
-			if serr := servicehost.ServeSurface(surfaceCtx, surface); serr != nil {
+			if werr := wait(); werr != nil {
 				logger.Error("не-gRPC поверхность остановлена с ошибкой",
-					"surface", string(surface.Spec().Name), "err", serr)
+					"surface", string(surface.Spec().Name), "err", werr)
 				triggerShutdown()
-				return fmt.Errorf("поверхность %q: %w", surface.Spec().Name, serr)
+				return fmt.Errorf("поверхность %q: %w", surface.Spec().Name, werr)
 			}
 			return nil
 		})
