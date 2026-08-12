@@ -395,6 +395,12 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 		pool.Close()
 	}
 
+	// Путь модели печатается ОТ КОРНЯ ДЕРЕВА: абсолютный путь рабочей копии в
+	// провенансе — координата, которой у читателя нет, и он ищет по ней файл,
+	// которого на его машине не существует.
+	if i := strings.Index(modelPath, "proto/"); i >= 0 {
+		modelPath = modelPath[i:]
+	}
 	sum := sha256.Sum256(canon)
 	prov := bench.CollectProvenance(stack, modelPath, hex.EncodeToString(sum[:])[:16])
 	// Производители перечисляются ЗАНОВО, а не дополняются: сборщик провенанса
