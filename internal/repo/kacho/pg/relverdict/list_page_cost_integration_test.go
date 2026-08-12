@@ -53,6 +53,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
 )
 
 // pageCostRatioCeiling — K, объявленный ДО прогона.
@@ -160,12 +161,20 @@ func TestList_PageStaysFullWhenCandidatesAreInterleaved(t *testing.T) {
 			} else {
 				want = append(want, id)
 			}
-			exec(t, ctx, tx,
-				`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', $1)`, id)
-			exec(t, ctx, tx,
-				`INSERT INTO kacho_iam.resource_parent_edge
-				   (object_type, object_id, parent_type, parent_id, depth)
-				 VALUES ('vpc_network', $1, 'project', $2, 1)`, id, owner)
+			// Через производителя — по той же причине, что и в посеве кривой: цепь
+			// предков кладёт он, и фикстура, разложившая её сама, утверждала бы
+			// свойство себя. Здесь это особенно видно: чередование ДЕРЖИТСЯ именно
+			// на том, что у чётных и нечётных объектов разные предки, — то есть
+			// проба опирается на цепь как на предмет, а не как на декорацию.
+			if _, err := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+				ObjectType:      "vpc_network",
+				ObjectID:        id,
+				ParentProjectID: owner,
+				ParentAccountID: "acc-1",
+				ParentChain:     []string{"project:" + owner},
+			}); err != nil {
+				t.Fatalf("посев объекта %s через производителя: %v", id, err)
+			}
 		}
 
 		const page = 3
@@ -298,16 +307,33 @@ func seedLabelledSet(t *testing.T, ctx context.Context, tx pgx.Tx, n int) {
 		`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
 		 VALUES ('acb-c', 'user', 'usr-1')`)
 
-	// Посев набором, а не построчно: построчный посев на десяти тысячах мерил бы
-	// терпение, а не форму.
-	exec(t, ctx, tx, fmt.Sprintf(`
-		INSERT INTO kacho_iam.resource_mirror (object_type, object_id, parent_project_id, parent_account_id, labels)
-		SELECT 'vpc_network', 'net-' || to_char(g, 'FM0000000'), 'prj-1', 'acc-1', '{"env":"prod"}'::jsonb
-		  FROM generate_series(0, %d) g`, n-1))
-	exec(t, ctx, tx, fmt.Sprintf(`
-		INSERT INTO kacho_iam.resource_parent_edge (object_type, object_id, parent_type, parent_id, depth)
-		SELECT 'vpc_network', 'net-' || to_char(g, 'FM0000000'), 'project', 'prj-1', 1
-		  FROM generate_series(0, %d) g`, n-1))
+	// Посев идёт ЧЕРЕЗ ПРОИЗВОДИТЕЛЯ цепи, а не прямой записью в таблицу рёбер.
+	//
+	// Здесь стоял посев набором — два INSERT ... SELECT generate_series, — и
+	// обоснованием была цена: построчный посев десяти тысяч «мерил бы терпение,
+	// а не форму». Обоснование верное по стоимости и неверное по предмету: эта
+	// проба пересчитывает чтения по ВСЕМУ зеркалу, поэтому фикстура, сама
+	// разложившая рёбра, утверждала бы свойство СЕБЯ — и осталась бы зелёной,
+	// даже если производитель перестанет писать цепь целиком. Держится гейтом
+	// internal/repohygiene TestCensusFixturesSeedThroughTheProducer, и он же
+	// нашёл это место.
+	//
+	// Построчность — не издержка, а форма предмета: цепь предков есть свойство
+	// ОБЪЕКТА, а не набора, и производитель работает над одним объектом. Цена
+	// померена, а не предположена: посев остаётся секундами, и кривая по-прежнему
+	// снимается с трёх точек до десяти тысяч.
+	for g := 0; g < n; g++ {
+		if _, err := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+			ObjectType:      "vpc_network",
+			ObjectID:        fmt.Sprintf("net-%07d", g),
+			ParentProjectID: "prj-1",
+			ParentAccountID: "acc-1",
+			Labels:          map[string]string{"env": "prod"},
+			ParentChain:     []string{"project:prj-1"},
+		}); err != nil {
+			t.Fatalf("посев объекта %d через производителя: %v", g, err)
+		}
+	}
 	// Статистика — чтобы измерялся ЗАПРОС, а не отсутствие статистики: на пустых
 	// оценках планировщик выбирает план по умолчанию, и кривая говорила бы о нём.
 	exec(t, ctx, tx, `ANALYZE kacho_iam.resource_mirror, kacho_iam.resource_parent_edge,
