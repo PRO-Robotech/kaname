@@ -63,7 +63,7 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 				seedGroupFact(t, ctx, tx, tc.group, tc.форма)
 
 				// (1) прямой вопрос — членство даёт право
-				got, err := relverdict.Ask(ctx, tx, relverdict.Query{
+				got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 					Subject: "user:usr-member", ObjectType: "vpc_network",
 					ObjectID: "net-1", Relation: "v_get",
 				})
@@ -104,7 +104,7 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 				}
 
 				// Отрицание рядом: посторонний не получает ничего ни одним вопросом.
-				other, err := relverdict.Ask(ctx, tx, relverdict.Query{
+				other, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 					Subject: "user:usr-outsider", ObjectType: "vpc_network",
 					ObjectID: "net-1", Relation: "v_get",
 				})

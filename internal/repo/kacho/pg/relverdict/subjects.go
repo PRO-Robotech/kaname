@@ -23,6 +23,7 @@ package relverdict
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -86,8 +87,9 @@ named(subject) AS (
       JOIN kacho_iam.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $1::text = ANY (rs.object_types)
       JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
-      LEFT JOIN kacho_iam.resource_mirror m
-        ON m.object_type = $1::text AND m.object_id = $2::text
+      -- Метки лежат там, где велит ТИП (labelaxis.go): у чужого ресурса — в
+      -- зеркале, у собственного объекта iam — в его таблице.
+      {{labels_join}}
      WHERE b.status = 'ACTIVE'
        AND (b.expires_at IS NULL OR b.expires_at > now())
        AND b.revoked_at IS NULL
@@ -126,7 +128,15 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := q.Query(ctx, subjectsSQL,
+	// Неназначенная ось меток — ошибка, а не пустой перечень: пустой перечень
+	// неотличим от честного «никто не имеет» (см. labelAxisOf).
+	labelTable, err := labelAxisOf(in.ObjectType)
+	if err != nil {
+		return nil, "", err
+	}
+	sql := strings.Replace(subjectsSQL, labelsJoinMark,
+		labelsJoinPinned(labelTable, "$1", "$2"), 1)
+	rows, err := q.Query(ctx, sql,
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
 		factParents, factRelations, bindVerbs)
 	if err != nil {

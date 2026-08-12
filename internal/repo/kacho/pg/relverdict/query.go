@@ -176,6 +176,12 @@ const maxConditionRows = 256
 // по имени условия ставит безусловное совпадение (пустое имя) первым, поэтому
 // самый частый случай решается первой же строкой.
 //
+// Место, где берутся МЕТКИ объекта, оставлено заполнителем: оно зависит от типа
+// (`labelaxis.go`) и подставляется фрагментом из закрытого реестра. Написать его
+// здесь одним соединением значило бы объявить, что метки всех типов лежат в
+// одном месте, — а они лежат в двух, и на одном из семейств такое соединение
+// тождественно ложно.
+//
 // $1 subject · $2 object_type · $3 object_id · $4 типы предков атомов-фактов ·
 // $5 отношения атомов-фактов · $6 глаголы атомов-выдачи · $7 max_depth · $8 limit
 const verdictSQL = `
@@ -224,10 +230,16 @@ fact_atom(parent_type, relation) AS (
     -- «на самом объекте», непустой — «на предке этого типа».
     SELECT * FROM unnest($4::text[], $5::text[])
 )
-SELECT DISTINCT cond_name, cond_params FROM (
+-- label_arm — НЕ часть вердикта, а признак того, что меточная ветвь дала
+-- основание. Считается оконной функцией по строкам ДО отбора различных, поэтому
+-- у всех строк он один и тот же и на состав ответа не влияет: набор условий
+-- остаётся тем же, что был до его появления. Без него «расхождений нет» не
+-- отличалось бы от «меточную ветвь никто ни разу не спросил».
+SELECT DISTINCT cond_name, cond_params, bool_or(arm = 'labels') OVER () AS label_arm FROM (
     -- (1) прямой факт. Условие берётся С САМОЙ ЗАПИСИ: она самоописательна, и
     -- читателю не нужно знать модель, чтобы соблюсти ограничение.
-    SELECT f.condition_name AS cond_name, f.condition_params AS cond_params
+    SELECT f.condition_name AS cond_name, f.condition_params AS cond_params,
+           ''::text AS arm
       FROM kacho_iam.relation_fact f
       JOIN speaker sp ON sp.subject = f.subject
       JOIN scope sc ON sc.s_type = f.object_type AND sc.s_id = f.object_id
@@ -251,7 +263,7 @@ SELECT DISTINCT cond_name, cond_params FROM (
     -- Пустое имя здесь — утверждение «действует всегда», проверяемое гейтом
     -- TestNoConditionedRelationIsAVerb: появится глагол с условием — гейт
     -- покраснеет, потому что вот эта строка молча потеряла бы его условие.
-    SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params
+    SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm
       FROM kacho_iam.access_bindings b
       JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
       JOIN speaker sp ON sp.subject = bs.subject_type || ':' || bs.subject_id
@@ -261,11 +273,12 @@ SELECT DISTINCT cond_name, cond_params FROM (
       JOIN kacho_iam.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $2::text = ANY (rs.object_types)
       JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
-      -- Зеркало нужно только ветви меток; LEFT, чтобы объект без строки зеркала
-      -- не выпадал из ветвей якоря и имён — иначе отсутствие меток читалось бы
-      -- как отсутствие права.
-      LEFT JOIN kacho_iam.resource_mirror m
-        ON m.object_type = $2::text AND m.object_id = $3::text
+      -- Метки нужны только ветви меток, и лежат они там, где велит ТИП: у чужого
+      -- ресурса — в зеркале, у собственного объекта iam — в его таблице.
+      -- Соединение ЛЕВОЕ на обеих осях, чтобы объект без меток не выпадал из
+      -- ветвей якоря и имён: иначе отсутствие меток читалось бы как отсутствие
+      -- права.
+      {{labels_join}}
      WHERE b.status = 'ACTIVE'
        AND (b.expires_at IS NULL OR b.expires_at > now())
        AND b.revoked_at IS NULL
@@ -279,27 +292,54 @@ SELECT DISTINCT cond_name, cond_params FROM (
 ORDER BY cond_name
 LIMIT $8::int`
 
+// Grounds — что участвовало в ответе, помимо самого вердикта.
+//
+// Существует ради ОДНОГО числа: сколько раз меточная ветвь дала основание. Без
+// него «расхождений между формами нет» не отличается от «меточную ветвь ни разу
+// не спросили» — а именно вторым состоянием и был дефект, ради которого ось
+// выбирается по типу. Число, которое нельзя предъявить, ничего не утверждает.
+//
+// Поле ровно одно и названо узко: расширять его «на будущее» значило бы обещать
+// наблюдаемость, за которую никто не отвечает.
+type Grounds struct {
+	// LabelArm — меточная ветвь правила дала основание на этом вопросе.
+	LabelArm bool
+	// LabelAxisTable — таблица, у которой спрашивались метки. Пусто — зеркало.
+	// Названа, потому что ось выбирается по типу, и «спросили не там» иначе
+	// неотличимо от «нечего было находить».
+	LabelAxisTable string
+}
+
 // Ask задаёт вопрос форме E.
 //
 // Ошибка запроса — это ОШИБКА, а не отказ: вернуть Deny на сбое означало бы
 // сказать «прав нет» там, где ответ не получен, и сравнение с движком показало
 // бы согласие вместо расхождения. Вызывающий обязан отличать одно от другого.
-func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, error) {
+// По той же причине ошибкой отвечает и НЕНАЗНАЧЕННАЯ ось меток: см. labelAxisOf.
+func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
+	var g Grounds
 	if in.Subject == "" || in.ObjectType == "" || in.ObjectID == "" || in.Relation == "" {
-		return Unknown, fmt.Errorf("relverdict: неполный вопрос %+v — пустая часть делает "+
+		return Unknown, g, fmt.Errorf("relverdict: неполный вопрос %+v — пустая часть делает "+
 			"ответ бессмысленным, и отдавать за него Deny значит выдавать незнание за отказ", in)
 	}
 	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
 	if err != nil {
-		return Unknown, err
+		return Unknown, g, err
 	}
+	labelTable, err := labelAxisOf(in.ObjectType)
+	if err != nil {
+		return Unknown, g, err
+	}
+	g.LabelAxisTable = labelTable
+	sql := strings.Replace(verdictSQL, labelsJoinMark,
+		labelsJoinPinned(labelTable, "$2", "$3"), 1)
 
-	rows, err := q.Query(ctx, verdictSQL,
+	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
 	)
 	if err != nil {
-		return Unknown, fmt.Errorf("relverdict: запрос: %w", err)
+		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
 	}
 	defer rows.Close()
 
@@ -309,18 +349,24 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, error) {
 	}
 	var sources []source
 	for rows.Next() {
-		var s source
-		if err := rows.Scan(&s.name, &s.params); err != nil {
-			return Unknown, fmt.Errorf("relverdict: разбор источника: %w", err)
+		var (
+			s        source
+			labelArm *bool
+		)
+		if err := rows.Scan(&s.name, &s.params, &labelArm); err != nil {
+			return Unknown, g, fmt.Errorf("relverdict: разбор источника: %w", err)
+		}
+		if labelArm != nil && *labelArm {
+			g.LabelArm = true
 		}
 		sources = append(sources, s)
 	}
 	if err := rows.Err(); err != nil {
-		return Unknown, fmt.Errorf("relverdict: чтение источников: %w", err)
+		return Unknown, g, fmt.Errorf("relverdict: чтение источников: %w", err)
 	}
 	if len(sources) >= maxConditionRows {
 		// Усечение — не отказ. См. maxConditionRows.
-		return Unknown, fmt.Errorf("relverdict: различных условий на вопрос %d и более — "+
+		return Unknown, g, fmt.Errorf("relverdict: различных условий на вопрос %d и более — "+
 			"набор усечён, и вердикт по нему давать нельзя", maxConditionRows)
 	}
 
@@ -330,7 +376,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, error) {
 	var notUnderstood error
 	for _, s := range sources {
 		if s.name == "" {
-			return Allow, nil
+			return Allow, g, nil
 		}
 		ok, err := evalCondition(s.name, s.params, in.Context)
 		if err != nil {
@@ -340,13 +386,13 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, error) {
 			continue
 		}
 		if ok {
-			return Allow, nil
+			return Allow, g, nil
 		}
 	}
 	if notUnderstood != nil {
-		return Unknown, notUnderstood
+		return Unknown, g, notUnderstood
 	}
-	return Deny, nil
+	return Deny, g, nil
 }
 
 // sourcesOf раскладывает вопрос на источники, которые запрос обязан спросить.

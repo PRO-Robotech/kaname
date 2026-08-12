@@ -29,6 +29,7 @@ package relverdict
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -65,9 +66,10 @@ const DefaultPageSize = 500
 //
 // Читается так же: цепь областей КАЖДОГО объекта-кандидата, субъекты, за которых
 // говорит вызывающий, затем источники права ПЛАНА. Отличий два, и оба несущие:
-// кандидаты берутся из ЗЕРКАЛА этого типа, то есть из своей таблицы, а не из
-// ответа чужого хранилища с его пределом; а цепь областей строится для каждого
-// кандидата, потому что вопрос задан не про один объект.
+// кандидаты берутся из СВОЕЙ базы — из зеркала для типов чужих сервисов и из
+// собственной таблицы для типов iam (`labelaxis.go`), а не из ответа чужого
+// хранилища с его пределом; а цепь областей строится для каждого кандидата,
+// потому что вопрос задан не про один объект.
 //
 // Право проверяется через EXISTS, а не соединением: объект, до которого достают
 // ДВА основания сразу (своя выдача и администратор облака), обязан занять в
@@ -99,10 +101,11 @@ WITH RECURSIVE speaker(subject) AS (
     SELECT 'user:*'
 ),
 candidate(object_id) AS (
-    SELECT m.object_id
-      FROM kacho_iam.resource_mirror m
-     WHERE m.object_type = $2::text
-       AND m.object_id > $3::text
+    -- Откуда берутся кандидаты — свойство ТИПА: у чужого ресурса это зеркало, у
+    -- собственного объекта iam — его таблица. Написать здесь одно зеркало значило
+    -- бы перечислять пустоту для семи типов и потом аккуратно спрашивать у неё
+    -- метки.
+    {{candidate_from}}
 ),
 scope(object_id, s_type, s_id, depth) AS (
     SELECT c.object_id, $2::text, c.object_id, 0 FROM candidate c
@@ -151,8 +154,7 @@ SELECT c.object_id
           JOIN scope sc
             ON sc.object_id = c.object_id
            AND sc.s_type = b.resource_type AND sc.s_id = b.resource_id
-          LEFT JOIN kacho_iam.resource_mirror m
-            ON m.object_type = $2::text AND m.object_id = c.object_id
+          {{labels_join}}
          WHERE b.status = 'ACTIVE'
            AND (b.expires_at IS NULL OR b.expires_at > now())
            AND b.revoked_at IS NULL
@@ -187,8 +189,19 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	if err != nil {
 		return nil, "", err
 	}
+	// Ось меток — и одновременно источник кандидатов: объект собственного типа iam
+	// живёт в своей таблице целиком. Неназначенная ось — ошибка, а не пустая
+	// страница (см. labelAxisOf).
+	labelTable, err := labelAxisOf(in.ObjectType)
+	if err != nil {
+		return nil, "", err
+	}
+	sql := strings.Replace(listSQL, candidateFromMark,
+		candidateFrom(labelTable, "$2", "$3"), 1)
+	sql = strings.Replace(sql, labelsJoinMark,
+		labelsJoinPerCandidate(labelTable, "$2", "c.object_id"), 1)
 
-	rows, err := q.Query(ctx, listSQL,
+	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.AfterID, limit, MaxAncestorDepth,
 		factParents, factRelations, bindVerbs)
 	if err != nil {

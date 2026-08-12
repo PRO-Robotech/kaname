@@ -58,7 +58,7 @@ func TestAsk_ConditionDecidesTheOutcomeBothWays(t *testing.T) {
 		seedConditionedFact(t, ctx, tx, "mfa_fresh")
 		now := time.Now()
 
-		got, err := relverdict.Ask(ctx, tx, sshQuery(freshContext(now)))
+		got, _, err := relverdict.Ask(ctx, tx, sshQuery(freshContext(now)))
 		if err != nil {
 			t.Fatalf("свежие доводы: %v", err)
 		}
@@ -70,7 +70,7 @@ func TestAsk_ConditionDecidesTheOutcomeBothWays(t *testing.T) {
 		// Та же запись, тот же субъект, тот же объект. Отличается ОДИН довод.
 		stale := freshContext(now)
 		stale["mfa_at"] = now.Add(-4 * time.Hour).Unix()
-		got, err = relverdict.Ask(ctx, tx, sshQuery(stale))
+		got, _, err = relverdict.Ask(ctx, tx, sshQuery(stale))
 		if err != nil {
 			t.Fatalf("устаревшие доводы: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestAsk_EveryPremiseOfTheConditionCarriesWeight(t *testing.T) {
 		} {
 			cctx := freshContext(now)
 			tc.breaks(cctx)
-			got, err := relverdict.Ask(ctx, tx, sshQuery(cctx))
+			got, _, err := relverdict.Ask(ctx, tx, sshQuery(cctx))
 			if err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
@@ -129,7 +129,7 @@ func TestAsk_UnknownConditionIsUnknownNotDenied(t *testing.T) {
 		seedTenant(t, ctx, tx)
 		seedConditionedFact(t, ctx, tx, "условие_которого_нет_в_наборе")
 
-		got, err := relverdict.Ask(ctx, tx, sshQuery(freshContext(time.Now())))
+		got, _, err := relverdict.Ask(ctx, tx, sshQuery(freshContext(time.Now())))
 		if got != relverdict.Unknown {
 			t.Fatalf("вердикт %s, ожидался unknown — незнание, выданное за отказ, "+
 				"неотличимо от честного «прав нет»", got)
@@ -159,7 +159,7 @@ func TestAsk_UnconditionalSourceWinsOverAnUnknownCondition(t *testing.T) {
 			`INSERT INTO kacho_iam.group_members (group_id, member_type, member_id)
 			 VALUES ('grp-1', 'user', 'usr-1')`)
 
-		got, err := relverdict.Ask(ctx, tx, sshQuery(nil))
+		got, _, err := relverdict.Ask(ctx, tx, sshQuery(nil))
 		if err != nil {
 			t.Fatalf("Ask: %v", err)
 		}

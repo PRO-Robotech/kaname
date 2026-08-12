@@ -30,13 +30,58 @@ package relverdict
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Asker — форма E как источник теневого вердикта.
-type Asker struct{ pool *pgxpool.Pool }
+//
+// Помимо ответов ведёт ОДНО наблюдение: сколько раз меточная ветвь дала
+// основание НА ПРЯМОМ ВЕРДИКТЕ, по каждой оси отдельно. Без него «расхождений с
+// движком нет» не отличается от «меточную ветвь ни разу не спросили».
+//
+// Разделено по осям потому, что предикат равенства форм у осей РАЗНЫЙ: число,
+// названное для одной, доказывает половину и молчит про другую — именно так
+// дефект и дожил до находки.
+//
+// ГРАНИЦА НАЗВАНА ЯВНО: считается прямой вердикт, и только он. Три обратных
+// вопроса (перечисление объектов, перечисление субъектов, разбор оснований)
+// сюда не считаются, потому что их ответ — множество, и «основание меточной
+// ветви» в нём не единица счёта: одно число на четыре разных вопроса читалось бы
+// шире, чем измерено. Ось у обратных вопросов та же и держится их пробами; если
+// понадобится число и по ним, оно заводится СВОИМ, а не расширением этого молча.
+type Asker struct {
+	pool *pgxpool.Pool
+	// labelMirror / labelIAMDirect — основания меточной ветви по осям.
+	labelMirror    atomic.Int64
+	labelIAMDirect atomic.Int64
+}
+
+// LabelArmGrounds отдаёт накопленные числа: сколько оснований дала меточная
+// ветвь на оси зеркала и на оси собственных таблиц iam.
+//
+// Читается наблюдателем (сравнитель кладёт их в каждую свою запись), а не
+// пробой: счётчик, у которого читатель только в тесте, наблюдаемым не является.
+func (a *Asker) LabelArmGrounds() (mirror, iamDirect int64) {
+	if a == nil {
+		return 0, 0
+	}
+	return a.labelMirror.Load(), a.labelIAMDirect.Load()
+}
+
+// observe засчитывает основание меточной ветви на ту ось, у которой спрашивали.
+func (a *Asker) observe(g Grounds) {
+	if !g.LabelArm {
+		return
+	}
+	if g.LabelAxisTable == "" {
+		a.labelMirror.Add(1)
+		return
+	}
+	a.labelIAMDirect.Add(1)
+}
 
 // NewAsker собирает источник. nil-пул — законный вход: сравнение тогда не
 // включается вовсе, а не отвечает молча «нет».
@@ -63,10 +108,14 @@ func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, rela
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	v, err := Ask(ctx, tx, Query{
+	v, grounds, err := Ask(ctx, tx, Query{
 		Subject: subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
 		Context: condCtx,
 	})
+	// Наблюдение засчитывается ДО разбора вердикта: меточное основание было
+	// найдено независимо от того, чем кончился вопрос, и считать его только на
+	// разрешении значило бы мерить не ветвь, а исход.
+	a.observe(grounds)
 	if err != nil {
 		return false, err
 	}

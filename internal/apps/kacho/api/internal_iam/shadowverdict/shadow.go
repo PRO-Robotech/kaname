@@ -97,6 +97,24 @@ type Asker interface {
 	Sources(ctx context.Context, objectType, objectID, relation string) (subjects []string, err error)
 }
 
+// LabelArmObserver — необязательное расширение формы E: сколько раз меточная
+// ветвь дала основание НА ПРЯМОМ ВЕРДИКТЕ, по осям. Границу счёта объявляет
+// сама форма (см. relverdict.Asker) — здесь числа только печатаются.
+//
+// Отдельным интерфейсом, а не полем порта `Asker`, намеренно: отвечать на
+// вопросы и вести наблюдение — разные обязанности, и форма, которая наблюдения
+// не ведёт, обязана оставаться пригодной без заглушки. Реализуется источником
+// (`relverdict.Asker`), читается ЗДЕСЬ — числа едут в каждую запись теневого
+// пути.
+//
+// Зачем это вообще: ветвь меток отвечает на ДВУХ осях (зеркало чужих ресурсов и
+// собственные таблицы iam), и «расхождений нет» при нуле оснований на одной из
+// них означает не согласие, а то, что ось не спрашивали. Одно число на обе оси
+// эту разницу скрыло бы — потому их два.
+type LabelArmObserver interface {
+	LabelArmGrounds() (mirror, iamDirect int64)
+}
+
 // Counters — то, что сравнение обязано уметь предъявить.
 //
 // «Ноль расхождений» без числа сравнений — утверждение ни о чём: оно одинаково
@@ -380,11 +398,20 @@ func (c *Comparator) unfinishedSet(question, reason string, fields logFields) {
 // ждёт, пока её кто-нибудь спросит: запись без неё читается шире, чем измерено.
 func (c *Comparator) coverage() []any {
 	s := c.counts.Read()
-	return []any{
+	out := []any{
 		"decisions", s.Decisions,
 		"compared", s.Compared,
 		"compared_share", s.ComparedShare(),
 	}
+	// Основания меточной ветви — ПО ОСЯМ. Без них запись отвечает «сколько
+	// сравнили» и молчит о том, спрашивали ли вообще ту ветвь, на которой
+	// конъюнкт однажды оказался тождественно ложным: ноль там читался бы как
+	// согласие форм.
+	if o, ok := c.form.(LabelArmObserver); ok {
+		mirror, iamDirect := o.LabelArmGrounds()
+		out = append(out, "label_grounds_mirror", mirror, "label_grounds_iam_direct", iamDirect)
+	}
+	return out
 }
 
 // setDiff отдаёт то, что назвал только движок, и то, что назвала только форма E.

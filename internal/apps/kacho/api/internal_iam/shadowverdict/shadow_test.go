@@ -282,3 +282,61 @@ func TestEveryOutputRecordCarriesTheComparedShare(t *testing.T) {
 		t.Fatalf("доля сравнённых не названа значением 0.5:\n%s", lines[1])
 	}
 }
+
+// countingAsker — форма E, которая ВЕДЁТ наблюдение за меточной ветвью.
+//
+// Отдельный дублёр рядом с `stubAsker`, а не поле в нём: наблюдение —
+// необязательное расширение порта, и форма без него обязана оставаться законным
+// входом. Один дублёр на оба случая скрыл бы именно это различие.
+type countingAsker struct {
+	stubAsker
+	mirror, iamDirect int64
+}
+
+func (c *countingAsker) LabelArmGrounds() (int64, int64) { return c.mirror, c.iamDirect }
+
+// TestCoverageCarriesLabelArmGroundsPerAxis — числа меточной ветви едут В КАЖДОЙ
+// записи теневого пути, по осям раздельно.
+//
+// Проверяется ЗАПИСЬ, а не только доступность метода: счётчик, который никто не
+// печатает, наблюдаемым не является — «расхождений нет» и «ветвь ни разу не
+// спросили» остались бы неразличимы ровно так же, как до фикса.
+func TestCoverageCarriesLabelArmGroundsPerAxis(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	form := &countingAsker{mirror: 3, iamDirect: 5}
+	form.allow = false
+	c := New(form, logger)
+
+	// Расхождение — чтобы запись состоялась: у согласия своей строки нет.
+	c.Ask(context.Background(), "user:usr-1", "iam_group", "grp-1", "v_get", nil)(true, true)
+
+	out := buf.String()
+	if !strings.Contains(out, "label_grounds_mirror=3") {
+		t.Errorf("запись не назвала оснований меточной ветви на оси зеркала: %s", out)
+	}
+	if !strings.Contains(out, "label_grounds_iam_direct=5") {
+		t.Errorf("запись не назвала оснований меточной ветви на оси собственных таблиц: %s", out)
+	}
+}
+
+// TestCoverageWithoutObserverStaysUsable — ЗАКОННЫЙ БЛИЗНЕЦ: форма, наблюдения
+// не ведущая, остаётся пригодной, и запись просто не несёт этих чисел.
+//
+// Без него расширение порта читалось бы как обязательное, и следующая форма
+// понадобилась бы с заглушкой — то есть с числами, которых никто не мерил.
+func TestCoverageWithoutObserverStaysUsable(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	c := New(&stubAsker{allow: false}, logger)
+
+	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
+
+	out := buf.String()
+	if !strings.Contains(out, "РАСХОЖДЕНИЕ") {
+		t.Fatalf("расхождение не записано вовсе: %s", out)
+	}
+	if strings.Contains(out, "label_grounds_") {
+		t.Errorf("форма без наблюдения выдала числа, которых не вела: %s", out)
+	}
+}

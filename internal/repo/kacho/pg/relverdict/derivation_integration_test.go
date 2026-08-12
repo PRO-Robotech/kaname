@@ -45,7 +45,7 @@ func seedChain(t *testing.T, ctx context.Context, tx pgx.Tx) {
 
 func ask(t *testing.T, ctx context.Context, tx pgx.Tx, subject, relation string) relverdict.Verdict {
 	t.Helper()
-	got, err := relverdict.Ask(ctx, tx, relverdict.Query{
+	got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 		Subject: subject, ObjectType: "vpc_network", ObjectID: "net-1", Relation: relation,
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestAsk_AccountOwnerReachesInsideAndNotOutside(t *testing.T) {
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth)
 			 VALUES ('vpc_network', 'net-9', 'account', 'acc-2', 1)`)
-		other, err := relverdict.Ask(ctx, tx, relverdict.Query{
+		other, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 			Subject: "user:usr-owner", ObjectType: "vpc_network", ObjectID: "net-9",
 			Relation: "v_update",
 		})
@@ -123,7 +123,7 @@ func TestAsk_AccountOwnerReachesInsideAndNotOutside(t *testing.T) {
 func TestAsk_RelationUnknownToTheModelIsAnErrorNotADenial(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		seedChain(t, ctx, tx)
-		got, err := relverdict.Ask(ctx, tx, relverdict.Query{
+		got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1",
 			Relation: "v_gte",
 		})
