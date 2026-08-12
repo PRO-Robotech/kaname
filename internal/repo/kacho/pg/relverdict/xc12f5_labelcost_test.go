@@ -424,9 +424,7 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	if err := bench.ReportLabelPath(&sb, in, cells); err != nil {
-		t.Fatalf("печать отчёта: %v", err)
-	}
+	bench.ReportLabelPath(&sb, in, cells)
 	fmt.Print(sb.String())
 	if out := os.Getenv("AUTHZFORMBENCH_F5_OUT"); out != "" {
 		if err := os.WriteFile(filepath.Clean(out), []byte(sb.String()), 0o600); err != nil {
