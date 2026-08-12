@@ -69,7 +69,7 @@ Per collection, two independent things:
    coverage is satisfied while every OTHER assertion of that step was scored
    against whatever the step became without its missing input (without a bearer:
    an ANONYMOUS caller, i.e. a different principal). That half is held statically
-   by `internal/repohygiene/newmanprerequestguard_test.go` — a pre-request
+   by `internal/repohygiene/artifactgates/newmanprerequestguard_test.go` — a pre-request
    assertion must be paired with `pm.execution.skipRequest()` in the same branch.
 
 2. EXECUTION COVERAGE — every leaf request must either have EXECUTED or be
