@@ -132,8 +132,14 @@ WITH RECURSIVE speaker(subject) AS (
   UNION
     SELECT 'user:*'
 ),
-candidate(object_id) AS (
-    SELECT m.object_id
+candidate(object_id, labels) AS (
+    -- Метки едут ВМЕСТЕ с кандидатом, а не добираются вторым чтением того же
+    -- зеркала ниже. Второе чтение было бы соединением по всему типу, и
+    -- планировщик на пустой статистике брал его целиком: измерено — страница
+    -- из 1000 объектов читала лишние 10 000 строк ровно там. Ограниченный
+    -- источник кандидатов уже держит нужную строку; брать её у него — не
+    -- оптимизация, а отказ от второго, ничем не ограниченного пути к ней.
+    SELECT m.object_id, m.labels
       FROM kacho_iam.resource_mirror m
      WHERE m.object_type = $2::text
        AND m.object_id > $3::text
@@ -207,16 +213,19 @@ SELECT c.object_id,
           JOIN scope sc
             ON sc.object_id = c.object_id
            AND sc.s_type = b.resource_type AND sc.s_id = b.resource_id
-          LEFT JOIN kacho_iam.resource_mirror m
-            ON m.object_type = $2::text AND m.object_id = c.object_id
          WHERE b.status = 'ACTIVE'
            AND (b.expires_at IS NULL OR b.expires_at > now())
            AND b.revoked_at IS NULL
            AND (
                  rs.arm = 'anchor'
               OR (rs.arm = 'names'  AND c.object_id = ANY (rs.resource_names))
-              OR (rs.arm = 'labels' AND m.labels IS NOT NULL
-                                    AND m.labels @> rs.match_labels)
+              -- Проверки на отсутствие метки здесь больше нет, и это не
+              -- послабление: она стерегла ПРОМАХ внешнего соединения, которого
+              -- теперь не бывает by construction — кандидат и есть строка
+              -- зеркала, а колонка меток объявлена NOT NULL. Оставить её значило
+              -- бы держать ветвь, которая не может быть ложной, и следующий
+              -- читатель искал бы случай, когда она срабатывает.
+              OR (rs.arm = 'labels' AND c.labels @> rs.match_labels)
            )
        ) AS allowed
   FROM candidate c
