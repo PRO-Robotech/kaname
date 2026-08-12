@@ -111,10 +111,10 @@ var declaredWithoutReader = map[verbPair]string{
 	// разойтись. Отдельного `v_get` на роли не спрашивает никто.
 	{Type: "iam_role", Relation: "v_get"}: "Get энфорсится предикатом страницы {viewer, v_list}, не v_get",
 
-	// Списочный фильтр storage спрашивает ровно `v_get` (visibilityRelations), а
-	// `SnapshotService/List` гейтится `viewer@project`. У томов и образов
-	// `v_list` читается на ListOperations; у снимка такого RPC нет.
-	{Type: "storage_snapshot", Relation: "v_list"}: "у снимка нет ListOperations; фильтр страницы спрашивает v_get",
+	// Здесь стояло послабление для пары (storage_snapshot, v_list): «у снимка нет
+	// ListOperations». Оно снято вместе со своим предметом — RPC заведён, и пара
+	// обрела читателя. Гейт сам это и назвал: запись, которой больше нечего
+	// исключать, — находка, а не безобидный остаток.
 }
 
 // TestVerbRelation_DeclaredOnlyWhereRead — перепись в обе стороны.

@@ -1874,6 +1874,16 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.storage.v1.ImageService/Copy",
+    "permission": "storage.images.copy",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.storage.v1.ImageService/Create",
     "permission": "storage.images.create",
     "required_relation": "editor",
@@ -1934,6 +1944,36 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.storage.v1.InternalDiskTypeBindingService/Create",
+    "permission": "storage.disk_type_bindings.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalDiskTypeBindingService/Get",
+    "permission": "storage.disk_type_bindings.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalDiskTypeBindingService/List",
+    "permission": "storage.disk_type_bindings.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.storage.v1.InternalDiskTypeService/Create",
     "permission": "storage.disk_types.create",
     "required_relation": "system_admin",
@@ -1946,6 +1986,16 @@
   {
     "fqn": "kacho.cloud.storage.v1.InternalDiskTypeService/Delete",
     "permission": "storage.disk_types.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalDiskTypeService/SetLifecycle",
+    "permission": "storage.disk_types.setLifecycle",
     "required_relation": "system_admin",
     "scope_extractor": {
       "object_type": "cluster",
@@ -1970,6 +2020,66 @@
     "scope_extractor": {
       "object_type": "storage_image",
       "from_request_field": "image_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalImageService/Register",
+    "permission": "storage.images.register",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalStorageBackendService/Create",
+    "permission": "storage.storage_backends.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalStorageBackendService/Delete",
+    "permission": "storage.storage_backends.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalStorageBackendService/Get",
+    "permission": "storage.storage_backends.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalStorageBackendService/List",
+    "permission": "storage.storage_backends.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.InternalStorageBackendService/Update",
+    "permission": "storage.storage_backends.update",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
     },
     "required_acr_min": "1"
   },
@@ -2015,6 +2125,16 @@
     "scope_filtered": true
   },
   {
+    "fqn": "kacho.cloud.storage.v1.SnapshotService/Copy",
+    "permission": "storage.snapshots.copy",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Create",
     "permission": "storage.snapshots.create",
     "required_relation": "editor",
@@ -2055,12 +2175,32 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.storage.v1.SnapshotService/ListOperations",
+    "permission": "storage.snapshots.listOperations",
+    "required_relation": "v_list",
+    "scope_extractor": {
+      "object_type": "storage_snapshot",
+      "from_request_field": "snapshot_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Update",
     "permission": "storage.snapshots.update",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "storage_snapshot",
       "from_request_field": "snapshot_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.VolumeService/ChangeDiskType",
+    "permission": "storage.volumes.changeDiskType",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "storage_volume",
+      "from_request_field": "volume_id"
     },
     "required_acr_min": "1"
   },
