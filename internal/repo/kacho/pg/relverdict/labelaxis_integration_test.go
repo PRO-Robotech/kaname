@@ -161,7 +161,6 @@ func askLabelled(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objec
 // СОБСТВЕННОГО типа iam, и право следует за меткой в обе стороны.
 func TestAsk_LabelGrantReachesEveryIAMDirectType(t *testing.T) {
 	for _, p := range iamDirectProbes {
-		p := p
 		t.Run(p.objectType, func(t *testing.T) {
 			withTx(t, func(ctx context.Context, tx pgx.Tx) {
 				seedTenant(t, ctx, tx)
@@ -268,7 +267,6 @@ func TestEveryIAMDirectAxisHasAProbe(t *testing.T) {
 // на них — то есть закрыла бы громкий подслучай и оставила три тихих.
 func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 	for _, p := range iamDirectProbes {
-		p := p
 		t.Run(p.objectType, func(t *testing.T) {
 			withTx(t, func(ctx context.Context, tx pgx.Tx) {
 				seedTenant(t, ctx, tx)
