@@ -474,6 +474,36 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, fgaTransport, relationStore,
 		structuralFacts, cfg.AuthN.Mode.IsProduction(), logger)
+	// Читатель счётчиков теневого сравнения. Бандл выносит сравнитель наружу
+	// именно ради этого: сравнение намеренно ни на что не влияет, и отсюда его
+	// слепое пятно — сравнитель, которого не спросили ни разу, снаружи неотличим
+	// от согласного. Поэтому наружу идёт и число решений, и число сравнений, а не
+	// одни расхождения.
+	//
+	// Величины читаются У САМОГО сравнителя на каждом сборе: второй накопитель
+	// рядом разошёлся бы с настоящим ровно там, где расхождение не видно, — оба
+	// отвечают «ноль» на нулевом трафике.
+	//
+	// Проверка реестра — та же, что у двух провязок наблюдаемости ниже: подпись
+	// функции nil допускает, хотя процесс всегда передаёт построенный реестр.
+	// Ветка на гейт не влияет — он смотрит на вызов, а не на условие, под которым
+	// тот стоит.
+	//
+	// Свойство «читатель есть» держит гейт по дереву
+	// TestDeclaredAccumulatorsHaveANonTestReader: провязка наблюдаемости всюду
+	// необязательна и nil-безопасна, поэтому её пропажу не поймает ни компилятор,
+	// ни проба самого коллектора — она останется зелёной, считая в пустоту.
+	if metricsReg != nil {
+		metricsReg.NewShadowVerdictCollector(func() metrics.ShadowVerdictCounts {
+			counts := authzServices.shadow.Counters()
+			return metrics.ShadowVerdictCounts{
+				Decisions:  counts.Decisions,
+				Compared:   counts.Compared,
+				Diverged:   counts.Diverged,
+				Unfinished: counts.Unfinished,
+			}
+		})
+	}
 
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation

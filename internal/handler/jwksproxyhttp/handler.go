@@ -160,9 +160,16 @@ func NewHandler(cfg Config) *Handler {
 // It exists to answer "has this control ever refused anything, and for which
 // reason?". Without the counts, a mirror that has fail-closed on every fetch since
 // the stand came up is indistinguishable from one that never had to — and the
-// difference is "every docker pull is 401" versus "everything is fine". The
-// process reports them on the boot/lifecycle log; a scrape surface is a separate
-// concern from correctness here.
+// difference is "every docker pull is 401" versus "everything is fine".
+//
+// WHO READS THIS. The composition root registers a scrape collector over these
+// counters (kacho_iam_jwks_mirror_outcomes_total), so Served is published beside
+// the two refusal reasons and "never refused" stays distinguishable from "never
+// reached". Здесь стояло «процесс сообщает их в журнале жизненного цикла» — такого
+// читателя в дереве не было НИ ОДНОГО, то есть комментарий описывал наблюдаемость,
+// которой не существовало, и именно поэтому её отсутствие никого не смутило.
+// Свойство «читатель есть» держит гейт по дереву
+// TestDeclaredAccumulatorsHaveANonTestReader.
 type MirrorStats struct {
 	// Served — fetches that produced a keyset (a cache hit serves without a fetch
 	// and is not counted here; this counts what came off the hop).

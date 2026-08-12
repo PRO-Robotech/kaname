@@ -18,6 +18,20 @@ package parentedge_test
 // работающая проверка.
 //
 // ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ФИКСТУРА СЕЕТ ЧЕРЕЗ ПРОИЗВОДИТЕЛЯ, А НЕ СЫРЫМ SQL
+//
+// Прежняя редакция клала рёбра прямо в таблицу. Тогда «у каждого объекта есть
+// цепь» — свойство ФИКСТУРЫ: она сама и положила то, что потом пересчитывала.
+// Проверено прогоном: производителю вырезали запись рёбер целиком, и проба
+// осталась ЗЕЛЁНОЙ на всех трёх кейсах — то есть она не могла упасть на том
+// самом дефекте, ради которого заведена.
+//
+// Теперь регистрация идёт ТЕМ ЖЕ вызовом, которым её делает продукт
+// (resource_mirror.UpsertTx — единственный производитель рёбер в дереве).
+// Цепь появляется, только если её ДЕЙСТВИТЕЛЬНО пишет код продукта; регистрация
+// без цепи — ровно то, что производит потребитель, который её не шлёт.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ГЕЙТ ПЕЧАТАЕТ И ПОЧЕМУ ИМЕННО ЭТО
 //
 // Пару чисел: сколько строк зеркала осмотрено и сколько из них без цепи. «Ноль
@@ -36,10 +50,12 @@ package parentedge_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
 )
 
 // rootLevelTypes — типы, у которых предка нет по построению.
@@ -64,27 +80,69 @@ func openPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// seedMirror кладёт строку зеркала и, если предок назван, ребро к нему.
-func seedMirror(t *testing.T, pool *pgxpool.Pool, objType, objID, parentType, parentID string) {
+// registration — намерение ОДНОГО потребителя: что он сообщает о своём объекте.
+//
+// Именованный тип, а не голый набор аргументов: «цепь не выслана» обязано
+// читаться в фикстуре так же, как оно выглядит в дереве, — отсутствием значения
+// у названного поля, а не пустой строкой в третьей позиции.
+type registration struct {
+	// consumer — чьё намерение изображается. Попадает в текст падения, чтобы
+	// находка называла ПОТРЕБИТЕЛЯ, а не только объект.
+	consumer   string
+	objectType string
+	objectID   string
+	// parentChain — цепь предков от ближайшего к дальнему, `"<type>:<id>"`.
+	// Пусто = потребитель цепи НЕ ШЛЁТ (и это ровно то состояние, которое гейт
+	// обязан находить у не-корневых объектов).
+	parentChain []string
+	// parentProjectID — прежняя, двухуровневая форма предка. Оставлена, чтобы
+	// законный близнец отличался от находки ТОЛЬКО цепью.
+	parentProjectID string
+}
+
+// register проводит намерение ЧЕРЕЗ ПРОИЗВОДИТЕЛЯ — тем же вызовом, которым это
+// делает продукт, — и требует, чтобы запись действительно применилась.
+//
+// Проверка `Applied` здесь не формальность: молча не применившаяся регистрация
+// оставила бы зелёной обе стороны гейта, и он снова утверждал бы свойство своей
+// фикстуры.
+func register(t *testing.T, pool *pgxpool.Pool, r registration, version time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO kacho_iam.resource_mirror (object_type, object_id, parent_project_id)
-		 VALUES ($1, $2, $3)`,
-		objType, objID, map[bool]string{true: parentID, false: ""}[parentType == "project"],
-	); err != nil {
-		t.Fatalf("посев зеркала %s:%s: %v", objType, objID, err)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("транзакция регистрации %s:%s: %v", r.objectType, r.objectID, err)
 	}
-	if parentType == "" {
-		return
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	out, err := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+		ObjectType:      r.objectType,
+		ObjectID:        r.objectID,
+		ParentProjectID: r.parentProjectID,
+		ParentChain:     r.parentChain,
+		SourceVersion:   version,
+	})
+	if err != nil {
+		t.Fatalf("регистрация %s (%s:%s): %v", r.consumer, r.objectType, r.objectID, err)
 	}
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO kacho_iam.resource_parent_edge
-		   (object_type, object_id, parent_type, parent_id, depth)
-		 VALUES ($1, $2, $3, $4, 1)`,
-		objType, objID, parentType, parentID,
-	); err != nil {
-		t.Fatalf("посев ребра %s:%s: %v", objType, objID, err)
+	if !out.Applied {
+		t.Fatalf("регистрация %s (%s:%s) не применилась — фикстура ничего не посеяла, "+
+			"и обе стороны гейта стали бы зелёными ни на чём",
+			r.consumer, r.objectType, r.objectID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("фиксация регистрации %s:%s: %v", r.objectType, r.objectID, err)
+	}
+}
+
+// seedThroughProducer проводит набор намерений, выдавая каждому свой маркер
+// версии (регистрации приходят в разное время, и монотонная защита строки это
+// читает).
+func seedThroughProducer(t *testing.T, pool *pgxpool.Pool, regs ...registration) {
+	t.Helper()
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	for i, r := range regs {
+		register(t, pool, r, base.Add(time.Duration(i)*time.Millisecond))
 	}
 }
 
@@ -122,13 +180,24 @@ func uncovered(t *testing.T, pool *pgxpool.Pool) (examined int, missing []string
 	return examined, missing
 }
 
-// Законная сторона: у каждого объекта есть цепь, корневой — не находка.
-func TestParentEdgeCompleteness_SilentWhenEveryObjectHasAChain(t *testing.T) {
+// Законная сторона: каждое намерение несёт свою цепь, корневой объект — не находка.
+//
+// Зелёное здесь означает, что цепь написал ПРОДУКТ: фикстура рёбер не касается.
+func TestParentEdgeCompleteness_SilentWhenEveryRegistrationCarriesItsChain(t *testing.T) {
 	pool := openPool(t)
-	seedMirror(t, pool, "vpc_network", "net-1", "project", "prj-1")
-	seedMirror(t, pool, "project", "prj-1", "account", "acc-1")
-	// Корневой уровень: предка нет по построению, цепи нет — и это НЕ находка.
-	seedMirror(t, pool, "account", "acc-1", "", "")
+	seedThroughProducer(t, pool,
+		registration{
+			consumer: "vpc", objectType: "vpc_network", objectID: "net-1",
+			parentProjectID: "prj-1",
+			parentChain:     []string{"project:prj-1", "account:acc-1"},
+		},
+		registration{
+			consumer: "iam", objectType: "project", objectID: "prj-1",
+			parentChain: []string{"account:acc-1"},
+		},
+		// Корневой уровень: предка нет по построению, цепи нет — и это НЕ находка.
+		registration{consumer: "iam", objectType: "account", objectID: "acc-1"},
+	)
 
 	examined, missing := uncovered(t, pool)
 	t.Logf("осмотрено строк зеркала: %d; без цепи: %d", examined, len(missing))
@@ -141,19 +210,23 @@ func TestParentEdgeCompleteness_SilentWhenEveryObjectHasAChain(t *testing.T) {
 	}
 }
 
-// Сторона дефекта: цепь снята — гейт обязан НАЗВАТЬ объект.
-func TestParentEdgeCompleteness_RedWhenAChainIsMissing(t *testing.T) {
+// Сторона дефекта: потребитель цепи НЕ ШЛЁТ — гейт обязан НАЗВАТЬ объект.
+//
+// Это не искусственная порча состояния: ровно такую регистрацию производит
+// сервис, который поле цепи не заполняет. Разница с законной стороной — одно
+// поле намерения, всё остальное совпадает.
+func TestParentEdgeCompleteness_NamesTheObjectWhoseRegistrationCarriedNoChain(t *testing.T) {
 	pool := openPool(t)
-	seedMirror(t, pool, "vpc_network", "net-1", "project", "prj-1")
-	seedMirror(t, pool, "project", "prj-1", "account", "acc-1")
-
-	// Снимаем цепь у одного объекта — ровно то, что происходит, когда владелец
-	// её не шлёт.
-	if _, err := pool.Exec(context.Background(),
-		`DELETE FROM kacho_iam.resource_parent_edge
-		  WHERE object_type = 'vpc_network' AND object_id = 'net-1'`); err != nil {
-		t.Fatalf("инъекция: %v", err)
-	}
+	seedThroughProducer(t, pool,
+		registration{
+			consumer: "vpc (цепь не выслана)", objectType: "vpc_network", objectID: "net-1",
+			parentProjectID: "prj-1",
+		},
+		registration{
+			consumer: "iam", objectType: "project", objectID: "prj-1",
+			parentChain: []string{"account:acc-1"},
+		},
+	)
 
 	examined, missing := uncovered(t, pool)
 	t.Logf("осмотрено строк зеркала: %d; без цепи: %d %v", examined, len(missing), missing)
@@ -161,6 +234,53 @@ func TestParentEdgeCompleteness_RedWhenAChainIsMissing(t *testing.T) {
 	if len(missing) != 1 || missing[0] != "vpc_network:net-1" {
 		t.Fatalf("объект без цепи не назван: %v — молчание здесь неотличимо от честного "+
 			"отказа в правах, потому что форма отказа та же", missing)
+	}
+}
+
+// Производитель ДЕЙСТВИТЕЛЬНО в петле: цепь глубже двух уровней доезжает целиком.
+//
+// Без этого утверждения законная сторона осталась бы зелёной и у производителя,
+// который пишет только первое звено, — а объект, чей ближайший предок не проект
+// и не аккаунт, именно так и выпадает из области выдачи.
+func TestParentEdgeCompleteness_ProducerWritesEveryLinkOfTheChain(t *testing.T) {
+	pool := openPool(t)
+	seedThroughProducer(t, pool, registration{
+		consumer: "registry", objectType: "registry_repository", objectID: "repo-1",
+		parentChain: []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
+	})
+
+	ctx := context.Background()
+	rows, err := pool.Query(ctx,
+		`SELECT depth, parent_type, parent_id
+		   FROM kacho_iam.resource_parent_edge
+		  WHERE object_type = 'registry_repository' AND object_id = 'repo-1'
+		  ORDER BY depth`)
+	if err != nil {
+		t.Fatalf("чтение цепи: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var depth int
+		var typ, id string
+		if err := rows.Scan(&depth, &typ, &id); err != nil {
+			t.Fatalf("чтение звена: %v", err)
+		}
+		got = append(got, typ+":"+id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("обход цепи: %v", err)
+	}
+	want := []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"}
+	if len(got) != len(want) {
+		t.Fatalf("звеньев цепи %d, ожидалось %d: %v — усечённая цепь ставит объект под "+
+			"предка, под которым он не находится", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("звено %d = %q, ожидалось %q (порядок — от ближайшего к дальнему)",
+				i+1, got[i], want[i])
+		}
 	}
 }
 

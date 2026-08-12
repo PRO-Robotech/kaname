@@ -628,12 +628,30 @@ func runServe(cfg config.Config) error {
 		if jerr != nil {
 			return fmt.Errorf("jwks-proxy upstream: %w", jerr)
 		}
-		jwksProxyHandler = jwksproxyhttp.NewMux(jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
+		// Зеркало собирается ИМЕНОВАННЫМ: построенное прямо в аргументе, оно
+		// никому не отдаёт своих счётчиков, и «отказов не было» тогда неотличимо
+		// от «сюда никто не приходил» — а это разница между работающим зеркалом и
+		// мёртвой плоскостью данных.
+		jwksMirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
 			UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
 			Client:      jwksUpstreamClient,
 			Timeout:     jwksUpstreamTimeout,
 			Logger:      logger.With(slog.String("component", "jwks_proxy")),
-		}))
+		})
+		// Читатель счётчиков зеркала. Выданные считаются наравне с отказами
+		// (security.md §Hardening-инвариант 8), а причина отказа держится отдельно:
+		// «не ответил» проходит со временем, «по адресу не то» — никогда.
+		// Свойство «читатель есть» держит гейт по дереву
+		// TestDeclaredAccumulatorsHaveANonTestReader.
+		metricsReg.NewJWKSMirrorCollector(func() metrics.JWKSMirrorCounts {
+			stats := jwksMirror.Stats()
+			return metrics.JWKSMirrorCounts{
+				Served:        stats.Served,
+				Unavailable:   stats.Unavailable,
+				Misconfigured: stats.Misconfigured,
+			}
+		})
+		jwksProxyHandler = jwksproxyhttp.NewMux(jwksMirror)
 	}
 	jwksProxySurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",
