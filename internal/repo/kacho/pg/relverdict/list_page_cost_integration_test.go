@@ -111,6 +111,91 @@ func TestList_PageCostBelongsToTheRequestNotTheSet(t *testing.T) {
 	}
 }
 
+// TestList_PageStaysFullWhenCandidatesAreInterleaved — договор страницы при
+// заходах, ограниченных предметом запроса.
+//
+// # Почему проба обязана быть отдельной
+//
+// Ограничение кандидатов страницей ввело то, чего в форме не было: заход может
+// не заполнить страницу, потому что часть осмотренных кандидатов вызывающему
+// недоступна. Тогда страницу набирает повтор захода. Если повтора нет, обход
+// отдаёт КОРОТКУЮ страницу и объявляет конец набора — то есть остаток становится
+// невидим при живых правах, ровно тот дефект, ради которого перечисление и
+// переписывалось. Кривая стоимости об этом молчит: усечённый ответ дешевле
+// полного.
+func TestList_PageStaysFullWhenCandidatesAreInterleaved(t *testing.T) {
+	withTx(t, func(ctx context.Context, tx pgx.Tx) {
+		seedTenant(t, ctx, tx)
+		seedRole(t, ctx, tx, "rol-mix", "vpc_network", "get", "anchor", "{}")
+		exec(t, ctx, tx,
+			`INSERT INTO kacho_iam.access_bindings
+			   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
+			 VALUES ('acb-m', 'user', 'usr-1', 'rol-mix', 'project', 'prj-1', 'ACTIVE')`)
+		exec(t, ctx, tx,
+			`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+			 VALUES ('acb-m', 'user', 'usr-1')`)
+		exec(t, ctx, tx,
+			`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ('prj-2', 'acc-1', 'foreign')`)
+
+		// ЧЕРЕДОВАНИЕ, а не «чужие в хвосте»: чужой объект в конце обход пережил бы
+		// и без повтора захода — проба зеленела бы на сломанном.
+		const total = 12
+		var want []string
+		for i := 0; i < total; i++ {
+			id := fmt.Sprintf("net-%02d", i)
+			owner := "prj-1"
+			if i%2 == 1 {
+				owner = "prj-2"
+			} else {
+				want = append(want, id)
+			}
+			exec(t, ctx, tx,
+				`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', $1)`, id)
+			exec(t, ctx, tx,
+				`INSERT INTO kacho_iam.resource_parent_edge
+				   (object_type, object_id, parent_type, parent_id, depth)
+				 VALUES ('vpc_network', $1, 'project', $2, 1)`, id, owner)
+		}
+
+		const page = 3
+		var seen []string
+		after := ""
+		for p := 0; p < total+2; p++ {
+			ids, next, err := relverdict.List(ctx, tx, relverdict.ListQuery{
+				Subject: "user:usr-1", ObjectType: "vpc_network", Relation: "v_get",
+				AfterID: after, Limit: page,
+			})
+			if err != nil {
+				t.Fatalf("страница %d: %v", p, err)
+			}
+			// Полнота КАЖДОЙ непоследней страницы: короткая страница с продолжением
+			// означала бы, что заход сдался, не набрав, — и вызывающий, доверяя
+			// размеру, решил бы, что доступного меньше, чем есть.
+			if next != "" && len(ids) != page {
+				t.Fatalf("страница %d неполна (%d из %d) при непустом продолжении %q — "+
+					"заход не повторился, и остаток набора стал бы невидим", p, len(ids), page, next)
+			}
+			seen = append(seen, ids...)
+			if next == "" {
+				break
+			}
+			after = next
+		}
+
+		if len(seen) != len(want) {
+			t.Fatalf("обход отдал %d объектов (%v), доступно %d (%v)", len(seen), seen, len(want), want)
+		}
+		for i := range want {
+			if seen[i] != want[i] {
+				t.Fatalf("порядок или состав нарушен: на месте %d %q вместо %q (всё: %v)",
+					i, seen[i], want[i], seen)
+			}
+		}
+		t.Logf("осмотрено: объектов %d, доступных %d, страница %d, обход отдал %d без пропусков и повторов",
+			total, len(want), page, len(seen))
+	})
+}
+
 func ratio(large, small int64) float64 {
 	if small <= 0 {
 		return float64(large)
