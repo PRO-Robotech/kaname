@@ -185,6 +185,20 @@ func TestList_PageStaysFullWhenCandidatesAreInterleaved(t *testing.T) {
 		if len(seen) != len(want) {
 			t.Fatalf("обход отдал %d объектов (%v), доступно %d (%v)", len(seen), seen, len(want), want)
 		}
+		// Курсор наружу называет только ОТДАННОЕ. Заход осматривает кандидатов и
+		// за отданным концом страницы: если бы курсором уехал последний
+		// ОСМОТРЕННЫЙ, объекты между ним и последним отданным были бы пропущены —
+		// причём молча, потому что вызывающий видит лишь непрерывный обход.
+		ids, next, err := relverdict.List(ctx, tx, relverdict.ListQuery{
+			Subject: "user:usr-1", ObjectType: "vpc_network", Relation: "v_get", Limit: 2,
+		})
+		if err != nil {
+			t.Fatalf("страница для проверки курсора: %v", err)
+		}
+		if len(ids) != 2 || next != ids[len(ids)-1] {
+			t.Fatalf("курсор %q не равен последнему отданному идентификатору (страница %v) — "+
+				"всё, что заход осмотрел сверх страницы, уехало бы за курсор непоказанным", next, ids)
+		}
 		for i := range want {
 			if seen[i] != want[i] {
 				t.Fatalf("порядок или состав нарушен: на месте %d %q вместо %q (всё: %v)",
