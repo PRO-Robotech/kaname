@@ -38,6 +38,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
@@ -410,10 +411,9 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 			PageSize: 1000, Partition: 50, Parallelism: 8,
 		},
 		RepeatSchedule: strings.Join(schedule, " · "),
-		QueueMS:        1000,
-		QueueNote: "период опроса очереди реконсайла iam (KACHO_IAM_RECONCILE_DRAIN_INTERVAL_MS, " +
-			"умолчание 1000 мс; запасной период дренажа очереди движка — 30 000 мс). Прибор очередь " +
-			"НЕ поднимает, поэтому измеренное окно движка её не содержит и является нижней границей.",
+		RunCommand: "AUTHZFORMBENCH_F5=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ " +
+			"-run TestXC12F5LabelPathCost -count=1 -v -timeout 180m",
+		QueueNote:  f5QueueNote,
 		Unmeasured: f5Unmeasured(),
 	}
 
@@ -439,13 +439,34 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 	t.Logf("ячеек: %d измерено, %d прочих", measured, len(cells)-measured)
 }
 
+// f5QueueNote — что у продукта стоит между коммитом метки и началом пересчёта.
+//
+// Сказано текстом и БЕЗ числа-«пола», потому что числа-пола здесь нет: обе очереди
+// пробуждаются уведомлением, а периоды опроса — запасной путь. Назвать период
+// опроса нижней границей окна значило бы придумать величину в отчёте, весь предмет
+// которого — чтобы величины были измеренными.
+const f5QueueNote = `
+Очередь реконсайла iam (resource_reconcile_outbox) и очередь движка (fga_outbox)
+пробуждаются УВЕДОМЛЕНИЕМ (LISTEN/NOTIFY, триггер AFTER INSERT). Задержка
+уведомления прибором НЕ измерялась: прибор держит движок и Postgres, а не сервис.
+Периоды опроса — ЗАПАСНОЙ путь на пропущенное уведомление, и они разные:
+  · очередь реконсайла  KACHO_IAM_RECONCILE_DRAIN_INTERVAL_MS, умолчание 1000 мс;
+                        полный проход (sweep) — 30 000 мс;
+  · очередь движка      PollFallback 30 000 мс, повтор с отступом 1000…30 000 мс,
+                        до 10 попыток.
+Отсюда: окно движка в проде = измеренное здесь ПЛЮС задержка уведомления на
+штатном пути ЛИБО плюс период запасного, если уведомление потеряно. Ни одно из
+этих слагаемых к измеренному не прибавлено — правило отнесения п.7.
+Форму E это не касается ни на одном из двух путей: у неё между изменением метки и
+вердиктом нет очереди вовсе, и её окно измерено целиком.`
+
 // f5Unmeasured — то, чего этот прогон не измеряет, названное до чтения его чисел.
 func f5Unmeasured() []string {
 	return []string{
-		"ОЧЕРЕДЬ ДОСТАВКИ. Между коммитом метки в БД сервиса и началом пересчёта у продукта стоит " +
-			"очередь со своим периодом опроса. Прибор её не поднимает — он держит движок и Postgres, " +
-			"а не сервис. Поэтому окно движка здесь есть его НИЖНЯЯ ГРАНИЦА; период очереди назван " +
-			"рядом отдельной величиной и НЕ прибавлен.",
+		"ЗАДЕРЖКА УВЕДОМЛЕНИЯ ОЧЕРЕДИ. Штатный путь пробуждения обеих очередей продукта — " +
+			"LISTEN/NOTIFY; прибор их не поднимает и эту задержку не измерял. Периоды опроса, " +
+			"названные в отчёте, — запасной путь, и «полом» окна они НЕ объявлены: назвать периодом " +
+			"опроса нижнюю границу того, что штатно им не ограничено, значило бы придумать величину.",
 		"БОЕВОЙ РЕКОНСАЙЛЕР. Развёртка правила в кортежи считается прибором, а не " +
 			"`…/access_binding/reconcile/`. Значит про эту половину измерено «столько стоит развёртка», " +
 			"а не «столько стоит развёртка ИМЕННО ЭТИМ кодом»; его собственные запросы к зеркалу и " +
@@ -469,19 +490,33 @@ func f5Unmeasured() []string {
 // непомеченный запасной. Посев в измеряемые величины не входит.
 func seedCommon(t *testing.T, ctx context.Context, w *f5World, sc bench.LabelScenario) {
 	t.Helper()
-	mustExec(t, ctx, w.pool, `INSERT INTO kacho_iam.clusters (id, name)
+	// Арендная обвязка кладётся ОДНОЙ транзакцией: ссылка между аккаунтом и его
+	// владельцем круговая, и её внешний ключ отложен до COMMIT. Построчный посев
+	// в автокоммите проверяет ключ на каждой строке и падает на первой же —
+	// проверено исполнением, а не рассуждением.
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("транзакция посева обвязки: %v", err)
+	}
+	txExec(t, ctx, tx, `INSERT INTO kacho_iam.clusters (id, name)
 		VALUES ('cluster_kacho_root', 'kacho') ON CONFLICT DO NOTHING`)
-	mustExec(t, ctx, w.pool, `INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
+	txExec(t, ctx, tx, `INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
 		VALUES ($1, 'authzformbench-f5', $2) ON CONFLICT DO NOTHING`, f5Account, subjID(sc.Subjects[0]))
 	for _, s := range sc.Subjects {
-		mustExec(t, ctx, w.pool, `INSERT INTO kacho_iam.users (id, external_id, email, account_id)
+		txExec(t, ctx, tx, `INSERT INTO kacho_iam.users (id, external_id, email, account_id)
 			VALUES ($1, $1, $1 || '@kacho.local', $2) ON CONFLICT DO NOTHING`, subjID(s), f5Account)
 	}
-	mustExec(t, ctx, w.pool, `INSERT INTO kacho_iam.users (id, external_id, email, account_id)
+	// Посторонний — субъект отрицательного контроля. Он ЗАВЕДЁН, но не назван ни в
+	// одной выдаче: без него «разрешено субъекту правила» неотличимо от
+	// «разрешено всякому, кто существует».
+	txExec(t, ctx, tx, `INSERT INTO kacho_iam.users (id, external_id, email, account_id)
 		VALUES ('usr-stranger-not-in-any-binding', 'ext-stranger',
 		        'stranger@kacho.local', $1) ON CONFLICT DO NOTHING`, f5Account)
-	mustExec(t, ctx, w.pool, `INSERT INTO kacho_iam.projects (id, account_id, name)
+	txExec(t, ctx, tx, `INSERT INTO kacho_iam.projects (id, account_id, name)
 		VALUES ($1, $2, 'authzformbench-f5') ON CONFLICT DO NOTHING`, f5Project, f5Account)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("коммит посева обвязки: %v", err)
+	}
 
 	ids := sc.Objects()
 	for i := 0; i < len(ids); i += 5000 {
@@ -530,9 +565,9 @@ func newTracedPool(t *testing.T, ctx context.Context, c *bench.SQLStmtCounter) *
 	return pool
 }
 
-func mustExec(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sql string, args ...any) {
+func txExec(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, args ...any) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, sql, args...); err != nil {
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
 		t.Fatalf("посев (%s): %v", strings.SplitN(strings.TrimSpace(sql), "\n", 2)[0], err)
 	}
 }
