@@ -49,7 +49,12 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Terraform',
       collapsed: false,
-      items: ['terraform/provider', 'terraform/module-iam-project'],
+      items: [
+        'terraform/provider',
+        'terraform/module-iam-project',
+        'terraform/module-iam-access',
+        'terraform/module-iam-machine-identity',
+      ],
     },
   ],
 }
