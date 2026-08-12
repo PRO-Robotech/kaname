@@ -147,26 +147,46 @@ func labelsJoinPinned(table, typeParam, idParam string) string {
 	return "LEFT JOIN " + table + " m ON m.id = " + idParam + "::text"
 }
 
-// labelsJoinPerCandidate — то же для перечисления объектов: идентификатор берётся
-// из строки кандидата, а не из параметра.
-func labelsJoinPerCandidate(table, typeParam, idExpr string) string {
-	if table == "" {
-		return "LEFT JOIN kacho_iam.resource_mirror m\n            ON m.object_type = " +
-			typeParam + "::text AND m.object_id = " + idExpr
-	}
-	return "LEFT JOIN " + table + " m ON m.id = " + idExpr
-}
+// Отдельного строителя «присоединить метки к КАЖДОМУ кандидату» здесь больше
+// нет, и это снятие вместе с предметом, а не упрощение. Перечисление читало метки
+// вторым обращением к тому же месту — соединением по всему типу, ничем не
+// ограниченным; теперь метки приезжают колонкой самого кандидата (см.
+// candidateFrom), поэтому присоединять нечего. Оставленный строитель без
+// вызывающего выглядел бы рабочим и предлагал бы следующему читателю ровно тот
+// второй путь, от которого мы ушли.
 
-// candidateFrom — откуда перечисление берёт кандидатов этого типа.
+// candidateFrom — откуда перечисление берёт кандидатов этого типа и ЧЕМ
+// ограничен один заход.
 //
 // Ось та же, что у меток, и это не совпадение: объект собственного типа iam
 // живёт в своей таблице целиком — и метками, и самим фактом существования.
 // Брать кандидатов из зеркала, а метки из своей таблицы значило бы перечислять
 // пустоту и аккуратно спрашивать у неё метки.
-func candidateFrom(table, typeParam, afterParam string) string {
+//
+// Фрагмент обязан отдавать ДВЕ колонки и нести СВОЙ предел:
+//
+//   - `labels` едет вместе с кандидатом. Второе чтение того же места было бы
+//     соединением по всему типу, и стоимость страницы снова стала бы стоимостью
+//     набора — уже не через кандидатов, а через метки;
+//   - `ORDER BY` + `LIMIT` стоят ЗДЕСЬ, в источнике, до раскрутки цепи областей.
+//     Предел, применённый последним действием запроса, ограничил бы длину
+//     ответа, но не работу. Порядок — тот же, каким страница отдаётся наружу
+//     (первичный ключ обеих осей), иначе заход и страница резали бы набор по
+//     разным осям и курсор пропускал бы строки.
+//
+// Оба требования держатся на ОБЕИХ осях, а не только на зеркальной: колонка
+// `labels` объявлена `jsonb NOT NULL DEFAULT '{}'` и в зеркале (0019), и во всех
+// семи собственных таблицах (0001 — аккаунты, проекты, группы; 0041 —
+// пользователи, служебные учётные записи, роли, выдачи), а ключ у них по `id`.
+// Поэтому форма фрагмента у обеих осей одна, и проверка на отсутствие метки в
+// меточной ветви не нужна ни на одной: пустых меток не бывает, бывает пустой
+// объект — а он честно не покрывает непустой селектор.
+func candidateFrom(table, typeParam, afterParam, limitParam string) string {
 	if table == "" {
-		return "SELECT m.object_id\n      FROM kacho_iam.resource_mirror m\n     WHERE m.object_type = " +
-			typeParam + "::text\n       AND m.object_id > " + afterParam + "::text"
+		return "SELECT m.object_id, m.labels\n      FROM kacho_iam.resource_mirror m\n     WHERE m.object_type = " +
+			typeParam + "::text\n       AND m.object_id > " + afterParam + "::text" +
+			"\n     ORDER BY m.object_id\n     LIMIT " + limitParam + "::int"
 	}
-	return "SELECT o.id AS object_id\n      FROM " + table + " o\n     WHERE o.id > " + afterParam + "::text"
+	return "SELECT o.id AS object_id, o.labels\n      FROM " + table + " o\n     WHERE o.id > " +
+		afterParam + "::text\n     ORDER BY o.id\n     LIMIT " + limitParam + "::int"
 }
