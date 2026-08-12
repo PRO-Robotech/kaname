@@ -172,10 +172,13 @@ sequenceDiagram
 
 ## Конфигурация
 
-| Env var                              | YAML                              | Default | Описание                       |
-|--------------------------------------|-----------------------------------|---------|--------------------------------|
-| `KACHO_IAM_OPENFGA_STORE_ID`         | `extapi.openfga.store-id`         | —       | OpenFGA store id (required для FGA-emit). |
-| `KACHO_IAM_OPENFGA_ENDPOINT`         | `extapi.openfga.endpoint`         | `kacho-umbrella-openfga:8080` | OpenFGA HTTP endpoint. |
+Обе настройки живут ТОЛЬКО в окружении: секции `extapi` конфигурационный файл
+сервиса не разбирает, и одноимённые ключи профиля не читал никто.
+
+| Env var                              | Default | Описание                       |
+|--------------------------------------|---------|--------------------------------|
+| `KACHO_IAM_OPENFGA_STORE_ID`         | —       | OpenFGA store id (required для FGA-emit). |
+| `KACHO_IAM_OPENFGA_ENDPOINT`         | `kacho-umbrella-openfga:8080` | OpenFGA HTTP endpoint. |
 
 Если store_id не задан — Create продолжает работать, но FGA-tuples
 накапливаются в `fga_outbox` до restart'а с FGA configured.
