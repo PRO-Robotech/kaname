@@ -361,7 +361,7 @@ func TestReverseAndDirectAnswersAgreeOnTheSameState(t *testing.T) {
 				listed[id] = true
 			}
 			for _, id := range append(append([]string{}, nets...), "net-99") {
-				v, err := relverdict.Ask(ctx, tx, relverdict.Query{
+				v, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 					Subject: subject, ObjectType: "vpc_network", ObjectID: id, Relation: "v_get",
 				})
 				if err != nil {
