@@ -570,12 +570,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// per-resource creator-tuple (vpc/compute/nlb после Create).
 		// Local relationStore (line ~522) is in scope here within buildServices.
 		WithRelationWriter(relationStore).
-		// Теневое сравнение формы E с движком (XC-12, Ф2). Отвечает по-прежнему
-		// движок; форма E спрашивается рядом, и ни один её исход не меняет ответа
-		// вызывающему. Провязка здесь и есть то, ради чего фаза делалась: без неё
-		// форма умеет ответить, но её никто не спрашивает, и «расхождений нет»
-		// означало бы «сравнений не было».
-		WithShadowVerdict(shadowverdict.New(relverdict.NewAsker(pool), logger)).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// ForceLogout records a session revocation.
@@ -897,6 +891,10 @@ type authzServiceBundle struct {
 	// authorizeSvc — raw AuthorizeService use-case, exposed so the
 	// InternalIAMService.Check gate can delegate to the SAME FGA pipeline.
 	authorizeSvc *service.AuthorizeService
+	// shadow — сравнитель форм, провязанный в тот же use-case. Вынесен наружу,
+	// чтобы у его счётчиков был читатель: «ноль расхождений» без числа решений и
+	// доли сравнённых — утверждение ни о чём.
+	shadow *shadowverdict.Comparator
 }
 
 // buildAuthZServices wires AuthorizeService + InternalAuthorizeService against a
@@ -932,11 +930,22 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	//
 	// It is the SAME resolver the own-gate wrapper uses — built once by the caller — so the
 	// two surfaces cannot come to derive facts from different places.
+	// Теневое сравнение формы E с движком (XC-12). Отвечает по-прежнему движок;
+	// форма E спрашивается РЯДОМ — на каждом вопросе решения о доступе, который
+	// этот use-case отвечает, и ДО обращения к движку, — и ни один её исход не
+	// меняет ответа вызывающему.
+	//
+	// Провязка здесь, а не у транспорта: сравнивать надо окончательный вердикт (к
+	// ответу движка ниже добавляются надзор администратора облака и структурный
+	// запасной путь), и одно место покрывает все вопросы, а не тот один, у чьего
+	// обработчика оказалось написано.
+	shadow := shadowverdict.New(relverdict.NewAsker(pool), logger)
 	authSvc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           fgaTransport,
 		ModelID:             modelID,
 		ClusterAdminChecker: fgaTransport,
 		StructuralFacts:     structuralFacts,
+		Shadow:              shadow,
 	})
 	// Refuse to run a cascade that has silently gone back to waiting for a queue.
 	// The fallback needs BOTH a resolver and an Authorizer that can carry contextual
@@ -975,6 +984,7 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 		authorize:         authzH,
 		authorizeSvc:      authSvc,
 		internalAuthorize: internalAuthH,
+		shadow:            shadow,
 	}
 }
 

@@ -137,6 +137,10 @@ type AuthorizeService struct {
 	// structural — request-time source of the cascade's structural facts. Wired in
 	// production; nil in unit tests that do not exercise the cascade.
 	structural StructuralFactResolver
+	// shadow — теневое сравнение формы E с движком. nil — сравнение выключено, и
+	// каждый вопрос ведёт себя ровно как прежде: ни один исход сравнения не меняет
+	// ответа вызывающему (см. shadow_port.go).
+	shadow ShadowComparator
 }
 
 // AuthorizeServiceConfig — DI config.
@@ -149,6 +153,9 @@ type AuthorizeServiceConfig struct {
 	// StructuralFacts — request-time resolver for the cascade's structural facts.
 	// nil → the cascade resolves only over tuples the queue has already delivered.
 	StructuralFacts StructuralFactResolver
+	// Shadow — теневое сравнение формы E с движком (XC-12). nil → сравнения нет, и
+	// каждый вопрос отвечается ровно как прежде.
+	Shadow ShadowComparator
 }
 
 // NewAuthorizeService — builder.
@@ -158,6 +165,7 @@ func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
 		modelID:      cfg.ModelID,
 		clusterAdmin: cfg.ClusterAdminChecker,
 		structural:   cfg.StructuralFacts,
+		shadow:       cfg.Shadow,
 	}
 }
 
@@ -310,9 +318,16 @@ func (s *AuthorizeService) Check(ctx context.Context, req CheckRequest) (*CheckR
 
 // check is the Check implementation parameterized by an optional cluster-admin
 // memo (shared across a BatchCheck pass; nil for a standalone Check).
-func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *clusterAdminMemo) (*CheckResult, error) {
+//
+// Возвраты именованы ради ОДНОГО свойства: теневой вопрос сводится на КАЖДОМ
+// пути, а путей отсюда много (короткое замыкание администратора облака,
+// структурный запасной путь, отказ). Сведение, приписанное к одному из них, снова
+// оставило бы часть решений без сравнения — и именно ту часть, где решение
+// принято дёшево. Заодно это покрывает и `BatchCheck`: он отвечает каждый свой
+// пункт этой же функцией.
+func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *clusterAdminMemo) (result *CheckResult, err error) {
 	now := time.Now().UTC().Truncate(time.Second)
-	result := &CheckResult{
+	result = &CheckResult{
 		AuthorizationModelID: s.modelID,
 		CheckedAt:            now,
 	}
@@ -341,6 +356,10 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		// Cluster-admin fallback: even an unresolvable relation is allowed for a
 		// cluster-admin (the flat super-gate is authority on everything). Checked on
 		// the deny path only — the common allow case never pays this round-trip.
+		// Отношения нет — вопроса форме E тоже нет: спросить её «наугад» значило бы
+		// получить честное «нет» о том, чего не спрашивали. Но решение принято, и оно
+		// обязано попасть в знаменатель.
+		s.shadowUnaskable("действие не разрешается в отношение", req.Resource.Type, "")
 		if s.isClusterAdmin(ctx, caMemo, req.Subject) {
 			result.Allowed = true
 			return result, nil
@@ -369,6 +388,8 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	// no resolvable authorization path, so we deny cleanly (-> gRPC
 	// PermissionDenied 403) instead of erroring.
 	if req.Resource.ID == "*" {
+		// Объекта нет — вопроса форме E нет; решение всё равно названо (знаменатель).
+		s.shadowUnaskable("область запроса не названа", req.Resource.Type, relation)
 		// Cluster-admin fallback: an unscopable resource has no per-object path,
 		// but a cluster-admin is authority on everything. Deny path only.
 		if s.isClusterAdmin(ctx, caMemo, req.Subject) {
@@ -383,6 +404,13 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	// Build the CEL condition-context: principal/connection attributes are
 	// server-derived (forged client values stripped); see buildCondContext.
 	condCtx := buildCondContext(ctx, req.Context, now)
+
+	// Теневой вопрос уходит ЗДЕСЬ — до любого обращения к движку и до любого
+	// короткого замыкания ниже. Сведение отложено на выход: вердикт окончателен
+	// только там, а сравнивать половину ответа значило бы записывать расхождение
+	// между стадиями одного решения, а не между формами.
+	settleShadow := s.askShadow(ctx, req.Subject, req.Resource.Type, req.Resource.ID, relation, condCtx)
+	defer func() { settleShadow(result.Allowed, err == nil) }()
 
 	// FGA Check.
 	if s.relations == nil {
@@ -602,9 +630,9 @@ func (s *AuthorizeService) structuralFallback(
 // (`InternalIAMService.Check`). Reuses the same FGA + OPA pipeline as
 // `Check`, but skips the action→relation resolution step because the caller
 // already supplies the resolved relation.
-func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationRequest) (*CheckResult, error) {
+func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationRequest) (result *CheckResult, err error) {
 	now := time.Now().UTC().Truncate(time.Second)
-	result := &CheckResult{
+	result = &CheckResult{
 		AuthorizationModelID: s.modelID,
 		CheckedAt:            now,
 	}
@@ -621,6 +649,18 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 
 	// Server forces current_time into the conditions context.
 	condCtx := map[string]any{"current_time": now.Unix()}
+
+	// Теневой вопрос — до движка и до всех замыканий ниже (см. check). Форма
+	// объекта, которую разобрать не удалось, форме E НЕ отдаётся: она честно
+	// ответила бы «нет» о несуществующем объекте, и сравнение записало бы
+	// расхождение, которого нет, — но решение всё равно называется, иначе оно
+	// выпадает из знаменателя молча.
+	if objType, objID, ok := splitFGAObject(req.Object); ok {
+		settleShadow := s.askShadow(ctx, req.Subject, objType, objID, req.Relation, condCtx)
+		defer func() { settleShadow(result.Allowed, err == nil) }()
+	} else {
+		s.shadowUnaskable("объект вопроса не разобран", "", req.Relation)
+	}
 
 	if s.relations == nil {
 		return result, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
@@ -887,7 +927,7 @@ const fgaListObjectsServerCap = 1000
 // A non-verb-bearing type (e.g. `cluster`, which defines no v_* relations) uses the
 // single resolved relation only — a v_list ListObjects on it would 400 on a
 // dangling relation.
-func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsRequest) (*ListObjectsResult, error) {
+func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsRequest) (res *ListObjectsResult, err error) {
 	if s.relations == nil {
 		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
@@ -923,6 +963,18 @@ func (s *AuthorizeService) ListObjects(ctx context.Context, req ListObjectsReque
 	if relation == relationViewer && authzmap.TypeHasVerbRelations(req.ResourceType) {
 		relations = []string{relationViewer, relationVList}
 	}
+
+	// Форма E спрашивается тем же НАБОРОМ отношений и до движка: спросить её об
+	// одном из объединяемых отношений значило бы сравнить два разных вопроса.
+	// Сведение отложено: сверяются множества, а множество известно только целиком.
+	settleShadow := s.askShadowObjects(ctx, req.Subject, req.ResourceType, relations)
+	defer func() {
+		if err != nil || res == nil {
+			settleShadow(nil, false, false)
+			return
+		}
+		settleShadow(res.ResourceIDs, !res.Truncated, true)
+	}()
 
 	seen := make(map[string]struct{})
 	ids := make([]string, 0, maxR)
@@ -979,7 +1031,7 @@ type ListSubjectsResult struct {
 }
 
 // ListSubjects — inverse of ListObjects.
-func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsRequest) (*ListSubjectsResult, error) {
+func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsRequest) (_ *ListSubjectsResult, err error) {
 	if s.relations == nil {
 		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
@@ -990,10 +1042,28 @@ func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsReq
 	if relation == "" {
 		return nil, fmt.Errorf("Illegal argument action %q", req.Action)
 	}
+	// Форма E спрашивается до движка. Сверяется НЕОТФИЛЬТРОВАННЫЙ ответ: сужение по
+	// типу субъекта — свойство запроса, а не модели, и сравнивать отфильтрованное с
+	// полным значило бы объявить расхождением сам фильтр.
+	//
+	// Сведение отложено, а не приписано к путям: путь, добавленный завтра между
+	// вопросом и сведением, иначе оставил бы теневой вызов висеть со своим сроком —
+	// и это свойство построения, а не внимательности автора.
+	var (
+		engineSubjects []string
+		engineComplete bool
+		engineAnswered bool
+	)
+	settleShadow := s.askShadowSubjects(ctx, req.ResourceType, req.ResourceID, relation)
+	defer func() { settleShadow(engineSubjects, engineComplete, engineAnswered) }()
+
 	subs, next, err := s.relations.ListSubjects(ctx, req.ResourceType, req.ResourceID, relation, req.PageSize, req.PageToken)
 	if err != nil {
 		return nil, fmt.Errorf("authz listSubjects: %w", err)
 	}
+	// Страница с продолжением — не всё множество: сверять её с полным ответом формы
+	// значило бы записать расхождением границу страницы.
+	engineSubjects, engineComplete, engineAnswered = subs, next == "" && req.PageToken == "", true
 	if req.SubjectTypeFilter != "" {
 		filtered := subs[:0]
 		prefix := req.SubjectTypeFilter + ":"
@@ -1024,10 +1094,21 @@ type ExpandResult struct {
 }
 
 // ExpandRelations — Zanzibar userset tree.
-func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandRequest) (*ExpandResult, error) {
+func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandRequest) (_ *ExpandResult, err error) {
 	if s.relations == nil {
 		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
+	// Форма E спрашивается до движка; сверяются субъекты, названные основаниями, —
+	// единственное, что обе формы называют одинаково (см. shadow_port.go). Сведение
+	// отложено по той же причине, что в ListSubjects.
+	var (
+		engineSubjects []string
+		engineComplete bool
+		engineAnswered bool
+	)
+	settleShadow := s.askShadowSources(ctx, req.ResourceType, req.ResourceID, req.Relation)
+	defer func() { settleShadow(engineSubjects, engineComplete, engineAnswered) }()
+
 	tree, err := s.relations.Expand(ctx, req.ResourceType, req.ResourceID, req.Relation)
 	if err != nil {
 		return nil, fmt.Errorf("authz expand: %w", err)
@@ -1040,6 +1121,10 @@ func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandReques
 		depth = 32
 	}
 	truncateTree(tree, depth)
+	// Читается ПОСЛЕ обрезки по глубине: вызывающий получает обрезанное дерево, и
+	// сверять надо то, что он получил, а не то, что пришло с провода.
+	engineSubjects, engineComplete = expandTreeSubjects(tree)
+	engineAnswered = true
 	return &ExpandResult{
 		Resource:             ResourceRef{Type: req.ResourceType, ID: req.ResourceID},
 		Relation:             req.Relation,
