@@ -2185,6 +2185,86 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/AddCidrBlocks",
+    "permission": "vpc.cidr_group_blocks.addCidrBlocks",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "vpc_cidr_group",
+      "from_request_field": "cidr_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/Create",
+    "permission": "vpc.cidr_groups.create",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/Delete",
+    "permission": "vpc.cidr_groups.delete",
+    "required_relation": "v_delete",
+    "scope_extractor": {
+      "object_type": "vpc_cidr_group",
+      "from_request_field": "cidr_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/Get",
+    "permission": "vpc.cidr_groups.get",
+    "required_relation": "v_get",
+    "scope_extractor": {
+      "object_type": "vpc_cidr_group",
+      "from_request_field": "cidr_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/List",
+    "permission": "vpc.cidr_groups.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/ListOperations",
+    "permission": "vpc.cidr_group_operations.listOperations",
+    "required_relation": "v_list",
+    "scope_extractor": {
+      "object_type": "vpc_cidr_group",
+      "from_request_field": "cidr_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/RemoveCidrBlocks",
+    "permission": "vpc.cidr_group_blocks.removeCidrBlocks",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "vpc_cidr_group",
+      "from_request_field": "cidr_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.CidrGroupService/Update",
+    "permission": "vpc.cidr_groups.update",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "vpc_cidr_group",
+      "from_request_field": "cidr_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Create",
     "permission": "vpc.gateways.create",
     "required_relation": "editor",

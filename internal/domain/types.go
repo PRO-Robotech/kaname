@@ -88,6 +88,7 @@ var validResourceTypes = map[ResourceType]struct{}{
 	"vpc_security_group":        {},
 	"vpc_gateway":               {},
 	"vpc_network_interface":     {},
+	"vpc_cidr_group":            {},
 	"compute_instance":          {},
 	"loadbalancer_nlb":          {},
 	"loadbalancer_target_group": {},

@@ -115,7 +115,7 @@ model
 #     parent-pointers only, no access cascade (Contract-A flat).
 #   - per-domain object types — `vpc_network`, `vpc_subnet`, `vpc_address`,
 #     `vpc_security_group`, `vpc_route_table`, `vpc_gateway`,
-#     `vpc_network_interface`, `vpc_address_pool`,
+#     `vpc_network_interface`, `vpc_address_pool`, `vpc_cidr_group`,
 #     `compute_instance`,
 #     `storage_volume`, `storage_snapshot`, `storage_image`,
 #     `nlb_network_load_balancer`, `nlb_target_group`,
@@ -463,6 +463,18 @@ type vpc_gateway
     define v_delete: [user, service_account, group#member] or super_admin
 
 type vpc_network_interface
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+type vpc_cidr_group
   relations
     define project: [project]
     define super_admin: super_admin from project

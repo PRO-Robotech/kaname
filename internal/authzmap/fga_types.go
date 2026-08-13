@@ -317,6 +317,7 @@ var typeVerbRelations = map[string][]string{
 	"vpc_gateway":               objectVerbRelations,
 	"vpc_network_interface":     objectVerbRelations,
 	"vpc_address_pool":          objectVerbRelations,
+	"vpc_cidr_group":            objectVerbRelations,
 	"nlb_network_load_balancer": objectVerbRelations,
 	// NLB-TGT-1: первый тип с набором ШИРЕ канонического CRUD — управление составом
 	// группы целей отделено от изменения самой группы. Литерал `objectVerbRelations`
@@ -424,6 +425,7 @@ var objectTypes = map[string]string{
 	"vpc.gateway":          "vpc_gateway",
 	"vpc.networkInterface": "vpc_network_interface",
 	"vpc.addressPool":      "vpc_address_pool",
+	"vpc.cidrGroup":        "vpc_cidr_group",
 
 	// load balancer (kacho-nlb)
 	"loadbalancer.networkLoadBalancers": "nlb_network_load_balancer",
