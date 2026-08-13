@@ -16,6 +16,35 @@
 // (fga_model_drift_test.go) fails the build on any divergence, in either
 // direction. The table is intentionally a closed enumeration: an unknown pair
 // must NOT silently land as an arbitrary FGA type.
+//
+// ─── The resource name here is SINGULAR, and the permission token's is PLURAL.
+//
+//	authzmap key       vpc.gateway            (this table)
+//	permission token   vpc.gateways.get       (proto authz annotation → catalog)
+//
+// This divergence is DELIBERATE, not drift, and must not be "reconciled" by
+// pluralizing these keys. The two names have different referents:
+//
+//   - the key here names an FGA OBJECT TYPE — the single object a tuple is
+//     written on. The canonical model declares those types in the singular
+//     (`type vpc_gateway` in fga_model.fga), and the unconditional drift-gate
+//     above requires this table to agree with it EXACTLY. Pluralizing a key
+//     would either desynchronize the table from the model or force renaming the
+//     model's types — a change to the authorization model, not naming hygiene;
+//   - the permission token names an ACTION ON A COLLECTION and mirrors the REST
+//     collection path it is annotated next to (`/vpc/v1/gateways`). Its resource
+//     segment is required to be plural, pluralized exactly once; that rule is
+//     held over the .proto annotations by
+//     internal/repohygiene TestVpcPermissionTokenPluralizedExactlyOnce.
+//
+// The two are never compared, so the difference costs nothing. Neither of the
+// two callers of ObjectType feeds a catalog token's resource segment in here:
+// permission_catalog/list_catalog.go iterates Catalog() — this table's OWN keys —
+// and permissions_to_relations.go matches a ROLE's permission patterns, where a
+// plural resource segment does not resolve and the caller takes the documented
+// scope-anchor fallback (that is the "ok is false when the pair is unknown"
+// branch named above, and it behaves identically for `vpc.subnets` and for a
+// misspelled `vpc.subnetses`).
 package authzmap
 
 import (

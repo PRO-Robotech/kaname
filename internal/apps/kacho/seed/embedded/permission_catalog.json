@@ -2166,7 +2166,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/List",
-    "permission": "vpc.addresseses.list",
+    "permission": "vpc.addresses.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2186,7 +2186,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.AddressService/ListOperations",
-    "permission": "vpc.address_operationses.listOperations",
+    "permission": "vpc.address_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_address",
@@ -2206,7 +2206,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Create",
-    "permission": "vpc.gatewaies.create",
+    "permission": "vpc.gateways.create",
     "required_relation": "editor",
     "scope_extractor": {
       "object_type": "project",
@@ -2216,7 +2216,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Delete",
-    "permission": "vpc.gatewaies.delete",
+    "permission": "vpc.gateways.delete",
     "required_relation": "v_delete",
     "scope_extractor": {
       "object_type": "vpc_gateway",
@@ -2226,7 +2226,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Get",
-    "permission": "vpc.gatewaies.get",
+    "permission": "vpc.gateways.get",
     "required_relation": "v_get",
     "scope_extractor": {
       "object_type": "vpc_gateway",
@@ -2236,7 +2236,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/List",
-    "permission": "vpc.gatewayses.list",
+    "permission": "vpc.gateways.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2246,7 +2246,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/ListOperations",
-    "permission": "vpc.gateway_operationses.listOperations",
+    "permission": "vpc.gateway_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_gateway",
@@ -2256,7 +2256,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.GatewayService/Update",
-    "permission": "vpc.gatewaies.update",
+    "permission": "vpc.gateways.update",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "vpc_gateway",
@@ -2547,7 +2547,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/List",
-    "permission": "vpc.network_interfaceses.list",
+    "permission": "vpc.network_interfaces.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2557,7 +2557,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkInterfaceService/ListOperations",
-    "permission": "vpc.network_interface_operationses.listOperations",
+    "permission": "vpc.network_interface_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_network_interface",
@@ -2577,7 +2577,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/AddCidrBlocks",
-    "permission": "vpc.network_cidr_blockses.addCidrBlocks",
+    "permission": "vpc.network_cidr_blocks.addCidrBlocks",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "vpc_network",
@@ -2617,7 +2617,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/List",
-    "permission": "vpc.networkses.list",
+    "permission": "vpc.networks.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2627,7 +2627,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListOperations",
-    "permission": "vpc.network_operationses.listOperations",
+    "permission": "vpc.network_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_network",
@@ -2637,7 +2637,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListRouteTables",
-    "permission": "vpc.network_route_tableses.listRouteTables",
+    "permission": "vpc.network_route_tables.listRouteTables",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_network",
@@ -2647,7 +2647,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListSecurityGroups",
-    "permission": "vpc.network_security_groupses.listSecurityGroups",
+    "permission": "vpc.network_security_groups.listSecurityGroups",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_network",
@@ -2657,7 +2657,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/ListSubnets",
-    "permission": "vpc.network_subnetses.listSubnets",
+    "permission": "vpc.network_subnets.listSubnets",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_network",
@@ -2667,7 +2667,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/RemoveCidrBlocks",
-    "permission": "vpc.network_cidr_blockses.removeCidrBlocks",
+    "permission": "vpc.network_cidr_blocks.removeCidrBlocks",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "vpc_network",
@@ -2727,7 +2727,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/List",
-    "permission": "vpc.route_tableses.list",
+    "permission": "vpc.route_tables.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2737,7 +2737,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/ListOperations",
-    "permission": "vpc.route_table_operationses.listOperations",
+    "permission": "vpc.route_table_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_route_table",
@@ -2807,7 +2807,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/List",
-    "permission": "vpc.security_groupses.list",
+    "permission": "vpc.security_groups.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2817,7 +2817,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/ListOperations",
-    "permission": "vpc.security_group_operationses.listOperations",
+    "permission": "vpc.security_group_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_security_group",
@@ -2847,7 +2847,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SecurityGroupService/UpdateRules",
-    "permission": "vpc.security_group_ruleses.updateRules",
+    "permission": "vpc.security_group_rules.updateRules",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "vpc_security_group",
@@ -2857,7 +2857,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/AddCidrBlocks",
-    "permission": "vpc.subnet_cidr_blockses.addCidrBlocks",
+    "permission": "vpc.subnet_cidr_blocks.addCidrBlocks",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "vpc_subnet",
@@ -2897,7 +2897,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/List",
-    "permission": "vpc.subnetses.list",
+    "permission": "vpc.subnets.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
@@ -2907,7 +2907,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/ListOperations",
-    "permission": "vpc.subnet_operationses.listOperations",
+    "permission": "vpc.subnet_operations.listOperations",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_subnet",
@@ -2917,7 +2917,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/ListUsedAddresses",
-    "permission": "vpc.used_addresseses.listUsedAddresses",
+    "permission": "vpc.used_addresses.listUsedAddresses",
     "required_relation": "v_list",
     "scope_extractor": {
       "object_type": "vpc_subnet",
@@ -2927,7 +2927,7 @@
   },
   {
     "fqn": "kacho.cloud.vpc.v1.SubnetService/RemoveCidrBlocks",
-    "permission": "vpc.subnet_cidr_blockses.removeCidrBlocks",
+    "permission": "vpc.subnet_cidr_blocks.removeCidrBlocks",
     "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "vpc_subnet",
