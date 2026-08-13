@@ -2445,6 +2445,26 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.vpc.v1.InternalDataplaneService/ReportIntentApplied",
+    "permission": "vpc.dataplane.report_applied",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.InternalDataplaneService/WatchIntent",
+    "permission": "vpc.dataplane.watch_intent",
+    "required_relation": "system_viewer",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.InternalNetworkInterfaceService/Attach",
     "permission": "vpc.network_interfaces.attach",
     "required_relation": "editor",
