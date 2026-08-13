@@ -184,6 +184,11 @@ const maxConditionRows = 256
 //
 // $1 subject · $2 object_type · $3 object_id · $4 типы предков атомов-фактов ·
 // $5 отношения атомов-фактов · $6 глаголы атомов-выдачи · $7 max_depth · $8 limit
+// $9 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
+// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
+// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
+// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const verdictSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
     -- Сам объект — тоже область: выдача, сделанная НА него, действует.
@@ -268,10 +273,10 @@ SELECT DISTINCT cond_name, cond_params, bool_or(arm = 'labels') OVER () AS label
       JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
       JOIN speaker sp ON sp.subject = bs.subject_type || ':' || bs.subject_id
       JOIN kacho_iam.role_verb rv
-        ON rv.role_id = b.role_id AND rv.object_type = $2::text
+        ON rv.role_id = b.role_id AND rv.object_type = $9::text
        AND rv.verb = ANY ($6::text[])
       JOIN kacho_iam.role_rule_selectors rs
-        ON rs.role_id = b.role_id AND $2::text = ANY (rs.object_types)
+        ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
       JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
       -- Метки нужны только ветви меток, и лежат они там, где велит ТИП: у чужого
       -- ресурса — в зеркале, у собственного объекта iam — в его таблице.
@@ -337,6 +342,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
+		GrantTypeName(in.ObjectType),
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)

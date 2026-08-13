@@ -50,6 +50,11 @@ type SubjectsQuery struct {
 //
 // $1 object_type · $2 object_id · $3 after · $4 limit · $5 max_depth ·
 // $6 типы предков атомов-фактов · $7 отношения атомов-фактов · $8 глаголы атомов-выдачи
+// $9 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
+// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
+// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
+// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const subjectsSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
     SELECT $1::text, $2::text, 0
@@ -82,10 +87,10 @@ named(subject) AS (
       FROM kacho_iam.access_bindings b
       JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
       JOIN kacho_iam.role_verb rv
-        ON rv.role_id = b.role_id AND rv.object_type = $1::text
+        ON rv.role_id = b.role_id AND rv.object_type = $9::text
        AND rv.verb = ANY ($8::text[])
       JOIN kacho_iam.role_rule_selectors rs
-        ON rs.role_id = b.role_id AND $1::text = ANY (rs.object_types)
+        ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
       JOIN scope sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
       -- Метки лежат там, где велит ТИП (labelaxis.go): у чужого ресурса — в
       -- зеркале, у собственного объекта iam — в его таблице.
@@ -138,7 +143,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 		labelsJoinPinned(labelTable, "$1", "$2"), 1)
 	rows, err := q.Query(ctx, sql,
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs)
+		factParents, factRelations, bindVerbs, GrantTypeName(in.ObjectType))
 	if err != nil {
 		return nil, "", fmt.Errorf("relverdict: перечисление субъектов: %w", err)
 	}

@@ -113,6 +113,11 @@ const DefaultPageSize = 500
 //
 // $1 subject · $2 object_type · $3 after_id · $4 размер захода · $5 max_depth ·
 // $6 типы предков атомов-фактов · $7 отношения атомов-фактов · $8 глаголы атомов-выдачи
+// $9 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
+// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
+// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
+// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const listSQL = `
 WITH RECURSIVE speaker(subject) AS (
     SELECT $1::text
@@ -226,10 +231,10 @@ SELECT c.object_id,
           JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
           JOIN speaker sp ON sp.subject = bs.subject_type || ':' || bs.subject_id
           JOIN kacho_iam.role_verb rv
-            ON rv.role_id = b.role_id AND rv.object_type = $2::text
+            ON rv.role_id = b.role_id AND rv.object_type = $9::text
            AND rv.verb = ANY ($8::text[])
           JOIN kacho_iam.role_rule_selectors rs
-            ON rs.role_id = b.role_id AND $2::text = ANY (rs.object_types)
+            ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
           JOIN scope sc
             ON sc.object_id = c.object_id
            AND sc.s_type = b.resource_type AND sc.s_id = b.resource_id
@@ -345,7 +350,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 	factParents, factRelations, bindVerbs []string) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs)
+		factParents, factRelations, bindVerbs, GrantTypeName(in.ObjectType))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

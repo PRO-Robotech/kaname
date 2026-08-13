@@ -190,3 +190,25 @@ func candidateFrom(table, typeParam, afterParam, limitParam string) string {
 	return "SELECT o.id AS object_id, o.labels\n      FROM " + table + " o\n     WHERE o.id > " +
 		afterParam + "::text\n     ORDER BY o.id\n     LIMIT " + limitParam + "::int"
 }
+
+// GrantTypeName — имя типа в той форме, какой названы типы в ТАБЛИЦАХ ВЫДАЧИ
+// (`role_verb.object_type`, `role_rule_selectors.object_types`): точечной.
+//
+// Вопрос о доступе приходит формой модели прав (`vpc_network`, `account`), а
+// писатель проекции глаголов и селекторов кладёт точечную (`vpc.network`,
+// `iam.account`). Соединение по разным написаниям не совпадает НИКОГДА — и молча:
+// исход выглядит как «права нет», а не как ошибка. Перевод поэтому делается один
+// раз, здесь, ТЕМ ЖЕ каталогом, каким его делает выбор оси меток; второго словаря
+// в соединении не заводится.
+//
+// Тип вне каталога модели возвращается КАК ЕСТЬ, а не пустой строкой: пустая
+// подстановка совпала бы с пустым значением колонки, если бы такое когда-нибудь
+// появилось, и превратила бы «типа не знаем» в «право есть». Неизвестный тип
+// просто ни с чем не совпадёт — тот же исход, что и прежде, но по названной
+// причине.
+func GrantTypeName(objectType string) string {
+	if dotted, known := authzmap.DottedType(objectType); known {
+		return dotted
+	}
+	return objectType
+}

@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 )
 
@@ -106,16 +107,30 @@ func seedRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID, objType, ver
 		             'resources', jsonb_build_array('*'),
 		             'verbs',     jsonb_build_array($3::text))),
 		         'cluster_kacho_root')`, roleID, "test."+verb, verb)
+	// ТИП КЛАДЁТСЯ В ТОЙ ФОРМЕ, В КАКОЙ ЕГО КЛАДЁТ ПРОД, — точечной. Вопрос о
+	// доступе приходит формой модели прав, и посев её же доказывал бы согласие
+	// запроса с фикстурой, а не с продом: соединение сходилось бы на данных,
+	// которых в проде не бывает. Перевод берётся ТОТ ЖЕ, каким его делает
+	// читатель, — второго словаря в дереве не заводится.
+	// Посев берёт КАТАЛОГ напрямую, а не функцию читателя. Иначе фикстура и
+	// продукт зовут одно и то же, и проба доказывает согласие запроса С САМИМ
+	// СОБОЙ: неверный переводчик сместил бы обе стороны одинаково и остался бы
+	// незамеченным. Проверено инъекцией — при общей функции подмена перевода
+	// НЕ роняла ни одной пробы.
+	grantType, known := authzmap.DottedType(objType)
+	if !known {
+		grantType = objType
+	}
 	exec(t, ctx, tx,
 		`INSERT INTO kacho_iam.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
-		roleID, objType, verb)
+		roleID, grantType, verb)
 	// Без селектора роль не адресует ни одного объекта — и это верно, а не
 	// пробел фикстуры.
 	exec(t, ctx, tx,
 		`INSERT INTO kacho_iam.role_rule_selectors
 		   (role_id, rule_fp, arm, object_types, match_labels)
 		 VALUES ($1, 'fp-1', $2, ARRAY[$3::text], $4::jsonb)`,
-		roleID, arm, objType, labels)
+		roleID, arm, grantType, labels)
 }
 
 // Источник 1 — прямой факт.
