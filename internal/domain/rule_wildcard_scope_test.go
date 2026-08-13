@@ -110,7 +110,11 @@ func TestMaterializingSelectors_RolePersistence_ExpandsWildcard(t *testing.T) {
 //
 // rule_fp is UNCHANGED across every re-seed (it hashes the RULE, not object_types); only
 // object_types moves. The constant below mirrors the latest migration to touch the row —
-// currently 0074, which array_remove'd the retired compute block-storage types out of it.
+// currently 0088, which appended `vpc.cidrGroup` (the named prefix set: its type was
+// declared verb-bearing and mirror-registered, but absent from the materializable set, so
+// its creator got denied on their OWN fresh resource — the #71 class, now held tree-wide
+// by authzmap/verb_type_materializable_test.go). Before it, 0074 array_remove'd the
+// retired compute block-storage types out of the same row.
 func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 	const migrationRuleFP = "3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4"
 	migrationObjectTypes := []string{
@@ -120,7 +124,7 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
 		"registry.registries", "registry.repositories",
 		"storage.images", "storage.snapshots", "storage.volumes",
-		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
+		"vpc.address", "vpc.cidrGroup", "vpc.gateway", "vpc.network", "vpc.networkInterface",
 		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
 	}
 
@@ -149,8 +153,9 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 // the verbs (and thus rule_fp) differ; verbs are not stored in role_rule_selectors.
 func TestSystemWildcardRoleSelectors_MigrationLockstep(t *testing.T) {
 	// The full materializable type set the seed migrations hard-code, as it stands after
-	// migration 0074 removed the retired compute block-storage types (mirror of the owner
-	// selector list in TestOwnerRoleSelector_MigrationLockstep).
+	// migration 0088 appended `vpc.cidrGroup` (0074 before it removed the retired compute
+	// block-storage types) — mirror of the owner selector list in
+	// TestOwnerRoleSelector_MigrationLockstep.
 	migrationObjectTypes := []string{
 		"compute.instance",
 		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
@@ -158,7 +163,7 @@ func TestSystemWildcardRoleSelectors_MigrationLockstep(t *testing.T) {
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
 		"registry.registries", "registry.repositories",
 		"storage.images", "storage.snapshots", "storage.volumes",
-		"vpc.address", "vpc.gateway", "vpc.network", "vpc.networkInterface",
+		"vpc.address", "vpc.cidrGroup", "vpc.gateway", "vpc.network", "vpc.networkInterface",
 		"vpc.routeTable", "vpc.securityGroup", "vpc.subnet",
 	}
 	cases := []struct {

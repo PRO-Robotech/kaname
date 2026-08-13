@@ -30,6 +30,16 @@ var labelSelectableTypes = map[string]struct{}{
 	"compute.instance": {},
 
 	// vpc — mirror-fed via vpc→iam RegisterResource extended payload.
+	//
+	// `vpc.cidrGroup` (именованный набор префиксов) заведён здесь ВМЕСТЕ с типом
+	// модели, а не следом за ним: его Create эмитит тот же указатель
+	// принадлежности с собственными labels, что и сосед `vpc.securityGroup`
+	// (ProjectHierarchyItem(..., "vpc_cidr_group", ..., labels)), поэтому он
+	// label-selectable и материализуем на общих основаниях. Пропуск этой строки
+	// — тот же класс, что #71 у storage: тип объявлен в модели, кортеж
+	// принадлежности доезжает, а привязка невидима подбору, и создатель получает
+	// отказ на СВОЁМ свежем наборе. Класс держит гейт
+	// authzmap/verb_type_materializable_test.go, а не эта заметка.
 	"vpc.network":          {},
 	"vpc.subnet":           {},
 	"vpc.securityGroup":    {},
@@ -37,6 +47,7 @@ var labelSelectableTypes = map[string]struct{}{
 	"vpc.address":          {},
 	"vpc.gateway":          {},
 	"vpc.networkInterface": {},
+	"vpc.cidrGroup":        {},
 
 	// loadbalancer (kacho-nlb) — mirror-fed via nlb→iam RegisterResource.
 	"loadbalancer.networkLoadBalancers": {},
