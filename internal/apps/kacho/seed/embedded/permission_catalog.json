@@ -1,11 +1,61 @@
 [
   {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/AddOneToOneNat",
-    "permission": "compute.instance_one_to_one_nats.addOneToOneNat",
+    "fqn": "kacho.cloud.compute.v1.GuestAccessKeyService/Create",
+    "permission": "compute.guest_access_keys.create",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.GuestAccessKeyService/Delete",
+    "permission": "compute.guest_access_keys.delete",
+    "required_relation": "v_delete",
+    "scope_extractor": {
+      "object_type": "compute_guest_access_key",
+      "from_request_field": "guest_access_key_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.GuestAccessKeyService/Get",
+    "permission": "compute.guest_access_keys.get",
+    "required_relation": "v_get",
+    "scope_extractor": {
+      "object_type": "compute_guest_access_key",
+      "from_request_field": "guest_access_key_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.GuestAccessKeyService/List",
+    "permission": "compute.guest_access_keys.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.GuestAccessKeyService/ListOperations",
+    "permission": "compute.guest_access_key_operations.listOperations",
+    "required_relation": "v_list",
+    "scope_extractor": {
+      "object_type": "compute_guest_access_key",
+      "from_request_field": "guest_access_key_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.GuestAccessKeyService/Update",
+    "permission": "compute.guest_access_keys.update",
     "required_relation": "v_update",
     "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
+      "object_type": "compute_guest_access_key",
+      "from_request_field": "guest_access_key_id"
     },
     "required_acr_min": "1"
   },
@@ -100,39 +150,9 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/ListAccessBindings",
-    "permission": "compute.access_bindingses.listAccessBindings",
-    "required_relation": "viewer",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.InstanceService/ListOperations",
     "permission": "compute.instance_operationses.listOperations",
     "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/Relocate",
-    "permission": "compute.instances.relocate",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/RemoveOneToOneNat",
-    "permission": "compute.instance_one_to_one_nats.removeOneToOneNat",
-    "required_relation": "v_update",
     "scope_extractor": {
       "object_type": "compute_instance",
       "from_request_field": "instance_id"
@@ -148,16 +168,6 @@
       "from_request_field": "instance_id"
     },
     "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/SetAccessBindings",
-    "permission": "compute.access_bindingses.setAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
   },
   {
     "fqn": "kacho.cloud.compute.v1.InstanceService/SimulateMaintenanceEvent",
@@ -200,36 +210,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/UpdateAccessBindings",
-    "permission": "compute.access_bindingses.updateAccessBindings",
-    "required_relation": "editor",
-    "scope_extractor": {
-      "object_type": "project",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "2"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/UpdateMetadata",
-    "permission": "compute.instance_metadatas.updateMetadata",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.compute.v1.InstanceService/UpdateNetworkInterface",
-    "permission": "compute.instance_network_interfaces.updateNetworkInterface",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "compute_instance",
-      "from_request_field": "instance_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.InternalMachineTypeService/Create",
     "permission": "compute.machineTypes.create",
     "required_relation": "system_admin",
@@ -256,6 +236,46 @@
     "scope_extractor": {
       "object_type": "cluster",
       "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.InternalNodeOwnershipService/ClaimInstance",
+    "permission": "compute.internal_instances.claim",
+    "required_relation": "realization_writer",
+    "scope_extractor": {
+      "object_type": "compute_instance",
+      "from_request_field": "instance_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.InternalNodeOwnershipService/ReleaseInstance",
+    "permission": "compute.internal_instances.release",
+    "required_relation": "realization_writer",
+    "scope_extractor": {
+      "object_type": "compute_instance",
+      "from_request_field": "instance_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.InternalNodeOwnershipService/RenewLease",
+    "permission": "compute.internal_instances.renewLease",
+    "required_relation": "realization_writer",
+    "scope_extractor": {
+      "object_type": "compute_instance",
+      "from_request_field": "instance_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.InternalRealizationService/ReportInstanceRealization",
+    "permission": "compute.instances.reportRealization",
+    "required_relation": "realization_writer",
+    "scope_extractor": {
+      "object_type": "compute_instance",
+      "from_request_field": "instance_id"
     },
     "required_acr_min": "1"
   },
@@ -287,6 +307,66 @@
     "scope_extractor": {
       "object_type": "cluster",
       "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Create",
+    "permission": "compute.placement_groups.create",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Delete",
+    "permission": "compute.placement_groups.delete",
+    "required_relation": "v_delete",
+    "scope_extractor": {
+      "object_type": "compute_placement_group",
+      "from_request_field": "placement_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Get",
+    "permission": "compute.placement_groups.get",
+    "required_relation": "v_get",
+    "scope_extractor": {
+      "object_type": "compute_placement_group",
+      "from_request_field": "placement_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.PlacementGroupService/List",
+    "permission": "compute.placement_groups.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.PlacementGroupService/ListOperations",
+    "permission": "compute.placement_group_operations.listOperations",
+    "required_relation": "v_list",
+    "scope_extractor": {
+      "object_type": "compute_placement_group",
+      "from_request_field": "placement_group_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Update",
+    "permission": "compute.placement_groups.update",
+    "required_relation": "v_update",
+    "scope_extractor": {
+      "object_type": "compute_placement_group",
+      "from_request_field": "placement_group_id"
     },
     "required_acr_min": "1"
   },
