@@ -95,6 +95,7 @@ var handlerEnforcedPairs = map[verbPair]string{
 // (пара перестала быть мёртвой либо тип перестал её объявлять) — находка: см.
 // утверждение о равенстве ниже.
 var declaredWithoutReader = map[verbPair]string{
+
 	// AddressPool — admin-only ресурс (`security.md` §Internal-vs-external): все 11
 	// RPC `InternalAddressPoolService` гейтятся `system_admin@cluster`, и ни один
 	// путь запроса не спрашивает пообъектный глагол на самом пуле. Тип объявлен

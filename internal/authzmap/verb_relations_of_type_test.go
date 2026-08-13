@@ -43,8 +43,8 @@ func TestVerbRelationsOfType_IsPerTypeAndTotal(t *testing.T) {
 		}
 	}
 	t.Logf("перепись: типов с набором: %d; без набора: %d", full, empty)
-	require.Equalf(t, 24, full,
-		"глагольных типов ожидалось 24, получено %d — число снято перемером против ревизии посадки", full)
+	require.Equalf(t, 26, full,
+		"глагольных типов ожидалось 26, получено %d — число снято перемером против ревизии посадки", full)
 }
 
 // TestVerbRelationsOfType_UnknownTypeCarriesNoSet — неизвестный тип набора не
