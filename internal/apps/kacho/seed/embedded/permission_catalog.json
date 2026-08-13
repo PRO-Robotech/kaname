@@ -2155,32 +2155,12 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.vpc.v1.AddressService/GetByValue",
-    "permission": "vpc.address_by_values.getByValue",
-    "required_relation": "v_get",
-    "scope_extractor": {
-      "object_type": "vpc_subnet",
-      "from_request_field": "subnet_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.vpc.v1.AddressService/List",
     "permission": "vpc.addresses.list",
     "required_relation": "viewer",
     "scope_extractor": {
       "object_type": "project",
       "from_request_field": "project_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.AddressService/ListBySubnet",
-    "permission": "vpc.addresses_by_subnets.listBySubnet",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "vpc_subnet",
-      "from_request_field": "subnet_id"
     },
     "required_acr_min": "1"
   },
@@ -2636,36 +2616,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.vpc.v1.NetworkService/ListRouteTables",
-    "permission": "vpc.network_route_tables.listRouteTables",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "vpc_network",
-      "from_request_field": "network_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.NetworkService/ListSecurityGroups",
-    "permission": "vpc.network_security_groups.listSecurityGroups",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "vpc_network",
-      "from_request_field": "network_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.NetworkService/ListSubnets",
-    "permission": "vpc.network_subnets.listSubnets",
-    "required_relation": "v_list",
-    "scope_extractor": {
-      "object_type": "vpc_network",
-      "from_request_field": "network_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.vpc.v1.NetworkService/RemoveCidrBlocks",
     "permission": "vpc.network_cidr_blocks.removeCidrBlocks",
     "required_relation": "v_update",
@@ -2682,16 +2632,6 @@
     "scope_extractor": {
       "object_type": "vpc_network",
       "from_request_field": "network_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.RouteTableService/AddRoutes",
-    "permission": "vpc.route_tables.update",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "vpc_route_table",
-      "from_request_field": "route_table_id"
     },
     "required_acr_min": "1"
   },
@@ -2746,27 +2686,7 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.vpc.v1.RouteTableService/RemoveRoutes",
-    "permission": "vpc.route_tables.update",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "vpc_route_table",
-      "from_request_field": "route_table_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/Update",
-    "permission": "vpc.route_tables.update",
-    "required_relation": "v_update",
-    "scope_extractor": {
-      "object_type": "vpc_route_table",
-      "from_request_field": "route_table_id"
-    },
-    "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.vpc.v1.RouteTableService/UpdateRoute",
     "permission": "vpc.route_tables.update",
     "required_relation": "v_update",
     "scope_extractor": {
