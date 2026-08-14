@@ -2064,6 +2064,345 @@
           ]
         }
       ]
+    },
+    {
+      "name": "IAM-INT-NEG-EXT-LIMIT-LIST — InternalLimitService.List on the external TLS listener → 404 mux miss (internal-only, ban #6) — refused even to the principal authorised for it",
+      "description": "class:NEG | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-NEG-EXT-LIMIT-LIST :: limit-list-on-external",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "limits"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/limits');",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"EXT-LIMIT-LIST: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-LIMIT-LIST: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss. An unrouted path is answered by",
+                  "// grpc-gateway's ROUTING error — the bare {code:5, message:'Not Found'}, the same",
+                  "// answer a nonsense path gets on this listener. iam's own NOT_FOUND always names",
+                  "// the resource and the id ('<Resource> <id> not found', contract tone), so any",
+                  "// other message here would mean the request REACHED the service.",
+                  "//",
+                  "// This used to ask whether the body was JSON AT ALL, because the hidden route was",
+                  "// answered by a second producer in plain text. That difference was itself an",
+                  "// existence-oracle for the admin surface and has been removed; the discriminator",
+                  "// is the message, not the content type.",
+                  "pm.test('EXT-LIMIT-LIST: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).message, 'any other message here would mean the request REACHED the service')",
+                  "    .to.eql('Not Found');",
+                  "});",
+                  "pm.test('EXT-LIMIT-LIST: no limits page in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).limits, 'limits page must not be in the response').to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-INT-NEG-EXT-LIMIT-CREATE — InternalLimitService.Create on the external TLS listener → 404 mux miss (internal-only, ban #6) — no ceiling is stated from the outside",
+      "description": "class:NEG | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-NEG-EXT-LIMIT-CREATE :: limit-create-on-external",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "limits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"scope\": \"PROJECT\", \"scopeId\": \"{{existingProjectId}}\", \"kind\": \"vpc.network\", \"value\": 4}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — externalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/limits');",
+                  "} else {",
+                  "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
+                  "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"EXT-LIMIT-CREATE: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('EXT-LIMIT-CREATE: status 404 — path is not routed on the external mux', () =>",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                  "// Discriminate a MUX miss from a SERVICE miss. An unrouted path is answered by",
+                  "// grpc-gateway's ROUTING error — the bare {code:5, message:'Not Found'}, the same",
+                  "// answer a nonsense path gets on this listener. iam's own NOT_FOUND always names",
+                  "// the resource and the id ('<Resource> <id> not found', contract tone), so any",
+                  "// other message here would mean the request REACHED the service.",
+                  "//",
+                  "// This used to ask whether the body was JSON AT ALL, because the hidden route was",
+                  "// answered by a second producer in plain text. That difference was itself an",
+                  "// existence-oracle for the admin surface and has been removed; the discriminator",
+                  "// is the message, not the content type.",
+                  "pm.test('EXT-LIMIT-CREATE: 404 is a mux miss, not a service-level NOT_FOUND', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).message, 'any other message here would mean the request REACHED the service')",
+                  "    .to.eql('Not Found');",
+                  "});",
+                  "pm.test('EXT-LIMIT-CREATE: no Operation metadata (a ceiling was stated) in body', () => {",
+                  "  let j = null;",
+                  "  try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "  pm.expect((j || {}).metadata, 'Operation metadata (a ceiling was stated) must not be in the response').to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-INT-OK-INT-LIMIT-LIST — InternalLimitService.List on the cluster-internal listener → 200 with a page (positive control: the two 404s above mean 'not routed here', not 'nowhere at all')",
+      "description": "class:CRUD | class:SEC | priority:P0",
+      "item": [
+        {
+          "name": "IAM-INT-OK-INT-LIMIT-LIST :: limit-list-on-internal",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "limits"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — internalBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/limits');",
+                  "} else {",
+                  "  pm.test('harness config: internalBaseUrl is set — internal-mux positive control — Internal* paths live ONLY on the cluster-internal REST listener', () => {",
+                  "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('INT-LIMIT-LIST: the internal listener serves the page', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j, JSON.stringify(j)).to.be.an('object');",
+                  "  const items = j.limits === undefined ? [] : j.limits;",
+                  "  pm.expect(items, 'limits must be a page, absent meaning empty').to.be.an('array');",
+                  "});",
+                  "pm.test('INT-LIMIT-LIST: the seeded platform defaults are there', () => {",
+                  "  const j = pm.response.json();",
+                  "  const items = j.limits === undefined ? [] : j.limits;",
+                  "  const defs = items.filter(l => l.scope === 'DEFAULT');",
+                  "  pm.expect(defs.length, JSON.stringify(items)).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

@@ -124,20 +124,29 @@ var askingSites = map[string]lane{
 	"internal/authzguard/system_viewer_floor.go:allow":                                             laneClusterOnly,
 	"internal/authzguard/fgaproxy.go:Authorize":                                                    laneClusterOnly,
 	"internal/apps/kacho/api/internal_operations/list_iam_operations.go:requireClusterSystemAdmin": laneClusterOnly,
-	"internal/apps/kacho/api/internal_iam/force_logout.go:requireSystemAdmin":                      laneClusterOnly,
-	"internal/apps/kacho/api/cluster/admin_authz.go:requireClusterSystemAdmin":                     laneClusterOnly,
-	"internal/apps/kacho/api/authorize/whoami.go:Execute":                                          laneClusterOnly,
-	"internal/service/authorize_service.go:check":                                                  laneEdge,
-	"internal/service/authorize_service.go:checkRelationWire":                                      laneEdge,
-	"internal/service/authorize_service.go:structuralFallback":                                     laneEdge,
-	"internal/apps/kacho/api/authorize/handler.go:Check":                                           laneEdge,
-	"internal/apps/kacho/seed/verify_gate.go:VerifyRelationSatisfiesAction":                        laneDelivery,
-	"internal/service/authorize_service.go:ListObjects":                                            laneEnumeration,
-	"internal/service/authorize_service.go:ListSubjects":                                           laneEnumeration,
-	"internal/service/authorize_service.go:ExpandRelations":                                        laneEnumeration,
-	"internal/apps/kacho/api/access_binding/expand_access.go:Execute":                              laneEnumeration,
-	"internal/apps/kacho/api/authorize/handler.go:ListObjects":                                     laneEnumeration,
-	"internal/apps/kacho/api/authorize/handler.go:ListSubjects":                                    laneEnumeration,
+	// Узкое право читать действующие потолки арендатора и их дельту
+	// (InternalLimitService.Resolve / ListChangedSince, issue #291). Объект
+	// вопроса — кластерный синглтон, поэтому структурного факта под ним нет и
+	// обёртка второго шанса ничего не меняет: та же полоса, что у соседей выше.
+	//
+	// Отношение при этом СВОЁ (`quota_reader`), а не кластерный ярус чтения: спрос
+	// здесь — служебная учётка владельца считаемого типа, и `system_viewer` был бы
+	// выдачей много шире самой способности.
+	"internal/apps/kacho/api/limit/usecases.go:requireQuotaReader":             laneClusterOnly,
+	"internal/apps/kacho/api/internal_iam/force_logout.go:requireSystemAdmin":  laneClusterOnly,
+	"internal/apps/kacho/api/cluster/admin_authz.go:requireClusterSystemAdmin": laneClusterOnly,
+	"internal/apps/kacho/api/authorize/whoami.go:Execute":                      laneClusterOnly,
+	"internal/service/authorize_service.go:check":                              laneEdge,
+	"internal/service/authorize_service.go:checkRelationWire":                  laneEdge,
+	"internal/service/authorize_service.go:structuralFallback":                 laneEdge,
+	"internal/apps/kacho/api/authorize/handler.go:Check":                       laneEdge,
+	"internal/apps/kacho/seed/verify_gate.go:VerifyRelationSatisfiesAction":    laneDelivery,
+	"internal/service/authorize_service.go:ListObjects":                        laneEnumeration,
+	"internal/service/authorize_service.go:ListSubjects":                       laneEnumeration,
+	"internal/service/authorize_service.go:ExpandRelations":                    laneEnumeration,
+	"internal/apps/kacho/api/access_binding/expand_access.go:Execute":          laneEnumeration,
+	"internal/apps/kacho/api/authorize/handler.go:ListObjects":                 laneEnumeration,
+	"internal/apps/kacho/api/authorize/handler.go:ListSubjects":                laneEnumeration,
 	// The read half of the reconciler's read-modify-write: what is already delivered on the
 	// object, so the next round writes only what is missing. The subject of the question IS
 	// delivery, and it reads at HIGHER_CONSISTENCY for exactly that reason — a replica-lagged

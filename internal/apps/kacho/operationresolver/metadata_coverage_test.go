@@ -74,6 +74,21 @@ var unresolvedMetadata = []string{
 	"CreateInteractiveClientMetadata",
 	"UpdateInteractiveClientMetadata",
 	"DeleteInteractiveClientMetadata",
+	// Limit{Create,Update,Delete}Metadata — то же основание и та же цена, что у
+	// трёх записей выше: у операций назначения, изменения и отзыва предела НЕТ
+	// воркера. Строка операции создаётся и переводится в терминальное состояние
+	// внутри одного вызова RPC (usecases.go: opsRepo.Create → запись → MarkDone
+	// либо MarkError), поэтому осиротеть ей негде, кроме гибели процесса между
+	// двумя соседними стейтментами. Ветка резолвера потребовала бы внести предел
+	// в CQRS-корень Reader, тогда как ресурс намеренно живёт отдельным адаптером
+	// (кластерная админ-поверхность, не тенантная).
+	//
+	// Это ДОЛГ С ЧИСЛОМ — записей стало шесть, — а не прощение: закрывается тем
+	// же заходом, что пара ClusterAdmin и тройка InteractiveClient, когда у
+	// админ-поверхности появится общий путь разрешения.
+	"CreateLimitMetadata",
+	"UpdateLimitMetadata",
+	"DeleteLimitMetadata",
 	"InviteUserMetadata",
 	"IssueSAKeyMetadata",
 	"IssueUserTokenMetadata",

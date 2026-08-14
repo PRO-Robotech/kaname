@@ -93,6 +93,21 @@ func GatewayFrontedInternalRPCs() []string {
 		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Create",
 		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Update",
 		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Delete",
+		// InternalLimitService — administration of resource-count ceilings
+		// (issue #291). The five CRUD verbs are gateway-fronted: an operator acts
+		// through the edge, and no module has business dialling them.
+		//
+		// Resolve / ListChangedSince are deliberately ABSENT: they are
+		// service→service reads made by the OWNER of the counted resource type
+		// (vpc today, the other owners next), so restricting them to the
+		// api-gateway SA would make the capability unreachable by its only
+		// intended caller. They are gated instead by the narrow `quota_reader`
+		// relation — at the edge catalog and again in-handler.
+		"/kacho.cloud.iam.v1.InternalLimitService/Get",
+		"/kacho.cloud.iam.v1.InternalLimitService/List",
+		"/kacho.cloud.iam.v1.InternalLimitService/Create",
+		"/kacho.cloud.iam.v1.InternalLimitService/Update",
+		"/kacho.cloud.iam.v1.InternalLimitService/Delete",
 		// InternalAuthorizeService — tuple/model administration (admin tooling).
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",

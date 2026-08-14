@@ -29,6 +29,7 @@ import (
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 	internaloperationsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_operations"
+	limitapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/limit"
 	permissioncatalogapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/permission_catalog"
 	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
 	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
@@ -90,6 +91,11 @@ type services struct {
 	// interactiveClientHandler — InternalInteractiveClientService: lifecycle of
 	// the OAuth2 client a HUMAN signs in through (IAM-INT-1). Internal-only.
 	interactiveClientHandler *interactiveclientapp.Handler
+
+	// limitHandler — InternalLimitService: the ceiling on how many resources of
+	// one kind a tenant may hold, plus the two reads owner-services live on
+	// (Resolve / ListChangedSince). Internal-only (ban #6), registered on :9091.
+	limitHandler *limitapp.Handler
 
 	// sessionRevocationsHandler — InternalSessionRevocationsService:
 	// token revocation on logout / force-logout + the api-gateway
@@ -736,6 +742,29 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithAdminChecker(relationStore)
 	internalOperationsHandler := internaloperationsapp.NewHandler(internalOperationsUC)
 
+	// ── InternalLimitService — resource-count ceilings (issue #291, S1) ───────
+	// Two audiences, two gates. The five CRUD verbs are admin surface and are
+	// gated by the catalog (system_admin @ cluster) at the edge. Resolve /
+	// ListChangedSince are dialled by the OWNER services that do the counting,
+	// so they carry the narrow `quota_reader` relation instead — the same
+	// least-privilege shape the fga-proxy authority uses, and NOT the cluster
+	// read tier, which would hand an owner service the whole cluster-scoped read
+	// surface to learn two numbers.
+	//
+	// The checker is wired here and nowhere else: an unwired gate fails CLOSED
+	// inside the use-case, because an unauthorised read of the platform's
+	// ceilings is not a lesser failure than an unauthorised write.
+	limitRepo := kachopg.NewLimitRepo(pool)
+	limitHandler := limitapp.NewHandler(
+		limitapp.NewGetUseCase(limitRepo),
+		limitapp.NewListUseCase(limitRepo),
+		limitapp.NewCreateUseCase(limitRepo, opsRepo, logger),
+		limitapp.NewUpdateUseCase(limitRepo, opsRepo, logger),
+		limitapp.NewDeleteUseCase(limitRepo, opsRepo, logger),
+		limitapp.NewResolveUseCase(limitRepo).WithQuotaReaderChecker(relationStore),
+		limitapp.NewListChangedUseCase(limitRepo, limitRepo).WithQuotaReaderChecker(relationStore),
+	)
+
 	// ── PermissionCatalogService — RBAC rules-model G public catalog ──
 	// In-code projection (authzmap + domain): no repo, no peer-call. Stateless.
 	permissionCatalogHandler := permissioncatalogapp.NewHandler(
@@ -755,6 +784,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// interactive-login client lifecycle.
 		interactiveClientHandler: interactiveClientHandler,
+
+		// resource-count ceilings (admin CRUD + owner-facing resolve/delta).
+		limitHandler: limitHandler,
 
 		// token revocation (logout / force-logout).
 		sessionRevocationsHandler: sessionRevocationsHandler,

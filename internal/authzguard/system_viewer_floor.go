@@ -106,6 +106,19 @@ func ReadFloorRPCs() []string {
 		// policy plus the acr floor.
 		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
 		"/kacho.cloud.iam.v1.InternalInteractiveClientService/List",
+		// InternalLimitService — admin reads of the resource-count ceilings
+		// (gateway-fronted; floor AND gateway-only both apply). The three
+		// mutations of the same service are deliberately ABSENT: the read floor is
+		// for reads, and the mutations are governed by the caller policy plus the
+		// acr floor.
+		//
+		// Resolve / ListChangedSince are ALSO absent, and for a different reason:
+		// they are read by owner SERVICES, and putting them under this floor would
+		// require every owner to hold `system_viewer` on the cluster — the whole
+		// cluster-scoped read surface — in addition to the narrow relation that is
+		// supposed to be the entire grant.
+		"/kacho.cloud.iam.v1.InternalLimitService/Get",
+		"/kacho.cloud.iam.v1.InternalLimitService/List",
 		// InternalAuthorizeService — admin-tooling tuple/store reads (gateway-
 		// fronted; floor AND gateway-only both apply).
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",

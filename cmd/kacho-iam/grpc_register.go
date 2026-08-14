@@ -116,6 +116,14 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	if svcs != nil && svcs.interactiveClientHandler != nil {
 		iamv1.RegisterInternalInteractiveClientServiceServer(srv, svcs.interactiveClientHandler)
 	}
+	// InternalLimitService — resource-count ceilings (issue #291). Internal-only
+	// (ban #6): NEVER registered on the external listener. The five CRUD verbs are
+	// gateway-fronted admin surface; Resolve / ListChangedSince are dialled
+	// directly by owner services and carry the narrow `quota_reader` relation
+	// both at the edge catalog and in-handler.
+	if svcs != nil && svcs.limitHandler != nil {
+		iamv1.RegisterInternalLimitServiceServer(srv, svcs.limitHandler)
+	}
 	// InternalSessionRevocationsService — token revocation
 	// (logout / force-logout write + IsRevoked hot-path + admin ListByUser).
 	// Internal-only (запрет #6); the api-gateway logout handler + refresh-hook
