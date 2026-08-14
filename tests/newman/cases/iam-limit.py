@@ -106,9 +106,27 @@ def _assert_status_one_of(codes, why):
     a step earlier than the backend would refuse it. Both listed codes are
     refusals; the assertion that carries the weight is that 2xx is not among them.
     """
+    # Список кодов раскрывается ЗДЕСЬ, литералом, а не приходит выражением.
+    #
+    # Гейт смешанных исходов читает аргумент `oneOf` статически и отказывается
+    # считать непрочитанное чистым — он прав: «не смог прочитать» неотличимо от
+    # «чисто». Прежняя форма подставляла `{list(codes)!r}`, и предикат честно
+    # объявлял место непроверенным.
+    #
+    # Оба допустимых списка — ОТКАЗЫ, и оба про ПОРЯДОК, а не про
+    # неопределённость: край решает про доступ раньше, чем судит тело, поэтому
+    # недостижимый субъект получает отказ на шаг раньше. Успех не входит ни в
+    # один — это и есть несущее утверждение.
+    if list(codes) == [403, 404]:
+        rendered = "[403, 404]"
+    else:  # предохранитель: новый список обязан быть назван здесь же
+        raise AssertionError(
+            f"неизвестный список кодов {list(codes)!r}: добавь его литералом в "
+            "_assert_status_one_of, иначе гейт смешанных исходов не сможет его прочитать"
+        )
     return [
         f"pm.test({repr(why)}, () => {{",
-        f"  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf({list(codes)!r});",
+        f"  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf({rendered});",
         "});",
     ]
 
