@@ -83,6 +83,8 @@ var notDerivableHere = map[string]string{
 	"vpc_address_pool":          "owned by kacho-vpc",
 	"vpc_cidr_group":            "owned by kacho-vpc",
 	"compute_instance":          "owned by kacho-compute",
+	"compute_guest_access_key":  "owned by kacho-compute",
+	"compute_placement_group":   "owned by kacho-compute",
 	"nlb_network_load_balancer": "owned by kacho-nlb",
 	"nlb_target_group":          "owned by kacho-nlb",
 	"nlb_listener":              "owned by kacho-nlb",

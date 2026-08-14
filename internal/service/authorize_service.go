@@ -1201,15 +1201,14 @@ func resolveActionToRelation(action string) string {
 	// Action verbs that are semantically editor-level mutations but are not
 	// the canonical CRUD verbs. Mapping them to a real model relation avoids
 	// an FGA 400 (unknown relation) on the Check.
-	case "invite", "move", "relocate", "start", "stop", "restart",
+	case "invite", "move", "start", "stop", "restart",
 		"addmember", "removemember", "addmembers", "removemembers",
 		"attachdisk", "detachdisk", "attachnetworkinterface",
 		"detachnetworkinterface", "attachfilesystem", "detachfilesystem",
-		"updatemetadata", "updatenetworkinterface", "addonetoonenat",
-		"removeonetoonenat", "addlistener", "removelistener",
+		"addlistener", "removelistener",
 		"attachtargetgroup", "detachtargetgroup", "enablezones",
 		"disablezones", "addtargets", "removetargets",
-		"setaccessbindings", "updateaccessbindings", "updaterule",
+		"updaterule",
 		"updaterules", "addcidrblocks", "removecidrblocks",
 		// SAKey credential-mutation verbs — issuing/revoking a Service Account
 		// OAuth key (SAKeyService.Issue/Revoke). Catalog gates these at editor;

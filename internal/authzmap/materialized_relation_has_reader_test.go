@@ -177,7 +177,9 @@ var knownUnread = map[string][]string{
 	//
 	// Снятие самих отношений — решение доменов-владельцев со своим разбором.
 	// Перечень самоистекает в обе стороны.
-	"v_list":   {"vpc_address_pool", "storage_snapshot"},
+	// storage_snapshot отсюда снят: SnapshotService/ListOperations читает v_list,
+	// значит послаблению больше нечего исключать.
+	"v_list":   {"vpc_address_pool"},
 	"v_update": {"vpc_address_pool"},
 	"v_delete": {"vpc_address_pool"},
 }

@@ -116,7 +116,7 @@ model
 #   - per-domain object types — `vpc_network`, `vpc_subnet`, `vpc_address`,
 #     `vpc_security_group`, `vpc_route_table`, `vpc_gateway`,
 #     `vpc_network_interface`, `vpc_address_pool`, `vpc_cidr_group`,
-#     `compute_instance`,
+#     `compute_instance`, `compute_guest_access_key`, `compute_placement_group`,
 #     `storage_volume`, `storage_snapshot`, `storage_image`,
 #     `nlb_network_load_balancer`, `nlb_target_group`,
 #     `nlb_listener` (KAC-178 §4 — Listener as first-class FGA object),
@@ -529,6 +529,66 @@ type compute_instance
     define viewer: [user, service_account, group#member] or editor
     define ssh: [user with mfa_fresh, service_account] or admin
     define console: [user with mfa_fresh] or admin
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+    # realization_writer — входящий канал плоскости исполнения:
+    # `InternalRealizationService/ReportInstanceRealization` (:9091, взаимный TLS).
+    #
+    # Отношение объявлено ЗДЕСЬ, потому что каталог прав его ТРЕБУЕТ. Запись
+    # каталога, ссылающаяся на отношение, которого нет в модели, — не «строгий по
+    # умолчанию отказ», а сломанная по построению проверка: хранилище прав
+    # отвергает такой вопрос как ошибку модели, и RPC отказывает КАЖДОМУ
+    # предъявителю. Тот же класс уже стоил трёх разборов (`nlb_listener`
+    # `project`, `storage_*`, `nlb` `announce_writer`).
+    #
+    # Носитель — ТОЛЬКО исполнитель этой машины. Право не выдаётся заранее и не
+    # распространяется на облако: оно материализуется вместе с обменом владением
+    # (узел взял машину) и снимается вместе с ним. Иначе предъявитель
+    # сертификата отчитывался бы о ЛЮБОЙ машине облака, а наблюдаемое состояние —
+    # это то, на что опирается решение о перезапуске.
+    #
+    # Арендатор его не получает ни при какой роли: наблюдаемое сообщает
+    # исполнитель, и возможность «сообщить о себе» сделала бы факт исполнителя
+    # управляемым извне.
+    define realization_writer: [service_account]
+
+# compute_placement_group — правило взаимного размещения машин как объект прав.
+#
+# Тип нужен по той же причине, что у ключа входа: запрос на чтение, правку и
+# снятие несёт ТОЛЬКО идентификатор группы, поэтому край не может вывести проект
+# иначе как резолвом цели у владельца прав.
+type compute_placement_group
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
+    define v_get: [user, service_account, group#member] or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
+    define v_update: [user, service_account, group#member] or super_admin
+    define v_delete: [user, service_account, group#member] or super_admin
+
+# compute_guest_access_key — публичный ключ входа в машину как ОТДЕЛЬНЫЙ объект
+# прав.
+#
+# Тип нужен не ради симметрии: запрос на чтение и снятие ключа несёт ТОЛЬКО его
+# идентификатор, поэтому край не может вывести проект иначе как резолвом цели у
+# владельца прав. Без пообъектного типа пришлось бы принимать проект от
+# вызывающего — то есть спрашивать разрешения у того, кого проверяем.
+#
+# `ssh`/`console` здесь не объявлены: они про вход В МАШИНУ, а не про управление
+# перечнем ключей. Объявить их значило бы завести отношение, которого никто не
+# спрашивает.
+type compute_guest_access_key
+  relations
+    define project: [project]
+    define super_admin: super_admin from project
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or editor
     define v_get: [user, service_account, group#member] or super_admin
     define v_list: [user, service_account, group#member] or super_admin
     define v_update: [user, service_account, group#member] or super_admin
