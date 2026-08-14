@@ -1,0 +1,555 @@
+---
+id: limit
+sidebar_position: 9
+title: Limit
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Limit
+
+**Limit** — потолок на число ресурсов **одного вида**, которые вправе держать арендатор.
+Сколько сетей, подсетей, адресов, интерфейсов, групп правил, таблиц маршрутизации, шлюзов,
+наборов префиксов и проектов заводит один арендатор — величина, назначаемая администратором
+платформы, а не следствие того, кто первым успел.
+
+:::danger Поверхность — только внутренняя
+`InternalLimitService` живёт **исключительно** на cluster-internal слушателе (`:9091`) под
+путём `/iam/v1/internal/limits` и на внешний TLS-эндпоинт не публикуется. Назначение потолка —
+административное действие о доле арендатора в общей платформе, и tenant-facing предмета у
+вопроса «насколько большим может быть ваш потолок» нет. Свой действующий потолок и своё
+потребление арендатор читает **у владельца вида ресурса**, а не здесь.
+
+Изоляцию держит диспетчер края: он классифицирует запрос по принадлежности метода
+`Internal*`-сервису, поэтому внешнему источнику путь отвечает `404`, скрывая существование.
+:::
+
+## Где живёт величина, а где — учёт
+
+Здесь хранится **только величина**. Учёт и отказ живут у владельца вида ресурса, и это не
+разделение обязанностей ради красоты: списание обязано быть атомарным с той самой вставкой,
+которая создаёт строку, а «прочитать у соседа → записать у себя» — это проверка-и-действие
+через сеть, то есть гонка с двумя победителями.
+
+Отсюда следует форма работы владельца: он держит **проекцию** потолков у себя и обновляет её
+дельтой ([`ListChangedSince`](#listchangedsince--дельта-для-проекции)), а когда проекции
+нечего сказать про арендатора — спрашивает [`Resolve`](#resolve--действующие-потолки).
+
+## Три области видимости и их старшинство
+
+Потолок объявляется на одном из трёх уровней. Более частное перекрывает более общее:
+
+**`PROJECT` → `ACCOUNT` → `DEFAULT`**
+
+Отсутствие строки на уровне — это **не** «потолка нет», это «здесь ничего не сказано», и
+отвечает следующий уровень. Разрешение старшинства выполняется **один раз**, в `Resolve`:
+если бы каждый владелец вида реализовал трёхуровневое правило сам, эти реализации разошлись
+бы при первом же расширении.
+
+<table>
+  <thead><tr><th>Область</th><th><code>scopeId</code></th><th>Действие</th></tr></thead>
+  <tbody>
+    <tr><td><code>DEFAULT</code></td><td>пустой (и только пустой)</td><td>Умолчание платформы; ровно одна действующая строка на вид</td></tr>
+    <tr><td><code>ACCOUNT</code></td><td>идентификатор аккаунта</td><td>Все проекты аккаунта, если проект не объявил своего</td></tr>
+    <tr><td><code>PROJECT</code></td><td>идентификатор проекта</td><td>Один проект; самый частный уровень</td></tr>
+  </tbody>
+</table>
+
+Пара «область ↔ её предмет» закреплена ограничением БД, а не соглашением: состояние «сказано
+про аккаунт, но не сказано про какой» **невыразимо**.
+
+## Поля
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор вида <code>lim-&lt;17 crockford-base32&gt;</code>, 21 символ. Назначается при Create и неизменяем всю жизнь ресурса</td></tr>
+    <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (RFC 3339, усечён до секунд)</td></tr>
+    <tr><td><code>scope</code></td><td>enum</td><td>immutable</td><td><code>DEFAULT</code> · <code>ACCOUNT</code> · <code>PROJECT</code></td></tr>
+    <tr><td><code>scopeId</code></td><td>string</td><td>immutable</td><td>Идентификатор аккаунта или проекта; пуст ровно для <code>DEFAULT</code></td></tr>
+    <tr><td><code>kind</code></td><td>string</td><td>immutable</td><td>Вид ресурса — точечный токен <code>domain.resource</code> из закрытого каталога</td></tr>
+    <tr><td><code>value</code></td><td>int64</td><td><strong>mutable</strong></td><td>Сам потолок. Ноль законен и означает «ни одного ресурса этого вида»; отрицательное отвергается</td></tr>
+    <tr><td><code>revision</code></td><td>int64</td><td>output-only</td><td>Монотонная ревизия; двигается на изменении величины и на отзыве</td></tr>
+  </tbody>
+</table>
+
+:::warning У Limit нет `name` — и это решение, а не пропуск
+Потолок адресуется **тройкой**, которой он управляет: `(scope, scopeId, kind)`. Косметическая
+метка была бы вторым способом назвать одну вещь. Внешне адресуемая идентичность — только
+неизменяемый `id`.
+:::
+
+### `value`: ноль законен, отрицательное отвергается
+
+Ноль — **осмысленная величина**, а не «не задано»: «ни одного ресурса этого вида создать
+нельзя». Поэтому нулём нельзя выразить «снять ограничение» — для этого есть
+[`Delete`](#delete--отозвать-потолок).
+
+Отрицательная величина отвергается **дважды и по имени поля**: доменной проверкой
+(`INVALID_ARGUMENT`, `"Illegal argument value: must not be negative"`) и ограничением БД
+`limit_value >= 0`. Первое называет вызывающему поле, второе делает состояние невыразимым
+для любого писателя.
+
+:::note Значения «без ограничения» не существует
+Ни `-1`, ни любое другое число не означает «безлимитно»: контракт принимает только
+неотрицательные величины. «Ограничения нет» выражается **отсутствием действующей строки на
+всех трёх уровнях**, и владельцы видов трактуют это как отказ гадать, а не как «бесконечно».
+:::
+
+### `kind`: закрытый каталог
+
+Потолок объявляется только на виде, который кто-то **считает**. Вид вне каталога отвергается
+по имени при создании: потолок на невидимый вид был бы принят и никогда не применён —
+администратор увидел бы успех, а арендатор не увидел бы эффекта.
+
+<table>
+  <thead><tr><th>Владелец</th><th>Виды</th></tr></thead>
+  <tbody>
+    <tr><td><code>vpc</code></td><td><code>vpc.network</code>, <code>vpc.subnet</code>, <code>vpc.address</code>, <code>vpc.networkInterface</code>, <code>vpc.securityGroup</code>, <code>vpc.routeTable</code>, <code>vpc.gateway</code>, <code>vpc.cidrGroup</code></td></tr>
+    <tr><td><code>iam</code></td><td><code>iam.project</code></td></tr>
+  </tbody>
+</table>
+
+Форма токена (`domain.resource`) проверяется ограничением БД, **членство** в каталоге —
+доменом. Разделение осознанное: форма переживёт любой новый домен, а перечень видов растёт —
+вписанный в миграцию, он требовал бы новой миграции на каждый вид, а применённую миграцию
+править нельзя.
+
+:::note Перечень растёт — сверяйте его деревом, а не этой страницей
+Таблица выше — состояние каталога, а не его определение. Каталог **один**, живёт в домене iam
+и закреплён проверками, требующими, чтобы каждая запись называла существующий тип объекта
+модели прав, а новый считаемый тип не появлялся без потолка либо без объявленного исключения.
+
+Перечитать действующий перечень:
+
+```bash
+grep -A14 'var countableKinds' services/iam/internal/domain/limit.go
+```
+:::
+
+### Умолчания платформы
+
+Посеяны миграцией и являются **единственным** местом в продукте, где эти числа записаны.
+Величина, назначенная константой кода или чарта владельца вида, была бы вторым источником — и
+администратор, поднявший потолок здесь, не понял бы, почему это не подействовало.
+
+<table>
+  <thead><tr><th>Вид</th><th>Умолчание</th><th>Вид</th><th>Умолчание</th></tr></thead>
+  <tbody>
+    <tr><td><code>vpc.network</code></td><td>16</td><td><code>vpc.securityGroup</code></td><td>64</td></tr>
+    <tr><td><code>vpc.subnet</code></td><td>64</td><td><code>vpc.routeTable</code></td><td>32</td></tr>
+    <tr><td><code>vpc.address</code></td><td>256</td><td><code>vpc.gateway</code></td><td>16</td></tr>
+    <tr><td><code>vpc.networkInterface</code></td><td>128</td><td><code>vpc.cidrGroup</code></td><td>64</td></tr>
+    <tr><td><code>iam.project</code></td><td>16</td><td></td><td></td></tr>
+  </tbody>
+</table>
+
+Числа **выбраны**, а не измерены, и внутренне согласованы: адресов не меньше двух на интерфейс
+(v4 + v6), подсетей не меньше четырёх на сеть. Сеть — самая дорогая строка домена, поэтому её
+потолок самый низкий. Пересмотр — когда доля проектов, упирающихся в потолок, перестанет быть
+пренебрежимой; величина наблюдаема после того, как владельцы начнут считать.
+
+Действующие умолчания читаются посевом миграции — сверяйте им, а не таблицей выше:
+
+```bash
+grep -A12 "INSERT INTO kacho_iam.limits" \
+  services/iam/internal/migrations/0092_resource_count_limits.sql
+```
+
+## Два круга вызывающих, два разных гейта
+
+<table>
+  <thead><tr><th>Методы</th><th>Кто зовёт</th><th>Отношение</th><th>Порог аутентификации</th></tr></thead>
+  <tbody>
+    <tr><td><code>Get</code>, <code>List</code></td><td>оператор через край</td><td><code>system_admin</code> на объекте кластера</td><td><code>1</code></td></tr>
+    <tr><td><code>Create</code>, <code>Update</code>, <code>Delete</code></td><td>оператор через край</td><td><code>system_admin</code> на объекте кластера</td><td><strong><code>2</code></strong></td></tr>
+    <tr><td><code>Resolve</code>, <code>ListChangedSince</code></td><td>сервис-владелец вида</td><td><strong><code>quota_reader</code></strong></td><td><code>1</code></td></tr>
+  </tbody>
+</table>
+
+Узкое отношение для двух служебных чтений — наименьшая привилегия, а не таксономия: общий
+читательский ярус кластера отдал бы сервису-владельцу всю кластерную поверхность чтения ради
+двух чисел.
+
+Порог `2` у мутаций объявлен **явно у каждого метода**: поднять или опустить потолок значит
+изменить то, что арендатор вправе сделать с общим ресурсом. Порог `1` у четырёх чтений — тоже
+явно, чтобы чувствительность приходила решением, а не умолчанием генератора.
+
+## Методы
+
+Чтения (`Get` / `List` / `Resolve` / `ListChangedSince`) — синхронные. Мутации асинхронны и
+возвращают [`Operation`](/api/operations).
+
+:::danger Идентификатор в метаданных операции чеканится ДО асинхронного шага
+`limitId` попадает в `metadata` в момент **создания** операции — раньше, чем выполнится сама
+запись. Поэтому строка операции с `done: true` и **ошибкой** всё равно несёт идентификатор,
+которому не соответствует ни один ресурс.
+
+Порядок обязателен и он один: **опросить операцию до `done` → убедиться, что `error`
+отсутствует → и только тогда читать `metadata`.** Чтение идентификатора без проверки ошибки
+даёт фантом: последующие вызовы по нему получают `NOT_FOUND`, и виновником выглядит чтение, а
+не создание.
+:::
+
+### Get — получить потолок
+
+<ApiOperation method="GET" endpoint="/iam/v1/internal/limits/{limit_id}">
+
+Возвращает потолок по идентификатору. Синхронно.
+
+Идентификатор неверной формы отвергается **первым же оператором** метода —
+`INVALID_ARGUMENT`; корректный идентификатор без строки — `NOT_FOUND` (полоса прямого
+чтения: это собственный ресурс iam).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'https://<cluster-internal>/iam/v1/internal/limits/lim-7mfpj2my52k5a06kg' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "lim-7mfpj2my52k5a06kg",
+      "createdAt": "2026-08-14T10:05:00Z",
+      "scope": "PROJECT",
+      "scopeId": "prj7mfpj2my52k5a06kg",
+      "kind": "vpc.network",
+      "value": "4",
+      "revision": "17"
+    }
+  `}
+</CodeBlock>
+
+:::note `int64` в JSON — строка
+`value` и `revision` объявлены `int64`, а JSON-проекция grpc-gateway передаёт 64-битные целые
+**строкой**. Это конвенция транспорта, а не свойство поля.
+:::
+
+</ApiOperation>
+
+### List — перечислить потолки
+
+<ApiOperation method="GET" endpoint="/iam/v1/internal/limits">
+
+Возвращает страницу потолков с курсорной пагинацией по `(createdAt, id)`. Синхронно.
+
+Сужается тремя **типизированными** параметрами — `scope`, `scopeId`, `kind`. Выражения-фильтра
+здесь нет намеренно: словарь закрыт и трёхзначен, а разборщик завёл бы вторую грамматику,
+единственная работа которой — принять те же три значения.
+
+<table>
+  <thead><tr><th>Параметр</th><th>Смысл</th></tr></thead>
+  <tbody>
+    <tr><td><code>scope</code></td><td>Сузить до одной области; опущен — все</td></tr>
+    <tr><td><code>scopeId</code></td><td>Сузить до потолков одного объекта. Законен <strong>без</strong> <code>scope</code> — «везде, где назван этот объект»</td></tr>
+    <tr><td><code>kind</code></td><td>Сузить до одного вида; опущен — все</td></tr>
+    <tr><td><code>pageSize</code></td><td>0 → умолчание; больше 1000 — <strong>отвергается</strong>, а не обрезается</td></tr>
+    <tr><td><code>pageToken</code></td><td>Непрозрачный курсор предыдущего ответа</td></tr>
+  </tbody>
+</table>
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'https://<cluster-internal>/iam/v1/internal/limits?scope=PROJECT&scopeId=prj7mfpj2my52k5a06kg&pageSize=50' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "limits": [
+        {
+          "id": "lim-7mfpj2my52k5a06kg",
+          "createdAt": "2026-08-14T10:05:00Z",
+          "scope": "PROJECT",
+          "scopeId": "prj7mfpj2my52k5a06kg",
+          "kind": "vpc.network",
+          "value": "4",
+          "revision": "17"
+        }
+      ],
+      "nextPageToken": ""
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### Create — объявить потолок
+
+<ApiOperation method="POST" endpoint="/iam/v1/internal/limits" async>
+
+Объявляет потолок для одной тройки `(scope, scopeId, kind)`. Асинхронно (`response: Limit`).
+
+Тройка уникальна **среди действующих** потолков: повторный Create на ту же тройку —
+`ALREADY_EXISTS`, и это обещание держит ограничение БД, а не проверка перед записью, поэтому
+два одновременных создания дают одну строку и один отказ.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'https://<cluster-internal>/iam/v1/internal/limits' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+            "scope":   "PROJECT",
+            "scopeId": "prj7mfpj2my52k5a06kg",
+            "kind":    "vpc.network",
+            "value":   4
+          }'
+  `}
+</CodeBlock>
+
+Ответ — `Operation`; после `done: true` и **отсутствия** `error` идентификатор доступен в
+`metadata.limitId`:
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "iop_8b0c4d2e6f1a3",
+      "description": "Create limit vpc.network for project prj7mfpj2my52k5a06kg",
+      "createdAt": "2026-08-14T10:05:00Z",
+      "done": true,
+      "metadata": { "limitId": "lim-7mfpj2my52k5a06kg" },
+      "response": {
+        "id": "lim-7mfpj2my52k5a06kg",
+        "createdAt": "2026-08-14T10:05:00Z",
+        "scope": "PROJECT",
+        "scopeId": "prj7mfpj2my52k5a06kg",
+        "kind": "vpc.network",
+        "value": "4",
+        "revision": "17"
+      }
+    }
+  `}
+</CodeBlock>
+
+`scope` обязателен: `SCOPE_UNSPECIFIED` отвергается **по имени**, а не заменяется умолчанием —
+всякое умолчание здесь было бы догадкой о радиусе действия потолка.
+
+</ApiOperation>
+
+### Update — изменить величину
+
+<ApiOperation method="PATCH" endpoint="/iam/v1/internal/limits/{limit_id}" async>
+
+Меняет потолок. **`value` — единственное изменяемое поле**: тройка, которой потолок
+управляет, и есть его идентичность, поэтому «перенести» потолок на другой проект или вид —
+это другой потолок, созданный и отозванный явно.
+
+<table>
+  <thead><tr><th>Маска</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td>пустая</td><td>полный PATCH по изменяемым полям</td></tr>
+    <tr><td><code>value</code></td><td>применяется</td></tr>
+    <tr><td><code>scope</code> / <code>scopeId</code> / <code>kind</code> / <code>id</code> / <code>createdAt</code> / <code>revision</code></td><td><code>INVALID_ARGUMENT</code>: <code>"&lt;поле&gt; is immutable after Limit.Create"</code></td></tr>
+    <tr><td>неизвестное поле</td><td><code>INVALID_ARGUMENT</code> против известного набора</td></tr>
+  </tbody>
+</table>
+
+Неизменяемые поля проверяются **до** сверки с известным набором: набор их не содержит, поэтому
+общий ответ «неизвестное поле» сработал бы первым и вызывающий никогда не узнал бы, что поле
+существует и просто не меняется.
+
+Маска принимается в **обоих** написаниях — `scope_id` (proto) и `scopeId` (REST): они называют
+одно поле, и отказ в одном из них поставил бы ответ в зависимость от того, какой дверью вошли.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X PATCH 'https://<cluster-internal>/iam/v1/internal/limits/lim-7mfpj2my52k5a06kg' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "updateMask": "value", "value": 32 }'
+  `}
+</CodeBlock>
+
+:::info Понизить потолок ниже текущего потребления — законно, и в этом смысл
+Такая правка замораживает создание, оставляя существующее читаемым и удаляемым. Схема,
+запрещающая это состояние, сделала бы штатное административное действие **невыразимым**:
+«занято больше, чем разрешено» — законное состояние, а не ошибка.
+:::
+
+</ApiOperation>
+
+### Delete — отозвать потолок
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/internal/limits/{limit_id}" async>
+
+Отзывает потолок. Тройка возвращается следующему уровню старшинства; отзыв `DEFAULT`
+оставляет вид без потолка **на всех уровнях**, и владельцы трактуют это как отказ гадать, а не
+как «безлимитно».
+
+**Идемпотентно**: повторный отзыв не отличается кодом от первого.
+
+Отзыв — **надгробие, а не удаление строки**. Причина в том, как владельцы обновляют проекцию:
+дельта, знающая только о записях, не способна ни понизить, ни снять строку проекции —
+отозванный потолок проекта перекрывал бы аккаунт вечно, а проекция стала бы записью всего, что
+когда-либо было верно.
+
+Отсюда же **частичность** уникальности: тройка уникальна среди действующих, поэтому потолок,
+отозванный вчера, не мешает объявить его заново сегодня.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X DELETE 'https://<cluster-internal>/iam/v1/internal/limits/lim-7mfpj2my52k5a06kg' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+:::note Удаление проекта или аккаунта отзывает его потолки
+Той же транзакцией, что удаляет референт. Это не запрет удаления: потолок не есть повод
+удерживать проект. Ревизия при этом двигается, поэтому отзыв виден дельте как изменение.
+:::
+
+</ApiOperation>
+
+### Resolve — действующие потолки
+
+<ApiOperation method="GET" endpoint="/iam/v1/internal/limits:resolve">
+
+Возвращает потолки, **действующие** для одного объекта области видимости, по каждому виду,
+которым владеет названный сервис. Синхронно. Отношение — `quota_reader`.
+
+Старшинство применяется здесь: `PROJECT` над `ACCOUNT` над `DEFAULT`.
+
+<table>
+  <thead><tr><th>Параметр</th><th>Смысл</th></tr></thead>
+  <tbody>
+    <tr><td><code>scopeId</code></td><td>Обязателен. Идентификатор проекта (обычный случай) или аккаунта. Вид объекта устанавливается <strong>поиском</strong>, никогда чтением префикса</td></tr>
+    <tr><td><code>service</code></td><td>Обязателен. Сервис, чьи виды нужны (<code>vpc</code>, <code>iam</code>)</td></tr>
+  </tbody>
+</table>
+
+Ответ несёт по строке на **каждый** вид этого сервиса, поэтому вызывающему не нужно знать,
+какие виды существуют: каталог принадлежит платформе, а не копии у вызывающего. Сервис, за
+которым не числится ни одного считаемого вида, отвергается по имени — пустой ответ читался бы
+как «у арендатора нет потолков», и владельцу пришлось бы гадать.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'https://<cluster-internal>/iam/v1/internal/limits:resolve?scopeId=prj7mfpj2my52k5a06kg&service=vpc' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "limits": [
+        { "kind": "vpc.network",   "value": "4",   "sourceScope": "PROJECT", "sourceScopeId": "prj7mfpj2my52k5a06kg" },
+        { "kind": "vpc.subnet",    "value": "128", "sourceScope": "ACCOUNT", "sourceScopeId": "acc2bkd71802av7dywa8" },
+        { "kind": "vpc.address",   "value": "256", "sourceScope": "DEFAULT", "sourceScopeId": "" }
+      ]
+    }
+  `}
+</CodeBlock>
+
+Ответ несёт **источник**, а не только число: без него оператор, разбирающийся, «почему этот
+проект останавливается на четырёх», не отличит переопределение проекта от аккаунтского и от
+умолчания платформы — и вынужден был бы гадать, перечитывая все три уровня.
+
+Объект, которого нет, отвечает полосой прямого чтения: `NOT_FOUND`, `"Project <id> not found"`.
+
+</ApiOperation>
+
+### ListChangedSince — дельта для проекции
+
+<ApiOperation method="GET" endpoint="/iam/v1/internal/limits:changedSince">
+
+Возвращает потолки, чья величина изменилась (или которые были отозваны) после курсора
+вызывающего, в порядке ревизии. Синхронно. Отношение — `quota_reader`.
+
+Так владелец держит проекцию свежей, не спрашивая про каждого арендатора, которого когда-либо
+видел.
+
+<table>
+  <thead><tr><th>Параметр</th><th>Смысл</th></tr></thead>
+  <tbody>
+    <tr><td><code>cursor</code></td><td>Курсор предыдущего ответа. Пустой — <strong>от начала времён</strong>: именно это нужно проекции, которая ещё ни разу не синхронизировалась</td></tr>
+    <tr><td><code>pageSize</code></td><td>0 → умолчание; больше 1000 — отвергается</td></tr>
+  </tbody>
+</table>
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'https://<cluster-internal>/iam/v1/internal/limits:changedSince?cursor=<opaque>&pageSize=100' \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "changes": [
+        {
+          "limit": {
+            "id": "lim-7mfpj2my52k5a06kg",
+            "createdAt": "2026-08-14T10:05:00Z",
+            "scope": "PROJECT",
+            "scopeId": "prj7mfpj2my52k5a06kg",
+            "kind": "vpc.network",
+            "value": "32",
+            "revision": "41"
+          },
+          "withdrawn": false
+        },
+        {
+          "limit": {
+            "id": "lim-2h9k4bqf0xr7t1m3e",
+            "createdAt": "2026-08-14T09:12:00Z",
+            "scope": "ACCOUNT",
+            "scopeId": "acc2bkd71802av7dywa8",
+            "kind": "vpc.subnet",
+            "value": "128",
+            "revision": "42"
+          },
+          "withdrawn": true
+        }
+      ],
+      "nextCursor": "<opaque>"
+    }
+  `}
+</CodeBlock>
+
+Три свойства этого ответа — несущие, и каждое закрывает свой способ потерять изменение:
+
+- **Отзыв приходит явно**, признаком `withdrawn`, а не отсутствием записи. Читатель, узнающий
+  только о записях, не может ни понизить, ни снять строку проекции. На отозванной записи
+  тройка (`scope`, `scopeId`, `kind`) **описана** — она и нужна, чтобы знать, что снимать;
+  `value` при этом — величина, которая была, и применять её нельзя.
+- **Курсор возвращается всегда**, включая пустую страницу. Читатель, продвигающий курсор
+  только на непустых страницах, вечно перечитывал бы один и тот же хвост, догнав дельту.
+- **Повторная запись того же значения дельту не двигает.** Ревизия двигается на **изменении**,
+  поэтому идемпотентное переназначение не заставляет всех читателей перечитывать мир.
+
+Курсор, которого сервис не выдавал, отвергается `INVALID_ARGUMENT`.
+
+</ApiOperation>
+
+## Ошибки и граничные случаи
+
+<table>
+  <thead><tr><th>Ситуация</th><th>Код</th><th>Поведение</th></tr></thead>
+  <tbody>
+    <tr><td><code>Get</code> / <code>Update</code> / <code>Delete</code> несуществующего потолка</td><td><code>NOT_FOUND</code></td><td><code>"Limit &lt;id&gt; not found"</code></td></tr>
+    <tr><td>Идентификатор неверной формы</td><td><code>INVALID_ARGUMENT</code></td><td><code>"invalid limit id '&lt;X&gt;'"</code>, синхронно, первым оператором</td></tr>
+    <tr><td>Идентификатор не передан</td><td><code>INVALID_ARGUMENT</code></td><td><code>"limit_id: required"</code> — проверка обязательности отдельная: проверка формы пустую строку пропускает</td></tr>
+    <tr><td><code>Create</code> на действующую тройку</td><td><code>ALREADY_EXISTS</code></td><td>Нарушение частичного UNIQUE по <code>(scope, scopeId, kind)</code></td></tr>
+    <tr><td>Отрицательная <code>value</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument value: must not be negative"</code></td></tr>
+    <tr><td><code>kind</code> вне каталога</td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument kind: &lt;X&gt; is not a countable resource kind"</code></td></tr>
+    <tr><td><code>scope</code> не из трёх</td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument scope: must be DEFAULT, ACCOUNT or PROJECT"</code></td></tr>
+    <tr><td><code>scopeId</code> непуст при <code>DEFAULT</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument scope_id: must be empty when scope is DEFAULT"</code></td></tr>
+    <tr><td><code>scopeId</code> пуст при <code>ACCOUNT</code> / <code>PROJECT</code></td><td><code>INVALID_ARGUMENT</code></td><td>Пара «область ↔ предмет» отвергается по имени</td></tr>
+    <tr><td>Аккаунт или проект из <code>scopeId</code> не существует</td><td><code>NOT_FOUND</code></td><td><code>"Account &lt;id&gt; not found"</code> / <code>"Project &lt;id&gt; not found"</code></td></tr>
+    <tr><td><code>Resolve</code> для сервиса без считаемых видов</td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument service: &lt;X&gt; owns no countable resource kinds"</code></td></tr>
+    <tr><td>Маска с неизменяемым полем</td><td><code>INVALID_ARGUMENT</code></td><td><code>"&lt;поле&gt; is immutable after Limit.Create"</code></td></tr>
+    <tr><td><code>pageSize</code> больше 1000</td><td><code>INVALID_ARGUMENT</code></td><td>Отвергается, не обрезается</td></tr>
+    <tr><td>Запрос с внешнего слушателя</td><td><code>404</code></td><td>Диспетчер края скрывает существование внутреннего маршрута</td></tr>
+  </tbody>
+</table>
+
+Соответствие кодов HTTP-статусам — общее для платформы, см. [Обзор API](/api/overview).
