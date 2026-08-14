@@ -336,7 +336,7 @@
           ]
         },
         {
-          "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK :: get-owner-derived-rya65",
+          "name": "IAM-ACC-RD-CR-OWNER-DERIVE-OK :: get-owner-derived-rya1",
           "request": {
             "method": "GET",
             "header": [
@@ -1009,7 +1009,7 @@
           ]
         },
         {
-          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: get-default-project-rya66",
+          "name": "IAM-ACC-RD-CR-SAGA-TWO-ID-OK :: get-default-project-rya2",
           "request": {
             "method": "GET",
             "header": [
@@ -1482,7 +1482,7 @@
           ]
         },
         {
-          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: delete-nonempty-rya67",
+          "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG :: delete-nonempty-rya3",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1959,7 +1959,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: get-project-rya68",
+          "name": "IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK :: get-project-rya4",
           "request": {
             "method": "GET",
             "header": [
@@ -3086,7 +3086,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-A-rya69",
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-A-rya5",
           "request": {
             "method": "DELETE",
             "header": [
@@ -3281,7 +3281,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-B-rya70",
+          "name": "IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT :: cleanup-dup-B-rya6",
           "request": {
             "method": "DELETE",
             "header": [

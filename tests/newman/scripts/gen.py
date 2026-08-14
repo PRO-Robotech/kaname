@@ -2387,7 +2387,27 @@ def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
 # Discovery + main
 # ---------------------------------------------------------------------------
 
+def _reset_step_name_counters() -> None:
+    """Reset every counter that feeds a STEP NAME, before loading a case module.
+
+    A step name must be a function of the CASE, never of the environment. These
+    counters live at module scope and only ever grow, so without this reset a
+    name would depend on how many case modules were loaded before this one, and
+    `gen.py <module>` would emit different names than a full `gen.py` for the
+    same case — leaving a tree the full run does not produce, and step names
+    that do not match between runs when a red run is being diagnosed.
+
+    Resetting is safe by construction: newman resolves setNextRequest by request
+    name WITHIN the collection being run, and one case module produces exactly
+    one collection — so uniqueness is only ever required within that scope.
+
+    Held by internal/repohygiene TestGeneratedStepNamesDoNotDependOnHowManyModulesRan.
+    """
+    _RYA_SEQ[0] = 0
+
+
 def load_cases_module(path: Path):
+    _reset_step_name_counters()
     spec = importlib.util.spec_from_file_location(path.stem.replace("-", "_"), path)
     mod = importlib.util.module_from_spec(spec)
     # пробрасываем helpers в namespace модуля

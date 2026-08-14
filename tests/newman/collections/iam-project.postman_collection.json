@@ -230,7 +230,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-CR-CRUD-OK :: get-confirms-rya123",
+          "name": "IAM-PRJ-CR-CRUD-OK :: get-confirms-rya1",
           "request": {
             "method": "GET",
             "header": [
@@ -3583,7 +3583,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-DL-NEG-HAS-CHILDREN :: get-child-host-project-rya124",
+          "name": "IAM-PRJ-DL-NEG-HAS-CHILDREN :: get-child-host-project-rya2",
           "request": {
             "method": "GET",
             "header": [
@@ -3971,7 +3971,7 @@
           ]
         },
         {
-          "name": "IAM-PRJ-DL-NEG-HAS-CHILDREN :: get-child-role-rya125",
+          "name": "IAM-PRJ-DL-NEG-HAS-CHILDREN :: get-child-role-rya3",
           "request": {
             "method": "GET",
             "header": [

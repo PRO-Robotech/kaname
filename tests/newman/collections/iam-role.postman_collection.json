@@ -230,7 +230,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-CR-CRUD-OK :: get-confirms-rya152",
+          "name": "IAM-ROL-CR-CRUD-OK :: get-confirms-rya1",
           "request": {
             "method": "GET",
             "header": [
@@ -4578,7 +4578,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: lsop-bad-token-rya153",
+          "name": "IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE :: lsop-bad-token-rya2",
           "request": {
             "method": "GET",
             "header": [
@@ -7507,7 +7507,7 @@
           ]
         },
         {
-          "name": "IAM-ROL-UP-T33-LABELS-OK :: update-labels-rya154",
+          "name": "IAM-ROL-UP-T33-LABELS-OK :: update-labels-rya3",
           "request": {
             "method": "PATCH",
             "header": [

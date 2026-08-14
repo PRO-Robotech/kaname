@@ -377,7 +377,7 @@
       "description": "class:AUTHZ | class:SECRET | priority:P0",
       "item": [
         {
-          "name": "AUTHZGCP-SAKEY-SECRET-NOT-LEAKED :: issue-sakey-rya80",
+          "name": "AUTHZGCP-SAKEY-SECRET-NOT-LEAKED :: issue-sakey-rya1",
           "request": {
             "method": "POST",
             "header": [
