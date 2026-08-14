@@ -203,6 +203,32 @@ var Profile = listfiltergate.Profile{
 		},
 
 		// ---- admin-only internal surface ----
+		"limit.List": {
+			Shape: listfiltergate.ClusterScoped,
+			Reason: "a resource-count ceiling is a CLUSTER-level administrative record: the row " +
+				"carries a scope (DEFAULT/ACCOUNT/PROJECT) but no owner to grant against, so " +
+				"there is no per-object grant to narrow the page to — RowFilter here would state " +
+				"a check whose subject does not exist. What bounds the caller instead is the " +
+				"surface: the RPC lives ONLY on InternalLimitService, is registered ONLY on the " +
+				"cluster-internal listener (ban #6), and its catalog entry demands `system_admin` " +
+				"on `cluster` — a relation defined `[user, service_account]` with NO `user:*` " +
+				"member, so unlike `viewer` it is not satisfiable by a wildcard tuple and does " +
+				"narrow. The exclusion expires with its subject twice over: retire the RPC and " +
+				"this entry becomes a finding, and give the ceiling a per-object owner and the " +
+				"reason above stops being true — at which point this must become RowFilter.",
+		},
+		"limit.ListChangedSince": {
+			Shape: listfiltergate.ClusterScoped,
+			Reason: "the incremental read owner services poll to refresh their ceiling cache. Its " +
+				"caller is a MACHINE, not a tenant: the catalog entry demands `quota_reader` on " +
+				"`cluster`, defined `[service_account, group#member] or system_admin` — no " +
+				"`user:*` member, so it is not satisfiable by a wildcard tuple. The grant is held " +
+				"by a GROUP rather than by enumerated subjects, so revoking one owner service is " +
+				"one membership row (data-integrity.md B18). Narrowing this page per object would " +
+				"be wrong, not merely absent: an owner service polls ceilings for every scope it " +
+				"enforces, and a page filtered to what the MACHINE can see would silently drop " +
+				"tenants whose limits it must apply. The exclusion expires with the RPC.",
+		},
 		"interactive_client.List": {
 			Shape: listfiltergate.ClusterScoped,
 			Reason: "an interactive-login client is a CLUSTER-level OAuth2 client registration: " +
