@@ -245,7 +245,7 @@ CASES.append(Case(
              body={"loadBalancerId": "{{_t31nLb}}", "name": "t31n-lsn-{{runId}}",
                    # `ipVersion`/`addressSpec` are RESERVED in CreateListenerRequest — the
                    # per-family VIP moved Listener->LoadBalancer, so the edge discards them.
-                   "protocol": "TCP", "port": 80, "targetPort": 8080,
+                   "protocol": "TCP", "port": 80,
                    "labels": {"lsn": "treska"}},
              auth="jwtAccountAdminA",
              test_script=[*assert_status(200),
