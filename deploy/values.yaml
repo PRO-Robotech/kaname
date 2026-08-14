@@ -45,10 +45,6 @@ apiServer:
   registryToken:
     issuer: ""
     service: ""
-metrics:
-  enable: true
-healthcheck:
-  enable: true
 repository:
   postgres:
     maxConns: 50
@@ -57,15 +53,14 @@ authn:
   # secure-by-default (core rule #16); dev — явный opt-in dev-профиля.
   mode: production
 
-# extapi — внешние peer-зависимости сервиса (OpenFGA для authz-Check).
-# Auth-tier построен на Ory Kratos + Hydra.
-extapi:
-  openfga:
-    enabled: false
-    endpoint: ""
-    storeId: ""
-    authModelId: ""
-    tls:
-      enable: false
+# Здесь стояли три ключа, которых нет в конфигурации сервиса: metrics.enable,
+# healthcheck.enable и extapi.openfga.* — шаблон их подставлял, випер отбрасывал.
+#
+# Слушатель метрик у iam настоящий, и его ручка одна — api-server.metrics-endpoint
+# (пустое значение выключает слушатель). Клиент OpenFGA собирается в
+# композиционном корне из переменных KACHO_IAM_*, а не из этого файла. Оба ключа
+# были ВТОРЫМ способом сказать то же самое, причём неработающим.
+#
+# Умбрелла того же сервиса рассталась с ними раньше (#204); здесь — тот же исход.
 
 env: {}

@@ -57,6 +57,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // ListQuery — вопрос «какие объекты этого типа доступны субъекту».
@@ -111,12 +113,13 @@ const DefaultPageSize = 500
 // косметика: страница отдаётся курсором, повтор съедает место в ней, а повтор на
 // границе сдвигает курсор не туда.
 //
-// $1 subject · $2 object_type · $3 after_id · $4 размер захода · $5 max_depth ·
+// $1 subject · $2 object_type в словаре МОДЕЛИ · $3 after_id · $4 размер захода ·
+// $5 max_depth ·
 // $6 типы предков атомов-фактов · $7 отношения атомов-фактов · $8 глаголы атомов-выдачи
-// $9 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
-// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
-// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
-// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// $9 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
+// `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
+// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
 // быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const listSQL = `
 WITH RECURSIVE speaker(subject) AS (
@@ -256,6 +259,13 @@ SELECT c.object_id,
   FROM candidate c
  ORDER BY c.object_id`
 
+// listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
+// (довод — у expandQuerySQL).
+func listQuerySQL(labelTable string) string {
+	return strings.Replace(listSQL, candidateFromMark,
+		candidateFrom(labelTable, "$9", "$3", "$4"), 1)
+}
+
 // List отдаёт страницу доступных объектов и курсор следующей.
 //
 // Курсор пуст, когда КАНДИДАТЫ ТИПА кончились, — это и есть конец обхода.
@@ -306,8 +316,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	//
 	// Метка `{{labels_join}}` отсюда ушла вместе со своим предметом: метки едут
 	// колонкой кандидата, второго чтения того же места больше нет.
-	sql := strings.Replace(listSQL, candidateFromMark,
-		candidateFrom(labelTable, "$2", "$3", "$4"), 1)
+	sql := listQuerySQL(labelTable)
 
 	after := in.AfterID
 	for {
@@ -350,7 +359,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 	factParents, factRelations, bindVerbs []string) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, GrantTypeName(in.ObjectType))
+		factParents, factRelations, bindVerbs, authzmap.CatalogTypeName(in.ObjectType))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

@@ -231,7 +231,8 @@ func TestAsk_LabelSelectorFollowsTheObjectLabels(t *testing.T) {
 			 VALUES ('vpc_network', 'net-1', 'project', 'prj-1', 1)`)
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id, labels)
-			 VALUES ('vpc_network', 'net-1', '{"env":"prod"}'::jsonb)`)
+			 VALUES ($1, 'net-1', '{"env":"prod"}'::jsonb)`,
+			catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.access_bindings
 			   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
@@ -254,7 +255,8 @@ func TestAsk_LabelSelectorFollowsTheObjectLabels(t *testing.T) {
 		// пересчёта доступа для всех субъектов с меточными выдачами.
 		exec(t, ctx, tx,
 			`UPDATE kacho_iam.resource_mirror SET labels = '{"env":"dev"}'::jsonb
-			  WHERE object_type = 'vpc_network' AND object_id = 'net-1'`)
+			  WHERE object_type = $1 AND object_id = 'net-1'`,
+			catalogFormOf(t, "vpc_network"))
 		after, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 			Subject: "user:usr-1", ObjectType: "vpc_network", ObjectID: "net-1", Relation: "v_get",
 		})
