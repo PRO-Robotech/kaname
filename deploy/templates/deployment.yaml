@@ -32,11 +32,15 @@ spec:
         kacho.cloud/image-id: {{ dig "kachoImageIds" "iam" "unset" (.Values.global | default dict) | quote }}
         # ConfigMap-content hash → pod rolling-restart при изменении config.yaml.
         kacho.cloud/config-checksum: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        # Prometheus scrape — /metrics on the dedicated internal port (never the
-        # public gRPC surface).
-        prometheus.io/scrape: "true"
-        prometheus.io/port: {{ .Values.ports.metrics | quote }}
-        prometheus.io/path: /metrics
+        # Объявления сбора здесь НЕТ, и это не пропуск. Этот каталог чарта не
+        # разворачивается ничем: умбрелла тянет iam каталогом сабчарта
+        # (`deploy/helm/umbrella/charts/kacho-iam`), и объявление, стоявшее
+        # здесь, не рендерилось ни в одном профиле — то есть было ровно тем
+        # классом, ради которого заведена перепись накопителей: артефакт,
+        # выглядящий как работа, у которого нет потребителя.
+        #
+        # Проверка `TestEveryRenderedChartDeclaresItsScrape` роняет любую новую
+        # аннотацию сбора в нерендерящемся каталоге — с координатой и причиной.
     spec:
       # Hardened pod security context (trivy AVD-KSV-0118): run as a
       # non-root user, drop the default ambient context.
