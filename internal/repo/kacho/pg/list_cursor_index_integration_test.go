@@ -46,7 +46,17 @@ func cursorOrderedTables(t *testing.T) []string {
 	// contains the words too, and a regex over raw text finds "FROM the" in an
 	// explanation of the very rule being checked.
 	literalRe := regexp.MustCompile("(?s)`([^`]*)`")
-	fromRe := regexp.MustCompile(`(?is)\bFROM\s+([a-z_][a-z0-9_]*)`)
+	// Имя может быть КВАЛИФИЦИРОВАНО схемой (`FROM kacho_iam.limits`), и тогда
+	// таблица — второй сегмент, а не первый. Прежняя форма брала первый
+	// идентификатор после FROM и на квалифицированном имени возвращала СХЕМУ:
+	// перепись объявляла таблицей `kacho_iam`, дальше искала у неё индекс и
+	// падала — вердикт неверный, а не находка.
+	//
+	// Класс шире одного запроса: квалифицированные имена есть в 11 файлах
+	// репозиториев iam и ещё в vpc/nlb/storage; гейт не краснел лишь потому,
+	// что курсорные списки до сих пор писались без схемы. Первый же такой
+	// список сделал бы вердикт ложным независимо от того, есть индекс или нет.
+	fromRe := regexp.MustCompile(`(?is)\bFROM\s+(?:[a-z_][a-z0-9_]*\.)?([a-z_][a-z0-9_]*)`)
 
 	found := map[string]bool{}
 	scanned, literals := 0, 0

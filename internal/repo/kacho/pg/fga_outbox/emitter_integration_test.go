@@ -59,11 +59,17 @@ func TestFGAOutboxEmitter_EmitWriteTx_AppendsRowsAtomically(t *testing.T) {
 	// the SEC-C fga_writer tuples (object `iam_fgaproxy:system`, 0009) and the
 	// cluster-root seeds (object `cluster:cluster_kacho_root`: SEC-L operator
 	// 0010, 5.1 reader SAs 0014).
+	// Отбор ПО СВОИМ объектам, а не «всё, кроме известного посева».
+	//
+	// Прежняя форма перечисляла посевные объекты списком, а список стареет молча:
+	// первый же новый посев (членство служебной учётки в группе) в него не попал, и
+	// проба покраснела на чужой законной строке. Положительный отбор этой слепой
+	// зоны не имеет by construction — фикстура знает свои объекты.
 	rows, err := pool.Query(ctx, `
 		SELECT event_type, payload::text
 		  FROM kacho_iam.fga_outbox
-		 WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')
-		 ORDER BY id ASC`)
+		 WHERE payload->>'object' = ANY($1::text[])
+		 ORDER BY id ASC`, []string{tuples[0].Object, tuples[1].Object})
 	require.NoError(t, err)
 	defer rows.Close()
 
@@ -115,7 +121,7 @@ func TestFGAOutboxEmitter_EmitDeleteTx_AppendsRevokeRows(t *testing.T) {
 	var et string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT event_type FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root') LIMIT 1`).Scan(&et))
+		  WHERE payload->>'object' = $1 LIMIT 1`, tuples[0].Object).Scan(&et))
 	require.Equal(t, "fga.tuple.delete", et)
 }
 
@@ -132,6 +138,10 @@ func TestFGAOutboxEmitter_RollbackRemovesRows(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
+	var before int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox`).Scan(&before))
+
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 
@@ -140,11 +150,12 @@ func TestFGAOutboxEmitter_RollbackRemovesRows(t *testing.T) {
 	}))
 	require.NoError(t, tx.Rollback(ctx))
 
-	var count int
+	// Считается ДЕЛЬТА, а не абсолютное число: таблицу наполняют посевные миграции,
+	// и «должно быть ноль» — утверждение о них, а не об откате.
+	var after int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')`).Scan(&count))
-	require.Equal(t, 0, count, "rollback must discard outbox rows (atomic emit-in-tx)")
+		`SELECT count(*) FROM kacho_iam.fga_outbox`).Scan(&after))
+	require.Equal(t, before, after, "rollback must discard outbox rows (atomic emit-in-tx)")
 }
 
 func TestFGAOutboxEmitter_EmitWriteTx_EmptyTuplesIsNoop(t *testing.T) {
@@ -158,6 +169,10 @@ func TestFGAOutboxEmitter_EmitWriteTx_EmptyTuplesIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
+	var before int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox`).Scan(&before))
+
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(ctx) })
@@ -166,11 +181,10 @@ func TestFGAOutboxEmitter_EmitWriteTx_EmptyTuplesIsNoop(t *testing.T) {
 	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx, []clients.RelationTuple{}))
 	require.NoError(t, tx.Commit(ctx))
 
-	var count int
+	var after int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')`).Scan(&count))
-	require.Equal(t, 0, count, "empty tuples is no-op")
+		`SELECT count(*) FROM kacho_iam.fga_outbox`).Scan(&after))
+	require.Equal(t, before, after, "empty tuples is no-op")
 }
 
 // Порядок ОДНОГО КЛЮЧА переживает переход на набор.
