@@ -82,7 +82,8 @@ func TestAskerCountsLabelArmGroundsOnTheMirrorAxis(t *testing.T) {
 		seedLabelGrant(t, ctx, tx, "vpc_network")
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id, labels)
-			 VALUES ('vpc_network', 'net-9', '{"env":"prod"}'::jsonb)`)
+			 VALUES ($1, 'net-9', '{"env":"prod"}'::jsonb)`,
+			catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth)

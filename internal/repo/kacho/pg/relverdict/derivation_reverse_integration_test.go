@@ -73,7 +73,8 @@ func seedTwoAccountsChain(t *testing.T, ctx context.Context, tx pgx.Tx, nets []s
 		        ('account', 'acc-2', 'cluster', 'cluster_kacho_root', 1)`)
 	for _, id := range nets {
 		exec(t, ctx, tx,
-			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', $1)`, id)
+			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($2, $1)`,
+			id, catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth)
@@ -81,7 +82,8 @@ func seedTwoAccountsChain(t *testing.T, ctx context.Context, tx pgx.Tx, nets []s
 	}
 	// Сеть ЧУЖОГО аккаунта — та же форма, другая область.
 	exec(t, ctx, tx,
-		`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', 'net-99')`)
+		`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($1, 'net-99')`,
+		catalogFormOf(t, "vpc_network"))
 	exec(t, ctx, tx,
 		`INSERT INTO kacho_iam.resource_parent_edge
 		   (object_type, object_id, parent_type, parent_id, depth)
@@ -202,7 +204,8 @@ func TestList_PagesThroughDerivedObjectsWithoutLossOrDuplication(t *testing.T) {
 		// источник, включая кластерный. Без него «страница верна» зеленело бы на
 		// форме, отдающей весь тип.
 		exec(t, ctx, tx,
-			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', 'net-orphan')`)
+			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($1, 'net-orphan')`,
+			catalogFormOf(t, "vpc_network"))
 
 		count := map[string]int{}
 		got := listAll(t, ctx, tx, "user:usr-admin", 2)

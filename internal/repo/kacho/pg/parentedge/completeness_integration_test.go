@@ -55,6 +55,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
 )
 
@@ -67,6 +68,20 @@ import (
 var rootLevelTypes = map[string]string{
 	"account": "над аккаунтом только кластер; сам аккаунт предка в зеркале не имеет",
 	"cluster": "корень иерархии областей",
+}
+
+// catalogFormOf — имя типа в словаре КАТАЛОГА, взятое у каталога напрямую.
+//
+// Не через переводчик продукта: общий вызов сместил бы фикстуру и продукт
+// одинаково, и проба доказывала бы согласие перевода с самим собой.
+func catalogFormOf(t *testing.T, modelType string) string {
+	t.Helper()
+	dotted, known := authzmap.DottedType(modelType)
+	if !known {
+		t.Fatalf("тип %q не объявлен в каталоге — фикстура назвала бы словарь, "+
+			"которого нет", modelType)
+	}
+	return dotted
 }
 
 func openPool(t *testing.T) *pgxpool.Pool {
@@ -88,7 +103,12 @@ func openPool(t *testing.T) *pgxpool.Pool {
 type registration struct {
 	// consumer — чьё намерение изображается. Попадает в текст падения, чтобы
 	// находка называла ПОТРЕБИТЕЛЯ, а не только объект.
-	consumer   string
+	consumer string
+	// objectType — тип в словаре КАТАЛОГА: им регистрация называет объект, и им
+	// назван `resource_mirror.object_type`. Цепь предков при этом ложится
+	// словарём МОДЕЛИ — перевод делает писатель, и перепись ниже обязана его
+	// повторить, иначе она сравнивала бы два разных словаря и объявила бы без
+	// цепи ВСЁ.
 	objectType string
 	objectID   string
 	// parentChain — цепь предков от ближайшего к дальнему, `"<type>:<id>"`.
@@ -147,14 +167,35 @@ func seedThroughProducer(t *testing.T, pool *pgxpool.Pool, regs ...registration)
 }
 
 // uncovered — строки зеркала без единого ребра, кроме корневых типов.
+//
+// # Почему один стейтмент, а не «прочитать зеркало и спросить по строке»
+//
+// Утверждение здесь — КВАНТОР по множеству, и он обязан остаться одним вопросом
+// к базе: перепись, разложенная на строку-за-строкой, перестаёт быть переписью и
+// выводит пробу из-под гейта `internal/repohygiene`
+// TestCensusFixturesSeedThroughTheProducer — он узнаёт перепись ровно по одному
+// стейтменту, называющему ОБЕ таблицы.
+//
+// # Почему в запрос едет словарь
+//
+// Зеркало названо словарём КАТАЛОГА, цепь — словарём МОДЕЛИ. Прямое соединение
+// колонок объявило бы без цепи КАЖДЫЙ объект: гейт краснел бы всегда и по
+// неверной причине. Соответствие приезжает параметрами, собранными ЕДИНСТВЕННЫМ
+// переходником (`authzmap`), — второго словаря в дереве не заводится.
 func uncovered(t *testing.T, pool *pgxpool.Pool) (examined int, missing []string) {
 	t.Helper()
 	ctx := context.Background()
+
+	catalogNames, modelNames := typeDictionaryPairs()
 	rows, err := pool.Query(ctx,
-		`SELECT m.object_type, m.object_id,
+		`WITH dict(catalog_name, model_name) AS (SELECT * FROM unnest($1::text[], $2::text[]))
+		 SELECT m.object_type, m.object_id,
 		        EXISTS (SELECT 1 FROM kacho_iam.resource_parent_edge e
-		                 WHERE e.object_type = m.object_type AND e.object_id = m.object_id)
-		   FROM kacho_iam.resource_mirror m`)
+		                 WHERE e.object_type = COALESCE(
+		                         (SELECT d.model_name FROM dict d
+		                           WHERE d.catalog_name = m.object_type), m.object_type)
+		                   AND e.object_id = m.object_id)
+		   FROM kacho_iam.resource_mirror m`, catalogNames, modelNames)
 	if err != nil {
 		t.Fatalf("перепись зеркала: %v", err)
 	}
@@ -169,15 +210,29 @@ func uncovered(t *testing.T, pool *pgxpool.Pool) (examined int, missing []string
 		if hasEdge {
 			continue
 		}
-		if _, root := rootLevelTypes[typ]; root {
+		// Корневые типы названы словарём модели: находка обязана называться так
+		// же, как её увидит вопрос о доступе.
+		modelType := authzmap.ModelTypeName(typ)
+		if _, root := rootLevelTypes[modelType]; root {
 			continue
 		}
-		missing = append(missing, typ+":"+id)
+		missing = append(missing, modelType+":"+id)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("обход зеркала: %v", err)
 	}
 	return examined, missing
+}
+
+// typeDictionaryPairs — соответствие словарей ДЛЯ ЗАПРОСА, собранное из каталога
+// единственным переходником.
+func typeDictionaryPairs() (catalogNames, modelNames []string) {
+	for _, e := range authzmap.Catalog() {
+		catalogName := e.Module + "." + e.Resource
+		catalogNames = append(catalogNames, catalogName)
+		modelNames = append(modelNames, authzmap.ModelTypeName(catalogName))
+	}
+	return catalogNames, modelNames
 }
 
 // Законная сторона: каждое намерение несёт свою цепь, корневой объект — не находка.
@@ -187,16 +242,16 @@ func TestParentEdgeCompleteness_SilentWhenEveryRegistrationCarriesItsChain(t *te
 	pool := openPool(t)
 	seedThroughProducer(t, pool,
 		registration{
-			consumer: "vpc", objectType: "vpc_network", objectID: "net-1",
+			consumer: "vpc", objectType: catalogFormOf(t, "vpc_network"), objectID: "net-1",
 			parentProjectID: "prj-1",
 			parentChain:     []string{"project:prj-1", "account:acc-1"},
 		},
 		registration{
-			consumer: "iam", objectType: "project", objectID: "prj-1",
+			consumer: "iam", objectType: catalogFormOf(t, "project"), objectID: "prj-1",
 			parentChain: []string{"account:acc-1"},
 		},
 		// Корневой уровень: предка нет по построению, цепи нет — и это НЕ находка.
-		registration{consumer: "iam", objectType: "account", objectID: "acc-1"},
+		registration{consumer: "iam", objectType: catalogFormOf(t, "account"), objectID: "acc-1"},
 	)
 
 	examined, missing := uncovered(t, pool)
@@ -219,11 +274,11 @@ func TestParentEdgeCompleteness_NamesTheObjectWhoseRegistrationCarriedNoChain(t 
 	pool := openPool(t)
 	seedThroughProducer(t, pool,
 		registration{
-			consumer: "vpc (цепь не выслана)", objectType: "vpc_network", objectID: "net-1",
+			consumer: "vpc (цепь не выслана)", objectType: catalogFormOf(t, "vpc_network"), objectID: "net-1",
 			parentProjectID: "prj-1",
 		},
 		registration{
-			consumer: "iam", objectType: "project", objectID: "prj-1",
+			consumer: "iam", objectType: catalogFormOf(t, "project"), objectID: "prj-1",
 			parentChain: []string{"account:acc-1"},
 		},
 	)
@@ -245,7 +300,7 @@ func TestParentEdgeCompleteness_NamesTheObjectWhoseRegistrationCarriedNoChain(t 
 func TestParentEdgeCompleteness_ProducerWritesEveryLinkOfTheChain(t *testing.T) {
 	pool := openPool(t)
 	seedThroughProducer(t, pool, registration{
-		consumer: "registry", objectType: "registry_repository", objectID: "repo-1",
+		consumer: "registry", objectType: catalogFormOf(t, "registry_repository"), objectID: "repo-1",
 		parentChain: []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
 	})
 

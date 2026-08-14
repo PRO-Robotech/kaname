@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 	bench "github.com/PRO-Robotech/kacho/tools/authzformbench"
 )
@@ -62,8 +63,26 @@ const (
 	f5Project = "prj-f5"
 	f5Role    = "rol-f5"
 	f5Binding = "abn-f5"
-	f5Type    = "vpc_network"
+
+	// f5Type — тип в словаре МОДЕЛИ ПРАВ: им задают вопрос и им названы обе
+	// стороны цепи предков.
+	f5Type = "vpc_network"
 )
+
+// f5CatalogType — ТОТ ЖЕ тип в словаре КАТАЛОГА: им названы `resource_mirror`,
+// `role_verb.object_type` и `role_rule_selectors.object_types`. Посев обязан
+// класть в каждую колонку её словарь — иначе замер снимается с запроса, который
+// не находит НИЧЕГО, и кривая описывает пустоту.
+//
+// Берётся у каталога напрямую, а не переводчиком продукта: общий вызов сместил
+// бы обе стороны одинаково.
+var f5CatalogType = func() string {
+	dotted, known := authzmap.DottedType(f5Type)
+	if !known {
+		panic("authzformbench: тип " + f5Type + " не объявлен в каталоге")
+	}
+	return dotted
+}()
 
 // f5Verbs / f5Subjects — M и S. Заданы здесь, чтобы кривая по N снималась при
 // неизменных двух других множителях: иначе наклон принадлежал бы не N.
@@ -118,7 +137,7 @@ func (r *relLabelForm) ApplyRule(ctx context.Context) (bench.Counters, int, erro
 	rows++
 	for _, v := range r.sc.Verbs {
 		if _, err := tx.Exec(ctx, `INSERT INTO kacho_iam.role_verb (role_id, object_type, verb)
-			VALUES ($1, $2, $3)`, f5Role, f5Type, v); err != nil {
+			VALUES ($1, $2, $3)`, f5Role, f5CatalogType, v); err != nil {
 			return bench.Counters{StmtSQL: w.Close()}, rows, fmt.Errorf("глагол роли: %w", err)
 		}
 		rows++
@@ -126,7 +145,7 @@ func (r *relLabelForm) ApplyRule(ctx context.Context) (bench.Counters, int, erro
 	if _, err := tx.Exec(ctx, `INSERT INTO kacho_iam.role_rule_selectors
 		  (role_id, rule_fp, arm, object_types, match_labels)
 		VALUES ($1, 'fp-f5', 'labels', ARRAY[$2::text], $3::jsonb)`,
-		f5Role, f5Type, labelJSON(r.sc)); err != nil {
+		f5Role, f5CatalogType, labelJSON(r.sc)); err != nil {
 		return bench.Counters{StmtSQL: w.Close()}, rows, fmt.Errorf("правило-селектор: %w", err)
 	}
 	rows++
@@ -237,12 +256,12 @@ func (w *f5World) Commit(ctx context.Context, ev bench.LabelEvent) (time.Time, e
 	switch ev.Kind {
 	case bench.EventEntered:
 		if _, err := w.pool.Exec(ctx, `UPDATE kacho_iam.resource_mirror SET labels = $3::jsonb
-			WHERE object_type = $1 AND object_id = $2`, f5Type, ev.ObjectID, labelJSON(w.sc)); err != nil {
+			WHERE object_type = $1 AND object_id = $2`, f5CatalogType, ev.ObjectID, labelJSON(w.sc)); err != nil {
 			return time.Time{}, err
 		}
 	case bench.EventLeft:
 		if _, err := w.pool.Exec(ctx, `UPDATE kacho_iam.resource_mirror SET labels = '{}'::jsonb
-			WHERE object_type = $1 AND object_id = $2`, f5Type, ev.ObjectID); err != nil {
+			WHERE object_type = $1 AND object_id = $2`, f5CatalogType, ev.ObjectID); err != nil {
 			return time.Time{}, err
 		}
 	case bench.EventCreated:
@@ -264,11 +283,11 @@ func (w *f5World) Revert(ctx context.Context, ev bench.LabelEvent) error {
 	switch ev.Kind {
 	case bench.EventEntered:
 		_, err := w.pool.Exec(ctx, `UPDATE kacho_iam.resource_mirror SET labels = '{}'::jsonb
-			WHERE object_type = $1 AND object_id = $2`, f5Type, ev.ObjectID)
+			WHERE object_type = $1 AND object_id = $2`, f5CatalogType, ev.ObjectID)
 		return err
 	case bench.EventLeft:
 		_, err := w.pool.Exec(ctx, `UPDATE kacho_iam.resource_mirror SET labels = $3::jsonb
-			WHERE object_type = $1 AND object_id = $2`, f5Type, ev.ObjectID, labelJSON(w.sc))
+			WHERE object_type = $1 AND object_id = $2`, f5CatalogType, ev.ObjectID, labelJSON(w.sc))
 		return err
 	case bench.EventCreated:
 		if _, err := w.pool.Exec(ctx, `DELETE FROM kacho_iam.resource_parent_edge
@@ -276,7 +295,7 @@ func (w *f5World) Revert(ctx context.Context, ev bench.LabelEvent) error {
 			return err
 		}
 		_, err := w.pool.Exec(ctx, `DELETE FROM kacho_iam.resource_mirror
-			WHERE object_type = $1 AND object_id = $2`, f5Type, ev.ObjectID)
+			WHERE object_type = $1 AND object_id = $2`, f5CatalogType, ev.ObjectID)
 		return err
 	}
 	return nil
@@ -308,7 +327,7 @@ func (w *f5World) insertMirror(ctx context.Context, ids []string, labelled bool)
 		  (object_type, object_id, parent_project_id, parent_account_id, labels)
 		SELECT $1, u, $2, $3, $4::jsonb FROM unnest($5::text[]) AS u
 		ON CONFLICT (object_type, object_id) DO UPDATE SET labels = EXCLUDED.labels`,
-		f5Type, f5Project, f5Account, labels, ids); err != nil {
+		f5CatalogType, f5Project, f5Account, labels, ids); err != nil {
 		return fmt.Errorf("зеркало: %w", err)
 	}
 	if _, err := w.pool.Exec(ctx, `INSERT INTO kacho_iam.resource_parent_edge

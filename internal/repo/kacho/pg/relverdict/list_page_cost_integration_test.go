@@ -167,7 +167,7 @@ func TestList_PageStaysFullWhenCandidatesAreInterleaved(t *testing.T) {
 			// на том, что у чётных и нечётных объектов разные предки, — то есть
 			// проба опирается на цепь как на предмет, а не как на декорацию.
 			if _, err := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
-				ObjectType:      "vpc_network",
+				ObjectType:      catalogFormOf(t, "vpc_network"),
 				ObjectID:        id,
 				ParentProjectID: owner,
 				ParentAccountID: "acc-1",
@@ -324,7 +324,7 @@ func seedLabelledSet(t *testing.T, ctx context.Context, tx pgx.Tx, n int) {
 	// снимается с трёх точек до десяти тысяч.
 	for g := 0; g < n; g++ {
 		if _, err := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
-			ObjectType:      "vpc_network",
+			ObjectType:      catalogFormOf(t, "vpc_network"),
 			ObjectID:        fmt.Sprintf("net-%07d", g),
 			ParentProjectID: "prj-1",
 			ParentAccountID: "acc-1",

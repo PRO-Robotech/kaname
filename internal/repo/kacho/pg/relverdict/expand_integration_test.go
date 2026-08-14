@@ -26,7 +26,8 @@ func TestExpand_NamesEverySourceNotJustTheFirst(t *testing.T) {
 		seedTenant(t, ctx, tx)
 		seedRole(t, ctx, tx, "rol-exp", "vpc_network", "get", "anchor", "{}")
 		exec(t, ctx, tx,
-			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', 'net-1')`)
+			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($1, 'net-1')`,
+			catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth)
