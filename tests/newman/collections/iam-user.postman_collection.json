@@ -3282,6 +3282,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "pm.test('на проекте чужого аккаунта доступа НЕТ (проба различает)', () => {",
                   "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
@@ -3575,7 +3590,7 @@
           ]
         },
         {
-          "name": "IAM-USR-DL-CRUD-OK :: delete-user-rya169",
+          "name": "IAM-USR-DL-CRUD-OK :: delete-user-rya204",
           "request": {
             "method": "DELETE",
             "header": [
@@ -4998,7 +5013,7 @@
           ]
         },
         {
-          "name": "IAM-USR-BLK-NEG-PENDING :: block-pending-rya170",
+          "name": "IAM-USR-BLK-NEG-PENDING :: block-pending-rya205",
           "request": {
             "method": "POST",
             "header": [
@@ -5495,7 +5510,7 @@
           ]
         },
         {
-          "name": "IAM-USR-UBK-NEG-PENDING :: unblock-pending-rya171",
+          "name": "IAM-USR-UBK-NEG-PENDING :: unblock-pending-rya206",
           "request": {
             "method": "POST",
             "header": [
