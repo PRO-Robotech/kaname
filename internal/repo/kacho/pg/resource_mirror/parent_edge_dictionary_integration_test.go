@@ -32,6 +32,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
 )
@@ -44,7 +45,7 @@ func TestParentEdges_AreWrittenInTheModelDictionary(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType:      "compute.instance", // словарь КАТАЛОГА — как зовёт регистрация
@@ -94,7 +95,7 @@ func TestParentEdges_SchemaRejectsTheCatalogDictionary(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	// Законный близнец ТОЙ ЖЕ формы проходит — иначе отказ ниже означал бы
 	// «таблица не принимает ничего», а не «не принимает чужой словарь».
