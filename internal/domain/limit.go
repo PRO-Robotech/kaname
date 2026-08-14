@@ -56,10 +56,20 @@ func (s LimitScope) Validate() error {
 	return nil
 }
 
-// LimitKind — a dotted `domain.resource` token naming what is being counted.
+// LimitKind — a dotted token naming what is being counted. Two forms, and only
+// two:
+//
+//	`<domain>.<resource>`            — a resource counted in its carrier
+//	`<domain>.<parent>.<child>`      — how many <child> fit in ONE <parent>
+//
+// Both forms name REAL types of the authorization model, and the three-part form
+// names two of them. That is a gate rather than a convention: a ceiling stated on
+// a name the platform does not know is a ceiling nobody can check and nobody can
+// show the tenant (§7 п.9 of the acceptance).
 type LimitKind string
 
-// Service — the owner service this kind belongs to (`vpc.network` → `vpc`).
+// Service — the owner service this kind belongs to (`vpc.network` → `vpc`,
+// `vpc.network.subnet` → `vpc`).
 //
 // Derived from the token rather than stored beside it: two fields naming one
 // thing drift, and the dot is the same separator the platform's reference types
@@ -69,6 +79,90 @@ func (k LimitKind) Service() string {
 		return string(k)[:i]
 	}
 	return ""
+}
+
+// Parts splits the kind into its dotted segments.
+func (k LimitKind) Parts() []string { return strings.Split(string(k), ".") }
+
+// Nested reports whether this kind bounds children within ONE parent
+// (`vpc.network.subnet`) rather than within the carrier as a whole.
+func (k LimitKind) Nested() bool { return len(k.Parts()) == 3 }
+
+// ParentKind — the two-part token of the parent a nested kind counts within;
+// empty for a flat kind. `vpc.network.subnet` → `vpc.network`.
+//
+// This is the token that must resolve against the closed table, and it is
+// returned rather than re-derived at each call site so the two halves of the
+// three-part gate cannot disagree about where the split is.
+func (k LimitKind) ParentKind() LimitKind {
+	p := k.Parts()
+	if len(p) != 3 {
+		return ""
+	}
+	return LimitKind(p[0] + "." + p[1])
+}
+
+// ChildKind — the two-part token of the child a nested kind counts; empty for a
+// flat kind. `vpc.network.subnet` → `vpc.subnet`.
+//
+// The child's domain is the kind's domain: a nested kind never crosses a service
+// boundary, because the parent and the child are rows of one database and the
+// count is an invariant of one schema (data-integrity §within-service).
+func (k LimitKind) ChildKind() LimitKind {
+	p := k.Parts()
+	if len(p) != 3 {
+		return ""
+	}
+	return LimitKind(p[0] + "." + p[2])
+}
+
+// LimitCarrier — the type of object a kind is counted IN.
+//
+// WHY IT IS DECLARED AND NOT DERIVED. The temptation is "two parts ⇒ counted in
+// a project", and that rule is false on the first entry that already exists:
+// `iam.project` has two parts and is counted in an ACCOUNT, because a project
+// does not live inside a project. A guess here does not fail loudly — it counts
+// the right rows against the wrong owner, and the tenant sees a ceiling that
+// never moves. So the carrier travels beside the kind, and the pair is the unit
+// of the catalogue.
+type LimitCarrier string
+
+// The two carriers that are not resource kinds: the tenancy roots. Any other
+// carrier is a two-part token of the closed table (`vpc.network`), naming the
+// parent a nested kind is counted within.
+const (
+	// CarrierProject — counted per project. The common case.
+	CarrierProject LimitCarrier = "project"
+	// CarrierAccount — counted per account. Used by kinds that have no project
+	// to live in: projects themselves, and the account-scoped iam subjects.
+	CarrierAccount LimitCarrier = "account"
+)
+
+// Validate — the carrier names one of the tenancy roots, or is shaped like a
+// two-part catalogue token.
+//
+// That the token RESOLVES against the authorization model is proved by
+// authzmap's gate, not here: this package must not import the authz map (that
+// package's gate already imports this one), and a second copy of the closed
+// table here would be the two-places-one-subject class the corpus warns about.
+func (c LimitCarrier) Validate() error {
+	if c == "" {
+		return fmt.Errorf("carrier: required")
+	}
+	if c == CarrierProject || c == CarrierAccount {
+		return nil
+	}
+	if parts := strings.Split(string(c), "."); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return nil
+	}
+	return fmt.Errorf(
+		"Illegal argument carrier: %s is neither project, account, nor a <domain>.<resource> type", c)
+}
+
+// CountableKind — one catalogue record: WHAT is counted and WHERE it is counted.
+type CountableKind struct {
+	Kind    LimitKind
+	Carrier LimitCarrier
 }
 
 // countableKinds — the CLOSED catalogue of kinds a ceiling may be stated on, in
@@ -90,26 +184,98 @@ func (k LimitKind) Service() string {
 //
 // The list is guarded, not merely written: authzmap's
 // TestLimitKindsAreKnownObjectTypes proves every entry names a real authz object
-// type, and TestEveryTenantVpcTypeIsCountable proves no NINTH vpc type can be
-// introduced without either a ceiling or a documented exclusion — which is the
-// mechanism by which the eighth was lost the first time.
-var countableKinds = []LimitKind{
-	"vpc.network",
-	"vpc.subnet",
-	"vpc.address",
-	"vpc.networkInterface",
-	"vpc.securityGroup",
-	"vpc.routeTable",
-	"vpc.gateway",
-	"vpc.cidrGroup",
-	"iam.project",
+// type, and TestEveryTenantTypeIsCountable proves no grantable pair of ANY domain
+// can be introduced without either a ceiling or a documented exclusion — which is
+// the mechanism by which the eighth vpc kind was lost the first time.
+//
+// # Carriers are measured, not assumed
+//
+// Every carrier below was read off the schema that holds the rows, not inferred
+// from the name: the iam subjects carry `account_id` and no project, compute's
+// `instances` carries `project_id` (its migration 0009 renamed the column), and
+// repository rows reach their project through their registry — a join inside one
+// database, not a call to a neighbour.
+var countableKinds = []CountableKind{
+	// vpc — every row carries `project_id`.
+	{"vpc.network", CarrierProject},
+	{"vpc.subnet", CarrierProject},
+	{"vpc.address", CarrierProject},
+	{"vpc.networkInterface", CarrierProject},
+	{"vpc.securityGroup", CarrierProject},
+	{"vpc.routeTable", CarrierProject},
+	{"vpc.gateway", CarrierProject},
+	{"vpc.cidrGroup", CarrierProject},
+
+	// vpc, nested — how many children fit in ONE parent. The danger the owner
+	// named ("resources able to bring the infrastructure down") lives in the
+	// nesting, not in the project total: one network with ten thousand subnets
+	// is a different failure from ten thousand subnets spread across projects.
+	// Declared here; counted by vpc in S3.
+	{"vpc.network.subnet", "vpc.network"},
+	{"vpc.network.routeTable", "vpc.network"},
+	{"vpc.network.securityGroup", "vpc.network"},
+	{"vpc.subnet.networkInterface", "vpc.subnet"},
+
+	// iam — the account is the tenancy root, and these have no project to live
+	// in. `iam.project` is the entry that makes "two parts ⇒ project" false.
+	{"iam.project", CarrierAccount},
+	{"iam.user", CarrierAccount},
+	{"iam.serviceAccount", CarrierAccount},
+	{"iam.group", CarrierAccount},
+	{"iam.role", CarrierAccount},
+	// The binding's target is polymorphic and carries no tenancy column of its
+	// own; iam reaches the account through its OWN mirror
+	// (`resource_mirror.parent_account_id`), which owners already populate. No
+	// new edge, and in particular not the `iam → owner` edge §7 п.3 forbids.
+	{"iam.accessBinding", CarrierAccount},
+
+	// compute — `project_id` on every row.
+	{"compute.instance", CarrierProject},
+	{"compute.guestAccessKey", CarrierProject},
+	{"compute.placementGroup", CarrierProject},
+
+	// storage — `project_id` on every row.
+	{"storage.volumes", CarrierProject},
+	{"storage.snapshots", CarrierProject},
+	{"storage.images", CarrierProject},
+
+	// loadbalancer — `project_id` on every row, listeners included.
+	{"loadbalancer.networkLoadBalancers", CarrierProject},
+	{"loadbalancer.targetGroups", CarrierProject},
+	{"loadbalancer.listeners", CarrierProject},
+
+	// registry — registries carry `project_id`; repository rows carry only
+	// `registry_id` and reach the project by joining their registry.
+	{"registry.registries", CarrierProject},
+	{"registry.repositories", CarrierProject},
 }
 
-// CountableKinds returns a COPY of the closed catalogue, in catalogue order.
-func CountableKinds() []LimitKind {
-	out := make([]LimitKind, len(countableKinds))
+// CountableEntries returns a COPY of the closed catalogue, in catalogue order.
+func CountableEntries() []CountableKind {
+	out := make([]CountableKind, len(countableKinds))
 	copy(out, countableKinds)
 	return out
+}
+
+// CountableKinds returns just the kinds of the catalogue, in catalogue order.
+func CountableKinds() []LimitKind {
+	out := make([]LimitKind, 0, len(countableKinds))
+	for _, e := range countableKinds {
+		out = append(out, e.Kind)
+	}
+	return out
+}
+
+// CarrierOfKind returns the carrier a kind is counted in. The second result is
+// false for a kind outside the catalogue — and the caller must not read a missing
+// carrier as "project": that default is exactly the guess V2-2 forbids.
+func CarrierOfKind(k LimitKind) (LimitCarrier, bool) {
+	for _, e := range countableKinds {
+		if e.Kind == k {
+			return e.Carrier, true
+		}
+	}
+	return "", false
 }
 
 // CountableKindsOfService returns the catalogue entries owned by one service, in
@@ -117,9 +283,9 @@ func CountableKinds() []LimitKind {
 // treat that as "this service counts nothing", not as "every kind".
 func CountableKindsOfService(service string) []LimitKind {
 	out := make([]LimitKind, 0, len(countableKinds))
-	for _, k := range countableKinds {
-		if k.Service() == service {
-			out = append(out, k)
+	for _, e := range countableKinds {
+		if e.Kind.Service() == service {
+			out = append(out, e.Kind)
 		}
 	}
 	return out
@@ -128,7 +294,7 @@ func CountableKindsOfService(service string) []LimitKind {
 // IsCountableKind reports membership in the closed catalogue.
 func IsCountableKind(k LimitKind) bool {
 	for _, c := range countableKinds {
-		if c == k {
+		if c.Kind == k {
 			return true
 		}
 	}
@@ -136,6 +302,11 @@ func IsCountableKind(k LimitKind) bool {
 }
 
 // Validate — membership in the closed catalogue, refused by the field's name.
+//
+// Membership is the only check needed: the catalogue admits two shapes and no
+// others, and every entry in it is proved well-formed and type-resolvable by
+// authzmap's gates. A token of four parts, or of two parts naming nothing, is
+// simply not a member.
 func (k LimitKind) Validate() error {
 	if k == "" {
 		return fmt.Errorf("kind: required")

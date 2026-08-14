@@ -24,6 +24,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 
@@ -525,4 +526,145 @@ func reasonToken(t *testing.T, st *grpcstatus.Status) string {
 	}
 	t.Fatalf("refusal carries no ErrorInfo — the lane is not machine-readable: %v", st)
 	return ""
+}
+
+// TestLimit_SeedCoversEveryCatalogueKind — у КАЖДОГО вида каталога есть
+// посеянное умолчание, и проверяется это ПОИМЁННО, а не счётом.
+//
+// # Почему поимённо
+//
+// Счёт строк («сколько посеяно» == «сколько видов») зелёный и тогда, когда один
+// вид потерян, а другой посеян дважды. Разница не теоретическая: правило V2-3
+// «не сказано = ОТКАЗ» превращает потерянный посев в запрет создавать ресурсы
+// этого вида — то есть в отказ, который выглядит как исправная работа квоты.
+//
+// # Почему это проба, а не комментарий в миграции
+//
+// Посев живёт в миграции, каталог — в коде, и разъезжаются они молча: каталог
+// растёт правкой Go-файла, а посев требует НОВОЙ миграции, потому что
+// применённую править нельзя. Ровно этот шов и стережёт проба.
+func TestLimit_SeedCoversEveryCatalogueKind(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	repo, _, ctx := newLimitRepo(t)
+
+	rows, _, err := repo.List(ctx, 1000, "", domain.LimitFilter{Scope: domain.LimitScopeDefault})
+	require.NoError(t, err)
+
+	seeded := make(map[domain.LimitKind]int, len(rows))
+	for _, r := range rows {
+		seeded[r.Kind]++
+	}
+
+	var missing, duplicated []string
+	for _, k := range domain.CountableKinds() {
+		switch seeded[k] {
+		case 1:
+		case 0:
+			missing = append(missing, string(k))
+		default:
+			duplicated = append(duplicated, string(k))
+		}
+	}
+	require.Emptyf(t, missing,
+		"вид каталога без посеянного умолчания: %v.\n"+
+			"    По правилу «не сказано = ОТКАЗ» это запрет создавать ресурсы этого вида,\n"+
+			"    неотличимый снаружи от исправно работающей квоты. Посев живёт в миграции,\n"+
+			"    каталог — в коде; новый вид требует НОВОЙ миграции (применённую не правим).",
+		missing)
+	require.Empty(t, duplicated,
+		"вид с двумя действующими умолчаниями: частичный UNIQUE обязан был это запретить")
+
+	// Обратное направление: посеяно ровно то, что каталог называет, и ничего
+	// сверх. Умолчание на вид вне каталога — потолок, который никто не читает.
+	var orphan []string
+	for k := range seeded {
+		if !domain.IsCountableKind(k) {
+			orphan = append(orphan, string(k))
+		}
+	}
+	require.Empty(t, orphan,
+		"посеяно умолчание на вид вне каталога: %v — потолок, которого никто не применит", orphan)
+
+	t.Logf("перепись: видов каталога %d, посеяно строк DEFAULT %d, лишних 0",
+		len(domain.CountableKinds()), len(rows))
+}
+
+// TestLimit_SeedCoverageProbeCanFail — инъекция: снятие ОДНОЙ посевной строки
+// обязано ронять пробу выше и НАЗЫВАТЬ недостающий вид.
+//
+// Проба покрытия сама по себе не доказывает своей способности упасть: на
+// исправной базе она зелёная, и зелёной же осталась бы, если бы читала не то.
+// Здесь у неё отнимают ровно один вид и требуют находку — а рядом стоит законный
+// близнец, на котором тот же предикат молчит.
+func TestLimit_SeedCoverageProbeCanFail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	repo, pool, ctx := newLimitRepo(t)
+
+	const victim = domain.LimitKind("registry.repositories")
+
+	// Законный близнец — сегодняшняя база: недостающих нет.
+	require.Empty(t, missingSeededKinds(t, ctx, repo),
+		"законный близнец: на посеянной базе недостающих видов нет")
+
+	_, err := pool.Exec(ctx,
+		`DELETE FROM kacho_iam.limits WHERE scope = 'DEFAULT' AND kind = $1`, string(victim))
+	require.NoError(t, err)
+
+	require.Equal(t, []string{string(victim)}, missingSeededKinds(t, ctx, repo),
+		"гейт обязан НАЗВАТЬ вид, чьё умолчание снято, а не просто покраснеть числом")
+}
+
+// missingSeededKinds — предикат покрытия, вынесенный отдельно ровно затем, чтобы
+// его можно было прогнать на повреждённой базе. Проверка, которую нельзя
+// покормить настоящим дефектом, о своей способности упасть не утверждает ничего.
+func missingSeededKinds(t *testing.T, ctx context.Context, repo *kachopg.LimitRepo) []string {
+	t.Helper()
+	rows, _, err := repo.List(ctx, 1000, "", domain.LimitFilter{Scope: domain.LimitScopeDefault})
+	require.NoError(t, err)
+	seeded := map[domain.LimitKind]bool{}
+	for _, r := range rows {
+		seeded[r.Kind] = true
+	}
+	var missing []string
+	for _, k := range domain.CountableKinds() {
+		if !seeded[k] {
+			missing = append(missing, string(k))
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+// TestLimit_NestedKindFormIsAccepted — схема принимает трёхчастный вид и
+// по-прежнему отвергает четырёхчастный.
+//
+// Форма расширена миграцией 0094 аддитивно, поэтому утверждаются ОБА края:
+// принятие нового и сохранение прежнего запрета. Без второй половины «форма
+// расширена» было бы неотличимо от «проверка формы снята».
+func TestLimit_NestedKindFormIsAccepted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	_, pool, ctx := newLimitRepo(t)
+	_, prj := seedLimitScopeObjects(t, ctx, pool, "nestedform")
+
+	insert := func(kind string) error {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO kacho_iam.limits (id, scope, scope_id, kind, limit_value)
+			 VALUES ($1, 'PROJECT', $2, $3, 4)`,
+			string(ids.NewHyphenID(ids.PrefixLimitHyphen)), prj, kind)
+		return err
+	}
+
+	require.NoError(t, insert("vpc.network.subnet"),
+		"трёхчастный вид обязан приниматься схемой — иначе предел на родителя невыразим")
+
+	require.Error(t, insert("vpc.network.subnet.route"),
+		"четыре части — предел на внука, у которого нет своего носителя; обязан отвергаться")
+	require.Error(t, insert("vpcnetwork"),
+		"законный близнец прежнего запрета: вид без точки по-прежнему отвергается")
 }
