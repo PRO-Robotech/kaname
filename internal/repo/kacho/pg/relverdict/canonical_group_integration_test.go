@@ -59,7 +59,8 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 					 VALUES ('usr-member', 'ext-m', 'm@kacho.local', 'acc-1') ON CONFLICT DO NOTHING`)
 				exec(t, ctx, tx,
 					`INSERT INTO kacho_iam.resource_mirror (object_type, object_id)
-					 VALUES ('vpc_network', 'net-1') ON CONFLICT DO NOTHING`)
+					 VALUES ($1, 'net-1') ON CONFLICT DO NOTHING`,
+					catalogFormOf(t, "vpc_network"))
 				seedGroupFact(t, ctx, tx, tc.group, tc.форма)
 
 				// (1) прямой вопрос — членство даёт право

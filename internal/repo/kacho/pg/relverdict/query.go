@@ -94,6 +94,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
 )
 
@@ -182,12 +183,13 @@ const maxConditionRows = 256
 // одном месте, — а они лежат в двух, и на одном из семейств такое соединение
 // тождественно ложно.
 //
-// $1 subject · $2 object_type · $3 object_id · $4 типы предков атомов-фактов ·
+// $1 subject · $2 object_type в словаре МОДЕЛИ · $3 object_id ·
+// $4 типы предков атомов-фактов ·
 // $5 отношения атомов-фактов · $6 глаголы атомов-выдачи · $7 max_depth · $8 limit
-// $9 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
-// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
-// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
-// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// $9 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
+// `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
+// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
 // быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const verdictSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
@@ -321,6 +323,14 @@ type Grounds struct {
 // сказать «прав нет» там, где ответ не получен, и сравнение с движком показало
 // бы согласие вместо расхождения. Вызывающий обязан отличать одно от другого.
 // По той же причине ошибкой отвечает и НЕНАЗНАЧЕННАЯ ось меток: см. labelAxisOf.
+// verdictQuerySQL — ГОТОВЫЙ запрос вердикта для выбранной оси меток (см. довод
+// у expandQuerySQL: собранный запрос читает не только продукт, но и гейт
+// словарей, и собирать его гейт не вправе).
+func verdictQuerySQL(labelTable string) string {
+	return strings.Replace(verdictSQL, labelsJoinMark,
+		labelsJoinPinned(labelTable, "$9", "$3"), 1)
+}
+
 func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	var g Grounds
 	if in.Subject == "" || in.ObjectType == "" || in.ObjectID == "" || in.Relation == "" {
@@ -336,13 +346,11 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		return Unknown, g, err
 	}
 	g.LabelAxisTable = labelTable
-	sql := strings.Replace(verdictSQL, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$2", "$3"), 1)
 
-	rows, err := q.Query(ctx, sql,
+	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		GrantTypeName(in.ObjectType),
+		authzmap.CatalogTypeName(in.ObjectType),
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)

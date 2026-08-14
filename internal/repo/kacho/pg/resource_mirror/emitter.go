@@ -37,11 +37,19 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // Row — the tenant-facing projection mirrored for one owner object. Labels nil
 // is normalized to an empty JSONB object ('{}').
 type Row struct {
+	// ObjectType — тип в словаре КАТАЛОГА ресурсов (`vpc.network`,
+	// `iam.account`): им названа колонка зеркала, и им же зовёт регистрация.
+	//
+	// Цепь предков этой же строки ложится словарём МОДЕЛИ ПРАВ — перевод делает
+	// писатель (см. upsertParentEdges). Разница не косметическая: по цепи ходит
+	// вопрос о доступе, а он приходит словарём модели.
 	ObjectType      string
 	ObjectID        string
 	ParentProjectID string
@@ -199,11 +207,33 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 //
 // Зовётся ТОЛЬКО когда зеркало реально применилось: устаревшая доставка не
 // проходит монотонную защиту строки и не должна переписывать цепь свежей.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЦЕПЬ ПИШЕТСЯ В СЛОВАРЕ МОДЕЛИ ПРАВ — И ЭТО НЕ ТО ЖЕ, ЧЕМ НАЗВАНА СТРОКА ЗЕРКАЛА
+//
+// Зеркало — проекция КАТАЛОГА ресурсов, и его `object_type` назван словарём
+// каталога (`vpc.network`). Цепь читается вопросом о доступе, а он приходит
+// словарём МОДЕЛИ (`vpc_network`) — им же названы три из четырёх колонок, с
+// которыми цепь соединяется: прямой факт, область выдачи и собственная
+// родительская сторона рёбер. Цепь в словаре каталога не совпала бы с ними
+// НИКОГДА и молча: исход выглядел бы как «права нет», а не как ошибка.
+//
+// Обратное направление невозможно by construction, а не по вкусу: вершина
+// иерархии `cluster` в каталоге ресурсов отсутствует — кластер не ресурс, — и
+// цепь, названная словарём каталога, не смогла бы дойти до строки администратора
+// облака вовсе.
+//
+// Перевод берётся ЕДИНСТВЕННЫЙ (`authzmap.ModelTypeName`) и идемпотентен:
+// родительская сторона приезжает от владельца ресурса уже модельными именами
+// (`project`, `account`, `registry_registry`), и второй перевод её не портит.
+// Держится это не здесь, а проверками схемы `*_type NOT LIKE '%.%'`: регрессия
+// писателя отвергается строкой, а не перестаёт совпадать тихо.
 func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, version any) error {
+	objectType := authzmap.ModelTypeName(row.ObjectType)
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM kacho_iam.resource_parent_edge
 		  WHERE object_type = $1 AND object_id = $2`,
-		row.ObjectType, row.ObjectID,
+		objectType, row.ObjectID,
 	); err != nil {
 		return fmt.Errorf("resource_parent_edge: clear: %w", err)
 	}
@@ -222,7 +252,7 @@ func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, version any) err
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth, source_version, updated_at)
 			 VALUES ($1, $2, $3, $4, $5, $6, now())`,
-			row.ObjectType, row.ObjectID, typ, id, i+1, version,
+			objectType, row.ObjectID, authzmap.ModelTypeName(typ), id, i+1, version,
 		); err != nil {
 			return fmt.Errorf("resource_parent_edge: insert depth %d: %w", i+1, err)
 		}

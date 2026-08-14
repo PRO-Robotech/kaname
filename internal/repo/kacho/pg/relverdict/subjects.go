@@ -26,6 +26,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // SubjectsQuery — вопрос «кто может это над этим объектом».
@@ -48,12 +50,12 @@ type SubjectsQuery struct {
 // как членам группы, которой сделана выдача. Один разворот поверх набора не
 // может разойтись сам с собой.
 //
-// $1 object_type · $2 object_id · $3 after · $4 limit · $5 max_depth ·
+// $1 object_type в словаре МОДЕЛИ · $2 object_id · $3 after · $4 limit · $5 max_depth ·
 // $6 типы предков атомов-фактов · $7 отношения атомов-фактов · $8 глаголы атомов-выдачи
-// $9 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
-// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
-// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
-// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// $9 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
+// `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
+// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
 // быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const subjectsSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
@@ -119,6 +121,13 @@ SELECT g.subject
  ORDER BY g.subject
  LIMIT $4::int`
 
+// subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
+// меток (довод — у expandQuerySQL).
+func subjectsQuerySQL(labelTable string) string {
+	return strings.Replace(subjectsSQL, labelsJoinMark,
+		labelsJoinPinned(labelTable, "$9", "$2"), 1)
+}
+
 // Subjects отдаёт страницу субъектов, имеющих отношение на объекте.
 func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []string, nextAfter string, err error) {
 	if in.ObjectType == "" || in.ObjectID == "" || in.Relation == "" {
@@ -139,11 +148,9 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	sql := strings.Replace(subjectsSQL, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$1", "$2"), 1)
-	rows, err := q.Query(ctx, sql,
+	rows, err := q.Query(ctx, subjectsQuerySQL(labelTable),
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, GrantTypeName(in.ObjectType))
+		factParents, factRelations, bindVerbs, authzmap.CatalogTypeName(in.ObjectType))
 	if err != nil {
 		return nil, "", fmt.Errorf("relverdict: перечисление субъектов: %w", err)
 	}

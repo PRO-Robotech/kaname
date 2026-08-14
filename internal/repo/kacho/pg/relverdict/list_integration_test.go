@@ -43,14 +43,16 @@ func TestList_PagesThroughEverythingTheSubjectMaySee(t *testing.T) {
 		for i := 0; i < inScope; i++ {
 			id := fmt.Sprintf("net-%02d", i)
 			exec(t, ctx, tx,
-				`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', $1)`, id)
+				`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($2, $1)`,
+				id, catalogFormOf(t, "vpc_network"))
 			exec(t, ctx, tx,
 				`INSERT INTO kacho_iam.resource_parent_edge
 				   (object_type, object_id, parent_type, parent_id, depth)
 				 VALUES ('vpc_network', $1, 'project', 'prj-1', 1)`, id)
 		}
 		exec(t, ctx, tx,
-			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', 'net-99')`)
+			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($1, 'net-99')`,
+			catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ('prj-9', 'acc-1', 'other')`)
 		exec(t, ctx, tx,

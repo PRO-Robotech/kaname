@@ -38,6 +38,11 @@ import (
 )
 
 // readParentChain — цепь предков объекта в порядке возрастания глубины.
+//
+// `objType` называется в словаре МОДЕЛИ ПРАВ: цепь читается вопросом о доступе,
+// а он приходит им (см. migration 0091 и комментарий у upsertParentEdges).
+// Регистрация при этом называет объект словарём КАТАЛОГА — на этом стыке и
+// стоит перевод, который здесь проверяется по исходу.
 func readParentChain(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string) []string {
 	t.Helper()
 	rows, err := pool.Query(ctx,
@@ -77,7 +82,7 @@ func TestParentEdges_ReRegistrationWithChainDoesNotEmptyTheSet(t *testing.T) {
 		ParentAccountID: "acc-A", Labels: map[string]string{"env": "dev"},
 		SourceVersion: v1, ParentChain: chain,
 	})
-	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute.instance", "inst-chain-keep"),
+	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-keep"),
 		"первая регистрация не записала цепь — дальше проверять нечего")
 
 	// Правка меток: тот же объект, та же цепь, версия строго новее.
@@ -87,7 +92,7 @@ func TestParentEdges_ReRegistrationWithChainDoesNotEmptyTheSet(t *testing.T) {
 		SourceVersion: v1.Add(time.Second), ParentChain: chain,
 	})
 
-	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute.instance", "inst-chain-keep"),
+	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-keep"),
 		"повторная регистрация опустошила набор рёбер объекта: дальше вопрос о доступе "+
 			"поднимается по цепи, цепи нет, и отказ неотличим от честного")
 }
@@ -112,14 +117,14 @@ func TestParentEdges_ReRegistrationWithoutChainEmptiesTheSet(t *testing.T) {
 		ObjectType: "compute.instance", ObjectID: "inst-chain-lost", ParentProjectID: "prj-P",
 		SourceVersion: v1, ParentChain: []string{"project:prj-P"},
 	})
-	require.NotEmpty(t, readParentChain(t, ctx, pool, "compute.instance", "inst-chain-lost"))
+	require.NotEmpty(t, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-lost"))
 
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-chain-lost", ParentProjectID: "prj-P",
 		Labels: map[string]string{"env": "prod"}, SourceVersion: v1.Add(time.Second),
 	})
 
-	require.Empty(t, readParentChain(t, ctx, pool, "compute.instance", "inst-chain-lost"),
+	require.Empty(t, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-lost"),
 		"набор рёбер пережил регистрацию, которая цепи не назвала — значит замена "+
 			"не работает, и перенос объекта в другую область не снимет старого предка")
 }
@@ -146,6 +151,6 @@ func TestParentEdges_MovedObjectLosesTheOldAncestor(t *testing.T) {
 	})
 
 	require.Equal(t, []string{"project:prj-NEW"},
-		readParentChain(t, ctx, pool, "compute.instance", "inst-moved"),
+		readParentChain(t, ctx, pool, "compute_instance", "inst-moved"),
 		"прежний предок пережил перенос — право пережило бы вместе с ним")
 }

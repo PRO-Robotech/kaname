@@ -61,7 +61,8 @@ func seedNetworks(t *testing.T, ctx context.Context, tx pgx.Tx, n int) []string 
 		id := fmt.Sprintf("net-%02d", i)
 		ids = append(ids, id)
 		exec(t, ctx, tx,
-			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ('vpc_network', $1)`, id)
+			`INSERT INTO kacho_iam.resource_mirror (object_type, object_id) VALUES ($2, $1)`,
+			id, catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth)

@@ -27,6 +27,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // Source — одно основание права.
@@ -60,12 +62,12 @@ type Source struct {
 // членов группы, которой выдано по именам или по меткам, — то есть скрывала
 // основание ровно там, где оно менее очевидно.
 //
-// $1 object_type · $2 object_id · $3 max_depth ·
+// $1 object_type в словаре МОДЕЛИ · $2 object_id · $3 max_depth ·
 // $4 типы предков атомов-фактов · $5 отношения атомов-фактов · $6 глаголы атомов-выдачи
-// $7 object_type в ТОЧЕЧНОЙ форме — ею названы типы в таблицах выдачи
-// (`role_verb.object_type`, `role_rule_selectors.object_types`), тогда как вопрос
-// приходит формой модели прав. Перевод делается ОДИН раз, на входе, тем же
-// каталогом, каким его делает выбор оси меток; двух словарей в одном соединении
+// $7 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
+// `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
+// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
 // быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const expandSQL = `
 WITH RECURSIVE scope(s_type, s_id, depth) AS (
@@ -133,6 +135,17 @@ SELECT 'group'::text,
   JOIN kacho_iam.group_members gm ON g.subject IN ('group:' || gm.group_id, 'group:' || gm.group_id || '#member')
  ORDER BY 1, 2, 3`
 
+// expandQuerySQL — ГОТОВЫЙ запрос разбора для выбранной оси меток.
+//
+// Собран отдельной функцией, а не на месте вызова, потому что у собранного
+// запроса появляется второй читатель — гейт словарей. Гейт, собирающий запрос
+// сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
+// ровно потому, что он подставляет свой.
+func expandQuerySQL(labelTable string) string {
+	return strings.Replace(expandSQL, labelsJoinMark,
+		labelsJoinPinned(labelTable, "$7", "$2"), 1)
+}
+
 // Expand перечисляет основания права на объекте.
 func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string) ([]Source, error) {
 	if objectType == "" || objectID == "" || relation == "" {
@@ -149,10 +162,8 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	if err != nil {
 		return nil, err
 	}
-	sql := strings.Replace(expandSQL, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$1", "$2"), 1)
-	rows, err := q.Query(ctx, sql, objectType, objectID, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, GrantTypeName(objectType))
+	rows, err := q.Query(ctx, expandQuerySQL(labelTable), objectType, objectID, MaxAncestorDepth,
+		factParents, factRelations, bindVerbs, authzmap.CatalogTypeName(objectType))
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)
 	}
