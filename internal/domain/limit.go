@@ -244,10 +244,27 @@ var countableKinds = []CountableKind{
 	{"loadbalancer.targetGroups", CarrierProject},
 	{"loadbalancer.listeners", CarrierProject},
 
+	// loadbalancer, nested — how many listeners fit in ONE balancer. Counted by
+	// nlb in S4.
+	//
+	// The pair `targetGroups → targets` is NOT here and its absence is a
+	// decision, not an oversight: `Target` is a row of `kacho_nlb.targets` but
+	// not a grantable type (the model declares three nlb types and
+	// `nlb_target` is not among them), so the token would fail this very
+	// catalogue's gate. Weakening the gate for one convenient pair would open
+	// it for ceilings on things the authorization model cannot name. The risk
+	// ("too many targets in one group") stays OPEN and is carried in §6 of the
+	// acceptance with the predicate that would close it.
+	{"loadbalancer.networkLoadBalancers.listeners", "loadbalancer.networkLoadBalancers"},
+
 	// registry — registries carry `project_id`; repository rows carry only
 	// `registry_id` and reach the project by joining their registry.
 	{"registry.registries", CarrierProject},
 	{"registry.repositories", CarrierProject},
+
+	// registry, nested — how many repositories fit in ONE registry. Counted by
+	// registry in S4.
+	{"registry.registries.repositories", "registry.registries"},
 }
 
 // CountableEntries returns a COPY of the closed catalogue, in catalogue order.
