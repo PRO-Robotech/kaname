@@ -3026,6 +3026,16 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.vpc.v1.QuotaService/List",
+    "permission": "vpc.quotas.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.RouteTableService/Create",
     "permission": "vpc.route_tables.create",
     "required_relation": "editor",
