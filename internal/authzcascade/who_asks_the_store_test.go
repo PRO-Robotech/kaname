@@ -446,6 +446,10 @@ var nonQuestionMethods = map[string]string{
 	"DeleteTuples":           "write",
 	"WriteConditionalTuples": "write",
 	"GetStoreInfo":           "store metadata — not a question about relations",
+	"LatestAuthorizationModelID": "store metadata — reports which model was written LAST, " +
+		"not what any subject may do. It is deliberately NOT the model this process " +
+		"evaluates against (that one is pinned by env), and it is read as a change " +
+		"signal by the fga_outbox poison redrive; no lane decision turns on it",
 }
 
 // TestQuestionMethodsAccountForThePortItClaimsToEnumerate — the premise of `questionMethods`.

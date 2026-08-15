@@ -880,6 +880,22 @@ func runServe(cfg config.Config) error {
 		runSubjectChangeOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
+	// Возврат отравленных строк очереди tuple'ов в работу. Дренаж травит отказ
+	// владельца прав как постоянный — верно, повтор идентичного запроса пройти не
+	// может, — но без возврата отравленная строка не берётся НИКОГДА, и любой
+	// временный рассинхрон (модель приехала позже строки) становится бессрочной
+	// потерей права. Триггер — смена версии модели, а не таймер: см.
+	// fga_outbox_redrive_backstop.go.
+	if openfgaClient != nil && openfgaClient.Endpoint != "" {
+		if rerr := startFGAOutboxRedrive(ctx, pool, openfgaClient.LatestAuthorizationModelID, logger); rerr != nil {
+			return fmt.Errorf("fga_outbox redrive backstop: %w", rerr)
+		}
+	} else {
+		// Названо вслух: без клиента наблюдать смену модели нечем, значит
+		// возврата НЕТ. Молчание здесь читалось бы как «механизм работает».
+		logger.Warn("fga_outbox poison redrive NOT started: no OpenFGA endpoint; " +
+			"a poisoned tuple intent will stay poisoned until an operator acts")
+	}
 
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_kacho_root` to
 	// the user identified by KACHO_IAM_BOOTSTRAP_ROOT_EMAIL and enqueues the
