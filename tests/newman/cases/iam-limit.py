@@ -599,10 +599,33 @@ CASES.append(Case(
             pre_script=_internal(_RESOLVE_Q),
             test_script=[
                 *assert_status(200),
-                "pm.test('one row per countable vpc kind — eight of them', () => {",
+                # УТВЕРЖДАЕТСЯ СВОЙСТВО, А НЕ ЧИСЛО — и это записано, чтобы
+                # следующий читатель не «починил» его обратно на число.
+                #
+                # Здесь стояло `lengthOf(8)`: восемь плоских видов vpc. Каталог
+                # с тех пор вырос вложенными пределами (сколько подсетей в сети,
+                # сколько интерфейсов в подсети), и ответ стал нести двенадцать.
+                # Кейс покраснел на ЗАКОННОМ расширении — то есть число держало
+                # не свойство, а момент времени.
+                #
+                # Держать точное число было бы правильно, будь чем: каталог живёт
+                # в Go (`domain.countableKinds`), кейс — в Python, и общего
+                # источника у них нет. Поэтому проверяются четыре свойства,
+                # каждое из которых ломается на настоящем дефекте: чужой домен в
+                # ответе, пропажа плоского вида, дубликат, пустой ответ.
+                "pm.test('ответ несёт виды ТОЛЬКО этого домена, все плоские и без повторов', () => {",
                 "  const j = pm.response.json();",
                 "  const items = j.limits === undefined ? [] : j.limits;",
-                "  pm.expect(items, JSON.stringify(j)).to.be.an('array').with.lengthOf(8);",
+                "  pm.expect(items, JSON.stringify(j)).to.be.an('array');",
+                "  const kinds = items.map(l => l.kind);",
+                "  pm.expect(kinds.length, JSON.stringify(j)).to.be.at.least(8);",
+                "  pm.expect(new Set(kinds).size, 'вид назван дважды: ' + JSON.stringify(kinds)).to.eql(kinds.length);",
+                "  const alien = kinds.filter(k => !k.startsWith('vpc.'));",
+                "  pm.expect(alien, 'резолв домена vpc вернул чужие виды').to.eql([]);",
+                "  const flat = ['vpc.network','vpc.subnet','vpc.address','vpc.networkInterface',",
+                "                'vpc.securityGroup','vpc.routeTable','vpc.gateway','vpc.cidrGroup'];",
+                "  const missing = flat.filter(k => !kinds.includes(k));",
+                "  pm.expect(missing, 'плоский вид пропал из ответа').to.eql([]);",
                 "});",
                 # The seeded platform default. It is asserted by VALUE because that
                 # number lives in exactly one place — the iam seed — and a ceiling
