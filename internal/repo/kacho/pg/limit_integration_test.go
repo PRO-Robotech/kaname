@@ -272,13 +272,31 @@ func TestLimit_08_PrecedenceAndFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(16), effectiveValue(t, ctx, repo, prj, "vpc.network"))
 
-	// The whole answer for the service is one row per countable kind of that
-	// service — eight for vpc, and the count is READ FROM THE CATALOGUE rather
-	// than written here, so a ninth kind cannot pass unnoticed.
+	// Ответ по КОРНЮ АРЕНДЫ — по строке на каждый вид сервиса, который в этом
+	// корне и считается.
+	//
+	// Число берётся ИЗ КАТАЛОГА, а не пишется здесь, — но берётся с тем же
+	// отбором, что делает сам резолв: виды, считаемые в родительском ресурсе
+	// (сколько подсетей в сети, сколько интерфейсов в подсети), этим чтением не
+	// отвечаются, потому что на уровне проекта у них нет единственного значения.
+	//
+	// Прежде здесь стояло `len(CountableKindsOfService("vpc"))` — весь каталог
+	// домена, включая вложенные. Проба закрепляла состояние, при котором
+	// арендатору уезжали четыре строки с носителем «проект» вопреки каталогу и с
+	// потреблением, которое не наполнится никогда.
+	wantKinds := 0
+	for _, k := range domain.CountableKindsOfService("vpc") {
+		if c, known := domain.CarrierOfKind(k); known &&
+			(c == domain.CarrierProject || c == domain.CarrierAccount) {
+			wantKinds++
+		}
+	}
+	require.NotZero(t, wantKinds, "у домена vpc не осталось видов, считаемых в корне аренды")
+
 	stated, ok, err := repo.StatedFor(ctx, prj)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Len(t, domain.ResolveEffective("vpc", stated), len(domain.CountableKindsOfService("vpc")))
+	require.Len(t, domain.ResolveEffective("vpc", stated), wantKinds)
 }
 
 // TestLimit_08b_ResolveByAccountId — the same read addressed by an ACCOUNT: the
