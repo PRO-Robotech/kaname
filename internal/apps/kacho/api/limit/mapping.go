@@ -71,6 +71,7 @@ func effectiveToProto(e domain.EffectiveLimit) *iamv1.EffectiveLimit {
 	return &iamv1.EffectiveLimit{
 		Kind:          string(e.Kind),
 		Value:         e.Value,
+		Carrier:       string(e.Carrier),
 		SourceScope:   scopeToProto(e.SourceScope),
 		SourceScopeId: e.SourceScopeID,
 	}

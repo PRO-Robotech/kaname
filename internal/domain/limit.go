@@ -424,8 +424,19 @@ func (f LimitFilter) Validate() error {
 // project stop at four" cannot otherwise tell a project override from an account
 // one from the platform default without re-reading all three scopes by hand.
 type EffectiveLimit struct {
-	Kind          LimitKind
-	Value         int64
+	Kind  LimitKind
+	Value int64
+	// Carrier — ГДЕ этот вид считается: корень аренды (`project` / `account`)
+	// либо двухчастный токен родительского типа.
+	//
+	// Едет вместе с величиной, потому что вывести его на стороне потребителя
+	// НЕЛЬЗЯ: форма токена носителя не определяет (`iam.project` — двухчастный
+	// вид, чей носитель не проект), а догадка здесь не отказывает громко — она
+	// считает верные строки против неверного владельца, и потребление такой
+	// строки не наполняется никогда.
+	//
+	// Пустым не бывает: вид вне каталога до этой структуры не доходит.
+	Carrier       LimitCarrier
 	SourceScope   LimitScope
 	SourceScopeID string
 }
@@ -458,9 +469,20 @@ func ResolveEffective(service string, stated []Limit) []EffectiveLimit {
 		if !ok {
 			continue
 		}
+		// Носитель берётся у КАТАЛОГА, а не у победившей строки предела: предел
+		// назначается на область видимости, а считается вид всегда в одном и том
+		// же носителе, каким бы образом величину ни выдали.
+		carrier, known := CarrierOfKind(k)
+		if !known {
+			// Недостижимо: перечень выше и есть каталог этого домена. Ветка
+			// оставлена, чтобы вид без носителя не уехал наружу с пустым полем,
+			// которое потребитель прочитает как «проект».
+			continue
+		}
 		out = append(out, EffectiveLimit{
 			Kind:          k,
 			Value:         w.Value,
+			Carrier:       carrier,
 			SourceScope:   w.Scope,
 			SourceScopeID: w.ScopeID,
 		})
