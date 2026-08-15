@@ -24,9 +24,11 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -173,14 +175,17 @@ func (fakeCursors) Decode(c string) (int64, error) {
 // fakeChecker — the relation store. `answer` is what it says; `fail` makes it
 // unable to answer at all, which must NOT be read as a "yes".
 type fakeChecker struct {
-	answer   bool
-	fail     bool
+	answer bool
+	fail   bool
+	// subject запоминается затем, что гейт обязан спрашивать про КАЛЛЕРА-МОДУЛЬ,
+	// а не про арендатора: без этой записи проба зеленела бы на любом субъекте.
+	subject  string
 	relation string
 	object   string
 }
 
-func (f *fakeChecker) Check(_ context.Context, _, relation, object string) (bool, error) {
-	f.relation, f.object = relation, object
+func (f *fakeChecker) Check(_ context.Context, subject, relation, object string) (bool, error) {
+	f.subject, f.relation, f.object = subject, relation, object
 	if f.fail {
 		return false, grpcstatus.Error(codes.Unavailable, "store unreachable")
 	}
@@ -525,6 +530,51 @@ func TestResolve_NarrowGate(t *testing.T) {
 		require.Equal(t, "quota_reader", checker.relation)
 		require.Equal(t, "cluster:"+domain.ClusterSingletonID, checker.object)
 	})
+}
+
+// TestResolve_GateAsksAboutTheCallingMODULE — право читать пределы принадлежит
+// МОДУЛЮ, а не арендатору, от чьего имени модуль сейчас работает.
+//
+// ЧТО ЭТО СТОИЛО. Клиенты пределов пробрасывают личность инициатора
+// (`auth.PropagateOutgoing`), потому что без неё внутренний листенер видел бы
+// безымянный вызов. Следствие: гейт спрашивал модель прав про АРЕНДАТОРА — а
+// членство в группе читателей пределов заведено служебным учётным записям
+// модулей. Ни один арендатор его не имеет и иметь не должен, поэтому резолв
+// отказывал ВСЕГДА, а списание квоты fail-closed роняло каждую мутацию домена.
+// В сквозном прогоне это дало более двух тысяч упавших утверждений, из которых
+// прямо о квоте говорили 66 — остальное каскад.
+//
+// Модуль доказывает себя СЕРТИФИКАТОМ, и iam уже умеет выводить из него учётную
+// запись (`SANToServiceAccountID`) — этим же способом работает пол чтения на том
+// же листенере. Гейт обязан спрашивать про неё.
+func TestResolve_GateAsksAboutTheCallingMODULE(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+	checker := &fakeChecker{answer: true}
+
+	// Контекст стенда: проверенная личность сертификата модуля ПЛЮС проброшенная
+	// личность арендатора. Оба присутствуют — вопрос в том, про кого спросят.
+	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/kacho-compute", true)
+	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: "usr-tenant"})
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
+	require.NoError(t, err)
+	require.Equal(t, "service_account:"+authzguard.ServiceAccountIDForService("compute"), checker.subject,
+		"спрошено должно быть про учётную запись МОДУЛЯ: членство в группе читателей заведено ей, "+
+			"а не арендатору, от чьего имени модуль работает")
+}
+
+// TestResolve_NoModuleIdentity_FallsBackToPrincipal — в процессной фикстуре
+// сертификата нет вовсе, и гейт обязан остаться работоспособным: иначе юниты
+// начали бы утверждать не то, что исполняется на стенде.
+func TestResolve_NoModuleIdentity_FallsBackToPrincipal(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+	checker := &fakeChecker{answer: true}
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(callerCtx(), "prj-x", "vpc")
+	require.NoError(t, err)
+	require.Equal(t, "service_account:sva-owner", checker.subject)
 }
 
 // TestResolve_UnknownScopeObject_NotFoundLane — an id that names neither a project

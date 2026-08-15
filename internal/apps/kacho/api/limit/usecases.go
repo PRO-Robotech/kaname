@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	kerrors "github.com/PRO-Robotech/kacho/pkg/errors"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
@@ -413,13 +414,40 @@ func (uc *ListChangedUseCase) Execute(ctx context.Context, cursor string, pageSi
 	return ChangedResult{Changes: rows, NextCursor: uc.cursors.Encode(next)}, nil
 }
 
+// quotaReaderSubject — КТО спрашивает пределы.
+//
+// Право читать величины принадлежит МОДУЛЮ, а не арендатору, от чьего имени
+// модуль сейчас работает: членство в группе читателей заведено служебным учётным
+// записям модулей, и ни один арендатор его не имеет и иметь не должен.
+//
+// Клиенты пределов пробрасывают личность инициатора (`auth.PropagateOutgoing`),
+// иначе внутренний листенер увидел бы безымянный вызов. Поэтому в контексте
+// присутствуют ОБЕ личности, и выбрать надо ту, о которой заведено право.
+//
+// Порядок: сначала личность СЕРТИФИКАТА (её нельзя подделать и она называет
+// модуль), затем — принципал. Второй путь оставлен не для послабления, а потому
+// что в процессных фикстурах сертификата нет вовсе; на развёрнутом стенде
+// production-mode требует mTLS, значит первый путь там есть всегда.
+//
+// Тот же способ вывода учётной записи из сертификата, что у пола чтения на этом
+// же листенере (`SANToServiceAccountID`) — общий, а не своя копия: две копии
+// разошлись бы молча и разошлись бы именно на форме имени.
+func quotaReaderSubject(ctx context.Context) (string, bool) {
+	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
+		if sva, ok := authzguard.SANToServiceAccountID(san); ok {
+			return "service_account:" + sva, true
+		}
+	}
+	return authzguard.PrincipalSubject(ctx)
+}
+
 // requireQuotaReader — the narrow gate, shared by both service-facing reads.
 //
 // Returns PermissionDenied (verbatim, non-leaking) on every failure mode:
 // anonymous principal, unwired checker, checker backend error, explicit deny. A
 // checker that cannot answer is not an answer of "yes".
 func requireQuotaReader(ctx context.Context, checker authzguard.RelationChecker) error {
-	subject, ok := authzguard.PrincipalSubject(ctx)
+	subject, ok := quotaReaderSubject(ctx)
 	if !ok {
 		return authzguard.PermissionDenied()
 	}
