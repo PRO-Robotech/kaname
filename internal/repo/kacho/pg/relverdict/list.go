@@ -134,11 +134,13 @@ WITH RECURSIVE speaker(subject) AS (
     -- что неполный ответ выглядит как честное «ничего нет».
     SELECT 'group:' || gm.group_id
       FROM kacho_iam.group_members gm
-     WHERE gm.member_type || ':' || gm.member_id = $1::text
+     WHERE gm.member_type = split_part($1::text, ':', 1)
+			   AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION
     SELECT 'group:' || gm.group_id || '#member'
       FROM kacho_iam.group_members gm
-     WHERE gm.member_type || ':' || gm.member_id = $1::text
+     WHERE gm.member_type = split_part($1::text, ':', 1)
+			   AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION
     SELECT 'user:*'
 ),
