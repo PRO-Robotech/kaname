@@ -182,12 +182,23 @@ type fakeChecker struct {
 	subject  string
 	relation string
 	object   string
+	// asked — ВСЕ субъекты, о которых спросили. Гейт вправе спросить о двух
+	// законных личностях; без записи всех проба видела бы только последнюю.
+	asked []string
+	// only — читателем считается только названный субъект.
+	only string
 }
 
 func (f *fakeChecker) Check(_ context.Context, subject, relation, object string) (bool, error) {
 	f.subject, f.relation, f.object = subject, relation, object
+	f.asked = append(f.asked, subject)
 	if f.fail {
 		return false, grpcstatus.Error(codes.Unavailable, "store unreachable")
+	}
+	// only — «читателем является ТОЛЬКО этот субъект». Пусто означает «любой»,
+	// то есть прежнее поведение дублёра.
+	if f.only != "" {
+		return f.answer && subject == f.only, nil
 	}
 	return f.answer, nil
 }
@@ -559,9 +570,9 @@ func TestResolve_GateAsksAboutTheCallingMODULE(t *testing.T) {
 
 	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
 	require.NoError(t, err)
-	require.Equal(t, "service_account:"+authzguard.ServiceAccountIDForService("compute"), checker.subject,
+	require.Contains(t, checker.asked, "service_account:"+authzguard.ServiceAccountIDForService("compute"),
 		"спрошено должно быть про учётную запись МОДУЛЯ: членство в группе читателей заведено ей, "+
-			"а не арендатору, от чьего имени модуль работает")
+			"а не только арендатору, от чьего имени модуль работает")
 }
 
 // TestResolve_NoModuleIdentity_FallsBackToPrincipal — в процессной фикстуре
@@ -574,7 +585,56 @@ func TestResolve_NoModuleIdentity_FallsBackToPrincipal(t *testing.T) {
 
 	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(callerCtx(), "prj-x", "vpc")
 	require.NoError(t, err)
-	require.Equal(t, "service_account:sva-owner", checker.subject)
+	require.Contains(t, checker.asked, "service_account:sva-owner")
+}
+
+// TestResolve_ModuleIdentityAloneIsEnough — модуль проходит, даже когда
+// проброшенный арендатор читателем не является. Это обычный путь мутации: клиент
+// пределов пробрасывает личность инициатора, и она читателем быть не должна.
+func TestResolve_ModuleIdentityAloneIsEnough(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+	checker := &fakeChecker{answer: true, only: "service_account:" + authzguard.ServiceAccountIDForService("compute")}
+
+	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/kacho-compute", true)
+	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: "usr-tenant"})
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
+	require.NoError(t, err)
+}
+
+// TestResolve_PrincipalAloneIsEnough — человек через край проходит, хотя
+// сертификат принадлежит КРАЮ, а край читателем не является и быть не должен.
+//
+// Этот путь чуть не потеряли: первая редакция гейта предпочитала сертификат и
+// на принципала уже не смотрела, из-за чего администратор терял доступ, которым
+// пользуется. Проба закрепляет обе стороны, а не ту, что чинили последней.
+func TestResolve_PrincipalAloneIsEnough(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+	checker := &fakeChecker{answer: true, only: "service_account:sva-admin"}
+
+	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway", true)
+	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "service_account", ID: "sva-admin"})
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
+	require.NoError(t, err)
+}
+
+// TestResolve_NeitherIdentityIsReader — ни одна из двух не читатель → отказ.
+// Положительные пробы выше без этого отрицания зеленели бы и на гейте, который
+// пропускает всех.
+func TestResolve_NeitherIdentityIsReader(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+	checker := &fakeChecker{answer: true, only: "service_account:sva-nobody-asks-about"}
+
+	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway", true)
+	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: "usr-tenant"})
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
+	require.Equal(t, codes.PermissionDenied, codeOf(t, err))
+	require.False(t, repo.touched)
 }
 
 // TestResolve_UnknownScopeObject_NotFoundLane — an id that names neither a project

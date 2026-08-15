@@ -414,31 +414,40 @@ func (uc *ListChangedUseCase) Execute(ctx context.Context, cursor string, pageSi
 	return ChangedResult{Changes: rows, NextCursor: uc.cursors.Encode(next)}, nil
 }
 
-// quotaReaderSubject — КТО спрашивает пределы.
+// quotaReaderSubjects — КТО спрашивает пределы. Личностей бывает ДВЕ, и обе законны.
 //
-// Право читать величины принадлежит МОДУЛЮ, а не арендатору, от чьего имени
-// модуль сейчас работает: членство в группе читателей заведено служебным учётным
-// записям модулей, и ни один арендатор его не имеет и иметь не должен.
+// Величины читают два разных вызывающих, и у каждого своя личность:
 //
-// Клиенты пределов пробрасывают личность инициатора (`auth.PropagateOutgoing`),
-// иначе внутренний листенер увидел бы безымянный вызов. Поэтому в контексте
-// присутствуют ОБЕ личности, и выбрать надо ту, о которой заведено право.
+//   - МОДУЛЬ на пути мутации (`vpc`, `compute`, …) — доказывает себя сертификатом;
+//     членство в группе читателей заведено его служебной учётной записи;
+//   - ЧЕЛОВЕК через край — администратор, смотрящий пределы арендатора; его
+//     личность приезжает переданным принципалом, а сертификат в этом случае
+//     принадлежит КРАЮ, который читателем не является и быть не должен.
 //
-// Порядок: сначала личность СЕРТИФИКАТА (её нельзя подделать и она называет
-// модуль), затем — принципал. Второй путь оставлен не для послабления, а потому
-// что в процессных фикстурах сертификата нет вовсе; на развёрнутом стенде
-// production-mode требует mTLS, значит первый путь там есть всегда.
+// Поэтому спрашиваются обе, и достаточно, чтобы читателем оказалась любая. Ни
+// одна не «сильнее»: это не иерархия, а два разных законных вызывающих одного
+// служебного чтения.
 //
-// Тот же способ вывода учётной записи из сертификата, что у пола чтения на этом
-// же листенере (`SANToServiceAccountID`) — общий, а не своя копия: две копии
-// разошлись бы молча и разошлись бы именно на форме имени.
-func quotaReaderSubject(ctx context.Context) (string, bool) {
+// ЧТО СТОИЛА ОДНА. Сначала здесь стояло «сертификат, иначе принципал»: модуль
+// работает от имени арендатора, поэтому проброшенная личность перебивала бы
+// его собственную, и резолв отказывал бы каждой мутации домена. Но и обратное
+// однобоко: край предъявляет СВОЙ сертификат, и администратор через него
+// потерял бы доступ, которым пользуется. Обе проверки нужны вместе.
+//
+// Способ вывода учётной записи из сертификата — общий с полом чтения того же
+// листенера (`SANToServiceAccountID`), а не своя копия: две копии разошлись бы
+// молча и разошлись бы на форме имени.
+func quotaReaderSubjects(ctx context.Context) []string {
+	var out []string
 	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
 		if sva, ok := authzguard.SANToServiceAccountID(san); ok {
-			return "service_account:" + sva, true
+			out = append(out, "service_account:"+sva)
 		}
 	}
-	return authzguard.PrincipalSubject(ctx)
+	if subject, ok := authzguard.PrincipalSubject(ctx); ok {
+		out = append(out, subject)
+	}
+	return out
 }
 
 // requireQuotaReader — the narrow gate, shared by both service-facing reads.
@@ -447,18 +456,23 @@ func quotaReaderSubject(ctx context.Context) (string, bool) {
 // anonymous principal, unwired checker, checker backend error, explicit deny. A
 // checker that cannot answer is not an answer of "yes".
 func requireQuotaReader(ctx context.Context, checker authzguard.RelationChecker) error {
-	subject, ok := quotaReaderSubject(ctx)
-	if !ok {
+	subjects := quotaReaderSubjects(ctx)
+	if len(subjects) == 0 {
 		return authzguard.PermissionDenied()
 	}
 	if checker == nil {
 		return authzguard.PermissionDenied()
 	}
-	allowed, err := checker.Check(ctx, subject, quotaReaderRelation, "cluster:"+domain.ClusterSingletonID)
-	if err != nil || !allowed {
-		return authzguard.PermissionDenied()
+	// Достаточно ОДНОЙ законной личности. Ошибка хранилища ответом «да» не
+	// является и здесь: она просто не даёт разрешения этой личностью, а если
+	// разрешения не дала ни одна — отказ.
+	for _, subject := range subjects {
+		allowed, err := checker.Check(ctx, subject, quotaReaderRelation, "cluster:"+domain.ClusterSingletonID)
+		if err == nil && allowed {
+			return nil
+		}
 	}
-	return nil
+	return authzguard.PermissionDenied()
 }
 
 // finish — terminal Operation of a Create. Method form kept so the Create path
