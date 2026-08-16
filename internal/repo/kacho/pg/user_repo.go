@@ -279,17 +279,30 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 	}
 
 	if f.Filter != "" {
-		if email, ok := parseFieldFilter(f.Filter, "email"); ok {
-			conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))
-			args = append(args, email)
-			argIdx++
-		} else if ext, ok := parseFieldFilter(f.Filter, "external_id"); ok {
-			conditions = append(conditions, fmt.Sprintf("external_id = $%d", argIdx))
-			args = append(args, ext)
-			argIdx++
-		} else if st, ok := parseFieldFilter(f.Filter, "invite_status"); ok {
-			conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
-			args = append(args, st)
+		// Whitelist is closed; an expression outside it is refused by name rather
+		// than dropped (#445). This resource dispatches on the parsed field instead
+		// of emitting ast.ToSQL, because two of the three columns are not addressed
+		// as the field is written: `email` is compared case-insensitively, and the
+		// switch is what keeps that mapping in one place. A field added to the
+		// whitelist without a case here would parse and then match nothing, so the
+		// default arm refuses instead of silently widening the page.
+		ast, ferr := parseListFilter(f.Filter, "email", "external_id", "invite_status")
+		if ferr != nil {
+			return nil, "", ferr
+		}
+		if ast != nil {
+			switch ast.Field {
+			case "email":
+				conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))
+			case "external_id":
+				conditions = append(conditions, fmt.Sprintf("external_id = $%d", argIdx))
+			case "invite_status":
+				conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
+			default:
+				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+					"Bad expression at column 1. Unknown field: %q", ast.Field)
+			}
+			args = append(args, ast.Value)
 			argIdx++
 		}
 	}
@@ -761,22 +774,4 @@ func nullableInvitedBy(id domain.UserID) any {
 		return nil
 	}
 	return string(id)
-}
-
-// parseFieldFilter — generalized parseNameFilter для arbitrary field-name.
-// Принимает `<field>="value"` либо `<field> = "value"`.
-func parseFieldFilter(s, field string) (string, bool) {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, field) {
-		return "", false
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, field))
-	if !strings.HasPrefix(s, "=") {
-		return "", false
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, "="))
-	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
-		return "", false
-	}
-	return s[1 : len(s)-1], true
 }
