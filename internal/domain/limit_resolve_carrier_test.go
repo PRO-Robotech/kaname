@@ -69,14 +69,25 @@ func TestResolveEffective_AnswersNestedKindsWithTheirParentCarrier(t *testing.T)
 		service, len(got), len(nestedWant))
 }
 
-// Ни один назначенный вид домена не пропадает из ответа.
+// Ни один назначенный вид НИ ОДНОГО домена не пропадает из ответа.
 //
 // Положительный контроль к пробе выше: без него та зеленела бы и на резолве,
 // который вырезает всё, кроме вложенных.
-func TestResolveEffective_KeepsEveryStatedKindOfTheService(t *testing.T) {
+//
+// Домены выводятся из каталога, а не выписываются: выписанный перечень не
+// покрыл бы домен, заведённый завтра, — и его вложенный вид потерял бы
+// производителя ровно так же молча, как это уже случилось однажды.
+func TestResolveEffective_KeepsEveryStatedKindOfEveryService(t *testing.T) {
 	t.Parallel()
 
-	for _, service := range []string{"vpc", "loadbalancer", "registry"} {
+	services := map[string]bool{}
+	for _, e := range domain.CountableEntries() {
+		services[domain.LimitKind(e.Kind).Service()] = true
+	}
+	require.NotEmpty(t, services, "каталог пуст — проба не читает ничего")
+
+	checked := 0
+	for service := range services {
 		var stated []domain.Limit
 		want := map[domain.LimitKind]bool{}
 		for _, k := range domain.CountableKindsOfService(service) {
@@ -91,11 +102,15 @@ func TestResolveEffective_KeepsEveryStatedKindOfTheService(t *testing.T) {
 			seen[e.Kind] = true
 		}
 		for k := range want {
-			require.True(t, seen[k], "вид %s назначен пределом, но в ответе резолва его нет", k)
+			require.True(t, seen[k],
+				"вид %s назначен пределом, но в ответе резолва его нет: у величины не осталось "+
+					"производителя, и владелец типа не сможет завести строку учёта", k)
 		}
 		require.Len(t, got, len(want),
 			"в ответе домена %s оказалось не столько видов, сколько назначено", service)
+		checked += len(want)
 	}
+	t.Logf("перепись: доменов %d, видов осмотрено %d", len(services), checked)
 }
 
 // Носитель в ОТВЕТЕ совпадает с носителем в КАТАЛОГЕ — для каждого вида.
