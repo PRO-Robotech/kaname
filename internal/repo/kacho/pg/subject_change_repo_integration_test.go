@@ -17,6 +17,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
@@ -39,17 +40,34 @@ func TestSubjectChangeRepo_PollSubjectChanges(t *testing.T) {
 
 	repo := kachopg.NewSubjectChangeRepo(pool)
 
+	// Посев идёт ТЕМ ЖЕ путём, каким пишет прод (`EmitSubjectChangeEvent`), а не
+	// собственным INSERT'ом: фикстура не вправе быть снисходительнее продукта.
+	// Прод кладёт в строку `payload` — тело, которое единственное и получает
+	// декодер дренажа (его godoc это оговаривает), — а прежний посев называл
+	// только `(subject_id, op)`. Такую строку прод не производит ни при каком
+	// входе, и разобрать её нельзя: проба стерегла форму, которой в очереди не
+	// бывает. Миграция 0097 закрепила это схемой, и посев через писателя
+	// продукта означает, что расходиться с ним больше нечему.
+	abRepo := kachopg.New(pool, nil)
+	seed := func(subjectID, op string) int64 {
+		t.Helper()
+		w, err := abRepo.Writer(ctx)
+		require.NoError(t, err)
+		require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx,
+			access_binding.SubjectChangeEvent{SubjectID: subjectID, Op: op}))
+		require.NoError(t, w.Commit(ctx))
+
+		var id int64
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT id FROM kacho_iam.subject_change_outbox WHERE subject_id = $1`,
+			subjectID).Scan(&id))
+		return id
+	}
+
 	// Seed 3 rows.
-	var id1, id2, id3 int64
-	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO kacho_iam.subject_change_outbox (subject_id, op)
-		 VALUES ('usr_a', 'binding_upsert') RETURNING id`).Scan(&id1))
-	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO kacho_iam.subject_change_outbox (subject_id, op)
-		 VALUES ('usr_b', 'binding_delete') RETURNING id`).Scan(&id2))
-	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO kacho_iam.subject_change_outbox (subject_id, op)
-		 VALUES ('usr_c', 'binding_upsert') RETURNING id`).Scan(&id3))
+	id1 := seed("usr_a", "binding_upsert")
+	id2 := seed("usr_b", "binding_delete")
+	id3 := seed("usr_c", "binding_upsert")
 
 	// ── Poll 1: since=0, limit=2 → first 2 rows; headID=id3 ─────────────────
 	changes, headID, err := repo.PollSubjectChanges(ctx, 0, 2)

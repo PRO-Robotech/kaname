@@ -258,42 +258,34 @@ func TestIntegration_LegacyRow_BackfilledAndDrained(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Migration 0023 has already run. Simulate a row that was inserted
-	// the legacy (op-only) row by directly INSERTing then explicitly NULL'ing
-	// the post-rollout-only columns; then run the migration's backfill UPDATE
-	// over that subject_id. (We cannot literally insert pre-migration in
-	// the same test process.)
+	// Предмет пробы — строка, чьё ТЕЛО собрала МИГРАЦИЯ (обратное заполнение
+	// 0023, затем 0097), а не писатель продукта: собрано оно выражением
+	// `jsonb_build_object` в SQL и полей эмиттера не повторяет. Проба стережёт,
+	// что такое тело декодер принимает и дренаж его доставляет, — иначе строки,
+	// восстановленные обратным заполнением, отравлялись бы разбором молча.
+	//
+	// Прежде эта форма добывалась в три шага: вставить строку без тела, обнулить
+	// колонки, прогнать обратное заполнение. С миграции 0097 строки без тела в
+	// схеме НЕ СУЩЕСТВУЕТ — в этом и предмет 0097 («неразбираемую строку нельзя
+	// записать»), и первый же шаг отвергается NOT NULL. Обходить запрет снятием
+	// ограничения значило бы проверять схему, которой нет; поэтому тело
+	// собирается СРАЗУ — тем же выражением, каким его собирает заполнение.
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.subject_change_outbox (subject_id, op)
-		VALUES ('usr_w1_2_21_legacy', 'binding_delete')`)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		UPDATE kacho_iam.subject_change_outbox
-		   SET event_type = NULL, payload = NULL
-		 WHERE subject_id='usr_w1_2_21_legacy'`)
-	require.NoError(t, err)
-
-	// Re-apply backfill (identical to migration 0023 SQL).
-	_, err = pool.Exec(ctx, `
-		UPDATE kacho_iam.subject_change_outbox
-		   SET payload = jsonb_build_object(
-		       'subject_id', subject_id,
-		       'op',         op,
-		       'event_type', COALESCE(event_type,
-		                              CASE op
-		                                  WHEN 'binding_delete' THEN 'binding_revoke'
-		                                  WHEN 'binding_upsert' THEN 'binding_grant'
-		                                  ELSE op
-		                              END),
-		       'resource_type', COALESCE(resource_type, ''),
-		       'resource_id',   COALESCE(resource_id,   '')
-		   ),
-		   event_type = COALESCE(event_type, CASE op
-		       WHEN 'binding_delete' THEN 'binding_revoke'
-		       WHEN 'binding_upsert' THEN 'binding_grant'
-		       ELSE op
-		   END)
-		 WHERE subject_id='usr_w1_2_21_legacy' AND payload IS NULL`)
+		INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, event_type, payload)
+		SELECT subject_id, op, event_type,
+		       jsonb_build_object(
+		           'subject_id',    subject_id,
+		           'op',            op,
+		           'event_type',    event_type,
+		           'resource_type', '',
+		           'resource_id',   '')
+		  FROM (SELECT 'usr_w1_2_21_legacy'::text AS subject_id,
+		               'binding_delete'::text     AS op,
+		               CASE 'binding_delete'::text
+		                   WHEN 'binding_delete' THEN 'binding_revoke'
+		                   WHEN 'binding_upsert' THEN 'binding_grant'
+		                   ELSE 'binding_delete'
+		               END AS event_type) AS legacy`)
 	require.NoError(t, err)
 
 	fakeSrv := &recordingAuthzCacheServer{}
