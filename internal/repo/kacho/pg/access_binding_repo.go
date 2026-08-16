@@ -52,9 +52,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 type abReader struct {
@@ -1103,32 +1105,36 @@ func (w *abWriter) ReplaceEmittedTuples(ctx context.Context, bindingID domain.Ac
 	return w.InsertEmittedTuples(ctx, bindingID, tuples)
 }
 
+// emitFGAOutbox enqueues the binding's tuples through the table's OWN emitter
+// rather than rendering a row here.
+//
+// It used to write its own INSERT, one row per tuple, with its own hand-built
+// payload — a second rendering of a shape whose whole point is that every producer
+// agrees on it. The two drifted the moment the row stopped being one tuple: this
+// path kept splitting a subject's relation set across rows, so a grant made through
+// a binding still reached OpenFGA one relation at a time while the same grant made
+// through the reconciler arrived whole. One emitter, one shape, one unit of
+// atomicity — the drift has nowhere to happen.
 func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples []access_binding.RelationTuple) error {
 	if len(tuples) == 0 {
 		return nil
 	}
+	out := make([]clients.RelationTuple, 0, len(tuples))
 	for _, t := range tuples {
 		if t.User == "" || t.Relation == "" || t.Object == "" {
 			return fmt.Errorf("emit fga_outbox: incomplete tuple (user=%q relation=%q object=%q)",
 				t.User, t.Relation, t.Object)
 		}
-		payload, err := json.Marshal(map[string]string{
-			"user":     t.User,
-			"relation": t.Relation,
-			"object":   t.Object,
-		})
-		if err != nil {
-			return fmt.Errorf("emit fga_outbox: marshal payload: %w", err)
-		}
-		if _, err := w.tx.Exec(ctx,
-			`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
-			 VALUES ($1, $2::jsonb, now())`,
-			eventType, payload,
-		); err != nil {
-			return fmt.Errorf("emit fga_outbox %s: %w", eventType, err)
-		}
+		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
 	}
-	return nil
+	switch eventType {
+	case fga_outbox.EventTypeWrite:
+		return fga_outbox.EmitWriteTx(ctx, w.tx, out)
+	case fga_outbox.EventTypeDelete:
+		return fga_outbox.EmitDeleteTx(ctx, w.tx, out)
+	default:
+		return fmt.Errorf("emit fga_outbox: unknown event type %q", eventType)
+	}
 }
 
 // EmitAuditEvent atomically appends one durable compliance row into

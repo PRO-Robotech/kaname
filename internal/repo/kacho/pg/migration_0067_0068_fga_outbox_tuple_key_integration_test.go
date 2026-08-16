@@ -8,9 +8,13 @@ package pg_test
 // Pins the SHIPPED shape of kacho_iam.fga_outbox that the drainer's
 // partition-head-only claim depends on:
 //
-//   0067 — the ordering partition key is the FULL tuple identity
-//          (user, relation, object), materialised into a `tuple_key` column by a
+//   0067 — the ordering partition key is materialised into a `tuple_key` column by a
 //          BEFORE INSERT trigger and indexed for the claim's correlated NOT EXISTS.
+//   0098 — that key is the GRANT identity (user, object), not the triple: one row
+//          carries a subject's WHOLE relation set on one object, so the partition has
+//          to cover every row the set can be ordered against. The COLUMN NAME is
+//          historical — renaming it would break the claim query of any pod still on
+//          the previous release, which turns a rollout into a stalled drainer.
 //   0068 — there is NO OTHER partial index over `sent_at IS NULL`, because any
 //          further ordering of the pending rows is a decoy the planner takes under
 //          the empty-queue statistics a queue table carries into a burst.
@@ -66,11 +70,31 @@ func TestMigration0067_FGAOutbox_TupleKeyPartition(t *testing.T) {
 			         now())
 			 RETURNING tuple_key`,
 		).Scan(&got))
-		assert.Equal(t, "user:usr01 v_get vpc_network:net01", got,
-			"the BEFORE INSERT trigger must render `user relation object`; the drainer's "+
-				"claim compares this value between rows, so a different rendering per writer "+
-				"would put two events of ONE tuple into two partitions and drop the ordering "+
-				"between a grant and its revoke.")
+		assert.Equal(t, "user:usr01 vpc_network:net01", got,
+			"the BEFORE INSERT trigger must render `user object` — the GRANT key (migration "+
+				"0098). The drainer's claim compares this value between rows, so a different "+
+				"rendering per writer would put two events of ONE grant into two partitions "+
+				"and drop the ordering between a grant and its revoke. It must NOT include the "+
+				"relation: one row carries a subject's whole relation set, and a key naming a "+
+				"single relation would split that row's own successors away from it.")
+	})
+
+	// The set form of the row must key exactly like the single-relation form: both are
+	// events on ONE grant, and they are ordered against each other or they are not
+	// ordered at all.
+	t.Run("trigger_keys_the_set_form_the_same", func(t *testing.T) {
+		var got string
+		require.NoError(t, pool.QueryRow(ctx,
+			`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+			 VALUES ('fga.tuple.write',
+			         '{"user":"user:usr01","object":"vpc_network:net01","relation":"v_get","relations":["v_get","v_update"]}'::jsonb,
+			         now())
+			 RETURNING tuple_key`,
+		).Scan(&got))
+		assert.Equal(t, "user:usr01 vpc_network:net01", got,
+			"a set row and a single-relation row naming the same (subject, object) must land "+
+				"in the SAME partition — otherwise a revoke of the set could be applied ahead "+
+				"of the grant it supersedes and the tuple would survive its own removal")
 	})
 
 	// A payload missing a component cannot produce a key, and a NULL key never
@@ -80,7 +104,7 @@ func TestMigration0067_FGAOutbox_TupleKeyPartition(t *testing.T) {
 	t.Run("incomplete_payload_rejected_at_emit", func(t *testing.T) {
 		_, err := pool.Exec(ctx,
 			`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
-			 VALUES ('fga.tuple.write', '{"user":"user:usr01","relation":"v_get"}'::jsonb, now())`)
+			 VALUES ('fga.tuple.write', '{"relation":"v_get","object":"vpc_network:net01"}'::jsonb, now())`)
 		require.Error(t, err,
 			"a tuple payload missing a component must be rejected at INSERT: it cannot yield "+
 				"a partition key, and a NULL-keyed row silently escapes the ordering predicate")

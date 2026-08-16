@@ -197,7 +197,7 @@ func TestRedriveAndDrainerAgreeOnTheOrderingKey(t *testing.T) {
 	t.Parallel()
 
 	cfg := fgaOutboxDrainerConfig()
-	require.Equal(t, fgaOutboxTupleKeyColumn, cfg.PartitionColumn,
+	require.Equal(t, fgaOutboxGrantKeyColumn, cfg.PartitionColumn,
 		"precondition: the drainer orders kacho_iam.fga_outbox by the tuple key")
 	require.NotEqual(t, reconciler.RegisterOutboxPartition, cfg.PartitionColumn,
 		"precondition that keeps this test honest: this queue is NOT a register-outbox, "+

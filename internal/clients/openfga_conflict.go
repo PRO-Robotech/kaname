@@ -155,6 +155,21 @@ func deleteRejectedAsAbsent(err error) bool {
 	return err != nil && idempotentDeleteReply(err.Error())
 }
 
+// writeRejectedAsExisting is the grant-direction twin: a WRITE batch rejected
+// because at least one of its tuples is already there.
+//
+// It exists for the same reason and resolves the same way — decompose and re-issue
+// per tuple — but the consequence of NOT having it is different and worse. A batch
+// write now carries one subject's whole relation set on one object (see
+// fga_outbox.emitTx), and "already exists" for a set proves only that SOME member
+// was present. Reporting that as applied would mark the row delivered while the
+// members that never landed stay missing — a grant permanently short of the verbs
+// it was supposed to carry, which is indistinguishable from a slow one until a
+// caller is refused an action it is entitled to.
+func writeRejectedAsExisting(err error) bool {
+	return err != nil && idempotentWriteReply(err.Error())
+}
+
 // readWriteReply interprets ONE OpenFGA /write reply.
 //
 //	200                            → nil

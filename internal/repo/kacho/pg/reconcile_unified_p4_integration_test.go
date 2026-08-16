@@ -41,6 +41,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // scopeGrantOutboxCount counts ANY scope_grant:* fga_outbox row (P4 invariant: the
@@ -338,10 +339,15 @@ func TestP4_H05_ConcurrentAnchorReconcile_ExactlyOnce(t *testing.T) {
 func fgaOutboxTuple(t *testing.T, ctx context.Context, pool *pgxpool.Pool, user, relation, object string) bool {
 	t.Helper()
 	var n int
+	// Отношение ищется в ОБЕИХ формах строки — скалярной и наборной. Ключ на одном
+	// скалярном поле пропускал бы всё, что приехало членом набора, и — что хуже —
+	// отрицательные утверждения рядом («роль на чтение НЕ поднимается до admin»)
+	// зеленели бы, не заглянув в строку, где это отношение и лежит.
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.fga_outbox
 		  WHERE event_type='fga.tuple.write'
-		    AND payload->>'user'=$1 AND payload->>'relation'=$2 AND payload->>'object'=$3`,
+		    AND payload->>'user'=$1 AND payload->>'object'=$3
+		    AND `+fga_outbox.RelationPredicate("payload", "$2"),
 		user, relation, object).Scan(&n))
 	return n > 0
 }

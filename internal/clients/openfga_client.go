@@ -225,6 +225,65 @@ func (c *OpenFGAHTTPClient) writeOrDeleteChunked(ctx context.Context, tuples []R
 // applied, safe to replay; see openfga_conflict.go). Every attempt carries its
 // own WriteTimeout deadline.
 func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []RelationTuple, write bool) error {
+	err := c.applyBatch(ctx, tuples, write)
+	if err == nil || len(tuples) == 1 {
+		return err
+	}
+	if write {
+		// ONE GRANT ONLY, and this condition is the whole safety of the branch below.
+		//
+		// A batch rejected because ≥1 of its tuples is already there applied NOTHING,
+		// and a verbatim replay can never succeed — so somebody has to finish the job.
+		// WHO finishes it depends on what the batch was:
+		//
+		//   - one subject's set on ONE object (the fga_outbox applier's row): the caller
+		//     has no read of its own and no way to split the work without splitting the
+		//     grant, so the completion happens here, and it happens in ONE write of the
+		//     missing subset — never tuple by tuple, which would put the half-present
+		//     grant back exactly where it was;
+		//   - MANY objects in one packed request (the reconciler's sync writer): the
+		//     caller owns a per-object resilient path with its own read-delta
+		//     (reconcile_adapter.go applyObject → reconcileObjectDelta), and it is
+		//     entitled to see the rejection so it can enter it. Completing here instead
+		//     would spread one object's relations across separate requests and destroy
+		//     the per-object atomicity that path exists to keep.
+		//
+		// Getting this wrong is not hypothetical: without the guard, a packed chunk of a
+		// dozen objects would fall into a per-tuple loop and report success, the resilient
+		// path would never be entered, and the creator could read its fresh object but not
+		// change it — the very defect the set-shaped row was introduced to remove.
+		if !writeRejectedAsExisting(err) || !singleGrant(tuples) {
+			return err
+		}
+		return c.completeGrant(ctx, tuples)
+	}
+	if !deleteRejectedAsAbsent(err) {
+		return err
+	}
+	// A DELETE batch rejected because ≥1 of its tuples is already gone. OpenFGA's write
+	// is TRANSACTIONAL, so nothing was removed, and — unlike a 409 conflict — replaying
+	// the identical request can NEVER succeed: the absent tuple stays absent. Because
+	// the async fga_outbox drainer applies revoke rows independently, "one of them is
+	// already gone" is the ordinary outcome of a partial drain, not an exotic one; before
+	// this the access_binding revoke burned its six bounded retries (~3s of worker time)
+	// on an impossible request every single time and left the batch's still-live tuples
+	// standing until the drainer caught up.
+	//
+	// Decompose instead of widening the shortcut: "already absent" proves the caller's
+	// post-condition only for a request carrying exactly ONE tuple (for a batch it
+	// proves the OTHERS did not land), so re-issue each tuple as its own single-tuple
+	// delete — precisely the shape where that reading is sound.
+	return c.applyEachTuple(ctx, tuples, false)
+}
+
+// applyBatch issues ONE request for the given tuples and returns its reply verbatim.
+// It carries NO completion policy: the decision of what a rejected batch means, and who
+// finishes it, belongs to writeOrDelete above.
+//
+// The split is not cosmetic. The completion path re-enters the writer for the missing
+// subset; when both lived in one function each re-entry hit the same policy branch and
+// the two called each other until the test process was killed by its own deadline.
+func (c *OpenFGAHTTPClient) applyBatch(ctx context.Context, tuples []RelationTuple, write bool) error {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return ErrNotConfigured
 	}
@@ -255,10 +314,12 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 	// SINGLE-TUPLE ONLY. OpenFGA's write is TRANSACTIONAL: a rejected request
 	// applies NONE of its tuples. So "this tuple already exists" equals "the
 	// desired post-condition holds" ONLY when the request carried exactly that one
-	// tuple (the fga_outbox drainer's row-per-tuple shape, the hierarchy-tuple and
-	// creator-tuple writers). For a BATCH the same reply means the OTHER tuples did
-	// not land — reporting success would silently lose them and rob the sync
-	// writer of the read-delta reconciliation that completes the grant.
+	// tuple (the hierarchy-tuple and creator-tuple writers, and any single-relation
+	// row of the fga_outbox drainer). For a BATCH the same reply means the OTHER
+	// tuples did not land — reporting success here would silently lose them. What
+	// finishes such a batch is decided one level up, in writeOrDelete: a single
+	// grant is completed by read-then-write-missing, a packed multi-object request
+	// is handed back to the caller's own per-object read-delta.
 	var idempotent func(string) bool
 	if len(tuples) == 1 {
 		idempotent = idempotentDeleteReply
@@ -289,38 +350,118 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 		defer resp.Body.Close()
 		return readWriteReply(resp, idempotent)
 	})
-	if err == nil || write || len(tuples) == 1 || !deleteRejectedAsAbsent(err) {
-		return err
-	}
-	// A DELETE batch rejected because ≥1 of its tuples is already gone. OpenFGA's write
-	// is TRANSACTIONAL, so nothing was removed, and — unlike a 409 conflict — replaying
-	// the identical request can NEVER succeed: the absent tuple stays absent. Because
-	// the async fga_outbox drainer applies the SAME revoke rows ONE AT A TIME, "one of
-	// them is already gone" is the ordinary outcome of a partial drain, not an exotic
-	// one; before this the access_binding revoke burned its six bounded retries (~3s of
-	// worker time) on an impossible request every single time and left the batch's
-	// still-live tuples standing until the drainer caught up.
-	//
-	// Decompose instead of widening the shortcut: "already absent" proves the caller's
-	// post-condition only for a request carrying exactly ONE tuple (for a batch it
-	// proves the OTHERS did not land), so re-issue each tuple as its own single-tuple
-	// delete — precisely the shape the drainer uses, where that reading is sound.
-	return c.deleteEachTuple(ctx, tuples)
+	return err
 }
 
-// deleteEachTuple re-issues every tuple of a rejected delete batch as its OWN
-// single-tuple request, where an already-absent tuple degrades to the idempotent
-// success the adapter contract promises.
+// singleGrant reports whether every tuple names the same (subject, object) — i.e.
+// whether the batch IS one grant, the unit that must reach the store whole.
+func singleGrant(tuples []RelationTuple) bool {
+	for i := 1; i < len(tuples); i++ {
+		if tuples[i].User != tuples[0].User || tuples[i].Object != tuples[0].Object {
+			return false
+		}
+	}
+	return len(tuples) > 0
+}
+
+// maxGrantCompletionRounds bounds the read→write-missing rounds. Each round that
+// ends in "already exists" proves a racing writer COMMITTED at least one tuple of
+// the missing set, so the next (strong) read sees it and the set strictly shrinks —
+// the budget is therefore derived from the set size, not guessed, and one extra
+// round pays for the final clean write.
+func maxGrantCompletionRounds(n int) int { return n + 1 }
+
+// completeGrant finishes ONE grant whose batch write was rejected because part of it
+// already exists: it reads what the subject already holds on the object and writes
+// ONLY the missing subset, in a single transactional request.
 //
-// It does NOT stop at the first failure: a revoke must remove as much as it can (every
-// tuple removed is access denied, the fail-safe direction), and the tuples are
-// independent once the batch is decomposed. The FIRST genuine error is returned so the
-// caller still sees the failure and its retry / durable fga_outbox backstop still runs.
-func (c *OpenFGAHTTPClient) deleteEachTuple(ctx context.Context, tuples []RelationTuple) error {
+// Why a read and not a per-tuple loop: the post-condition this adapter promises is
+// "all of these tuples are in the store", and the reason the set travels together is
+// that a caller must never observe it half-present. Writing the members one by one
+// would satisfy the post-condition and violate the reason.
+//
+// STRONG read: this is the read half of a read-modify-write whose termination depends
+// on observing the racer's commit. A replica-lagged read would leave the missing set
+// unchanged round after round.
+func (c *OpenFGAHTTPClient) completeGrant(ctx context.Context, tuples []RelationTuple) error {
+	subject, object := tuples[0].User, tuples[0].Object
+	budget := maxGrantCompletionRounds(len(tuples))
+	for round := 0; round < budget; round++ {
+		have, err := c.readGrant(ctx, subject, object)
+		if err != nil {
+			return err
+		}
+		missing := make([]RelationTuple, 0, len(tuples))
+		for _, t := range tuples {
+			if _, ok := have[t]; !ok {
+				missing = append(missing, t)
+			}
+		}
+		if len(missing) == 0 {
+			return nil // the whole grant is present — the post-condition holds.
+		}
+		// applyBatch, NOT writeOrDelete: this IS the completion, and re-entering the
+		// policy branch that dispatched here would make the two call each other without
+		// end (each nested call gets a fresh budget, so the loop bound below does not
+		// bound the recursion).
+		err = c.applyBatch(ctx, missing, true)
+		if err == nil {
+			return nil
+		}
+		if !writeRejectedAsExisting(err) {
+			return err
+		}
+		// A racer committed ≥1 of the missing tuples; the next strong read sees it.
+	}
+	return fmt.Errorf("openfga write: grant %s on %s did not converge in %d rounds",
+		subject, object, budget)
+}
+
+// readGrant returns the tuples the subject already holds on the object, filtered
+// server-side by (subject, object) so the reply stays small. Pagination is followed to
+// a bound; a grant is a handful of relations, and the bound is defensive.
+func (c *OpenFGAHTTPClient) readGrant(ctx context.Context, subject, object string) (map[RelationTuple]struct{}, error) {
+	const (
+		pageSize = 50
+		maxPages = 20
+	)
+	have := make(map[RelationTuple]struct{})
+	token := ""
+	for page := 0; page < maxPages; page++ {
+		tuples, next, err := c.ReadTuplesStrong(ctx, subject, "", object, pageSize, token)
+		if err != nil {
+			return nil, fmt.Errorf("openfga read grant %s on %s: %w", subject, object, err)
+		}
+		for _, t := range tuples {
+			have[RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object}] = struct{}{}
+		}
+		if next == "" {
+			break
+		}
+		token = next
+	}
+	return have, nil
+}
+
+// applyEachTuple re-issues every tuple of a rejected batch as its OWN single-tuple
+// request, where "already gone" degrades to the idempotent success the adapter
+// contract promises.
+//
+// REVOKE DIRECTION ONLY. Removing access one tuple at a time is safe in a way that
+// GRANTING one tuple at a time is not: every tuple removed is access denied, so an
+// interrupted decomposition leaves LESS access, never a half-present grant somebody
+// can act on. The grant direction therefore completes by read-then-write-missing
+// instead (completeGrant above).
+//
+// It does NOT stop at the first failure: a revoke must remove as much as it can, and
+// the tuples are independent once the batch is decomposed. The FIRST genuine error is
+// returned so the caller still sees the failure and its retry / durable fga_outbox
+// backstop still runs.
+func (c *OpenFGAHTTPClient) applyEachTuple(ctx context.Context, tuples []RelationTuple, write bool) error {
 	var firstErr error
 	for i := range tuples {
 		// len==1 ⇒ the single-tuple idempotent path; no further decomposition (no recursion).
-		if err := c.writeOrDelete(ctx, tuples[i:i+1], false); err != nil && firstErr == nil {
+		if err := c.writeOrDelete(ctx, tuples[i:i+1], write); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -182,7 +183,7 @@ func countOutboxByEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool, e
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.fga_outbox
 		  WHERE event_type = $1
-		    AND payload->>'relation' = 'system_admin'
+		    AND `+fga_outbox.RelationPredicate("payload", "'system_admin'")+`
 		    AND payload->>'user' LIKE 'user:%'`,
 		eventType).Scan(&n))
 	return n
