@@ -32,6 +32,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -156,7 +157,7 @@ func TestObjectVerbSetNeverObservedPartiallyMaterialized(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	const (
 		subject = "user:usr_set_atomicity"
@@ -193,7 +194,7 @@ func TestObjectVerbSetNeverObservedPartiallyRevoked(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	const (
 		subject = "user:usr_set_revoke"
@@ -239,7 +240,7 @@ func TestOutboxPartitionKeyCoversTheWholeGrantSet(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	const (
 		alice  = "user:usr_partition_alice"

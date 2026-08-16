@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // Coordinates of the tuple outbox. Named once so the drainer that empties it and
@@ -23,10 +22,13 @@ const (
 // the GRANT identity (user, object), materialised into a column by the table's
 // BEFORE INSERT trigger (migration 0098) and indexed by fga_outbox_tuple_head_idx.
 //
-// The name is taken from the emitter, not written again here: the emitter decides
-// what a row IS, and a partition that stopped matching the row's unit would reorder
-// rows that must not overtake each other — silently, which is why one literal owns
-// both ends.
+// It is a LITERAL here, deliberately, and not an alias of the emitter's constant: the
+// tree gate that checks every drained queue declares an ordering key resolves it by
+// PARSING THE SOURCE, and a cross-package reference is indistinguishable to it from no
+// key at all — the queue would drop out of that check silently. Drift against the
+// emitter is caught instead by a paired probe that reads BOTH values
+// (fga_outbox_drainer_test.go), which is the same arrangement the redrive backstop
+// already uses for the same reason.
 //
 // It must be the NARROWEST key over which the target's events fail to commute, and
 // what that is depends on what a row carries. A row carries one subject's WHOLE
@@ -41,7 +43,7 @@ const (
 // different subjects stay in different partitions here. What merges is one subject's
 // own relations — the rows that must be ordered — and the emitter no longer writes
 // them separately.
-const fgaOutboxGrantKeyColumn = fga_outbox.PartitionColumn
+const fgaOutboxGrantKeyColumn = "tuple_key"
 
 // fgaOutboxApplyConcurrency is how many rows of one claim batch are applied to
 // OpenFGA in parallel.
