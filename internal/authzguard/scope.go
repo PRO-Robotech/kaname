@@ -26,9 +26,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // RelationChecker — narrow port for an FGA relation check. Satisfied by
@@ -83,7 +80,7 @@ func RequireScopeRelation(
 					// fail-closed). Mirrors RelationWriteGate / SystemViewerFloor:
 					// a transient flap must not become a terminal PermissionDenied
 					// that the client would never retry.
-					return status.Error(codes.Unavailable, "authz backend unavailable")
+					return AuthzBackendUnavailable()
 				}
 				if allowed {
 					return nil

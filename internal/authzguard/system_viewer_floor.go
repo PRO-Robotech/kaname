@@ -205,7 +205,7 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 		// fail-closed). Collapsing it to PermissionDenied would mis-signal a
 		// permanent deny; allowing it would be fail-open. Raw error is
 		// logged-not-leaked: the message is the fixed, non-leaking text.
-		return status.Error(codes.Unavailable, "authz backend unavailable")
+		return AuthzBackendUnavailable()
 	}
 	if !allowed {
 		// Explicit deny: the SA holds no system_viewer relation → PermissionDenied.

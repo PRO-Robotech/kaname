@@ -87,7 +87,14 @@ func TestForceLogout_DeniesWhenPrincipalEmpty(t *testing.T) {
 	require.Zero(t, rec.allCnt)
 }
 
-func TestForceLogout_DeniesWhenCheckerErrors(t *testing.T) {
+// TestForceLogout_RefusesWithUnavailableWhenCheckerErrors — the model could not be
+// asked: nothing is revoked, and the code says which of the two happened.
+//
+// The expectation moved off PermissionDenied with issue #497; the assertion is not
+// weakened, since fail-closed is asserted directly (`rec.allCnt` stays zero — no
+// cutoff was recorded). "You may not" would tell the caller that retrying is
+// pointless, which is false of an outage that lasts a moment.
+func TestForceLogout_RefusesWithUnavailableWhenCheckerErrors(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
 	chk := &fakeForceLogoutChecker{err: errors.New("fga backend down")}
 	h := forceLogoutHandlerWithGate(rec, chk)
@@ -95,8 +102,9 @@ func TestForceLogout_DeniesWhenCheckerErrors(t *testing.T) {
 	_, err := h.ForceLogout(ctxAdmin("usr0000000000000admin"), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
 	})
-	require.Equal(t, codes.PermissionDenied, status.Code(err), "checker error must fail closed")
-	require.Zero(t, rec.allCnt)
+	require.Equal(t, codes.Unavailable, status.Code(err),
+		"backend outage is not an authorization decision: fail-closed, but retryable")
+	require.Zero(t, rec.allCnt, "fail-closed: nothing is revoked when the model did not answer")
 }
 
 func TestForceLogout_DeniesWhenCheckerNil(t *testing.T) {

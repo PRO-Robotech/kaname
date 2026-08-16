@@ -138,8 +138,11 @@ func (h *Handler) WithAdminChecker(c authzguard.RelationChecker) *Handler {
 // internal included, runs its own per-RPC Check — the caller-policy only proves
 // WHO dialed :9091, not that the END USER is a cluster admin).
 //
-// Fail-closed everywhere: anonymous / empty principal, nil checker, backend
-// error, or not-allowed → PermissionDenied (verbatim, non-leaking).
+// Fail-closed everywhere — the revoke never runs unless the model said yes; the
+// ANSWER still says what happened: anonymous / empty principal, nil checker or
+// not-allowed → PermissionDenied; a checker that could not be reached →
+// Unavailable (nothing was decided, an identical retry is worth making). Both are
+// verbatim and non-leaking.
 //
 // acr step-up (required_acr_min) is enforced separately by the internal acr-floor
 // (authzguard.ACRFloor) chained on the :9091 listener BEFORE this handler: when
@@ -164,7 +167,10 @@ func (h *Handler) requireSystemAdmin(ctx context.Context) error {
 	}
 	allowed, err := h.adminCheck.Check(ctx,
 		subject, "system_admin", "cluster:"+domain.ClusterSingletonID)
-	if err != nil || !allowed {
+	if err != nil {
+		return authzguard.AuthzBackendUnavailable()
+	}
+	if !allowed {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	return nil

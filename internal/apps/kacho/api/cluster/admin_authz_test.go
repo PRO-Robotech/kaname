@@ -94,13 +94,23 @@ func TestGrantAdmin_DeniesWhenNoSystemAdmin(t *testing.T) {
 	require.Equal(t, "cluster:"+domain.ClusterSingletonID, chk.object)
 }
 
-func TestGrantAdmin_DeniesWhenCheckerErrors(t *testing.T) {
+// TestGrantAdmin_RefusesWithUnavailableWhenCheckerErrors — the model could not be
+// asked: the mutation still does not run, and the caller is told so in the code.
+//
+// The expectation moved off PermissionDenied with issue #497 and the assertion is
+// not weakened — fail-closed is asserted directly (the grant is not issued). What
+// changed is what the caller is told. "You may not" means an identical retry is
+// pointless, so a two-second outage of the model read to a cluster admin exactly
+// like a revoked grant, at the moment they are most likely to need it.
+func TestGrantAdmin_RefusesWithUnavailableWhenCheckerErrors(t *testing.T) {
 	chk := &fakeAdminChecker{err: errors.New("fga backend down")}
 	uc := clusterapp.NewGrantAdminUseCase(nil, nil, nil, nil, nil).WithAdminChecker(chk)
 
-	_, err := uc.Execute(ctxUser(validUserA), iamv1.ClusterGrantSubjectType_USER, validUserB)
-	require.Equal(t, codes.PermissionDenied, status.Code(err),
-		"checker error must fail closed (PermissionDenied), never allow")
+	res, err := uc.Execute(ctxUser(validUserA), iamv1.ClusterGrantSubjectType_USER, validUserB)
+	require.Error(t, err, "fail-closed: a backend outage never grants")
+	require.Nil(t, res)
+	require.Equal(t, codes.Unavailable, status.Code(err),
+		"backend outage is not an authorization decision: fail-closed, but retryable")
 }
 
 func TestGrantAdmin_DeniesWhenCheckerNil(t *testing.T) {
@@ -132,13 +142,17 @@ func TestRevokeAdmin_DeniesWhenNoSystemAdmin(t *testing.T) {
 	require.Equal(t, "cluster:"+domain.ClusterSingletonID, chk.object)
 }
 
-func TestRevokeAdmin_DeniesWhenCheckerErrors(t *testing.T) {
+// TestRevokeAdmin_RefusesWithUnavailableWhenCheckerErrors — see the Grant twin
+// above for why the code is Unavailable and not PermissionDenied (issue #497).
+func TestRevokeAdmin_RefusesWithUnavailableWhenCheckerErrors(t *testing.T) {
 	chk := &fakeAdminChecker{err: errors.New("fga backend down")}
 	uc := clusterapp.NewRevokeAdminUseCase(nil, nil, nil, nil).WithAdminChecker(chk)
 
-	_, err := uc.Execute(ctxUser(validUserA), iamv1.ClusterGrantSubjectType_USER, validUserB)
-	require.Equal(t, codes.PermissionDenied, status.Code(err),
-		"checker error must fail closed")
+	res, err := uc.Execute(ctxUser(validUserA), iamv1.ClusterGrantSubjectType_USER, validUserB)
+	require.Error(t, err, "fail-closed: a backend outage never revokes either")
+	require.Nil(t, res)
+	require.Equal(t, codes.Unavailable, status.Code(err),
+		"backend outage is not an authorization decision: fail-closed, but retryable")
 }
 
 func TestRevokeAdmin_DeniesWhenCheckerNil(t *testing.T) {

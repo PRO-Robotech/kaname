@@ -107,7 +107,7 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		// Unavailable (retryable, fail-closed) lets the caller retry; collapsing
 		// it to PermissionDenied would make the drainer poison a legitimate
 		// owner-tuple intent. The raw backend error is logged-not-leaked.
-		return "", status.Error(codes.Unavailable, "authz backend unavailable")
+		return "", AuthzBackendUnavailable()
 	}
 	if !allowed {
 		// Explicit deny: Check succeeded and returned allowed==false (the SA holds

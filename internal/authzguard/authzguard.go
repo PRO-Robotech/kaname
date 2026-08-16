@@ -54,6 +54,29 @@ func PermissionDenied() error {
 	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
+// AuthzBackendUnavailable — canonical answer for "the model could not be asked".
+//
+// It is NOT PermissionDenied, and the difference is the whole point: a refusal
+// says "you may not", which tells the caller that retrying is pointless — the
+// decision depends on (subject, relation, object) and an identical retry changes
+// none of the three. A backend outage says nothing about rights at all; the same
+// question a moment later gets an answer. Collapsing the two hands a caller a
+// terminal verdict on a transient flap, and callers that classify peer answers by
+// lane (outbox drainers, reconcilers, peer clients) will mark the intent
+// permanently failed.
+//
+// Fail-closed is unchanged either way: the request is refused, nothing runs. Only
+// the code differs, and the code is the whole signal.
+//
+// The text carries no detail of the backend failure (security.md
+// §Hardening-инварианты п.1 — no leak); the raw error is logged, not surfaced.
+// Single source for the three gates that already answered this way inline
+// (RelationWriteGate, SystemViewerFloor, scope) and for those that used to
+// collapse it into a refusal.
+func AuthzBackendUnavailable() error {
+	return status.Error(codes.Unavailable, "authz backend unavailable")
+}
+
 // RequireOwnerMatchesPrincipal is GONE (2026-07-27). It was written as
 // request-body validation for ONE operation — Account.Create anti-hijacking
 // ("you may not create an account naming someone else as owner") — and was then

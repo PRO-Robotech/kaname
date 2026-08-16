@@ -22,7 +22,11 @@ package cluster
 //      use-case), AND
 //   2. that principal holds `system_admin` on `cluster:<singleton>` in ReBAC.
 //
-// Fail-closed everywhere: nil checker, checker error, or not-allowed → deny.
+// Fail-closed everywhere — the mutation never runs unless the model said yes.
+// The ANSWER, however, distinguishes what happened: an unnameable principal, an
+// unwired checker or an explicit deny is PermissionDenied; a checker that could
+// not be reached is Unavailable, because nothing was decided and the same
+// question a moment later gets an answer.
 // acr step-up (`required_acr_min`) is enforced separately by the
 // internal acr-floor (authzguard.ACRFloor) chained on the :9091 listener BEFORE
 // this handler: a gateway-fronted RPC whose catalog acr_min>0 (GrantAdmin /
@@ -42,8 +46,10 @@ import (
 // package-level authzguard.RelationChecker so the same fake works across gates.
 type adminChecker = authzguard.RelationChecker
 
-// requireClusterSystemAdmin enforces the defense-in-depth gate. Returns
-// PermissionDenied (verbatim, non-leaking) on every failure mode.
+// requireClusterSystemAdmin enforces the defense-in-depth gate. Every failure
+// mode is non-leaking and verbatim: PermissionDenied when the model decided (or
+// there was no nameable principal / no wired checker), Unavailable when it could
+// not be asked.
 func requireClusterSystemAdmin(ctx context.Context, checker adminChecker) error {
 	// 1. authenticated principal required, and it must be NAMEABLE (anonymous /
 	//    empty ctx / unknown principal type / an id carrying an FGA separator →
@@ -67,11 +73,23 @@ func requireClusterSystemAdmin(ctx context.Context, checker adminChecker) error 
 		"system_admin",
 		"cluster:"+domain.ClusterSingletonID,
 	)
-	if err != nil || !allowed {
-		// Backend error OR explicit deny → fail-closed PermissionDenied. (Unlike
-		// the fga-proxy gate, which surfaces backend outages as Unavailable for a
-		// retryable owner-tuple drainer, this is an interactive admin mutation:
-		// fail-closed deny is the safe default — no false-allow.)
+	if err != nil {
+		// Backend outage — NOT an authorization decision. Fail-closed either way
+		// (the mutation does not run), but the caller is told "I could not ask",
+		// not "you may not": the latter means an identical retry is pointless, and
+		// a cluster admin locked out by a two-second FGA flap would read it as a
+		// revoked grant. Same answer the sibling gates in this service already give
+		// (RelationWriteGate, SystemViewerFloor, scope).
+		//
+		// The previous edition collapsed this into the refusal below and justified
+		// it as "fail-closed deny is the safe default — no false-allow". That
+		// justification does not distinguish the two: Unavailable is equally
+		// fail-closed and equally free of false-allows. What it did distinguish was
+		// how long the outage lasts in the caller's eyes — forever.
+		return authzguard.AuthzBackendUnavailable()
+	}
+	if !allowed {
+		// Explicit deny: the Check succeeded and answered no.
 		return authzguard.PermissionDenied()
 	}
 	return nil

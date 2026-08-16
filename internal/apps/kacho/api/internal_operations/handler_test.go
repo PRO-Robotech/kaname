@@ -146,15 +146,24 @@ func TestListIamOperations_NilChecker_FailClosed(t *testing.T) {
 	}
 }
 
-func TestListIamOperations_CheckerError_FailClosed(t *testing.T) {
+// TestListIamOperations_CheckerError_RefusesWithUnavailable — the model could not
+// be asked: the feed is refused, and the code says so (issue #497).
+//
+// It matters most on exactly this RPC: an operator reads this feed DURING an
+// incident, and PermissionDenied would tell them their admin grant is gone at the
+// moment they need it. Fail-closed is unchanged — no rows are returned.
+func TestListIamOperations_CheckerError_RefusesWithUnavailable(t *testing.T) {
 	ops := &internalOpsRepo{}
 	checker := &clusterCheckStub{err: errors.New("fga down")}
 	h := newHandler(ops, checker)
 
-	_, err := h.ListIamOperations(adminCtx("usr-admin"),
+	resp, err := h.ListIamOperations(adminCtx("usr-admin"),
 		&iamv1.ListIamOperationsRequest{PageSize: 100})
-	if got := grpcstatus.Code(err); got != codes.PermissionDenied {
-		t.Fatalf("checker backend error must fail closed → PermissionDenied, got %s", got)
+	if resp != nil {
+		t.Fatalf("fail-closed: no rows may be returned when the model did not answer, got %v", resp)
+	}
+	if got := grpcstatus.Code(err); got != codes.Unavailable {
+		t.Fatalf("checker backend outage must fail closed as UNAVAILABLE (retryable), got %s", got)
 	}
 }
 

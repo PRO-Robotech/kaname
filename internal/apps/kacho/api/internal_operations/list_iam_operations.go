@@ -76,10 +76,14 @@ func (u *ListIamOperationsUseCase) Execute(ctx context.Context, accountID string
 	return ops, next, nil
 }
 
-// requireClusterSystemAdmin — defense-in-depth gate. Returns PermissionDenied
-// (verbatim, non-leaking) on every failure mode: anonymous principal, nil
-// checker, checker backend error, or explicit deny. Mirrors
-// cluster.requireClusterSystemAdmin (the highest-blast pattern).
+// requireClusterSystemAdmin — defense-in-depth gate, non-leaking on every failure
+// mode: anonymous principal, nil checker or explicit deny → PermissionDenied; a
+// checker that could not be reached → Unavailable, because nothing was decided.
+// Mirrors cluster.requireClusterSystemAdmin (the highest-blast pattern).
+//
+// The distinction matters most here: this feed is what an operator reads DURING
+// an incident, and an outage of the model would otherwise read to them as "your
+// admin grant is gone" at the exact moment they need it.
 func (u *ListIamOperationsUseCase) requireClusterSystemAdmin(ctx context.Context) error {
 	// The subject is resolved to the principal's own type — see
 	// cluster.requireClusterSystemAdmin for why "user:" joined to the id is a
@@ -96,7 +100,10 @@ func (u *ListIamOperationsUseCase) requireClusterSystemAdmin(ctx context.Context
 		"system_admin",
 		"cluster:"+domain.ClusterSingletonID,
 	)
-	if err != nil || !allowed {
+	if err != nil {
+		return authzguard.AuthzBackendUnavailable()
+	}
+	if !allowed {
 		return authzguard.PermissionDenied()
 	}
 	return nil
