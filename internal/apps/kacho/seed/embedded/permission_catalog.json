@@ -2415,6 +2415,116 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/AddCidrBlocks",
+    "permission": "vpc.address_pools.add_cidr_blocks",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/BindAsNetworkDefault",
+    "permission": "vpc.address_pools.bind",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/Create",
+    "permission": "vpc.address_pools.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/Delete",
+    "permission": "vpc.address_pools.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/Get",
+    "permission": "vpc.address_pools.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/GetUtilization",
+    "permission": "vpc.address_pools.get_utilization",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/List",
+    "permission": "vpc.address_pools.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/ListAddresses",
+    "permission": "vpc.address_pools.list_addresses",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/RemoveCidrBlocks",
+    "permission": "vpc.address_pools.remove_cidr_blocks",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/UnbindNetworkDefault",
+    "permission": "vpc.address_pools.unbind",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.vpc.v1.AddressPoolService/Update",
+    "permission": "vpc.address_pools.update",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.AddressService/Create",
     "permission": "vpc.addresses.create",
     "required_relation": "editor",
