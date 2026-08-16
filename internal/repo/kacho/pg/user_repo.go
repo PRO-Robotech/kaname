@@ -281,12 +281,13 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 	if f.Filter != "" {
 		// Whitelist is closed; an expression outside it is refused by name rather
 		// than dropped (#445). This resource dispatches on the parsed field instead
-		// of emitting ast.ToSQL, because two of the three columns are not addressed
-		// as the field is written: `email` is compared case-insensitively, and the
-		// switch is what keeps that mapping in one place. A field added to the
-		// whitelist without a case here would parse and then match nothing, so the
-		// default arm refuses instead of silently widening the page.
-		ast, ferr := parseListFilter(f.Filter, "email", "external_id", "invite_status")
+		// of emitting ast.ToSQL, because none of the four terms is addressed as the
+		// field is written: `email` is compared case-insensitively, and `search` is
+		// not a column at all — it is a term spanning two of them. The switch is
+		// what keeps that mapping in one place. A field added to the whitelist
+		// without a case here would parse and then match nothing, so the default arm
+		// refuses instead of silently widening the page.
+		ast, ferr := parseListFilter(f.Filter, "email", "external_id", "invite_status", "search")
 		if ferr != nil {
 			return nil, "", ferr
 		}
@@ -294,15 +295,33 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 			switch ast.Field {
 			case "email":
 				conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))
+				args = append(args, ast.Value)
 			case "external_id":
 				conditions = append(conditions, fmt.Sprintf("external_id = $%d", argIdx))
+				args = append(args, ast.Value)
 			case "invite_status":
 				conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
+				args = append(args, ast.Value)
+			case "search":
+				// Поиск по ПОДСТРОКЕ — по тому, чем пользователя знают: почта и
+				// идентификатор. `name` у пользователя нет вовсе, а полное совпадение
+				// `email="…"` отвечает только тому, кто уже знает адрес целиком.
+				//
+				// Сузить список на клиенте нельзя: клиент видит только загруженную
+				// страницу и о том, что в неё не поместилось, врёт молча.
+				//
+				// Индекса под этот предикат нет намеренно. Строки таблицы сужены
+				// аккаунтом вызывающего условием выше, и разбор здесь идёт по уже
+				// суженному набору; триграммный индекс заводится ЗАМЕРОМ на боевом
+				// объёме, а не догадкой о нём — заведённый вслепую, он стоил бы
+				// расширения и записи на каждой правке почты, ничего не ускорив.
+				conditions = append(conditions, fmt.Sprintf(
+					`(lower(email) LIKE $%d ESCAPE '\' OR lower(id) LIKE $%d ESCAPE '\')`, argIdx, argIdx))
+				args = append(args, "%"+escapeLikePattern(strings.ToLower(ast.Value))+"%")
 			default:
 				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
 					"Bad expression at column 1. Unknown field: %q", ast.Field)
 			}
-			args = append(args, ast.Value)
 			argIdx++
 		}
 	}
@@ -775,3 +794,14 @@ func nullableInvitedBy(id domain.UserID) any {
 	}
 	return string(id)
 }
+
+// escapeLikePattern экранирует служебные знаки LIKE, чтобы образец искался как
+// СИМВОЛЫ.
+//
+// Без этого ввод `%` находил бы всех, а `_` — любой одиночный знак: поиск
+// отвечал бы не на тот вопрос, который задали, и выглядел бы при этом
+// работающим. Обратный слэш экранируется первым — иначе экранирующий знак,
+// добавленный следующими заменами, сам оказался бы экранирован.
+var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func escapeLikePattern(s string) string { return likePatternEscaper.Replace(s) }
