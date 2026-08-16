@@ -289,7 +289,21 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 		defer resp.Body.Close()
 		return readWriteReply(resp, idempotent)
 	})
-	if err == nil || write || len(tuples) == 1 || !deleteRejectedAsAbsent(err) {
+	if err == nil || len(tuples) == 1 {
+		return err
+	}
+	if write {
+		if !writeRejectedAsExisting(err) {
+			return err
+		}
+		// A WRITE batch rejected because ≥1 of its tuples is already there. Same
+		// transactional reasoning as the delete case below: nothing was applied and a
+		// verbatim replay can never succeed. Decompose so the members that are NOT yet
+		// present still land — the batch now carries one subject's whole relation set
+		// on one object, so swallowing this would leave that set short.
+		return c.applyEachTuple(ctx, tuples, true)
+	}
+	if !deleteRejectedAsAbsent(err) {
 		return err
 	}
 	// A DELETE batch rejected because ≥1 of its tuples is already gone. OpenFGA's write
@@ -305,22 +319,24 @@ func (c *OpenFGAHTTPClient) writeOrDelete(ctx context.Context, tuples []Relation
 	// post-condition only for a request carrying exactly ONE tuple (for a batch it
 	// proves the OTHERS did not land), so re-issue each tuple as its own single-tuple
 	// delete — precisely the shape the drainer uses, where that reading is sound.
-	return c.deleteEachTuple(ctx, tuples)
+	return c.applyEachTuple(ctx, tuples, false)
 }
 
-// deleteEachTuple re-issues every tuple of a rejected delete batch as its OWN
-// single-tuple request, where an already-absent tuple degrades to the idempotent
-// success the adapter contract promises.
+// applyEachTuple re-issues every tuple of a rejected batch as its OWN single-tuple
+// request, where "already there" (write) / "already gone" (delete) degrades to the
+// idempotent success the adapter contract promises.
 //
-// It does NOT stop at the first failure: a revoke must remove as much as it can (every
-// tuple removed is access denied, the fail-safe direction), and the tuples are
-// independent once the batch is decomposed. The FIRST genuine error is returned so the
-// caller still sees the failure and its retry / durable fga_outbox backstop still runs.
-func (c *OpenFGAHTTPClient) deleteEachTuple(ctx context.Context, tuples []RelationTuple) error {
+// It does NOT stop at the first failure: each direction has a reason to finish the
+// set — a revoke must remove as much as it can (every tuple removed is access
+// denied, the fail-safe direction), and a grant must not leave a subject holding
+// part of a set it is entitled to whole. The tuples are independent once the batch
+// is decomposed. The FIRST genuine error is returned so the caller still sees the
+// failure and its retry / durable fga_outbox backstop still runs.
+func (c *OpenFGAHTTPClient) applyEachTuple(ctx context.Context, tuples []RelationTuple, write bool) error {
 	var firstErr error
 	for i := range tuples {
 		// len==1 ⇒ the single-tuple idempotent path; no further decomposition (no recursion).
-		if err := c.writeOrDelete(ctx, tuples[i:i+1], false); err != nil && firstErr == nil {
+		if err := c.writeOrDelete(ctx, tuples[i:i+1], write); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

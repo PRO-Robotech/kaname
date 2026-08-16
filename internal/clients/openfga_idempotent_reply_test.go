@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,6 +55,30 @@ func badRequestServer(t *testing.T, body string) string {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return strings.TrimPrefix(srv.URL, "http://")
+}
+
+// countingBadRequestServer is badRequestServer plus a request counter — the only way
+// to tell "the client stopped at the rejected batch" from "the client decomposed and
+// asked about each tuple", which is the whole difference this file's batch cases turn on.
+func countingBadRequestServer(t *testing.T, body string) (string, func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	n := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stores/", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(body))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return strings.TrimPrefix(srv.URL, "http://"), func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return n
+	}
 }
 
 func replyClient(endpoint string) *clients.OpenFGAHTTPClient {
@@ -139,22 +164,32 @@ func TestWriteConditionalTuples_MixedBatch_RejectedIsNotSuccess(t *testing.T) {
 	}
 }
 
-// TestWriteTuples_MultiTupleBatch_AlreadyExists_IsNotSuccess — BATCH semantics.
-// "This tuple already exists" is an idempotent SUCCESS only for a request that
-// carried exactly ONE tuple: then the rejection literally means the desired
-// post-condition holds. OpenFGA's write is TRANSACTIONAL, so for a MULTI-tuple
-// batch the very same reply means the batch applied NOTHING — the other tuples
-// did not land. Reporting success there would silently lose them (the sync
-// writer would skip its read-delta reconciliation and the object's grant would
-// stay partial / absent).
-func TestWriteTuples_MultiTupleBatch_AlreadyExists_IsNotSuccess(t *testing.T) {
-	c := replyClient(badRequestServer(t, liveDuplicateWriteBody))
-	err := c.WriteTuples(context.Background(), []clients.RelationTuple{
+// TestWriteTuples_MultiTupleBatch_AlreadyExists_IsNotSwallowedWholesale — BATCH
+// semantics. "This tuple already exists" is an idempotent SUCCESS only for a request
+// that carried exactly ONE tuple: then the rejection literally means the desired
+// post-condition holds. OpenFGA's write is TRANSACTIONAL, so for a MULTI-tuple batch
+// the very same reply means the batch applied NOTHING — the other tuples did not land,
+// and treating the reply as success at THIS level would silently lose them.
+//
+// The client does not treat it as success at this level: it decomposes into
+// single-tuple writes, where the reading is sound. Here the fake rejects EVERY request
+// with that body, i.e. it claims every tuple is already present — so a nil return is
+// the correct answer to what the fake said, and what this case pins is that the client
+// did not stop at the batch. The outcome-level version, against a fake with real
+// transactional state, is TestWriteTuples_BatchWithAnExistingTuple_LandsTheMissingOnes.
+func TestWriteTuples_MultiTupleBatch_AlreadyExists_IsNotSwallowedWholesale(t *testing.T) {
+	endpoint, count := countingBadRequestServer(t, liveDuplicateWriteBody)
+	c := replyClient(endpoint)
+	if err := c.WriteTuples(context.Background(), []clients.RelationTuple{
 		{User: "user:u1", Relation: "v_get", Object: "doc:d1"},
 		{User: "user:u1", Relation: "v_list", Object: "doc:d1"},
-	})
-	if err == nil {
-		t.Fatalf("a rejected MULTI-tuple batch applied nothing — the un-applied tuples must not be reported as written")
+	}); err != nil {
+		t.Fatalf("every tuple reported already-present ⇒ the post-condition holds, got %v", err)
+	}
+	// 1 batch attempt + one request per tuple. Without the decomposition the count is
+	// 1 and the two tuples were never asked about individually.
+	if n := count(); n != 3 {
+		t.Fatalf("the rejected batch must be decomposed per tuple: expected 3 requests, got %d", n)
 	}
 }
 

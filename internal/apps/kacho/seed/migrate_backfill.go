@@ -136,8 +136,14 @@ WHERE b.role_id       = 'rol' || substr(md5('owner'), 1, 17)
       FROM kacho_iam.fga_outbox o
      WHERE o.event_type        = 'fga.tuple.write'
        AND o.payload->>'user'     = 'account:' || b.resource_id
-       AND o.payload->>'relation' = 'account'
        AND o.payload->>'object'   = 'iam_access_binding:' || b.id
+       -- Отношение ищется в ОБЕИХ формах строки: одиночной и наборной. Читая только
+       -- скалярное поле, этот де-дуп не увидел бы указатель, приехавший членом набора,
+       -- и поставил бы вторую строку на уже поставленное. Повтор идемпотентен у
+       -- хранилища прав, поэтому это не порча — но это работа, которой не должно быть,
+       -- и молчаливое «не нашёл» там, где есть.
+       AND (o.payload->>'relation' = 'account'
+            OR o.payload->'relations' @> to_jsonb('account'::text))
   )`
 )
 

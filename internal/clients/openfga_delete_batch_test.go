@@ -54,14 +54,17 @@ type fgaStoreServer struct {
 	rejectAll bool
 }
 
+type fgaWireKeys struct {
+	TupleKeys []struct {
+		User     string `json:"user"`
+		Relation string `json:"relation"`
+		Object   string `json:"object"`
+	} `json:"tuple_keys"`
+}
+
 type fgaWriteBody struct {
-	Deletes *struct {
-		TupleKeys []struct {
-			User     string `json:"user"`
-			Relation string `json:"relation"`
-			Object   string `json:"object"`
-		} `json:"tuple_keys"`
-	} `json:"deletes"`
+	Deletes *fgaWireKeys `json:"deletes"`
+	Writes  *fgaWireKeys `json:"writes"`
 }
 
 func tupleKey(user, relation, object string) string { return user + "|" + relation + "|" + object }
@@ -90,6 +93,29 @@ func (s *fgaStoreServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.rejectAll {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"code":"validation_error","message":"invalid tuple: relation 'bogus' not found on type 'doc'"}`))
+		return
+	}
+	// WRITE direction, same transactional semantics in mirror image: a batch naming
+	// even ONE tuple that is already present is rejected wholesale, with the deployed
+	// server's verbatim duplicate body. Modelling this is what makes the write test
+	// assert an OUTCOME (which tuples ended up in the store) instead of a code path —
+	// a fake that accepted duplicates could not tell a decomposing client from one
+	// that silently dropped the batch.
+	if body.Writes != nil && len(body.Writes.TupleKeys) > 0 {
+		for _, k := range body.Writes.TupleKeys {
+			if _, ok := s.live[tupleKey(k.User, k.Relation, k.Object)]; ok {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(fmt.Sprintf(
+					`{"code":"write_failed_due_to_invalid_input","message":"cannot write a tuple which already exists: user: '%s', relation: '%s', object: '%s': tuple to be written already existed or the tuple to be deleted did not exist"}`,
+					k.User, k.Relation, k.Object)))
+				return
+			}
+		}
+		for _, k := range body.Writes.TupleKeys {
+			s.live[tupleKey(k.User, k.Relation, k.Object)] = struct{}{}
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
 		return
 	}
 	if body.Deletes == nil || len(body.Deletes.TupleKeys) == 0 {
@@ -211,15 +237,66 @@ func TestDeleteTuples_GenuineRejection_SurfacesError(t *testing.T) {
 	}
 }
 
-// TestWriteTuples_BatchWithAnExistingTuple_IsNotSilentlySwallowed — the WRITE direction
-// is deliberately NOT given the same treatment here: the reconciler's sync writer owns
-// that case with a read-then-write-delta (it must know WHICH tuples are missing to keep
-// a grant all-or-nothing per object), so the client must keep surfacing the rejection
-// rather than reporting a partial grant as applied.
-func TestWriteTuples_BatchWithAnExistingTuple_IsNotSilentlySwallowed(t *testing.T) {
-	c := replyClient(badRequestServer(t, liveDuplicateWriteBody))
+// TestWriteTuples_BatchWithAnExistingTuple_LandsTheMissingOnes — the WRITE direction now
+// gets the same treatment as the revoke, and for a reason the revoke did not have.
+//
+// The invariant is unchanged and is the one this file is about: a call that returns nil
+// must mean the caller's post-condition holds. What changed is that a write batch is now
+// a UNIT — one subject's whole relation set on one object — because a set split across
+// requests is a grant a caller can observe half present. A batch rejected for naming one
+// tuple that is already there is the ORDINARY outcome of the synchronous writer and the
+// queue materialising the same grant; the batch can never succeed on replay, so reporting
+// the rejection (the old behaviour) left the missing relations unwritten, and swallowing
+// it would report a partial grant as whole. Decomposition does neither.
+//
+// Asserted on the OBSERVABLE: after the call, every tuple of the batch is in the store.
+func TestWriteTuples_BatchWithAnExistingTuple_LandsTheMissingOnes(t *testing.T) {
+	store := &fgaStoreServer{live: map[string]struct{}{
+		tupleKey(liveTupleA.User, liveTupleA.Relation, liveTupleA.Object): {},
+	}}
+	c := newFGAStoreServer(t, store)
+
+	if err := c.WriteTuples(context.Background(), []clients.RelationTuple{liveTupleA, liveTupleB}); err != nil {
+		t.Fatalf("a batch whose only fault is a pre-existing member must converge, got %v", err)
+	}
+	if !store.has(liveTupleA) || !store.has(liveTupleB) {
+		t.Fatalf("both tuples must be present afterwards (A=%v B=%v)", store.has(liveTupleA), store.has(liveTupleB))
+	}
+}
+
+// TestWriteTuples_AllMissingBatch_AppliedInOneRequest — the positive control, and the
+// half that keeps the decomposition a FALLBACK. Without it the test above would stay
+// green on a client that abandoned batching entirely and wrote every grant tuple by
+// tuple — which is the very shape (one relation per request) whose partial observations
+// this change exists to remove.
+func TestWriteTuples_AllMissingBatch_AppliedInOneRequest(t *testing.T) {
+	store := &fgaStoreServer{live: map[string]struct{}{}}
+	c := newFGAStoreServer(t, store)
+
+	if err := c.WriteTuples(context.Background(), []clients.RelationTuple{liveTupleA, liveTupleB}); err != nil {
+		t.Fatalf("an all-missing batch must apply cleanly, got %v", err)
+	}
+	if n := store.reqCount(); n != 1 {
+		t.Fatalf("an all-missing batch must stay ONE transactional request, took %d", n)
+	}
+	if !store.has(liveTupleA) || !store.has(liveTupleB) {
+		t.Fatalf("both tuples must be present after a clean batch write")
+	}
+}
+
+// TestWriteTuples_GenuineRejection_SurfacesError — direction discipline, mirror of the
+// delete control: a 400 that is NOT "already exists" (a real validation error) must
+// still surface. A grant reported as applied while nothing landed is an authz gap that
+// the durable queue would never be told to retry.
+func TestWriteTuples_GenuineRejection_SurfacesError(t *testing.T) {
+	store := &fgaStoreServer{live: map[string]struct{}{}, rejectAll: true}
+	c := newFGAStoreServer(t, store)
+
 	err := c.WriteTuples(context.Background(), []clients.RelationTuple{liveTupleA, liveTupleB})
 	if err == nil {
-		t.Fatalf("a rejected multi-tuple WRITE applied nothing — it must not be reported as written")
+		t.Fatalf("a genuinely rejected write must NOT be reported as a successful grant")
+	}
+	if store.has(liveTupleA) || store.has(liveTupleB) {
+		t.Fatalf("nothing may have been written by a rejected request (transactional)")
 	}
 }
