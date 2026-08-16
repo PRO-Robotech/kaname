@@ -157,6 +157,19 @@ var askingSites = map[string]lane{
 	// delivery, and it reads at HIGHER_CONSISTENCY for exactly that reason — a replica-lagged
 	// answer would leave the delta unchanged round after round. No access decision turns on it.
 	"internal/repo/kacho/pg/reconcile_adapter.go:readExisting": laneDelivery,
+	// The read half of the adapter's OWN completion of one grant: a batch write rejected
+	// because part of the set is already present applied nothing, and a verbatim replay
+	// never can — so the writer asks what is present and writes only the missing subset,
+	// in ONE request. Same lane and same reason as readExisting above: the subject of the
+	// question IS delivery, it reads at HIGHER_CONSISTENCY because a lagged answer would
+	// leave the missing set unchanged round after round, and nothing is granted or refused
+	// on it.
+	//
+	// Why it must complete in one request rather than tuple by tuple: the set travels
+	// together precisely so a caller can never observe half a grant — able to read its own
+	// fresh object and not to change it. Splitting the completion would satisfy the
+	// post-condition and defeat the reason.
+	"internal/clients/openfga_client.go:readGrant": laneDelivery,
 	// The read half of a WITHDRAWAL: what is still standing on an object whose registration
 	// is being withdrawn, so the teardown takes away all of what this proxy could have
 	// written rather than only the tuple the consumer was able to name. Same lane and same

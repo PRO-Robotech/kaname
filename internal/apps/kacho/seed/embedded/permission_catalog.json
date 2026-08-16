@@ -2915,6 +2915,16 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.vpc.v1.InternalAddressService/ReleaseOwnedAddress",
+    "permission": "vpc.addresses.releaseOwned",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.InternalAddressService/SetAddressReference",
     "permission": "vpc.addresses.setReference",
     "required_relation": "v_update",

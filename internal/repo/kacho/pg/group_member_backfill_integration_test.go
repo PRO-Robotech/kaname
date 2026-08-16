@@ -25,6 +25,7 @@ import (
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // backfillGroupMemberTuplesSQL is migration 0029's Up INSERT body (single source
@@ -46,7 +47,8 @@ WHERE NOT EXISTS (
     FROM kacho_iam.fga_outbox o
    WHERE o.event_type = 'fga.tuple.write'
      AND o.payload->>'user'     = gm.member_type || ':' || gm.member_id
-     AND o.payload->>'relation' = 'member'
+     AND (o.payload->>'relation' = 'member'
+          OR o.payload->'relations' @> to_jsonb('member'::text))
      AND o.payload->>'object'   = 'group:' || gm.group_id
 )`
 
@@ -130,7 +132,8 @@ func TestGroupMember_Backfill_GM_BF2_Idempotent(t *testing.T) {
 	var cnt int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.fga_outbox
-		  WHERE event_type='fga.tuple.write' AND payload->>'relation'='member' AND payload->>'object' = $1`,
+		  WHERE event_type='fga.tuple.write' AND payload->>'object' = $1
+		    AND `+fga_outbox.RelationPredicate("payload", "'member'"),
 		"group:"+string(g.ID)).Scan(&cnt))
 	assert.Equal(t, 2, cnt, "exactly one member-tuple per member — re-running the backfill is a no-op (idempotent)")
 }

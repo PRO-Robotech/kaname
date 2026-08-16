@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -288,7 +289,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
 				// потому что добавление проходит успешно.
 				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					domain.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
+					authzmap.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
 					return domain.Role{}, verr
 				}
 			}

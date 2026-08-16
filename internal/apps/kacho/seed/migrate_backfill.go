@@ -43,7 +43,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // ownerRoleIDExpr / the deterministic owner-binding-id expression mirror migration
@@ -105,7 +107,14 @@ SELECT b.id, b.subject_type, b.subject_id, 0
    AND b.resource_type = 'account'
    AND b.revoked_at IS NULL
 ON CONFLICT (binding_id, subject_type, subject_id) DO NOTHING`
+)
 
+// backfillOwnerHierarchyTuplesSQL is a `var`, not a `const`, because its de-dup predicate
+// is BUILT BY THE PACKAGE THAT OWNS THE ROW SHAPE (fga_outbox.RelationPredicate) rather
+// than written again here. A second rendering of "does this row already carry that
+// relation" is exactly the drift that made this backfill miss rows arriving in the set
+// form — and it would miss them silently, enqueueing a duplicate intent instead.
+var (
 	// backfillOwnerHierarchyTuplesSQL emits the owner-binding OBJECT hierarchy
 	// parent-pointer FGA tuple (account:<A>#account@iam_access_binding:<id>) for every
 	// active owner-binding (no-access-loss). This boot-path is the SOLE home
@@ -136,8 +145,13 @@ WHERE b.role_id       = 'rol' || substr(md5('owner'), 1, 17)
       FROM kacho_iam.fga_outbox o
      WHERE o.event_type        = 'fga.tuple.write'
        AND o.payload->>'user'     = 'account:' || b.resource_id
-       AND o.payload->>'relation' = 'account'
        AND o.payload->>'object'   = 'iam_access_binding:' || b.id
+       -- Отношение ищется в ОБЕИХ формах строки: одиночной и наборной. Читая только
+       -- скалярное поле, этот де-дуп не увидел бы указатель, приехавший членом набора,
+       -- и поставил бы вторую строку на уже поставленное. Повтор идемпотентен у
+       -- хранилища прав, поэтому это не порча — но это работа, которой не должно быть,
+       -- и молчаливое «не нашёл» там, где есть.
+       AND ` + fga_outbox.RelationPredicate("o.payload", "'account'") + `
   )`
 )
 
@@ -312,6 +326,57 @@ func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) erro
 			if uerr := upsertRoleSelectorTx(ctx, tx, rr.id, sel); uerr != nil {
 				return uerr
 			}
+		}
+		// ВТОРАЯ СТОРОНА ТОГО ЖЕ ПРАВИЛА, и досевается она здесь по той же причине,
+		// по какой здесь досевается первая: обе пишет ReplaceRuleSelectors /
+		// ReplaceRoleVerbs, то есть путь ПОЛЬЗОВАТЕЛЬСКОЙ роли, а системная роль
+		// заводится сырым SQL миграции и этим путём не проходит никогда.
+		//
+		// Селекторы отвечают «подходит ли объект», проекция глаголов — «разрешено ли
+		// действие». Роль с одной стороной адресует объект и не разрешает на нём
+		// ничего: вердикт по её выдаче — отказ, причём МОЛЧАЛИВЫЙ (пустое соединение
+		// не отличается от честного «права нет»). Именно этот тихий близнец пережил
+		// громкий: досев селекторов завели, когда пообъектная материализация 403-ила
+		// создателя на его же ресурсе, а вторую сторону не завели — потому что её
+		// читатель отвечает не отказом в API, а расхождением в теневом сравнении.
+		//
+		// Замена ПОЛНАЯ и той же функцией, что у пользовательской роли: проекция есть
+		// СОСТОЯНИЕ роли, и глагол, снятый из правил, обязан отсюда исчезнуть.
+		if verr := replaceRoleVerbsTx(ctx, tx, rr.id, authzmap.RoleVerbsFromSelectors(selectors)); verr != nil {
+			return verr
+		}
+	}
+	return nil
+}
+
+// replaceRoleVerbsTx заменяет проекцию «роль → тип объекта × глагол» для одной
+// роли внутри транзакции вызывающего.
+//
+// Тот же порядок и та же форма строки, что у пути пользовательской роли
+// (`roleWriter.ReplaceRoleVerbs`): снять всё, положить текущее. Два места пишут
+// одну таблицу, и разойтись им нельзя — поэтому пары ОБА берут из одной функции
+// домена (`RoleVerbsFromSelectors`) и из одних селекторов, а не вычисляют их
+// каждый по-своему.
+func replaceRoleVerbsTx(ctx context.Context, tx pgxExecer, roleID string, pairs []domain.RoleVerb) error {
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM kacho_iam.role_verb WHERE role_id = $1`, roleID); err != nil {
+		return fmt.Errorf("sync system role verbs: prune %s: %w", roleID, err)
+	}
+	for _, pv := range pairs {
+		if pv.ObjectType == "" || pv.Verb == "" {
+			// Пустая пара — отказ, а не пропуск: она означает, что перевод дал
+			// ничего, и записать «ничего» тихо значит потерять право, которое роль
+			// объявляет.
+			return fmt.Errorf("sync system role verbs: пустая пара (%q,%q) у роли %s",
+				pv.ObjectType, pv.Verb, roleID)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO kacho_iam.role_verb (role_id, object_type, verb)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (role_id, object_type, verb) DO NOTHING`,
+			roleID, pv.ObjectType, pv.Verb); err != nil {
+			return fmt.Errorf("sync system role verbs: insert (%s,%s) for %s: %w",
+				pv.ObjectType, pv.Verb, roleID, err)
 		}
 	}
 	return nil

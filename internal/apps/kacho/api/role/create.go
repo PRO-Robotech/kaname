@@ -21,6 +21,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -186,7 +187,7 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// вердикт наполовину определённым, а расхождение проявится не отказом,
 			// а неверным ответом.
 			if verr := w.RolesW().ReplaceRoleVerbs(ctx, inserted.ID,
-				domain.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors())); verr != nil {
+				authzmap.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors())); verr != nil {
 				return domain.Role{}, verr
 			}
 			// Role audit payload carries id + name + actor — NOT the full

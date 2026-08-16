@@ -66,6 +66,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // retiredModuleSA — шесть снятых объявлений: имя службы (для детерминированного
@@ -216,7 +217,7 @@ func countClusterTuple(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	return scalarInt(t, ctx, pool,
 		fmt.Sprintf(`SELECT count(*) FROM kacho_iam.fga_outbox
 		              WHERE event_type = 'fga.tuple.write'
-		                AND payload->>'relation' = $1
+		                AND `+fga_outbox.RelationPredicate("payload", "$1")+`
 		                AND payload->>'object'   = $2
 		                AND payload->>'user'     = 'service_account:' ||
 		                    ('sva' || substr(md5('kacho-%s'), 1, 17))`, svc),

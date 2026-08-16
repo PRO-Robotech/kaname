@@ -33,6 +33,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -187,8 +188,8 @@ func TestOwnResource_FGAOutbox_AccountOwnerSelfGrantEmittedInTx(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.fga_outbox
 		  WHERE event_type='fga.tuple.write'
-		    AND payload->>'user' = $1 AND payload->>'relation' = 'owner'
-		    AND payload->>'object' = $2`,
+		    AND payload->>'user' = $1 AND payload->>'object' = $2
+		    AND `+fga_outbox.RelationPredicate("payload", "'owner'"),
 		"user:"+string(uid), "account:"+string(accID)).Scan(&ownerCnt))
 	require.Equal(t, 1, ownerCnt, "owner self-grant intent must be co-committed in-tx")
 }

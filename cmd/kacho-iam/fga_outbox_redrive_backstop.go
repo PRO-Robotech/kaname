@@ -103,7 +103,26 @@ func startFGAOutboxRedrive(
 		// эта очередь выпала бы из сверки молча. Совпадение с дренажом при этом
 		// держится не только константой — парная проба читает ОБА значения из
 		// настройки, с которой работает процесс.
-		PartitionColumn: fgaOutboxTupleKeyColumn,
+		//
+		// Что даёт ключ ВЫДАЧИ (миграция 0098) этому возврату: «перекрыта» теперь
+		// означает «по этой же выдаче позже доставлена другая строка», а не «по этому
+		// же кортежу». Такая строка не воскрешается — и это осознанно консервативно:
+		// воскресив её, мы могли бы вернуть отношение, которое доставленный преемник
+		// как раз снял (пере-выдача). Цена — недодача, а не передача: недостающее
+		// доводит периодическое сведение, тогда как лишнее правами не отменяется
+		// ничем. Направление отказа выбрано в пользу закрытого.
+		PartitionColumn: fgaOutboxGrantKeyColumn,
+		// A later delivered row of the same GRANT voids a poisoned one only if it
+		// re-determined EVERYTHING that row named. Since a row here carries a subject's
+		// whole relation set, a successor may have re-stated part of it — and voiding on
+		// that would drop the rest: in the removal direction, tuples that survive their
+		// own revoke while the queue reports the work done.
+		//
+		// Coverage, not direction: a later delivered row states the desired final state
+		// whichever way it points, so a WRITE covering a poisoned DELETE voids it just as
+		// a DELETE covering a poisoned WRITE does.
+		SupersededCoverageSQL: `coalesce(s.payload->'relations', jsonb_build_array(s.payload->>'relation'))
+		                        @> coalesce(t.payload->'relations', jsonb_build_array(t.payload->>'relation'))`,
 	}, log)
 	if err != nil {
 		return err

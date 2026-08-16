@@ -18,21 +18,32 @@ const (
 	fgaOutboxChannel = "kacho_iam_fga_outbox"
 )
 
-// fgaOutboxTupleKeyColumn is the ORDERING PARTITION key of kacho_iam.fga_outbox:
-// the full tuple identity (user, relation, object), materialised into a column by
-// migration 0067's BEFORE INSERT trigger and indexed by
-// fga_outbox_tuple_head_idx.
+// fgaOutboxGrantKeyColumn is the ORDERING PARTITION key of kacho_iam.fga_outbox:
+// the GRANT identity (user, object), materialised into a column by the table's
+// BEFORE INSERT trigger (migration 0098) and indexed by fga_outbox_tuple_head_idx.
 //
-// It must be the NARROWEST key over which the target's events fail to commute.
-// OpenFGA's state is a SET OF TUPLES keyed by the whole triple, so a WRITE and a
-// DELETE only conflict when they name the SAME triple; rows that merely share an
-// `object` touch different entries and may apply in any order. Partitioning on
-// payload->>'object' (as this did until migration 0067) therefore serialised a
-// revoke behind every unrelated grant queued earlier against the same object —
-// measured on a live stand: 8 643 pending rows over 1 439 objects but 8 641
-// distinct tuples, one revoke behind up to 632 same-object predecessors while its
-// own tuple had at most 3.
-const fgaOutboxTupleKeyColumn = "tuple_key"
+// It is a LITERAL here, deliberately, and not an alias of the emitter's constant: the
+// tree gate that checks every drained queue declares an ordering key resolves it by
+// PARSING THE SOURCE, and a cross-package reference is indistinguishable to it from no
+// key at all — the queue would drop out of that check silently. Drift against the
+// emitter is caught instead by a paired probe that reads BOTH values
+// (fga_outbox_drainer_test.go), which is the same arrangement the redrive backstop
+// already uses for the same reason.
+//
+// It must be the NARROWEST key over which the target's events fail to commute, and
+// what that is depends on what a row carries. A row carries one subject's WHOLE
+// relation set on one object (fga_outbox.emitTx), because the row is the unit that
+// reaches OpenFGA atomically and a set split across rows is a grant observed half
+// present. Two such rows fail to commute when their sets intersect — that is
+// (user, object).
+//
+// This is NOT a retreat to the object key migration 0067 removed. 0067's measured
+// cost was DIFFERENT SUBJECTS on one object serialising against each other (a revoke
+// behind up to 632 same-object predecessors while its own tuple had at most 3);
+// different subjects stay in different partitions here. What merges is one subject's
+// own relations — the rows that must be ordered — and the emitter no longer writes
+// them separately.
+const fgaOutboxGrantKeyColumn = "tuple_key"
 
 // fgaOutboxApplyConcurrency is how many rows of one claim batch are applied to
 // OpenFGA in parallel.
@@ -45,7 +56,10 @@ const fgaOutboxTupleKeyColumn = "tuple_key"
 //     queue offered 13 / 99 / 77 / 13 heads — REPEATEDLY FEWER THAN 16 — while the
 //     same instants offered 136 / 1286 / 808 / 103 TUPLE heads. The wide key was
 //     starving the apply wave, so the fan-out was nominal. Narrowing the key
-//     (migration 0067) removed that limit.
+//     (migration 0067) removed that limit. Migration 0098 widened it again to the
+//     GRANT — one head per (subject, object) rather than per tuple — which sits
+//     between the two shapes measured above and was NOT re-measured on a stand;
+//     what is known is that it is bounded below by the object-key head count.
 //
 //   - What OpenFGA will absorb. This is what binds now, and it is why the number is
 //     16 rather than something larger. Measured on the stand with an identical
@@ -61,7 +75,7 @@ const fgaOutboxTupleKeyColumn = "tuple_key"
 //     volume — NOT this constant.
 //
 // Ordering is independent of this value: the partition-head predicate admits at
-// most one row per tuple into any batch, cross-batch and cross-replica alike (see
+// most one row per grant into any batch, cross-batch and cross-replica alike (see
 // drainer.Config.PartitionColumn). Changing it widens or narrows the wave, never the
 // ordering window. The connection pool must stay sized above it — see
 // clients.fgaMaxIdleConnsPerHost, otherwise each wave re-handshakes most of its
@@ -89,7 +103,7 @@ func fgaOutboxDrainerConfig() drainer.Config {
 		ApplyTimeout: 5 * time.Second,
 		// Order-preserving concurrent drain. iam's fga_outbox carries BOTH tuple
 		// WRITES (grant / label-register) AND DELETES (revoke / label-remove /
-		// delete-stale) of the SAME (user,relation,object) — NOT commutative.
+		// delete-stale) of the SAME (user,object) grant — NOT commutative.
 		// ApplyConcurrency>1 alone does NOT preserve order (and the claim
 		// ORDER BY (attempt_count,id) splits a bumped WRITE and a fresh DELETE into
 		// different batches), so a naive N=16 let a DELETE apply before its
@@ -97,18 +111,18 @@ func fgaOutboxDrainerConfig() drainer.Config {
 		// authz OVER-GRANT / cross-account leak (observed: authz-deny + iam-role
 		// foreign-Get 200-not-404). PartitionColumn makes the claim
 		// partition-head-only: a row is never claimed while a DELIVERABLE
-		// same-TUPLE predecessor with a smaller id is unsent, so per-tuple FIFO holds
-		// cross-batch AND cross-replica and at most one row per tuple is in flight —
+		// same-GRANT predecessor with a smaller id is unsent, so per-grant FIFO holds
+		// cross-batch AND cross-replica and at most one row per grant is in flight —
 		// safe to raise the revoke/membership drain to N=16. Requires migration
 		// 0067's partial index (tuple_key,id) WHERE sent_at IS NULL for the claim's
 		// NOT EXISTS, and migration 0063's (attempt_count,id) for its outer ordered
 		// scan. See drainer.Config.PartitionColumn.
 		ApplyConcurrency: fgaOutboxApplyConcurrency,
-		PartitionColumn:  fgaOutboxTupleKeyColumn,
+		PartitionColumn:  fgaOutboxGrantKeyColumn,
 		// Per-partition head-of-line wedge attribution: a persistently-transient
-		// tuple head blocks its successors until the peer recovers (temporary, by
+		// grant head blocks its successors until the peer recovers (temporary, by
 		// design — leak-safety over per-partition liveness). WedgeWarnAfter surfaces
-		// WHICH tuple is stuck, beyond the table-wide oldest-pending-age gauge.
+		// WHICH grant is stuck, beyond the table-wide oldest-pending-age gauge.
 		WedgeWarnAfter: 60 * time.Second,
 	}
 }

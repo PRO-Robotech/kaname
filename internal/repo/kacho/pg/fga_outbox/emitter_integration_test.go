@@ -224,10 +224,12 @@ func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 		id  int64
 		typ string
 	}
+	// Отбор по КЛЮЧУ СТРОКИ — (субъект, объект): строка несёт набор отношений субъекта
+	// на объекте, поэтому отношение в отборе не участвует (см. fga_outbox.emitTx).
 	rows, err := pool.Query(ctx, `
 		SELECT id, event_type FROM kacho_iam.fga_outbox
-		 WHERE payload->>'user'=$1 AND payload->>'relation'=$2 AND payload->>'object'=$3
-		 ORDER BY id ASC`, key.User, key.Relation, key.Object)
+		 WHERE payload->>'user'=$1 AND payload->>'object'=$2
+		 ORDER BY id ASC`, key.User, key.Object)
 	require.NoError(t, err)
 	defer rows.Close()
 	var evs []ev
@@ -241,13 +243,18 @@ func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 	require.Equal(t, "fga.tuple.delete", evs[1].typ, "отзыв обязан быть строго после неё")
 	require.Greater(t, evs[1].id, evs[0].id)
 
-	// ВНУТРИ одного набора порядок id обязан следовать порядку массива. Без этого
-	// утверждения проба покрывала бы только соседство двух ВЫЗОВОВ и оставалась зелёной
-	// на реализации, которая переставляет элементы внутри набора, — а именно перестановка
-	// внутри набора и есть то, что вставка через `unnest` могла бы потерять (проверено
-	// инъекцией: без этой части проба на развороте набора не краснела).
+	// ВНУТРИ одного набора порядок обязан следовать порядку массива — на ОБОИХ уровнях,
+	// потому что уровней теперь два: строки идут в порядке первого упоминания субъекта, а
+	// отношения внутри строки — в порядке перечисления. Без этого утверждения проба
+	// покрывала бы только соседство двух ВЫЗОВОВ и оставалась зелёной на реализации,
+	// которая переставляет элементы внутри набора, — а именно перестановка внутри набора и
+	// есть то, что вставка через `unnest` могла бы потерять (проверено инъекцией: без этой
+	// части проба на развороте набора не краснела).
 	inner, err := pool.Query(ctx, `
-		SELECT payload->>'user' || '|' || (payload->>'relation') FROM kacho_iam.fga_outbox
+		SELECT payload->>'user' || '|' ||
+		       coalesce((SELECT string_agg(r, '+') FROM jsonb_array_elements_text(payload->'relations') AS t(r)),
+		                payload->>'relation')
+		  FROM kacho_iam.fga_outbox
 		 WHERE event_type='fga.tuple.write' AND payload->>'object'=$1
 		 ORDER BY id ASC`, key.Object)
 	require.NoError(t, err)
@@ -259,10 +266,9 @@ func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 		got = append(got, s)
 	}
 	require.Equal(t, []string{
-		key.User + "|" + key.Relation,
-		other.User + "|" + other.Relation,
+		key.User + "|" + key.Relation + "+" + other.Relation,
 		"user:usr_order2|admin",
-	}, got, "порядок строк внутри набора обязан совпасть с порядком, в котором их перечислил вызывающий")
+	}, got, "порядок строк и порядок отношений внутри строки обязаны совпасть с порядком, в котором их перечислил вызывающий")
 
 	// Парный контроль: обратный порядок перечисления даёт обратный порядок id.
 	// Без него утверждение выше зеленело бы на реализации, которая сортирует как угодно.

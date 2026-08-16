@@ -38,6 +38,7 @@ import (
 	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -72,8 +73,8 @@ func fgaOutboxCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, user,
 		SELECT count(*) FROM kacho_iam.fga_outbox
 		 WHERE event_type = 'fga.tuple.write'
 		   AND payload->>'user' = $1
-		   AND payload->>'relation' = $2
-		   AND payload->>'object' = $3`, user, relation, object).Scan(&n))
+		   AND payload->>'object' = $3
+		   AND `+fga_outbox.RelationPredicate("payload", "$2"), user, relation, object).Scan(&n))
 	return n
 }
 
