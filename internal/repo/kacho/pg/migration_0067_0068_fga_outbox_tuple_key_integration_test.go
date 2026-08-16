@@ -10,7 +10,7 @@ package pg_test
 //
 //   0067 — the ordering partition key is materialised into a `tuple_key` column by a
 //          BEFORE INSERT trigger and indexed for the claim's correlated NOT EXISTS.
-//   0098 — that key is the GRANT identity (user, object), not the triple: one row
+//   0099 — that key is the GRANT identity (user, object), not the triple: one row
 //          carries a subject's WHOLE relation set on one object, so the partition has
 //          to cover every row the set can be ordered against. The COLUMN NAME is
 //          historical — renaming it would break the claim query of any pod still on
@@ -72,7 +72,7 @@ func TestMigration0067_FGAOutbox_TupleKeyPartition(t *testing.T) {
 		).Scan(&got))
 		assert.Equal(t, "user:usr01 vpc_network:net01", got,
 			"the BEFORE INSERT trigger must render `user object` — the GRANT key (migration "+
-				"0098). The drainer's claim compares this value between rows, so a different "+
+				"0099). The drainer's claim compares this value between rows, so a different "+
 				"rendering per writer would put two events of ONE grant into two partitions "+
 				"and drop the ordering between a grant and its revoke. It must NOT include the "+
 				"relation: one row carries a subject's whole relation set, and a key naming a "+

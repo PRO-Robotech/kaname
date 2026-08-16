@@ -20,7 +20,7 @@ const (
 
 // fgaOutboxGrantKeyColumn is the ORDERING PARTITION key of kacho_iam.fga_outbox:
 // the GRANT identity (user, object), materialised into a column by the table's
-// BEFORE INSERT trigger (migration 0098) and indexed by fga_outbox_tuple_head_idx.
+// BEFORE INSERT trigger (migration 0099) and indexed by fga_outbox_tuple_head_idx.
 //
 // It is a LITERAL here, deliberately, and not an alias of the emitter's constant: the
 // tree gate that checks every drained queue declares an ordering key resolves it by
@@ -56,7 +56,7 @@ const fgaOutboxGrantKeyColumn = "tuple_key"
 //     queue offered 13 / 99 / 77 / 13 heads — REPEATEDLY FEWER THAN 16 — while the
 //     same instants offered 136 / 1286 / 808 / 103 TUPLE heads. The wide key was
 //     starving the apply wave, so the fan-out was nominal. Narrowing the key
-//     (migration 0067) removed that limit. Migration 0098 widened it again to the
+//     (migration 0067) removed that limit. Migration 0099 widened it again to the
 //     GRANT — one head per (subject, object) rather than per tuple — which sits
 //     between the two shapes measured above and was NOT re-measured on a stand;
 //     what is known is that it is bounded below by the object-key head count.

@@ -31,7 +31,7 @@ import (
 //
 // The key is (user, object) — the GRANT — because that is what a row now IS: one
 // subject's whole relation set on one object, carried together so the set cannot be
-// observed half present (migration 0098, fga_outbox.emitTx). The object key's cost
+// observed half present (migration 0099, fga_outbox.emitTx). The object key's cost
 // does not come back with it: different SUBJECTS on one object stay in different
 // partitions, and it is those that the measurement above was about.
 //

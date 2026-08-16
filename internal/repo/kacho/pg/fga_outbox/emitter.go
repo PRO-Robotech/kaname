@@ -45,7 +45,7 @@
 //	                           and lose the write→delete order silently. A payload
 //	                           missing a component yields NULL and is refused
 //	                           by fga_outbox_tuple_key_present_check at INSERT.
-//	                           The COLUMN NAME is historical: until migration 0098
+//	                           The COLUMN NAME is historical: until migration 0099
 //	                           the key was the whole triple (see PartitionColumn
 //	                           below for why it no longer can be).
 //
@@ -78,7 +78,7 @@ const (
 // rendering of the name in the wiring would let those two drift apart silently,
 // which is the failure mode the table's own doc warns about.
 //
-// Its stored value is `user || ' ' || object` (migration 0098), NOT the whole
+// Its stored value is `user || ' ' || object` (migration 0099), NOT the whole
 // triple: the unit a row now carries is one subject's WHOLE relation set on one
 // object (see emitTx), and a partition has to cover every row it can be ordered
 // against. Narrower than that and a revoke of the set could apply ahead of the
