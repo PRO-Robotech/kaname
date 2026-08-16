@@ -122,6 +122,21 @@ type services struct {
 	// fails fast on missing KACHO_IAM_OPENFGA_STORE_ID). Reused by runServe
 	// for the fga_outbox drainer.
 	relationStore *clients.OpenFGAHTTPClient
+
+	// ownGates — ЗНАЧЕНИЕ, КОТОРОЕ ДЕРЖАТ СОБСТВЕННЫЕ СТРАЖИ iam: тот же клиент,
+	// обёрнутый вторым шансом и предъявляющий каждое решение сравнению.
+	//
+	// Выставлено наружу потому, что не все стражи собираются здесь. Потолок
+	// чтения на внутреннем слушателе собирается в `runServe`, и ему до сих пор
+	// отдавали ГОЛЫЙ транспорт — то есть решение о доступе на каждом читающем
+	// RPC внутреннего слушателя уходило движку и мимо второго шанса, и мимо
+	// сравнения. Снаружи это выглядело исправно: страж есть, провязан,
+	// исполняется на каждом запросе.
+	//
+	// Пока у `runServe` не было доступа к обёрнутому значению, «отдать стражу
+	// правильное» было невыполнимо — не из-за недосмотра, а из-за раскладки.
+	// Поле закрывает именно это.
+	ownGates *authzcascade.Client
 }
 
 // ownGateWiringComplaint reports why iam's own authorization gates cannot be trusted with
@@ -154,6 +169,20 @@ func ownGateWiringComplaint(store *authzcascade.Client, facts *authzcascade.Reso
 	if !facts.BatchReachable() {
 		return "the structural page read is not wired, so every list filter would resolve " +
 			"one object at a time and a contract-sized page would not fit its request budget"
+	}
+	// Сравнение — условие НАБЛЮДАЕМОСТИ, и отказ в старте по нему тоже намеренный.
+	//
+	// Без него ответы остаются прежними, поэтому пропажа ничем себя не выдаёт: обе
+	// формы живы, решения принимает движок, а расхождение никем не считается. Ровно
+	// в этом состоянии переключать источник вердикта потипово нельзя — страж чтения
+	// спрашивает ТИПО-НЕЗАВИСИМО, и на первом же переключённом типе один вопрос
+	// получил бы два действующих ответа. Провязка при этом выглядит исполненной:
+	// значение собрано, стражам роздано, вызовы идут.
+	if !store.ComparatorWired() {
+		return "собственные стражи iam принимали бы решения о доступе, не предъявляя их " +
+			"сравнению форм (сравнитель не провязан в значение, которое стражам выдаёт " +
+			"композиционный корень): расхождение двух форм осталось бы несчитанным, и " +
+			"переключать источник вердикта потипово в этом состоянии нельзя"
 	}
 	return ""
 }
@@ -191,7 +220,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// value here to hand it. Everything below wires this; the bare transport is used only
 	// where the subject of the question is DELIVERY itself (the boot verify gate) or where
 	// a concrete field of the client is needed.
-	relationStore := authzcascade.Wrap(fgaTransport, structuralFacts)
+	// shadow — сравнитель форм. Собирается ЗДЕСЬ, до стражей, потому что его
+	// держат ДВОЕ: край (`AuthorizeService`) и обёртка, через которую решения
+	// принимают собственные стражи iam. Один экземпляр на обоих — иначе счётчики
+	// разъедутся на два перечня об одном предмете, и доля сравнённого будет
+	// считаться от разных знаменателей у края и у стражей.
+	shadow := shadowverdict.New(relverdict.NewAsker(pool), logger)
+	relationStore := authzcascade.Wrap(fgaTransport, structuralFacts).WithComparator(shadow)
 	// Refuse to run gates that have silently gone back to waiting for a queue. Losing
 	// either half of this in a refactor would put iam's own answers back out of step with
 	// the edge's, and nothing else would say so.
@@ -479,7 +514,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, fgaTransport, relationStore,
-		structuralFacts, cfg.AuthN.Mode.IsProduction(), logger)
+		structuralFacts, shadow, cfg.AuthN.Mode.IsProduction(), logger)
 	// Читатель счётчиков теневого сравнения. Бандл выносит сравнитель наружу
 	// именно ради этого: сравнение намеренно ни на что не влияет, и отсюда его
 	// слепое пятно — сравнитель, которого не спросили ни разу, снаружи неотличим
@@ -814,6 +849,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// fga_outbox drainer wiring. The drainer writes tuples; it asks no
 		// authorization question, so it has nothing to gain from the wrapper.
 		relationStore: fgaTransport,
+
+		// И ОТДЕЛЬНО — обёрнутое значение для тех стражей, что собираются в
+		// runServe. Два поля рядом намеренно: разница между ними и есть разница
+		// между «пишет кортежи» и «принимает решение о доступе», и выбор между
+		// ними перестаёт быть догадкой на месте вызова.
+		ownGates: relationStore,
 	}
 }
 
@@ -974,6 +1015,7 @@ type authzServiceBundle struct {
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	kachoRepo kachorepo.Repository, fgaTransport *clients.OpenFGAHTTPClient,
 	ownGates *authzcascade.Client, structuralFacts *authzcascade.Resolver,
+	shadow *shadowverdict.Comparator,
 	prodMode bool, logger *slog.Logger) authzServiceBundle {
 	modelID := fgaTransport.AuthorizationModel
 	logger.Info("openfga extended client wired for AuthZ",
@@ -1001,7 +1043,10 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// ответу движка ниже добавляются надзор администратора облака и структурный
 	// запасной путь), и одно место покрывает все вопросы, а не тот один, у чьего
 	// обработчика оказалось написано.
-	shadow := shadowverdict.New(relverdict.NewAsker(pool), logger)
+	// Сравнитель приходит СОБРАННЫМ от вызывающего: тот же экземпляр держит
+	// обёртка собственных стражей. Собрать второй здесь значило бы завести две
+	// меры одного предмета — у края своя, у стражей своя, — и «доля сравнённого»
+	// перестала бы иметь один знаменатель.
 	authSvc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           fgaTransport,
 		ModelID:             modelID,
