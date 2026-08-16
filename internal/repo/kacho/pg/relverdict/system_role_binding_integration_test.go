@@ -52,7 +52,7 @@ func withSeededPool(t *testing.T, fn func(ctx context.Context, tx pgx.Tx)) {
 	if err != nil {
 		t.Fatalf("пул: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	pgtest.ClosePoolAtEnd(t, pool)
 	// Обе стороны правила системной роли кладёт продукт, а не фикстура.
 	if err := seed.SyncAllSystemRoleSelectors(ctx, pool); err != nil {
 		t.Fatalf("досев системных ролей: %v", err)

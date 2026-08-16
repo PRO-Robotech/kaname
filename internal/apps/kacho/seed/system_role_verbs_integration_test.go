@@ -71,7 +71,7 @@ func TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
 	require.NoError(t, err)
-	t.Cleanup(pool.Close)
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
 
@@ -149,7 +149,7 @@ func TestSystemRoleWithoutMaterializingRulesGetsNoVerbs(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
 	require.NoError(t, err)
-	t.Cleanup(pool.Close)
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	// Роль системная (cluster_id непуст ⇒ is_system вычисляется), правил нет.
 	// Разрешение — четырёхсегментное, как требует грамматика схемы.
