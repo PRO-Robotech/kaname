@@ -49,6 +49,32 @@ func enqueueTuple(t *testing.T, ctx context.Context, tx pgx.Tx, event, user, rel
 		event, user, relation, object)
 }
 
+// enqueueGrantSet кладёт ВТОРУЮ форму строки журнала — набор отношений одной
+// выдачи, — ровно так, как её кладёт `fga_outbox.emitTx`: на выдаче рядом с
+// набором едет совместимое эхо (первый элемент скаляром) для пода прежнего
+// выпуска, на отзыве эха НЕТ намеренно.
+//
+// Фикстура повторяет производителя дословно и не снисходительнее его: положи
+// она скаляр и на отзыве, проба зеленела бы на проекции, которая набора не
+// читает вовсе, — то есть на том самом дефекте, ради которого написана.
+func enqueueGrantSet(t *testing.T, ctx context.Context, tx pgx.Tx, event, user, object string, relations []string) {
+	t.Helper()
+	if event == "fga.tuple.write" {
+		exec(t, ctx, tx,
+			`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+			 VALUES ($1, jsonb_build_object('user', $2::text, 'object', $3::text,
+			                                'relations', to_jsonb($4::text[]),
+			                                'relation', $4::text[] [1]), now())`,
+			event, user, object, relations)
+		return
+	}
+	exec(t, ctx, tx,
+		`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+		 VALUES ($1, jsonb_build_object('user', $2::text, 'object', $3::text,
+		                                'relations', to_jsonb($4::text[])), now())`,
+		event, user, object, relations)
+}
+
 func countFacts(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, relation string) int {
 	t.Helper()
 	var n int
@@ -156,6 +182,107 @@ func TestFactProjection_DoesNotCopyVerbTuples(t *testing.T) {
 		}
 		if got != relverdict.Deny {
 			t.Errorf("глагол дал право без выдачи: %v", got)
+		}
+	})
+}
+
+// Набор глаголов одной выдачи обязан ПРОХОДИТЬ и не проецироваться.
+//
+// Это регрессия на стык двух линий: проекция журнала (0098) читала одно поле
+// `relation` и роняла вставку исключением, когда его нет, — а набор глаголов
+// (0099 и её код) скалярного `relation` не несёт вовсе. Вместе это отвергало
+// всякую выдачу и всякий отзыв, где у субъекта больше одного отношения на
+// объекте: то есть ровно тот случай, ради которого вторая форма и заведена.
+//
+// Утверждается ИСХОД записи, а не форма строки: дефект проявлялся отказом
+// транзакции вызывающего, и проба, смотрящая только в таблицу фактов, прошла бы
+// мимо него — до таблицы дело не доходило.
+func TestFactProjection_VerbSetPassesAndIsNotProjected(t *testing.T) {
+	withTx(t, func(ctx context.Context, tx pgx.Tx) {
+		verbs := []string{"v_get", "v_list", "v_update", "v_delete"}
+
+		// Сама вставка и есть предмет: прежняя проекция роняла её здесь.
+		enqueueGrantSet(t, ctx, tx, "fga.tuple.write", "user:usr-set", "vpc_network:net-set", verbs)
+		enqueueGrantSet(t, ctx, tx, "fga.tuple.delete", "user:usr-set", "vpc_network:net-set", verbs)
+
+		for _, verb := range verbs {
+			if n := countFacts(t, ctx, tx, "vpc_network", verb); n != 0 {
+				t.Errorf("глагол %s из набора скопирован в проекцию (%d строк): сравнение "+
+					"формы E с движком становится тождеством", verb, n)
+			}
+		}
+	})
+}
+
+// Набор НЕ-глаголов проецируется ЦЕЛИКОМ, а не первым элементом.
+//
+// Порядок чтения полей здесь и есть предмет. Строка выдачи набора несёт ОБА
+// поля — весь набор и совместимое эхо (первый элемент скаляром). Проекция,
+// прочитавшая скаляр первым, взяла бы из выдачи одно отношение из нескольких и
+// молча потеряла остальные: своя БД знала бы о меньшем доступе, чем выдан
+// движку. Отказа при этом не было бы ни одного — потому проба и утверждает
+// КАЖДЫЙ элемент, а не факт непустоты.
+//
+// # Почему эхо — САМОЕ СЛАБОЕ отношение набора, а не первое попавшееся
+//
+// На типе `project` уровни выводят друг друга: `admin` даёт `editor`, тот даёт
+// `viewer`. Набор, ведомый сильнейшим, прошёл бы и на проекции, читающей ОДНО
+// эхо, — вывод довершил бы остальное, и проба зеленела бы ровно на том дефекте,
+// ради которого написана. Поэтому эхо здесь `viewer`, а `admin` стоит дальше:
+// при чтении одного эха `admin` и `editor` остаются без права, и проба краснеет.
+func TestFactProjection_SetProjectsEveryRelationNotOnlyTheEcho(t *testing.T) {
+	withTx(t, func(ctx context.Context, tx pgx.Tx) {
+		// Эхо (первый элемент) — слабейшее; см. шапку.
+		set := []string{"viewer", "admin"}
+		// `editor` набором не назван и выводится из `admin`: он и различает
+		// «спроецирован весь набор» от «спроецировано одно эхо».
+		expect := []string{"viewer", "editor", "admin"}
+
+		enqueueGrantSet(t, ctx, tx, "fga.tuple.write", "user:usr-multi", "project:prj-multi", set)
+
+		for _, rel := range expect {
+			got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
+				Subject: "user:usr-multi", ObjectType: "project",
+				ObjectID: "prj-multi", Relation: rel,
+			})
+			if err != nil {
+				t.Fatalf("запрос %s: %v", rel, err)
+			}
+			if got != relverdict.Allow {
+				t.Errorf("отношение %s не получено из набора: %v — проекция взяла из выдачи "+
+					"эхо вместо набора, и своя БД знает о меньшем доступе, чем выдан движку",
+					rel, got)
+			}
+		}
+
+		// Отрицание рядом: набор не раздаёт того, чего в нём нет. Глагол уровнями
+		// НЕ выводится (см. модель), поэтому годится отрицательным контролем.
+		absent, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
+			Subject: "user:usr-multi", ObjectType: "project",
+			ObjectID: "prj-multi", Relation: "v_get",
+		})
+		if err != nil {
+			t.Fatalf("запрос v_get: %v", err)
+		}
+		if absent != relverdict.Deny {
+			t.Errorf("набор дал отношение, которого не несёт: %v", absent)
+		}
+
+		// Отзыв набора снимает КАЖДОЕ отношение — иначе часть доступа пережила бы
+		// собственное снятие, и это было бы не видно ни одному отказу. У отзыва эха
+		// нет вовсе, поэтому проекция, читающая скаляр, не сняла бы ничего.
+		enqueueGrantSet(t, ctx, tx, "fga.tuple.delete", "user:usr-multi", "project:prj-multi", set)
+		for _, rel := range expect {
+			got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
+				Subject: "user:usr-multi", ObjectType: "project",
+				ObjectID: "prj-multi", Relation: rel,
+			})
+			if err != nil {
+				t.Fatalf("запрос после отзыва %s: %v", rel, err)
+			}
+			if got != relverdict.Deny {
+				t.Errorf("отношение %s пережило отзыв набора: %v", rel, got)
+			}
 		}
 	})
 }
