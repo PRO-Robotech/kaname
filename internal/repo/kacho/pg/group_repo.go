@@ -62,10 +62,19 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 		argIdx++
 	}
 	if f.Filter != "" {
-		if name, ok := parseNameFilter(f.Filter); ok {
-			conditions = append(conditions, fmt.Sprintf("name = $%d", argIdx))
-			args = append(args, name)
-			argIdx++
+		// Whitelist `name="value"`; anything else is refused by name, never
+		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// expression, so the column follows the whitelist instead of being
+		// restated here and drifting from it.
+		ast, ferr := parseListFilter(f.Filter, "name")
+		if ferr != nil {
+			return nil, "", ferr
+		}
+		if ast != nil {
+			frag, fargs := ast.ToSQL(argIdx)
+			conditions = append(conditions, frag)
+			args = append(args, fargs...)
+			argIdx += len(fargs)
 		}
 	}
 	if f.PageToken != "" {

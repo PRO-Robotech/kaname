@@ -56,16 +56,22 @@ import (
 //
 // Fail-closed is unchanged: the first error of either population is returned and
 // no partial answer is produced.
+// ДВЕРЬ РЕШЕНИЯ: страница предъявляется сравнению целиком — сверяется выборка в
+// пределах бюджета, остальные объекты объявляются незаданными с причиной и
+// остаются в знаменателе. Почему бюджет, а не полная сверка, — comparator.go.
 func (c *Client) BatchCheckWithContext(
 	ctx context.Context, subject, relation string, objects []string, condCtx map[string]any,
-) ([]bool, error) {
+) (out []bool, err error) {
 	if c == nil {
 		return nil, nil
 	}
-	out := make([]bool, len(objects))
+	out = make([]bool, len(objects))
 	if len(objects) == 0 {
 		return out, nil
 	}
+
+	settle := c.presentPage(ctx, subject, relation, objects, condCtx)
+	defer func() { settle(out, err == nil) }()
 
 	// Split by what this request already knows. Positions are kept so the answer
 	// can be reassembled in the caller's order — a batched answer that is right
@@ -102,9 +108,11 @@ func (c *Client) BatchCheckWithContext(
 	}
 
 	for _, pos := range missIdx {
-		allowed, err := c.CheckWithContext(ctx, subject, relation, objects[pos], condCtx)
-		if err != nil {
-			return nil, err
+		// Ядро, а НЕ публичная дверь: страница уже предъявлена сравнению целиком
+		// выше, и повторный проход через дверь посчитал бы те же решения вторично.
+		allowed, cerr := c.checkWithContextCore(ctx, subject, relation, objects[pos], condCtx)
+		if cerr != nil {
+			return nil, cerr
 		}
 		out[pos] = allowed
 	}

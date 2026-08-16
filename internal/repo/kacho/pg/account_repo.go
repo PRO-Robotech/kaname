@@ -65,11 +65,19 @@ func (r *accountReader) List(ctx context.Context, f account.ListFilter) ([]domai
 	args := []any{}
 	argIdx := 1
 	if f.Filter != "" {
-		// Минимальный синтаксис `name="value"`.
-		if name, ok := parseNameFilter(f.Filter); ok {
-			conditions = append(conditions, fmt.Sprintf("name = $%d", argIdx))
-			args = append(args, name)
-			argIdx++
+		// Whitelist `name="value"`; anything else is refused by name, never
+		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// expression, so the column follows the whitelist instead of being
+		// restated here and drifting from it.
+		ast, ferr := parseListFilter(f.Filter, "name")
+		if ferr != nil {
+			return nil, "", ferr
+		}
+		if ast != nil {
+			frag, fargs := ast.ToSQL(argIdx)
+			conditions = append(conditions, frag)
+			args = append(args, fargs...)
+			argIdx += len(fargs)
 		}
 	}
 	if f.PageToken != "" {
@@ -404,23 +412,6 @@ func buildAccountUpdateSet(a domain.Account, labelsJSON []byte, mask []string) (
 }
 
 // ---- filter / page-token helpers ------------------------------------------
-
-func parseNameFilter(s string) (string, bool) {
-	// Минимальный парсер: `name="<value>"` либо `name = "<value>"`.
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "name") {
-		return "", false
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, "name"))
-	if !strings.HasPrefix(s, "=") {
-		return "", false
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, "="))
-	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
-		return "", false
-	}
-	return s[1 : len(s)-1], true
-}
 
 func encodePageToken(ts time.Time, id string) string {
 	// Простой формат: `<RFC3339Nano>|<id>` через base64-URL.

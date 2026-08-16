@@ -255,3 +255,69 @@ def test_generated_poll_step_is_valid_json_serialisable():
         ],
     )
     json.dumps(gen.case_to_postman(case))
+
+
+# ---------------------------------------------------------------------------
+# 5. Страж неразрешённой подстановки обязан смотреть и в ТЕЛО запроса
+# ---------------------------------------------------------------------------
+#
+# Страж читал ТОЛЬКО адрес (`pm.request.url`). Идентификатор, названный в ТЕЛЕ,
+# уезжал литералом `{{имя}}` — и класс, ради которого страж написан, оставался
+# открытым ровно для тех шагов, которые называют предмет телом, а не путём.
+#
+# Замер прогона 31951162447 (шард iam, коллекция `label-revoke-nlb`): 63 запроса
+# ушли с литералом `{{_t31nLsn}}` в теле, потому что создание слушателя было
+# отвергнуто и переменную никто не захватил. Два из них ОТЧИТАЛИСЬ ПРОЙДЕННЫМИ:
+# оба — отрицательные (`lsn-pre-grant-deny`, `lsn-post-revoke-deny`), которые
+# ждут отказа в доступе. Несуществующий объект отказывает и сам, поэтому запрет
+# «нечего проверять» неотличим от запрета работающего — фикстура оказалась
+# СНИСХОДИТЕЛЬНЕЕ продукта.
+#
+# Шаги того же кейса, называющие слушателя ПУТЁМ, страж поймал — отсюда и
+# асимметрия: три отказа стража против двух ложных зеленей в одном кейсе.
+
+
+def _prerequest(step: gen.Step) -> str:
+    item = gen.step_to_postman(step)
+    for ev in item.get("event", []):
+        if ev["listen"] == "prerequest":
+            return "\n".join(ev["script"]["exec"])
+    return ""
+
+
+def test_guard_catches_an_unresolved_placeholder_named_in_the_body():
+    """Тело называет предмет — страж обязан отказать до отправки."""
+    step = gen.Step(
+        name="check-listener",
+        method="POST",
+        path="/iam/v1/internal/iam:check",
+        body={"object": "nlb_listener:{{_t31nLsn}}", "relation": "v_list"},
+    )
+    pre = _prerequest(step)
+    assert "pm.request.body" in pre, (
+        "страж читает только адрес: идентификатор, названный телом, уезжает литералом"
+    )
+    assert "skipRequest()" in pre
+    assert "pm.test(" in pre, "отсутствие обязано быть НАЗВАНО, а не тихо пропущено"
+
+
+def test_guard_stays_silent_when_the_body_placeholder_is_resolvable():
+    """Законный близнец: та же форма, но переменная задана — страж молчит.
+
+    Без этой пары страж ловил бы ФОРМУ (`{{`) вместо существа и краснел бы на
+    каждом шаге, который сам готовит своё тело.
+    """
+    step = gen.Step(
+        name="check-listener",
+        method="POST",
+        path="/iam/v1/internal/iam:check",
+        body={"object": "nlb_listener:{{_t31nLsn}}", "relation": "v_list"},
+        pre_script=["pm.variables.set('_t31nLsn', 'lsn-real');"],
+    )
+    pre = _prerequest(step)
+    assert "pm.variables.has" in pre, (
+        "решение обязано зависеть от того, ЗАДАНА ли переменная, а не от наличия скобок"
+    )
+    assert pre.index("pm.variables.set('_t31nLsn'") < pre.index("pm.request.body"), (
+        "страж обязан стоять ПОСЛЕ законных производителей тела этого шага"
+    )

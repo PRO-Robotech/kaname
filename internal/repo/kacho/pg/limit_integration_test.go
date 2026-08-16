@@ -272,13 +272,60 @@ func TestLimit_08_PrecedenceAndFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(16), effectiveValue(t, ctx, repo, prj, "vpc.network"))
 
-	// The whole answer for the service is one row per countable kind of that
-	// service — eight for vpc, and the count is READ FROM THE CATALOGUE rather
-	// than written here, so a ninth kind cannot pass unnoticed.
+	// Посев миграции доезжает до резолва ЦЕЛИКОМ: по строке на каждый вид
+	// каталога домена, и каждая строка называет носителя из каталога.
+	//
+	// ПОЧЕМУ ПРЕЖНЕЕ ОЖИДАНИЕ БЫЛО НЕВЕРНЫМ. Здесь недолго стоял отбор по
+	// носителю — засчитывались только виды корня аренды, и проба требовала
+	// восьми строк из двенадцати. Она закрепляла ДЕФЕКТ, а не свойство:
+	// вырезание вложенных видов лишало владельца типа единственного источника,
+	// из которого берётся снимок при заведении родителя. Родитель заводился без
+	// строки учёта, и первый же ребёнок получал отказ «потолок не назван» при
+	// потолке, названном умолчанием каталога; на сквозном прогоне это
+	// останавливало создание слушателей и репозиториев целиком.
+	//
+	// Беда, ради которой отбор вводился, закрывается не вырезанием, а полем
+	// носителя: оно едет вместе с величиной, и потребитель разводит по нему учёт
+	// корня аренды и умолчание вложенности.
+	//
+	// ПОЧЕМУ ПАРА, А НЕ ЧИСЛО. На одном числе строк обе стороны ошибки остаются
+	// зелёными: потерянный вид даёт отказ создать ребёнка, подменённый носитель —
+	// строку учёта, которая не наполнится никогда, и оба дефекта сохраняют
+	// длину ответа. Поэтому утверждается пара «вид и носитель».
+	//
+	// ПРЕДМЕТ ИМЕННО ЭТОЙ ПРОБЫ — что до резолва доезжает ПОСЕВ: виды берутся из
+	// каталога, величины из базы, и ни один вид каталога в ответе не пропущен.
+	// Что посев покрывает каждый вид, держит TestLimit_SeedCoversEveryCatalogueKind;
+	// что резолв не путает носителя на синтетике — пробы домена.
+	wantCarrier := map[domain.LimitKind]domain.LimitCarrier{}
+	nested := 0
+	for _, k := range domain.CountableKindsOfService("vpc") {
+		c, known := domain.CarrierOfKind(k)
+		require.Truef(t, known, "вид %q каталога не объявил носителя", k)
+		wantCarrier[k] = c
+		if c != domain.CarrierProject && c != domain.CarrierAccount {
+			nested++
+		}
+	}
+	require.NotEmpty(t, wantCarrier, "каталог не назвал ни одного вида домена vpc")
+	require.NotZero(t, nested,
+		"у домена vpc не осталось видов, считаемых в родителе: проба стала вакуумной, "+
+			"и её надо снимать вместе с предметом, а не держать зелёной")
+
 	stated, ok, err := repo.StatedFor(ctx, prj)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Len(t, domain.ResolveEffective("vpc", stated), len(domain.CountableKindsOfService("vpc")))
+
+	gotCarrier := map[domain.LimitKind]domain.LimitCarrier{}
+	for _, e := range domain.ResolveEffective("vpc", stated) {
+		gotCarrier[e.Kind] = e.Carrier
+	}
+	require.Equal(t, wantCarrier, gotCarrier,
+		"резолв обязан ответить по строке на КАЖДЫЙ вид каталога домена и назвать "+
+			"носителя из каталога")
+
+	t.Logf("перепись: видов каталога vpc %d, из них считаемых в родителе %d, строк в ответе %d",
+		len(wantCarrier), nested, len(gotCarrier))
 }
 
 // TestLimit_08b_ResolveByAccountId — the same read addressed by an ACCOUNT: the

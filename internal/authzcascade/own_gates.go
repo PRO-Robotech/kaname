@@ -134,6 +134,10 @@ type Client struct {
 	// transport's own. Named (not anonymous-typed) so the overrides can call through.
 	Relations
 	facts FactSource
+	// compare — теневое сравнение, которому предъявляется КАЖДОЕ решение,
+	// принятое через эту обёртку. Провязывается композиционным корнем; nil —
+	// дешёвый no-op. Зачем это здесь, а не у каждого стража, — comparator.go.
+	compare VerdictComparator
 }
 
 // Wrap returns the relation client iam's own gates must be given.
@@ -154,7 +158,22 @@ func (c *Client) SecondChanceReachable() bool {
 }
 
 // Check — clients.RelationStore / authzguard.RelationChecker.
-func (c *Client) Check(ctx context.Context, subject, relation, object string) (bool, error) {
+//
+// ДВЕРЬ РЕШЕНИЯ: вопрос предъявляется сравнению до движка и сводится его
+// исходом. Почему это стоит здесь, а не у пятнадцати стражей поимённо, —
+// comparator.go.
+func (c *Client) Check(ctx context.Context, subject, relation, object string) (allowed bool, err error) {
+	settle := c.present(ctx, subject, relation, object, nil)
+	defer func() { settle(allowed, err == nil) }()
+	return c.checkCore(ctx, subject, relation, object)
+}
+
+// checkCore — та же дверь БЕЗ предъявления сравнению: внутренний путь обёртки.
+//
+// Существует ровно затем, чтобы внутренний доспрос не считался вторым решением.
+// Одно решение, посчитанное дважды, делает знаменатель выдуманным, и доля
+// сходимости перестаёт означать то, что написано на ней.
+func (c *Client) checkCore(ctx context.Context, subject, relation, object string) (bool, error) {
 	// Facts already read for this object (a page prefetch, page_memo.go) ride along with
 	// the FIRST question instead of being used to re-ask a denied one. Not a shortcut past
 	// the ordinary resolve: a contextual tuple can only ADD a resolution path, so one
@@ -172,7 +191,18 @@ func (c *Client) Check(ctx context.Context, subject, relation, object string) (b
 }
 
 // CheckWithContext — clients.RelationQueries / authzfilter.ObjectChecker.
+//
+// ДВЕРЬ РЕШЕНИЯ: см. Check выше.
 func (c *Client) CheckWithContext(
+	ctx context.Context, subject, relation, object string, condCtx map[string]any,
+) (allowed bool, err error) {
+	settle := c.present(ctx, subject, relation, object, condCtx)
+	defer func() { settle(allowed, err == nil) }()
+	return c.checkWithContextCore(ctx, subject, relation, object, condCtx)
+}
+
+// checkWithContextCore — та же дверь БЕЗ предъявления сравнению (внутренний путь).
+func (c *Client) checkWithContextCore(
 	ctx context.Context, subject, relation, object string, condCtx map[string]any,
 ) (bool, error) {
 	if facts, known := c.memoFacts(ctx, object); known && len(facts) > 0 {

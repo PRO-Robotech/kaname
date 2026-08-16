@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
@@ -32,14 +33,19 @@ func openSnapshot(context.Context) (authzcascade.StructuralSnapshot, error) { re
 func TestOwnGateWiringGuard(t *testing.T) {
 	transport := &clients.OpenFGAHTTPClient{Endpoint: "127.0.0.1:1", StoreID: "s"}
 	complete := authzcascade.New(nil).WithBatch(authzcascade.BatchSourceFunc(openSnapshot))
+	// Сравнитель с nil-формой: страж спрашивает лишь, ПРОВЯЗАН ли он, и ни одной
+	// строки здесь не читается. Настоящий тип, а не дублёр, — иначе проба
+	// утверждала бы о значении, которого композиционный корень не собирает.
+	comparator := shadowverdict.New(nil, nil)
 
-	require.Empty(t, ownGateWiringComplaint(authzcascade.Wrap(transport, complete), complete),
+	require.Empty(t,
+		ownGateWiringComplaint(authzcascade.Wrap(transport, complete).WithComparator(comparator), complete),
 		"the wiring the composition root builds must satisfy its own guard — otherwise the "+
 			"guard is either wrong or unreachable, and both look identical from outside")
 
 	// Piece one missing: the gates would answer from delivered relations only.
 	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, nil), complete),
+		ownGateWiringComplaint(authzcascade.Wrap(transport, nil).WithComparator(comparator), complete),
 		"delivered relations only",
 		"a relation store without a fact source must be refused, and the refusal must say why")
 
@@ -47,7 +53,19 @@ func TestOwnGateWiringGuard(t *testing.T) {
 	noBatch := authzcascade.New(nil)
 	require.False(t, noBatch.BatchReachable(), "premise: this resolver cannot batch")
 	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, noBatch), noBatch),
+		ownGateWiringComplaint(authzcascade.Wrap(transport, noBatch).WithComparator(comparator), noBatch),
 		"one object at a time",
 		"a resolver without the page read must be refused, and the refusal must name the cost")
+
+	// Piece three missing: РЕШЕНИЯ УХОДЯТ ДВИЖКУ НЕ ПРЕДЪЯВЛЕННЫМИ СРАВНЕНИЮ.
+	//
+	// Это отказ не про корректность ответа — ответ остаётся прежним, — а про
+	// НАБЛЮДАЕМОСТЬ перед переключением источника вердикта. Без сравнения обе
+	// формы живы, расходятся молча, и первое, что об этом скажет, — арендатор.
+	// Провязка в пустоту выглядит исполненной, поэтому её и проверяет отказ в
+	// старте, а не память ревьюера.
+	require.Contains(t,
+		ownGateWiringComplaint(authzcascade.Wrap(transport, complete), complete),
+		"не предъявляя их сравнению",
+		"обёртка без сравнения обязана быть отвергнута, и отказ обязан назвать, чего не хватает")
 }

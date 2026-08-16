@@ -318,7 +318,14 @@ func runServe(cfg config.Config) error {
 	// three only — are seeded system_viewer@cluster by migration 0014. The network
 	// operator held one too, from SEC-L 0010; migration 0081 revoked it together
 	// with the identity, so exactly three subjects can pass this floor.
-	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(openfgaClient, authzguard.ReadFloorRPCs()).
+	//
+	// Порт получает `svcs.ownGates`, а НЕ голый транспорт. Здесь долго стоял
+	// транспорт, и это давало ровно тот класс, который под-фаза закрывает:
+	// решение о доступе на каждом читающем RPC внутреннего слушателя уходило
+	// движку мимо второго шанса и мимо сравнения форм. Страж при этом
+	// присутствовал, был провязан и исполнялся — снаружи неотличимо от
+	// исправного.
+	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs()).
 		WithProductionMode(productionMode)
 
 	// Per-RPC `required_acr_min` (step-up) FLOOR on the internal

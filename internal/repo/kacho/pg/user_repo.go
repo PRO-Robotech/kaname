@@ -28,6 +28,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/kacho/pkg/filter"
+
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
@@ -279,35 +281,69 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 	}
 
 	if f.Filter != "" {
-		if email, ok := parseFieldFilter(f.Filter, "email"); ok {
-			conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))
-			args = append(args, email)
-			argIdx++
-		} else if ext, ok := parseFieldFilter(f.Filter, "external_id"); ok {
-			conditions = append(conditions, fmt.Sprintf("external_id = $%d", argIdx))
-			args = append(args, ext)
-			argIdx++
-		} else if st, ok := parseFieldFilter(f.Filter, "invite_status"); ok {
-			conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
-			args = append(args, st)
-			argIdx++
-		} else if q, ok := parseFieldFilter(f.Filter, "search"); ok {
-			// Поиск по ПОДСТРОКЕ — по тому, чем пользователя знают: почта и
-			// идентификатор. `name` у пользователя нет вовсе, а полное совпадение
-			// `email="…"` отвечает только тому, кто уже знает адрес целиком.
+		// Whitelist is closed; an expression outside it is refused by name rather
+		// than dropped (#445). This resource dispatches on the parsed field instead
+		// of emitting ast.ToSQL, because none of the four terms is addressed as the
+		// field is written: `email` is compared case-insensitively, and `search` is
+		// not a column at all — it is a term spanning two of them. The switch is
+		// what keeps that mapping in one place. A field added to the whitelist
+		// without a case here would parse and then match nothing, so the default arm
+		// refuses instead of silently widening the page.
+		ast, ferr := parseListFilter(f.Filter, "email", "external_id", "invite_status", "search")
+		if ferr != nil {
+			return nil, "", ferr
+		}
+		if ast != nil {
+			// The grammar carries an OPERATOR, and this switch reads only ast.Value —
+			// so before #460 `email CONTAINS "acme"` was answered as `email = "acme"`:
+			// the caller asked for everyone at that domain and got the single exact
+			// match under a 200, with nothing in the response to tell the two apart.
+			// api-conventions.md §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows
+			// implement, refuse by name, or drop from the contract; this is the second.
 			//
-			// Сузить список на клиенте нельзя: клиент видит только загруженную
-			// страницу и о том, что в неё не поместилось, врёт молча.
-			//
-			// Индекса под этот предикат нет намеренно. Строки таблицы сужены
-			// аккаунтом вызывающего условием выше, и разбор здесь идёт по уже
-			// суженному набору; триграммный индекс заводится ЗАМЕРОМ на боевом
-			// объёме, а не догадкой о нём — заведённый вслепую, он стоил бы
-			// расширения и записи на каждой правке почты, ничего не ускорив.
-			pattern := "%" + escapeLikePattern(strings.ToLower(q)) + "%"
-			conditions = append(conditions, fmt.Sprintf(
-				`(lower(email) LIKE $%d ESCAPE '\' OR lower(id) LIKE $%d ESCAPE '\')`, argIdx, argIdx))
-			args = append(args, pattern)
+			// Refusing rather than implementing is the deliberate choice, not the cheap
+			// one: substring search on User already EXISTS and is published as
+			// `search="…"` (ListUsersRequest.filter), spanning email and id. Adding
+			// LIKE to `email` / `external_id` / `invite_status` would give one question
+			// two spellings that must then be kept in step forever, and on
+			// `invite_status` — a closed enum — a substring means nothing at all. So the
+			// message names the operator, the field, AND where substring search lives,
+			// because a caller told only "invalid" tries the same expression again.
+			if ast.Op != filter.OpEquals {
+				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+					`Operator %s is not supported for filter field %q. Substring search on User is spelled search="<value>"`,
+					ast.Op, ast.Field)
+			}
+			switch ast.Field {
+			case "email":
+				conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))
+				args = append(args, ast.Value)
+			case "external_id":
+				conditions = append(conditions, fmt.Sprintf("external_id = $%d", argIdx))
+				args = append(args, ast.Value)
+			case "invite_status":
+				conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
+				args = append(args, ast.Value)
+			case "search":
+				// Поиск по ПОДСТРОКЕ — по тому, чем пользователя знают: почта и
+				// идентификатор. `name` у пользователя нет вовсе, а полное совпадение
+				// `email="…"` отвечает только тому, кто уже знает адрес целиком.
+				//
+				// Сузить список на клиенте нельзя: клиент видит только загруженную
+				// страницу и о том, что в неё не поместилось, врёт молча.
+				//
+				// Индекса под этот предикат нет намеренно. Строки таблицы сужены
+				// аккаунтом вызывающего условием выше, и разбор здесь идёт по уже
+				// суженному набору; триграммный индекс заводится ЗАМЕРОМ на боевом
+				// объёме, а не догадкой о нём — заведённый вслепую, он стоил бы
+				// расширения и записи на каждой правке почты, ничего не ускорив.
+				conditions = append(conditions, fmt.Sprintf(
+					`(lower(email) LIKE $%d ESCAPE '\' OR lower(id) LIKE $%d ESCAPE '\')`, argIdx, argIdx))
+				args = append(args, "%"+escapeLikePattern(strings.ToLower(ast.Value))+"%")
+			default:
+				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+					"Bad expression at column 1. Unknown field: %q", ast.Field)
+			}
 			argIdx++
 		}
 	}
@@ -791,21 +827,3 @@ func nullableInvitedBy(id domain.UserID) any {
 var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func escapeLikePattern(s string) string { return likePatternEscaper.Replace(s) }
-
-// parseFieldFilter — generalized parseNameFilter для arbitrary field-name.
-// Принимает `<field>="value"` либо `<field> = "value"`.
-func parseFieldFilter(s, field string) (string, bool) {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, field) {
-		return "", false
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, field))
-	if !strings.HasPrefix(s, "=") {
-		return "", false
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, "="))
-	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
-		return "", false
-	}
-	return s[1 : len(s)-1], true
-}

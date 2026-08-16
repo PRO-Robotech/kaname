@@ -36,13 +36,20 @@ import (
 // Догадка в этом месте не отказывает громко — она считает верные строки против
 // неверного владельца.
 
-// TestResolveEffective_CarriesTheCarrierOfEveryKind — у каждой разрешённой
+// TestResolveEffective_CarriesTheCarrierOfEveryKind — у каждой ОТВЕЧЕННОЙ
 // величины назван носитель, и он тот же, что в каталоге.
+//
+// Отвечаются ВСЕ виды домена, включая вложенные: величину каждого назначает
+// платформа, а различает их не присутствие в ответе, а названный носитель.
+// Ожидание выводится из каталога, а не выписывается числом — выписанное
+// разошлось бы с деревом на первом же новом виде и молча.
 func TestResolveEffective_CarriesTheCarrierOfEveryKind(t *testing.T) {
 	const service = "vpc"
 
 	kinds := domain.CountableKindsOfService(service)
 	require.NotEmpty(t, kinds, "предусловие: у домена есть виды — иначе проба вакуумна")
+
+	wantAnswered := len(kinds)
 
 	stated := make([]domain.Limit, 0, len(kinds))
 	for i, k := range kinds {
@@ -54,7 +61,7 @@ func TestResolveEffective_CarriesTheCarrierOfEveryKind(t *testing.T) {
 	}
 
 	got := domain.ResolveEffective(service, stated)
-	require.Len(t, got, len(kinds), "отвечено по каждому виду каталога")
+	require.Len(t, got, wantAnswered, "отвечено по каждому виду корня аренды")
 
 	for _, e := range got {
 		want, ok := domain.CarrierOfKind(e.Kind)
@@ -65,35 +72,41 @@ func TestResolveEffective_CarriesTheCarrierOfEveryKind(t *testing.T) {
 	}
 }
 
-// TestResolveEffective_NestedKindsDoNotClaimTheProjectAsCarrier — вложенные
-// виды называют носителем РОДИТЕЛЯ.
+// TestResolveEffective_NestedKindsDoNotClaimTheProjectAsCarrier — ВОССТАНОВЛЕНА
+// вместе со своим предметом.
 //
-// Это и есть та четвёрка, из-за которой заведена задача. Проба названа отдельно
-// от общей выше, потому что общая осталась бы зелёной и на реализации,
-// проставляющей `project` всем подряд, если бы каталог вдруг оказался плоским, —
-// а здесь предмет утверждения именно НЕплоскость.
+// Её снимали как вакуумную: пока резолв вложенные виды вырезал, ответ на этот
+// вход был пуст, цикл не выполнялся ни разу и проба зеленела, ничего не
+// утверждая. Вырезание снято (оно останавливало создание детей целиком), предмет
+// вернулся — возвращается и проба. Предпосылка проверяется первой строкой, чтобы
+// вакуумность не вернулась незамеченной.
 func TestResolveEffective_NestedKindsDoNotClaimTheProjectAsCarrier(t *testing.T) {
-	nested := map[domain.LimitKind]domain.LimitCarrier{}
+	var nested []domain.LimitKind
 	for _, k := range domain.CountableKindsOfService("vpc") {
-		c, ok := domain.CarrierOfKind(k)
-		require.True(t, ok)
-		if c != domain.CarrierProject && c != domain.CarrierAccount {
-			nested[k] = c
+		if c, ok := domain.CarrierOfKind(k); ok &&
+			c != domain.CarrierProject && c != domain.CarrierAccount {
+			nested = append(nested, k)
 		}
 	}
 	require.NotEmpty(t, nested,
-		"предмет пробы: у домена есть виды, считаемые в родителе. Исчезнут — проба вакуумна, и это надо заметить")
+		"предпосылка: у домена есть виды, считаемые в родителе — иначе утверждать не о чем")
 
 	stated := make([]domain.Limit, 0, len(nested))
-	for k := range nested {
-		stated = append(stated, domain.Limit{Scope: domain.LimitScopeDefault, Kind: k, Value: 4})
+	for _, k := range nested {
+		stated = append(stated, domain.Limit{Scope: domain.LimitScopeDefault, Kind: k, Value: 16})
 	}
 
-	for _, e := range domain.ResolveEffective("vpc", stated) {
-		want := nested[e.Kind]
-		require.Equal(t, want, e.Carrier,
-			"вид %s считается в %s, а не в проекте", e.Kind, want)
-		require.NotEqual(t, domain.CarrierProject, e.Carrier)
+	got := domain.ResolveEffective("vpc", stated)
+	require.Len(t, got, len(nested),
+		"вложенные виды обязаны отвечаться: из них берётся снимок при заведении родителя")
+
+	for _, e := range got {
+		require.NotEqual(t, domain.CarrierProject, e.Carrier,
+			"вложенный вид %s назвал носителем проект — потребитель заведёт строку учёта, "+
+				"потребление которой не наполнится никогда", e.Kind)
+		want, ok := domain.CarrierOfKind(e.Kind)
+		require.True(t, ok, "вид %s обязан быть в каталоге", e.Kind)
+		require.Equal(t, want, e.Carrier, "носитель вида %s обязан совпасть с каталогом", e.Kind)
 	}
 }
 
