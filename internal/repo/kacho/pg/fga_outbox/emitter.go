@@ -141,7 +141,9 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 // SHAPE. A group of one relation keeps the historical single-tuple payload
 // verbatim, so the many emitters that grant one relation at a time (bootstrap, JIT,
 // break-glass, the register proxy) produce byte-identical rows and nothing about
-// them changes. Only a genuine SET takes the `relations` form.
+// them changes. Only a genuine SET takes the `relations` form, and only a GRANT set
+// additionally carries the compatibility echo — see the branch below for why the two
+// directions differ.
 func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
@@ -157,13 +159,27 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 			fields["relation"] = g.relations[0]
 		} else {
 			fields["relations"] = g.relations
-			// COMPATIBILITY ECHO, and it is not decoration. During a rolling upgrade a
-			// pod that predates the set form still claims these rows; without a
-			// `relation` it cannot decode one and marks it POISON, and a poisoned row
-			// here is not re-driven on a timer — it waits for an authorization-model
-			// change. A row it CAN read is applied in part and consumed, which the next
-			// reconcile pass re-converges. Partial-and-moving beats stuck.
-			fields["relation"] = g.relations[0]
+			if eventType == EventTypeWrite {
+				// COMPATIBILITY ECHO — GRANTS ONLY, and the asymmetry is the point.
+				//
+				// During a rolling upgrade a pod that predates the set form still claims
+				// these rows. Given an echo it applies ONE relation and marks the row
+				// delivered; given none it cannot decode the row and poisons it.
+				//
+				// For a GRANT the first outcome is better: the subject ends up with less
+				// access than it is owed (fail-closed), the row is consumed, and the next
+				// reconcile pass completes it.
+				//
+				// For a REVOKE it is strictly worse, and irrecoverably so: the row is
+				// marked delivered while most of the set SURVIVES ITS OWN REMOVAL — an
+				// over-grant that is invisible to the poison ledger, to the wedge warning
+				// and to the redrive, because as far as the queue is concerned the work
+				// is done. A poisoned revoke, by contrast, is visible in all three and is
+				// re-driven on the first model observation after a pod starts — which the
+				// end of the rollout guarantees. So revokes carry no echo: better stuck
+				// and loud than applied in part and silent.
+				fields["relation"] = g.relations[0]
+			}
 		}
 		payload, err := json.Marshal(fields)
 		if err != nil {

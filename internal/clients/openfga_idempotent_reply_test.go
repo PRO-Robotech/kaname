@@ -169,27 +169,29 @@ func TestWriteConditionalTuples_MixedBatch_RejectedIsNotSuccess(t *testing.T) {
 // that carried exactly ONE tuple: then the rejection literally means the desired
 // post-condition holds. OpenFGA's write is TRANSACTIONAL, so for a MULTI-tuple batch
 // the very same reply means the batch applied NOTHING — the other tuples did not land,
-// and treating the reply as success at THIS level would silently lose them.
+// and treating the reply as success would silently lose them.
 //
-// The client does not treat it as success at this level: it decomposes into
-// single-tuple writes, where the reading is sound. Here the fake rejects EVERY request
-// with that body, i.e. it claims every tuple is already present — so a nil return is
-// the correct answer to what the fake said, and what this case pins is that the client
-// did not stop at the batch. The outcome-level version, against a fake with real
-// transactional state, is TestWriteTuples_BatchWithAnExistingTuple_LandsTheMissingOnes.
+// Here EVERY request is rejected, the read included, so the client cannot establish what
+// is actually present. The required outcome is then an ERROR: a grant reported as applied
+// on the strength of a reply that proves nothing about the rest of the set is exactly the
+// silent loss this case exists to forbid. The durable queue retries; a retired row does not.
+//
+// The converging counterpart, against a fake with real transactional state, is
+// TestWriteTuples_BatchWithAnExistingTuple_LandsTheMissingOnes.
 func TestWriteTuples_MultiTupleBatch_AlreadyExists_IsNotSwallowedWholesale(t *testing.T) {
 	endpoint, count := countingBadRequestServer(t, liveDuplicateWriteBody)
 	c := replyClient(endpoint)
-	if err := c.WriteTuples(context.Background(), []clients.RelationTuple{
+	err := c.WriteTuples(context.Background(), []clients.RelationTuple{
 		{User: "user:u1", Relation: "v_get", Object: "doc:d1"},
 		{User: "user:u1", Relation: "v_list", Object: "doc:d1"},
-	}); err != nil {
-		t.Fatalf("every tuple reported already-present ⇒ the post-condition holds, got %v", err)
+	})
+	if err == nil {
+		t.Fatalf("nothing was established about the set — reporting the grant as applied would lose it")
 	}
-	// 1 batch attempt + one request per tuple. Without the decomposition the count is
-	// 1 and the two tuples were never asked about individually.
-	if n := count(); n != 3 {
-		t.Fatalf("the rejected batch must be decomposed per tuple: expected 3 requests, got %d", n)
+	// The client did not stop at the rejected batch: it went on to ask what is present.
+	// Without that step the count is 1, and the two tuples were never enquired about.
+	if n := count(); n < 2 {
+		t.Fatalf("the rejected batch must be followed by a read of the grant: got %d requests", n)
 	}
 }
 

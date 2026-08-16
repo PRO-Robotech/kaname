@@ -49,6 +49,8 @@ type fgaStoreServer struct {
 	live map[string]struct{}
 	// requests counts /write calls (how much the client had to decompose).
 	requests int
+	// reads counts /read calls — the grant-completion path's half of the work.
+	reads int
 	// rejectAll, when set, makes every request fail with a NON-idempotent 400 (a
 	// genuine validation error) — the "must still surface an error" control.
 	rejectAll bool
@@ -82,7 +84,62 @@ func (s *fgaStoreServer) reqCount() int {
 	return s.requests
 }
 
+// serveRead answers /read for the (subject, object) filter the grant-completion path
+// uses. Without it the fake would report an EMPTY store to a caller about to decide what
+// is missing — and a fake that lies about the state is exactly the "fixture more lenient
+// than production" trap: the completion would rewrite tuples that are already there and
+// the case would pass for the wrong reason.
+func (s *fgaStoreServer) serveRead(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TupleKey *struct {
+			User     string `json:"user"`
+			Relation string `json:"relation"`
+			Object   string `json:"object"`
+		} `json:"tuple_key"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads++
+
+	type wireKey struct {
+		User     string `json:"user"`
+		Relation string `json:"relation"`
+		Object   string `json:"object"`
+	}
+	out := struct {
+		Tuples []struct {
+			Key wireKey `json:"key"`
+		} `json:"tuples"`
+		ContinuationToken string `json:"continuation_token"`
+	}{}
+	for k := range s.live {
+		parts := strings.SplitN(k, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if req.TupleKey != nil {
+			if req.TupleKey.User != "" && req.TupleKey.User != parts[0] {
+				continue
+			}
+			if req.TupleKey.Object != "" && req.TupleKey.Object != parts[2] {
+				continue
+			}
+		}
+		out.Tuples = append(out.Tuples, struct {
+			Key wireKey `json:"key"`
+		}{Key: wireKey{User: parts[0], Relation: parts[1], Object: parts[2]}})
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(out)
+}
+
 func (s *fgaStoreServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/read") {
+		s.serveRead(w, r)
+		return
+	}
 	var body fgaWriteBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
@@ -261,6 +318,13 @@ func TestWriteTuples_BatchWithAnExistingTuple_LandsTheMissingOnes(t *testing.T) 
 	}
 	if !store.has(liveTupleA) || !store.has(liveTupleB) {
 		t.Fatalf("both tuples must be present afterwards (A=%v B=%v)", store.has(liveTupleA), store.has(liveTupleB))
+	}
+	// The missing member lands in ONE further request, not one per tuple: the grant is
+	// the unit, and a caller must never be able to observe half of it. Two writes total
+	// (the rejected batch, then the missing subset) plus the read that decided what was
+	// missing.
+	if n := store.reqCount(); n != 2 {
+		t.Fatalf("the completion must be ONE write of the missing subset: expected 2 writes, got %d", n)
 	}
 }
 

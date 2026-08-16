@@ -85,6 +85,24 @@ UPDATE kacho_iam.fga_outbox
 
 -- +goose StatementBegin
 
+-- A row must NAME A RELATION, in one form or the other.
+--
+-- Until now the partition key carried that guarantee for free: it was built from
+-- `relation`, so a payload without one produced a NULL key and the 0067 check refused the
+-- INSERT. The key no longer reads `relation`, so that guarantee is gone — and a row naming
+-- no relation is not a small mistake: it decodes to nothing the applier can write, poisons,
+-- and (being poison) never applies, which for a revoke means access that outlives its own
+-- removal. Loud at INSERT beats silent in the queue.
+--
+-- NOT VALID for the same reason as its sibling: enforced for every row from here on, never
+-- validated against the historic rows the claim can no longer see.
+ALTER TABLE kacho_iam.fga_outbox
+    ADD CONSTRAINT fga_outbox_relation_present_check
+    CHECK (
+        (payload->>'relation' IS NOT NULL AND payload->>'relation' <> '')
+        OR jsonb_array_length(coalesce(payload->'relations', '[]'::jsonb)) > 0
+    ) NOT VALID;
+
 -- The index (tuple_key, id) WHERE sent_at IS NULL — migration 0067's
 -- fga_outbox_tuple_head_idx — is on the same column and needs no change; the claim's
 -- correlated NOT EXISTS keeps using it. ANALYZE because the column's cardinality just
@@ -96,6 +114,8 @@ ANALYZE kacho_iam.fga_outbox;
 
 -- +goose Down
 -- +goose StatementBegin
+
+ALTER TABLE kacho_iam.fga_outbox DROP CONSTRAINT IF EXISTS fga_outbox_relation_present_check;
 
 -- Back to the triple. NOTE the asymmetry, and it is deliberate: going down NARROWS the
 -- partition, which REMOVES ordering constraints. That is only sound once no row carries

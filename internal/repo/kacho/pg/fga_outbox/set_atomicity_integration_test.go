@@ -285,3 +285,73 @@ func TestOutboxPartitionKeyCoversTheWholeGrantSet(t *testing.T) {
 		}
 	}
 }
+
+// TestSetRowCarriesTheEchoOnlyForGrants — the rollout asymmetry, pinned.
+//
+// A pod that predates the set form reads `relation` and ignores `relations`. Given an
+// echo it applies ONE relation and marks the row delivered; given none it cannot decode
+// the row at all and poisons it.
+//
+// For a GRANT the first is better: the subject ends up with LESS access than it is owed,
+// the row is consumed, and the next reconcile pass completes it. For a REVOKE it is
+// strictly worse and irrecoverable: the row retires while most of the set survives its
+// own removal — an over-grant invisible to the poison ledger, the wedge warning and the
+// redrive, because as far as the queue is concerned the work is done.
+//
+// So the echo is written for writes and withheld for deletes. Asserted on the ROW,
+// because that is what the other reader sees.
+func TestSetRowCarriesTheEchoOnlyForGrants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, pool)
+
+	const (
+		subject = "user:usr_echo"
+		object  = "vpc_address:vaddr_echo"
+	)
+	set := []clients.RelationTuple{
+		{User: subject, Relation: "v_get", Object: object},
+		{User: subject, Relation: "v_update", Object: object},
+	}
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx, set))
+	require.NoError(t, fga_outbox.EmitDeleteTx(ctx, tx, set))
+	require.NoError(t, tx.Commit(ctx))
+
+	rows, err := pool.Query(ctx, `
+		SELECT event_type,
+		       coalesce(payload->>'relation', ''),
+		       jsonb_array_length(coalesce(payload->'relations', '[]'::jsonb))
+		  FROM kacho_iam.fga_outbox
+		 WHERE payload->>'object' = $1
+		 ORDER BY id ASC`, object)
+	require.NoError(t, err)
+	type row struct {
+		eventType string
+		echo      string
+		setSize   int
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		require.NoError(t, rows.Scan(&r.eventType, &r.echo, &r.setSize))
+		got = append(got, r)
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
+
+	require.Len(t, got, 2, "one row per direction")
+	require.Equal(t, 2, got[0].setSize)
+	require.Equal(t, "v_get", got[0].echo,
+		"a GRANT set row carries the echo: an older reader applies part of it and the row keeps moving")
+	require.Equal(t, 2, got[1].setSize)
+	require.Empty(t, got[1].echo,
+		"a REVOKE set row carries NO echo: an older reader must poison it loudly rather than "+
+			"retire it having removed one relation of the set")
+}

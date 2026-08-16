@@ -151,10 +151,10 @@ func NewFGAApplier(fga RelationStore) drainer.Applier[FGAOutboxEvent] {
 		switch eventType {
 		case FGAEventTypeWrite:
 			err := fga.WriteTuples(ctx, tup)
-			return classifyFGAWriteErr(err)
+			return classifyFGAWriteErr(err, len(tup))
 		case FGAEventTypeDelete:
 			err := fga.DeleteTuples(ctx, tup)
-			return classifyFGADeleteErr(err)
+			return classifyFGADeleteErr(err, len(tup))
 		default:
 			return fmt.Errorf("%w: fga_outbox: unknown event_type %q", drainer.ErrPermanent, eventType)
 		}
@@ -170,11 +170,26 @@ func NewFGAApplier(fga RelationStore) drainer.Applier[FGAOutboxEvent] {
 //	  or "is undefined"
 //	  or "type_not_found"     → ErrPermanent (bad tuple shape — retry can't fix)
 //	otherwise                 → raw (treated as transient by drainer)
-func classifyFGAWriteErr(err error) error {
+//
+// `n` is how many tuples the request carried, and the already-applied shortcut is
+// REFUSED for n > 1. OpenFGA's write is transactional: for a batch, "one of these
+// already exists" proves the OTHERS did not land, so treating it as applied would
+// mark the row delivered while part of the grant is missing. The adapter completes
+// such a batch itself (openfga_client.completeGrant) and returns nil when the whole
+// set is present — so an already-exists reaching here for a batch means the
+// completion did NOT happen, and the row must be retried rather than retired.
+//
+// This is deliberately keyed on the COUNT and not on the reply vocabulary: the two
+// places recognise "already exists" by different markers, and the direction that
+// fails on the difference is the silent one.
+func classifyFGAWriteErr(err error, n int) error {
 	if err == nil {
 		return nil
 	}
 	msg := err.Error()
+	if n > 1 && containsAny(msg, "already_exists", "already exists") {
+		return err // transient: the set is not whole, and the row must not retire
+	}
 	switch {
 	case IsWriteConflict(err):
 		// Transactional abort: NOTHING was applied. Explicit branch (before the
@@ -196,11 +211,21 @@ func classifyFGAWriteErr(err error) error {
 // classifyFGADeleteErr — same shape as classifyFGAWriteErr but for delete.
 // "cannot_delete" / "does not exist" → ErrAlreadyApplied (the desired
 // post-condition — tuple absent — is already met).
-func classifyFGADeleteErr(err error) error {
+//
+// `n` carries the same meaning and the same refusal for n > 1, for the same reason
+// and one worse consequence: a revoke retired while part of its set is still live is
+// an over-grant, and it looks exactly like a revoke that worked. The adapter
+// decomposes a rejected multi-tuple DELETE into single-tuple deletes and returns nil
+// when the post-condition holds, so an already-absent reply reaching here for a batch
+// means that decomposition did not happen.
+func classifyFGADeleteErr(err error, n int) error {
 	if err == nil {
 		return nil
 	}
 	msg := err.Error()
+	if n > 1 && containsAny(msg, "cannot_delete", "does not exist", "not_found", "not found") {
+		return err // transient: some of the set may still be live
+	}
 	switch {
 	case IsWriteConflict(err):
 		// Transactional abort: the tuple is still there. Retry (see the write twin).

@@ -44,6 +44,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // ownerRoleIDExpr / the deterministic owner-binding-id expression mirror migration
@@ -105,7 +106,14 @@ SELECT b.id, b.subject_type, b.subject_id, 0
    AND b.resource_type = 'account'
    AND b.revoked_at IS NULL
 ON CONFLICT (binding_id, subject_type, subject_id) DO NOTHING`
+)
 
+// backfillOwnerHierarchyTuplesSQL is a `var`, not a `const`, because its de-dup predicate
+// is BUILT BY THE PACKAGE THAT OWNS THE ROW SHAPE (fga_outbox.RelationPredicate) rather
+// than written again here. A second rendering of "does this row already carry that
+// relation" is exactly the drift that made this backfill miss rows arriving in the set
+// form — and it would miss them silently, enqueueing a duplicate intent instead.
+var (
 	// backfillOwnerHierarchyTuplesSQL emits the owner-binding OBJECT hierarchy
 	// parent-pointer FGA tuple (account:<A>#account@iam_access_binding:<id>) for every
 	// active owner-binding (no-access-loss). This boot-path is the SOLE home
@@ -142,8 +150,7 @@ WHERE b.role_id       = 'rol' || substr(md5('owner'), 1, 17)
        -- и поставил бы вторую строку на уже поставленное. Повтор идемпотентен у
        -- хранилища прав, поэтому это не порча — но это работа, которой не должно быть,
        -- и молчаливое «не нашёл» там, где есть.
-       AND (o.payload->>'relation' = 'account'
-            OR o.payload->'relations' @> to_jsonb('account'::text))
+       AND ` + fga_outbox.RelationPredicate("o.payload", "'account'") + `
   )`
 )
 

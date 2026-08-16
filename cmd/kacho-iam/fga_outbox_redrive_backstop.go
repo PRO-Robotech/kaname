@@ -112,6 +112,17 @@ func startFGAOutboxRedrive(
 		// доводит периодическое сведение, тогда как лишнее правами не отменяется
 		// ничем. Направление отказа выбрано в пользу закрытого.
 		PartitionColumn: fgaOutboxGrantKeyColumn,
+		// A later delivered row of the same GRANT voids a poisoned one only if it
+		// re-determined EVERYTHING that row named. Since a row here carries a subject's
+		// whole relation set, a successor may have re-stated part of it — and voiding on
+		// that would drop the rest: in the removal direction, tuples that survive their
+		// own revoke while the queue reports the work done.
+		//
+		// Coverage, not direction: a later delivered row states the desired final state
+		// whichever way it points, so a WRITE covering a poisoned DELETE voids it just as
+		// a DELETE covering a poisoned WRITE does.
+		SupersededCoverageSQL: `coalesce(s.payload->'relations', jsonb_build_array(s.payload->>'relation'))
+		                        @> coalesce(t.payload->'relations', jsonb_build_array(t.payload->>'relation'))`,
 	}, log)
 	if err != nil {
 		return err
