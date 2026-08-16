@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -46,7 +47,7 @@ func TestAccountList_UnknownFilter_445(t *testing.T) {
 	dsn := setupTestDB(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kachopg.New(pool, nil)
 
 	owner := mustSeedUser(t, ctx, pool, "f445a")
@@ -99,7 +100,7 @@ func TestUserList_UnknownFilter_445(t *testing.T) {
 	dsn := setupTestDB(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
-	defer pool.Close()
+	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kachopg.New(pool, nil)
 
 	mustSeedUser(t, ctx, pool, "f445u1")
