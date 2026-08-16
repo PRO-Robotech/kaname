@@ -12,86 +12,128 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-// Резолв по КОРНЮ АРЕНДЫ отвечает только про виды, которые в этом корне и
-// считаются.
+// Резолв называет НОСИТЕЛЯ каждого вида и не скрывает вложенные.
 //
-// ПРЕДМЕТ. `Resolve` спрашивают, называя проект либо аккаунт, — то есть корень
-// аренды. Каталог же держит и виды, считаемые В РОДИТЕЛЬСКОМ РЕСУРСЕ: сколько
-// подсетей в сети, сколько интерфейсов в подсети. У такого вида на уровне
-// проекта нет единственного значения: подсетей столько-то в КАЖДОЙ сети, а не в
-// проекте.
+// ПРЕДМЕТ. Величину вложенного вида («сколько слушателей помещается в ОДИН
+// балансировщик») платформа назначает на проект ровно так же, как любую другую:
+// одной строкой умолчания. Единственное, чем этот вид отличается, — ГДЕ он
+// потом считается: в родительском ресурсе, а не в корне аренды. Различие несёт
+// поле носителя, и потребитель по нему и разводит две полосы.
 //
-// ЧТО ЭТО СТОИЛО. Резолв отдавал домену vpc все двенадцать видов, потребитель
-// проставлял каждому носителя «проект» константой, и арендатор получал четыре
-// строки, которые:
-//   - называют носителем проект, тогда как каталог называет родительский ресурс;
-//   - показывают потребление, которое не наполнится никогда (списание идёт по
-//     носителю, и строки с носителем-проектом для вложенного вида не касается
-//     ни один триггер).
+// ЧТО СТОИЛО ОБРАТНОЕ. Пока это чтение вложенные виды ВЫРЕЗАЛО, владелец типа
+// не мог узнать величину, из которой берётся снимок при заведении родителя.
+// Родитель заводился без строки учёта, и первый же ребёнок получал
+// `QUOTA_NOT_PROVISIONED` — «потолок не назван» при потолке, названном
+// умолчанием каталога. На сквозном прогоне это остановило создание слушателей и
+// репозиториев целиком (три красных шарда, один корень).
 //
-// Хуже того, состав ответа ЗАВИСЕЛ ОТ ИСТОРИИ проекта: свежий проект получал
-// двенадцать строк резолвом, а тот же проект после первой мутации — восемь из
-// собственных строк учёта. Одно и то же чтение отвечало по-разному, и разница
-// не была ничем объявлена.
-//
-// ПОЧЕМУ ЭТО НЕ ЗАМЕТИЛИ. Обе пробы потребителя закрепляли восемь, потому что
-// дублёр резолва отдавал восемь: он был снисходительнее настоящего, который
-// отдаёт двенадцать. Класс `testing.md` §«Гейт на класс» — дублёр обязан
-// выполнять контракт настоящего.
-func TestResolveEffective_AnswersOnlyTenancyRootKinds(t *testing.T) {
+// ЧТО ОСТАЁТСЯ ЗАЩИЩЁННЫМ. Исходная беда была не в наличии вложенных видов в
+// ответе, а в том, что потребитель проставлял им носителя «проект» константой и
+// заводил строку учёта, которая не наполнится никогда. Это закрывается
+// носителем, едущим вместе с величиной, — его и закрепляет проба ниже.
+func TestResolveEffective_AnswersNestedKindsWithTheirParentCarrier(t *testing.T) {
 	t.Parallel()
 
-	// Все виды домена, каждый с назначенным пределом: если фильтр не работает,
-	// в ответ попадут и вложенные.
+	const service = "loadbalancer"
+
 	var stated []domain.Limit
-	for _, k := range domain.CountableKindsOfService("vpc") {
-		stated = append(stated, domain.Limit{
-			Kind:  k,
-			Scope: domain.LimitScopeDefault,
-			Value: 16,
-		})
+	nestedWant := map[domain.LimitKind]domain.LimitCarrier{}
+	for _, k := range domain.CountableKindsOfService(service) {
+		stated = append(stated, domain.Limit{Kind: k, Scope: domain.LimitScopeDefault, Value: 16})
+		if c, ok := domain.CarrierOfKind(k); ok && c != domain.CarrierProject && c != domain.CarrierAccount {
+			nestedWant[k] = c
+		}
 	}
-	require.NotEmpty(t, stated, "каталог не назвал ни одного вида домена vpc — предикат пробы устарел")
+	require.NotEmpty(t, stated, "каталог не назвал ни одного вида домена %s — предикат пробы устарел", service)
+	require.NotEmpty(t, nestedWant,
+		"у домена %s не осталось видов, считаемых в родителе: проба стала вакуумной, "+
+			"и её надо снимать вместе с предметом, а не держать зелёной", service)
 
-	got := domain.ResolveEffective("vpc", stated)
-	require.NotEmpty(t, got, "резолв не вернул ничего на полном наборе назначенных пределов")
+	got := domain.ResolveEffective(service, stated)
 
+	seen := map[domain.LimitKind]domain.LimitCarrier{}
 	for _, e := range got {
-		carrier, known := domain.CarrierOfKind(e.Kind)
-		require.True(t, known, "вид %s вернулся из резолва, но каталог его не знает", e.Kind)
-		require.Contains(t,
-			[]domain.LimitCarrier{domain.CarrierProject, domain.CarrierAccount}, carrier,
-			"вид %s считается в %q, а не в корне аренды — на уровне проекта у него нет "+
-				"единственного значения, и отдавать его этим чтением нельзя", e.Kind, carrier)
+		seen[e.Kind] = e.Carrier
+	}
+	for k, wantCarrier := range nestedWant {
+		carrier, ok := seen[k]
+		require.True(t, ok,
+			"вложенный вид %s не вернулся резолвом: владельцу типа неоткуда взять величину, "+
+				"из которой заводится строка учёта родителя, и первый же ребёнок получит "+
+				"отказ «потолок не назван» при названном умолчании", k)
+		require.Equal(t, wantCarrier, carrier,
+			"вид %s вернулся с носителем %q вместо %q — потребитель разводит полосы именно "+
+				"по этому полю", k, carrier, wantCarrier)
+	}
+	t.Logf("перепись: домен %s, видов в ответе %d, из них вложенных %d",
+		service, len(got), len(nestedWant))
+}
+
+// Ни один назначенный вид домена не пропадает из ответа.
+//
+// Положительный контроль к пробе выше: без него та зеленела бы и на резолве,
+// который вырезает всё, кроме вложенных.
+func TestResolveEffective_KeepsEveryStatedKindOfTheService(t *testing.T) {
+	t.Parallel()
+
+	for _, service := range []string{"vpc", "loadbalancer", "registry"} {
+		var stated []domain.Limit
+		want := map[domain.LimitKind]bool{}
+		for _, k := range domain.CountableKindsOfService(service) {
+			stated = append(stated, domain.Limit{Kind: k, Scope: domain.LimitScopeDefault, Value: 16})
+			want[k] = true
+		}
+		require.NotEmpty(t, want, "каталог не назвал ни одного вида домена %s", service)
+
+		got := domain.ResolveEffective(service, stated)
+		seen := map[domain.LimitKind]bool{}
+		for _, e := range got {
+			seen[e.Kind] = true
+		}
+		for k := range want {
+			require.True(t, seen[k], "вид %s назначен пределом, но в ответе резолва его нет", k)
+		}
+		require.Len(t, got, len(want),
+			"в ответе домена %s оказалось не столько видов, сколько назначено", service)
 	}
 }
 
-// Положительный контроль: фильтр не съедает то, ради чего чтение существует.
+// Носитель в ОТВЕТЕ совпадает с носителем в КАТАЛОГЕ — для каждого вида.
 //
-// Без него проба выше зеленела бы и на резолве, который не возвращает НИЧЕГО, —
-// то есть отрицание закрепляло бы поломку вместо свойства.
-func TestResolveEffective_KeepsEveryTenancyRootKind(t *testing.T) {
+// Это и есть та защита, ради которой вводилось поле носителя: пока оно верно,
+// потребитель не заведёт вложенному виду строку учёта на проект, а именно эта
+// строка показывала бы арендатору потребление, которое не наполнится никогда.
+// Проба намеренно обходит ВСЕ домены каталога: расхождение по одному виду —
+// такой же дефект, как по всем.
+func TestResolveEffective_CarrierInAnswerMatchesTheCatalogue(t *testing.T) {
 	t.Parallel()
 
-	var stated []domain.Limit
-	want := map[domain.LimitKind]bool{}
-	for _, k := range domain.CountableKindsOfService("vpc") {
-		stated = append(stated, domain.Limit{Kind: k, Scope: domain.LimitScopeDefault, Value: 16})
-		if c, ok := domain.CarrierOfKind(k); ok && (c == domain.CarrierProject || c == domain.CarrierAccount) {
-			want[k] = true
+	services := map[string]bool{}
+	for _, e := range domain.CountableEntries() {
+		services[domain.LimitKind(e.Kind).Service()] = true
+	}
+	require.NotEmpty(t, services, "каталог пуст — проба не читает ничего")
+
+	checked := 0
+	for service := range services {
+		var stated []domain.Limit
+		for _, k := range domain.CountableKindsOfService(service) {
+			stated = append(stated, domain.Limit{Kind: k, Scope: domain.LimitScopeDefault, Value: 16})
+		}
+		for _, e := range domain.ResolveEffective(service, stated) {
+			carrier, known := domain.CarrierOfKind(e.Kind)
+			require.True(t, known, "вид %s вернулся из резолва, но каталог его не знает", e.Kind)
+			require.Equal(t, carrier, e.Carrier,
+				"вид %s вернулся с носителем %q, а каталог называет %q — потребитель, "+
+					"поверив ответу, заведёт строку учёта не на том носителе, и её "+
+					"потребление не наполнится никогда", e.Kind, e.Carrier, carrier)
+			require.NotEmpty(t, e.Carrier,
+				"вид %s вернулся с пустым носителем — потребитель прочитает пустое как «проект»", e.Kind)
+			checked++
 		}
 	}
-	require.NotEmpty(t, want, "у домена vpc не нашлось ни одного вида, считаемого в корне аренды")
-
-	got := domain.ResolveEffective("vpc", stated)
-	seen := map[domain.LimitKind]bool{}
-	for _, e := range got {
-		seen[e.Kind] = true
-	}
-	for k := range want {
-		require.True(t, seen[k], "вид %s считается в корне аренды и обязан быть в ответе", k)
-	}
-	require.Len(t, got, len(want), "в ответе оказалось больше видов, чем считается в корне аренды")
+	require.NotZero(t, checked, "ни одного вида не осмотрено — проба вакуумна")
+	t.Logf("перепись: доменов %d, видов осмотрено %d", len(services), checked)
 }
 
 // Вложенные виды каталога СУЩЕСТВУЮТ — иначе две пробы выше не утверждают ничего.
