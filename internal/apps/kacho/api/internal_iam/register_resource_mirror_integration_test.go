@@ -59,10 +59,12 @@ func TestRegisterResource_B01_MirrorRowAndTupleCoCommit(t *testing.T) {
 	ctx := context.Background()
 	uc, p := newRegisterUCWithMirror(t)
 
+	const obj = "compute_instance:inst-abc"
+
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:prj-P",
 		Relation:        "parent",
-		Object:          "compute_instance:inst-abc",
+		Object:          obj,
 		Labels:          map[string]string{"env": "dev", "team": "core"},
 		ParentProjectId: "prj-P",
 		ParentAccountId: "acc-A",
@@ -75,7 +77,7 @@ func TestRegisterResource_B01_MirrorRowAndTupleCoCommit(t *testing.T) {
 	require.Equal(t, map[string]string{"env": "dev", "team": "core"}, labels)
 
 	// Owner-tuple co-committed in the SAME writer-tx.
-	require.Equal(t, 1, p.outboxCount(t, ctx), "owner-tuple emitted alongside mirror")
+	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "owner-tuple emitted alongside mirror")
 }
 
 // payload with empty labels → mirror row with labels={}, parent filled.
@@ -111,14 +113,16 @@ func TestRegisterResource_B03_AtomicCoCommit(t *testing.T) {
 	ctx := context.Background()
 	uc, p := newRegisterUCWithMirror(t)
 
+	const obj = "compute_instance:inst-atomic"
+
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-atomic",
+		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P", ParentAccountId: "acc-A",
 	}))
 
 	prj, _, _ := p.readMirror(t, ctx, "compute.instance", "inst-atomic")
 	require.Equal(t, "prj-P", prj, "mirror present")
-	require.Equal(t, 1, p.outboxCount(t, ctx), "tuple present — both committed together")
+	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "tuple present — both committed together")
 }
 
 // idempotency — repeat RegisterResource (drainer retry) → no mirror dup.
@@ -188,18 +192,20 @@ func TestRegisterResource_B07_UnregisterDeletesMirrorAndRevokesTuple(t *testing.
 	ctx := context.Background()
 	uc, p := newRegisterUCWithMirror(t)
 
+	const obj = "compute_instance:inst-gone"
+
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-gone",
+		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P",
 	}))
 	require.Equal(t, 1, p.mirrorCount(t, ctx, "compute.instance", "inst-gone"))
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-gone",
+		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
 	}))
 	require.Equal(t, 0, p.mirrorCount(t, ctx, "compute.instance", "inst-gone"),
 		"Unregister removes the mirror row (β-07)")
-	require.Equal(t, "fga.tuple.delete", p.lastOutboxEvent(t, ctx),
+	require.Equal(t, "fga.tuple.delete", p.lastOutboxEvent(t, ctx, obj),
 		"tuple-revoke emitted in the same tx as the mirror delete")
 }
 
@@ -225,8 +231,10 @@ func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	ctx := context.Background()
 	uc, p := newRegisterUCWithMirror(t)
 
+	const obj = "compute_instance:inst-legacy"
+
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-legacy",
+		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
 		// no labels / parent_* — old compute
 	}))
 
@@ -234,7 +242,7 @@ func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	require.Equal(t, "", prj)
 	require.Equal(t, "", acc)
 	require.Equal(t, map[string]string{}, labels)
-	require.Equal(t, 1, p.outboxCount(t, ctx), "owner-tuple emitted as before")
+	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "owner-tuple emitted as before")
 }
 
 // negative — invalid labels (uppercase key) → InvalidArgument, no mirror,
@@ -246,14 +254,20 @@ func TestRegisterResource_B15_InvalidLabelsRejected(t *testing.T) {
 	ctx := context.Background()
 	uc, p := newRegisterUCWithMirror(t)
 
+	const obj = "compute_instance:inst-badlabels"
+	// «Ничего не записано» — утверждение обо всей таблице: объектный отбор не
+	// увидел бы строку, записанную под чужим объектом, поэтому рядом дельта.
+	before := p.totalRows(t, ctx)
+
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-badlabels",
+		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
 		Labels: map[string]string{"ENV": "x"}, ParentProjectId: "prj-P",
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "invalid label key → InvalidArgument (β-15)")
 	require.Equal(t, 0, p.mirrorCount(t, ctx, "compute.instance", "inst-badlabels"), "no mirror row on validation failure")
-	require.Equal(t, 0, p.outboxCount(t, ctx), "no outbox row on validation failure")
+	require.Equal(t, 0, p.outboxCount(t, ctx, obj), "no outbox row for the object the request named")
+	require.Equal(t, before, p.totalRows(t, ctx), "no outbox row on validation failure — at all")
 }
 
 // mirror carries ONLY tenant-facing labels + parent-scope (no infra
@@ -305,22 +319,31 @@ func (p *mirrorProbe) mirrorCount(t *testing.T, ctx context.Context, objType, ob
 	return n
 }
 
-func (p *mirrorProbe) outboxCount(t *testing.T, ctx context.Context) int {
+// outboxCount / lastOutboxEvent отбирают строки ПО СВОИМ объектам — тем, что
+// тест назвал в собственном запросе. Обоснование формы и что случилось с
+// прежним «всё, кроме известного посева» — у outboxProbe в
+// register_resource_integration_test.go; здесь то же решение, не второе.
+func (p *mirrorProbe) outboxCount(t *testing.T, ctx context.Context, objects ...string) int {
 	t.Helper()
 	var n int
 	require.NoError(t, p.pool.QueryRow(ctx,
 		`SELECT count(*) FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')`).Scan(&n))
+		  WHERE payload->>'object' = ANY($1::text[])`, scopedToOwnObjects(t, objects)).Scan(&n))
 	return n
 }
 
-func (p *mirrorProbe) lastOutboxEvent(t *testing.T, ctx context.Context) string {
+func (p *mirrorProbe) totalRows(t *testing.T, ctx context.Context) int {
+	t.Helper()
+	return outboxTotalRows(t, ctx, p.pool)
+}
+
+func (p *mirrorProbe) lastOutboxEvent(t *testing.T, ctx context.Context, objects ...string) string {
 	t.Helper()
 	var et string
 	require.NoError(t, p.pool.QueryRow(ctx,
 		`SELECT event_type FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')
-		  ORDER BY id DESC LIMIT 1`).Scan(&et))
+		  WHERE payload->>'object' = ANY($1::text[])
+		  ORDER BY id DESC LIMIT 1`, scopedToOwnObjects(t, objects)).Scan(&et))
 	return et
 }
 
