@@ -109,10 +109,10 @@ class Case:
 
 
 # ---------------------------------------------------------------------------
-# Глобальный prerequest (runId генерация + _suiteFolder* алиасы + страж адреса)
+# Глобальный prerequest (runId генерация + _suiteFolder* алиасы + страж подстановки)
 # ---------------------------------------------------------------------------
 
-# СТРАЖ НЕРАЗРЕШЁННОГО АДРЕСА — на уровне КОЛЛЕКЦИИ.
+# СТРАЖ НЕРАЗРЕШЁННОЙ ПОДСТАНОВКИ — в адресе И в теле.
 #
 # ЧТО ЗАПРЕЩАЕТСЯ. Newman подставляет `{{имя}}` только если переменная где-то
 # определена; неопределённую он оставляет ЛИТЕРАЛОМ и отправляет как есть. Тогда
@@ -144,10 +144,29 @@ class Case:
 # области (`pm.variables.has` смотрит все). Переменная, заданная ПУСТОЙ, — законный
 # негативный кейс («пустой id → 400»); newman подставит её пустой строкой, литерала в
 # адресе не останется, и страж до неё не доберётся by construction.
-_URL_VAR_GUARD = [
+#
+# АДРЕС И ТЕЛО — ОДНА ПОВЕРХНОСТЬ, А НЕ ДВЕ (расширено по прогону 31951162447).
+# Прежде страж читал только адрес, и предмет, названный ТЕЛОМ, уезжал литералом.
+# Замер того прогона, шард iam, коллекция `label-revoke-nlb`: 63 запроса ушли с
+# `{{_t31nLsn}}` в теле — создание слушателя было отвергнуто, и переменную никто
+# не захватил. Два из этих запросов ОТЧИТАЛИСЬ ПРОЙДЕННЫМИ, и оба — отрицательные
+# (`lsn-pre-grant-deny`, `lsn-post-revoke-deny`): они ждут отказа в доступе, а
+# несуществующий объект отказывает и сам. То есть «запрет работает» и «проверять
+# было нечего» выглядели одинаково — фикстура оказалась СНИСХОДИТЕЛЬНЕЕ продукта.
+# Шаги того же кейса, называвшие слушателя ПУТЁМ, страж поймал: отсюда асимметрия
+# три отказа стража против двух ложных зеленей в одном кейсе.
+#
+# ЧИТАЕТСЯ `raw` — И ЭТО ВСЯ ПОВЕРХНОСТЬ, А НЕ ЧАСТЬ ЕЁ. `step_to_postman` эмитит
+# тело единственным режимом `raw` (см. ниже по файлу); режима, который страж не
+# прочитал бы, генератор не производит. Появится второй режим — эта посылка станет
+# ложной, поэтому она записана здесь, а не подразумевается.
+_UNRESOLVED_VAR_GUARD = [
     "(function () {",
     "  var _u = '';",
     "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+    "  try {",
+    "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+    "  } catch (e) { /* тела может не быть — это не находка */ }",
     "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
     "  if (!_all) { return; }",
     "  var _n = null;",
@@ -174,7 +193,7 @@ PRE_GLOBAL = [
     "}",
     "pm.environment.set('_suiteProjectId', pm.environment.get('existingProjectId'));",
     "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));",
-    # _URL_VAR_GUARD ЗДЕСЬ БОЛЬШЕ НЕ СТОИТ — он переехал в конец пред-скрипта КАЖДОГО
+    # _UNRESOLVED_VAR_GUARD ЗДЕСЬ БОЛЬШЕ НЕ СТОИТ — он переехал в конец пред-скрипта КАЖДОГО
     # шага (step_to_item). Причина — порядок исполнения newman: prerequest коллекции
     # идёт до prerequest шага, поэтому отсюда страж судил об адресе раньше, чем шаг
     # успевал задать переменные, которыми владеет сам.
@@ -600,7 +619,7 @@ def require_env_url(var: str, path: str, why: str = "") -> List[str]:
     So the path is resolved HERE, before the assignment, by the documented
     primitive. On a path with no `{{…}}` this is the identity function, which is
     why every existing caller is byte-unchanged in behaviour. The collection-level
-    `_URL_VAR_GUARD` still runs FIRST and still refuses to send a request whose
+    `_UNRESOLVED_VAR_GUARD` still runs FIRST and still refuses to send a request whose
     original URL names a variable that is undefined in every scope, so "the
     variable was never captured" remains a reported failure and not a silent
     substitution of the empty string.
@@ -1900,7 +1919,7 @@ def step_to_postman(step: Step) -> Dict:
     pre = list(step.pre_script)
     if step.auth is not None:
         pre = _auth_pre_script(step.auth) + pre
-    # Страж адреса — ПОСЛЕДНИМ в пред-скрипте шага, а не в общем событии коллекции.
+    # Страж подстановки — ПОСЛЕДНИМ в пред-скрипте шага, а не в общем событии коллекции.
     #
     # Newman исполняет prerequest коллекции ДО prerequest шага, всегда. Пока страж
     # стоял там, он выносил вердикт о переменных адреса РАНЬШЕ, чем шаг успевал
@@ -1913,7 +1932,7 @@ def step_to_postman(step: Step) -> Dict:
     # ушёл бы литералом `{{…}}`. Меняется только момент — теперь после того, как
     # отработали все законные производители этого адреса, включая сам шаг.
     # Переменная, которую не задал НИКТО, по-прежнему находка.
-    pre = pre + _URL_VAR_GUARD
+    pre = pre + _UNRESOLVED_VAR_GUARD
     events = []
     if pre:
         events.append({"listen": "prerequest", "script": {"type": "text/javascript", "exec": pre}})
