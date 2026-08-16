@@ -177,38 +177,3 @@ type RoleVerb struct {
 	ObjectType string
 	Verb       string
 }
-
-// RoleVerbsFromSelectors выводит проекцию «тип × глагол» из тех же селекторов,
-// которыми роль материализуется.
-//
-// ИСТОЧНИК ОДИН — селекторы. Второй источник (например, разбор `permissions`
-// заново) дал бы два места об одном предмете, расходящиеся при первом же
-// изменении формы правила, причём молча: обе стороны по отдельности
-// непротиворечивы.
-//
-// Подстановочный глагол сюда НЕ раскрывается: набор глаголов типа знает каталог
-// типов, а не домен, и раскрытие здесь означало бы, что домен завёл собственную
-// копию каталога. Такие пары отбрасываются, и это НЕ потеря права: правило с
-// подстановочным глаголом материализуется соседней стороной (селекторами),
-// которая набор типа получает параметром от того, кто его знает.
-func RoleVerbsFromSelectors(selectors []RuleSelector) []RoleVerb {
-	seen := map[RoleVerb]bool{}
-	out := make([]RoleVerb, 0, len(selectors))
-	for _, sel := range selectors {
-		for _, typ := range sel.ObjectTypes {
-			for _, v := range sel.Verbs {
-				verb := NormalizeVerb(v)
-				if typ == "" || verb == "" || verb == "*" {
-					continue
-				}
-				pair := RoleVerb{ObjectType: typ, Verb: verb}
-				if seen[pair] {
-					continue
-				}
-				seen[pair] = true
-				out = append(out, pair)
-			}
-		}
-	}
-	return out
-}

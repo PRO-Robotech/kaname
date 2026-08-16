@@ -43,9 +43,11 @@ package shadowverdict
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -161,12 +163,42 @@ func (c *Counters) Read() Snapshot {
 	}
 }
 
+// DefaultSummaryEvery — как часто сравнение печатает сводку.
+//
+// Сводка существует ради ОДНОГО различия: «расхождений 0 из N сравнённых» против
+// «сравнено 0». Пока наружу выходили только записи о расхождениях, согласие форм
+// и выключенное сравнение выглядели одинаково — тишиной. Значение выбрано так,
+// чтобы след оставался у любого прогона (сквозная проба идёт минуты), и при этом
+// сводка не становилась сама источником шума.
+const DefaultSummaryEvery = 30 * time.Second
+
 // Comparator задаёт форме E вопросы, ушедшие движку, и считает исход.
 type Comparator struct {
 	form    Asker
 	timeout time.Duration
 	logger  *slog.Logger
 	counts  Counters
+
+	// now — часы. Параметром ради проб: сводка привязана ко времени, и проба,
+	// ждущая настоящих секунд, проверяла бы планировщик, а не свойство.
+	now          func() time.Time
+	summaryEvery time.Duration
+
+	// mu защищает перечень классов и отметку последней сводки.
+	//
+	// РАЗБОР ВЕДЁТСЯ ПО КЛАССУ, А НЕ ПО СЛУЧАЮ. Один и тот же дефект даёт тысячи
+	// одинаковых записей — за один прогон их было 3215, — и уровень записи от
+	// этого перестаёт значить что-либо: настоящая ошибка тонет by construction.
+	// Поэтому КАЖДЫЙ класс называется поимённо ровно один раз, а повторы копятся
+	// счётчиком и выходят сводкой.
+	//
+	// Это НЕ ослабление сравнения: ни один счётчик и ни одна клетка метрики от
+	// этого не меняются, и ни один класс не пропадает — пропадает только
+	// дословный повтор уже названного. Ослаблением было бы перестать СЧИТАТЬ.
+	mu          sync.Mutex
+	classes     map[string]int64
+	lastSummary time.Time
+	summaries   int64
 }
 
 // New собирает сравнитель. nil-форма — законный вход: сравнение выключено, и
@@ -175,7 +207,14 @@ func New(form Asker, logger *slog.Logger) *Comparator {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Comparator{form: form, timeout: DefaultTimeout, logger: logger}
+	return &Comparator{
+		form:         form,
+		timeout:      DefaultTimeout,
+		logger:       logger,
+		now:          time.Now,
+		summaryEvery: DefaultSummaryEvery,
+		classes:      make(map[string]int64),
+	}
 }
 
 // WithTimeout меняет срок теневого вызова (для проб).
@@ -184,6 +223,73 @@ func (c *Comparator) WithTimeout(d time.Duration) *Comparator {
 		c.timeout = d
 	}
 	return c
+}
+
+// WithClock подменяет часы сводки (для проб).
+func (c *Comparator) WithClock(now func() time.Time) *Comparator {
+	if now != nil {
+		c.now = now
+	}
+	return c
+}
+
+// WithSummaryEvery меняет период сводки. Ноль и отрицательное — отказ от
+// изменения, а не «печатать всегда»: последнее превратило бы сводку в шум.
+func (c *Comparator) WithSummaryEvery(d time.Duration) *Comparator {
+	if d > 0 {
+		c.summaryEvery = d
+	}
+	return c
+}
+
+// firstOfClass отвечает, впервые ли встречен этот класс, и сколько их всего.
+func (c *Comparator) firstOfClass(key string) (first bool, seen int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.classes[key]++
+	return c.classes[key] == 1, c.classes[key]
+}
+
+// Summarise печатает сводку безусловно — числа и перечень классов.
+//
+// Печатается ВСЕГДА, даже когда расхождений нет: строка «расхождений 0 из N
+// сравнённых» — единственное, что отличает согласие форм от невыполненного
+// сравнения в журнале (метрика отвечает на тот же вопрос, но её на прогоне со
+// стенда никто не снимает).
+func (c *Comparator) Summarise() {
+	if c == nil || c.form == nil {
+		return
+	}
+	s := c.counts.Read()
+	c.mu.Lock()
+	classes := make([]string, 0, len(c.classes))
+	for k, n := range c.classes {
+		classes = append(classes, fmt.Sprintf("%s×%d", k, n))
+	}
+	c.summaries++
+	c.lastSummary = c.now()
+	c.mu.Unlock()
+	sort.Strings(classes)
+
+	c.logger.Info("shadow verdict: сводка",
+		"decisions", s.Decisions, "compared", s.Compared,
+		"diverged", s.Diverged, "unfinished", s.Unfinished,
+		"compared_share", s.ComparedShare(),
+		"classes", len(classes), "class_breakdown", strings.Join(classes, " "))
+}
+
+// maybeSummarise печатает сводку не чаще, чем раз в период.
+//
+// Первая печатается на первом же сведённом исходе: присутствие строки отвечает
+// «сравнение живо», а её числа — «до чего оно дошло». Отсутствие отвечало бы на
+// оба вопроса сразу и не отвечало бы ни на один.
+func (c *Comparator) maybeSummarise() {
+	c.mu.Lock()
+	due := c.lastSummary.IsZero() || c.now().Sub(c.lastSummary) >= c.summaryEvery
+	c.mu.Unlock()
+	if due {
+		c.Summarise()
+	}
 }
 
 // Counters отдаёт счётчики.
@@ -201,9 +307,14 @@ func (c *Comparator) Unaskable(reason, objectType, relation string) {
 	}
 	c.counts.decisions.Add(1)
 	c.counts.unfinished.Add(1)
-	c.logger.Warn("shadow verdict: вопрос форме E не задан", append([]any{
-		"reason", reason, "object_type", objectType, "relation", relation,
-	}, c.coverage()...)...)
+	class := fmt.Sprintf("не задан|%s|%s|%s", objectType, relation, reason)
+	if first, seen := c.firstOfClass(class); first {
+		c.logger.Warn("shadow verdict: вопрос форме E не задан", append([]any{
+			"reason", reason, "object_type", objectType, "relation", relation,
+			"class", class, "class_seen", seen,
+		}, c.coverage()...)...)
+	}
+	c.maybeSummarise()
 }
 
 // Ask задаёт форме E прямой вопрос СЕЙЧАС и отдаёт сведение исхода.
@@ -259,15 +370,24 @@ func (c *Comparator) Ask(ctx context.Context, subject, objectType, objectID, rel
 		}
 		c.counts.compared.Add(1)
 		if a.allowed == engineAllowed {
+			c.maybeSummarise()
 			return
 		}
 		c.counts.diverged.Add(1)
 		// Расхождение называется ПОИМЁННО: счётчик говорит «сколько», а разобрать
 		// можно только зная, на каком вопросе. Доля едет рядом (см. coverage).
-		c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append([]any{
-			"question", "прямой вердикт", "engine", engineAllowed, "form_e", a.allowed,
-			"subject", subject, "object_type", objectType, "object_id", objectID, "relation", relation,
-		}, c.coverage()...)...)
+		//
+		// Поимённо — ОДИН РАЗ НА КЛАСС. Повторы копятся счётчиком класса и выходят
+		// сводкой; разбирают их всё равно по классу, а не по случаю (см. mu).
+		class := fmt.Sprintf("прямой вердикт|%s|%s|движок=%v", objectType, relation, engineAllowed)
+		if first, seen := c.firstOfClass(class); first {
+			c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append([]any{
+				"question", "прямой вердикт", "engine", engineAllowed, "form_e", a.allowed,
+				"subject", subject, "object_type", objectType, "object_id", objectID, "relation", relation,
+				"class", class, "class_seen", seen,
+			}, c.coverage()...)...)
+		}
+		c.maybeSummarise()
 	}
 }
 
@@ -316,6 +436,28 @@ func (c *Comparator) AskSources(ctx context.Context, objectType, objectID,
 // logFields — поля, называющие вопрос в журнале.
 type logFields map[string]string
 
+// class — устойчивая часть вопроса: всё, кроме идентификатора объекта и субъекта.
+//
+// Оба исключены намеренно: они меняются на каждом ресурсе и на каждом вызывающем,
+// и класс, включивший их, перестал бы быть классом — перечень «уже названного»
+// рос бы вместе с трафиком, а разбор всё равно ведётся по типу и отношению.
+// Координаты первого случая при этом называются полностью — они в самой записи.
+func (f logFields) class() string {
+	keys := make([]string, 0, len(f))
+	for k := range f {
+		if k == "object_id" || k == "subject" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+f[k])
+	}
+	return strings.Join(parts, ",")
+}
+
 // askSet — общая механика трёх перечислительных вопросов: спросить форму E СЕЙЧАС,
 // свести исход, когда движок ответил.
 //
@@ -361,33 +503,54 @@ func (c *Comparator) askSet(ctx context.Context, question string, fields logFiel
 			extra = nil
 		}
 		if len(missing) == 0 && len(extra) == 0 {
+			c.maybeSummarise()
 			return
 		}
 		c.counts.diverged.Add(1)
-		args := []any{"question", question,
-			"engine_only", strings.Join(missing, ","), "form_e_only", strings.Join(extra, ",")}
-		for k, v := range fields {
-			args = append(args, k, v)
+		class := question + "|" + fields.class()
+		if first, seen := c.firstOfClass(class); first {
+			args := []any{"question", question,
+				"engine_only", strings.Join(missing, ","), "form_e_only", strings.Join(extra, ","),
+				"class", class, "class_seen", seen}
+			for k, v := range fields {
+				args = append(args, k, v)
+			}
+			c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append(args, c.coverage()...)...)
 		}
-		c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append(args, c.coverage()...)...)
+		c.maybeSummarise()
 	}
 }
 
+// unfinishedAt / unfinishedSet — то же правило класса, что у расхождения.
+//
+// «Не выполнилось» повторяется ещё чаще расхождения (за один прогон таких записей
+// было 914 при 4 различных причинах), и повтор одной и той же причины по одному и
+// тому же вопросу нового действия не требует. Счётчик исходов при этом не
+// меняется: он считает СЛУЧАИ, а перечень классов — ВИДЫ.
 func (c *Comparator) unfinishedAt(question, reason, objectType, relation string) {
 	c.counts.unfinished.Add(1)
-	c.logger.Warn("shadow verdict: не выполнилось", append([]any{
-		"question", question, "reason", reason,
-		"object_type", objectType, "relation", relation,
-	}, c.coverage()...)...)
+	class := fmt.Sprintf("не выполнилось|%s|%s|%s|%s", question, objectType, relation, reason)
+	if first, seen := c.firstOfClass(class); first {
+		c.logger.Warn("shadow verdict: не выполнилось", append([]any{
+			"question", question, "reason", reason,
+			"object_type", objectType, "relation", relation,
+			"class", class, "class_seen", seen,
+		}, c.coverage()...)...)
+	}
+	c.maybeSummarise()
 }
 
 func (c *Comparator) unfinishedSet(question, reason string, fields logFields) {
 	c.counts.unfinished.Add(1)
-	args := []any{"question", question, "reason", reason}
-	for k, v := range fields {
-		args = append(args, k, v)
+	class := "не выполнилось|" + question + "|" + fields.class() + "|" + reason
+	if first, seen := c.firstOfClass(class); first {
+		args := []any{"question", question, "reason", reason, "class", class, "class_seen", seen}
+		for k, v := range fields {
+			args = append(args, k, v)
+		}
+		c.logger.Warn("shadow verdict: не выполнилось", append(args, c.coverage()...)...)
 	}
-	c.logger.Warn("shadow verdict: не выполнилось", append(args, c.coverage()...)...)
+	c.maybeSummarise()
 }
 
 // coverage — ДОЛЯ сравнённого, которую несёт КАЖДАЯ запись теневого пути.

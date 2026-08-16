@@ -573,12 +573,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	).
 		WithReconcile(kachopg.NewReconcileEventEmitter()).
 		WithAccountResolver(kachopg.NewProjectAccountResolver()).
-		// Прямой факт отношения ложится в СВОЮ БД в той же транзакции, что
-		// намерение доставить кортеж наружу (XC-12, Ф1). Пока движок жив, факт
-		// живёт дважды, и провязка обязана быть здесь — иначе одна из двух баз
-		// молча отстанет, и расхождение проявится неверным вердиктом, а не
-		// отказом. Читать эти строки пока никто не будет: пишем, не читаем.
-		WithRelationFacts(kachopg.NewRelationFactWriter()).
 		// Design-B instant-visibility (VBC-15): after the owner-tuple + mirror co-commit,
 		// drive a SYNCHRONOUS ReconcileObject (shared rsabReconciler's sync-FGA writer) so
 		// the creator's per-object v_get materializes before the consumer's create-Operation

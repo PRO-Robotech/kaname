@@ -246,29 +246,14 @@ type RegisterResourceUseCase struct {
 	objRecon  objectReconciler      // sync post-commit — optional, nil-safe
 	tuples    hierarchyTupleApplier // sync post-commit containment pointer — optional, nil-safe
 	residual  residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
-	// facts — запись прямого факта отношения в СВОЮ БД, в той же транзакции, что
-	// намерение доставить кортеж наружу. Пока движок жив, факт живёт дважды, и
-	// откат, оставивший одно без другого, разводит две базы молча.
-	// Необязателен (nil-safe): сборка без него ведёт себя ровно как прежде.
-	facts   relationFactWriter
-	metrics materializationRecorder
-	logger  *slog.Logger
+	metrics   materializationRecorder
+	logger    *slog.Logger
 }
 
 // NewRegisterResourceUseCase — constructor. `mirror` co-commits the
 // resource_mirror row in the same writer-tx as the owner-tuple emit.
 func NewRegisterResourceUseCase(emitter relationOutboxEmitter, mirror resourceMirrorEmitter, txb service.TxBeginner) *RegisterResourceUseCase {
 	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb}
-}
-
-// WithRelationFacts подключает запись прямых фактов отношения в собственную БД.
-//
-// Отдельным методом, а не аргументом конструктора: так уже существующие сборки
-// (в том числе пробные) не переписываются, а отсутствие провязки означает ровно
-// прежнее поведение, а не тихую запись в никуда.
-func (uc *RegisterResourceUseCase) WithRelationFacts(w relationFactWriter) *RegisterResourceUseCase {
-	uc.facts = w
-	return uc
 }
 
 // WithReconcile wires the reconcile-event emitter: a mirror change
@@ -643,14 +628,6 @@ type versionedInput interface {
 	GetSourceVersion() *timestamppb.Timestamp
 }
 
-// relationFactWriter — узкий порт записи прямых фактов; удовлетворяется
-// адаптером репозитория. Объявлен ЗДЕСЬ, в use-case, а не импортируется из
-// сервисного слоя: направление зависимостей идёт внутрь.
-type relationFactWriter interface {
-	WriteFactsTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, version time.Time) error
-	DeleteFactsTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, tombstone time.Time) error
-}
-
 // registerInput — Register additionally consumes the mirror fields (labels +
 // parent-scope) + the source_version. Satisfied by
 // *iamv1.RegisterResourceRequest.
@@ -726,12 +703,19 @@ func validateRelationString(field, v string) error {
 // co-commit with, because the intent says nothing about the object's own state.
 // The at-least-once contract is unchanged — the tuple enqueue is durable, and the
 // drainer's idempotent classification makes a repeat a no-op.
-// emitGrant кладёт намерение доставки кортежа и — в ТОЙ ЖЕ транзакции — прямой
-// факт отношения в собственную БД.
-//
 // `version` приходит от вызывающего, а не берётся часами здесь: обе доставки
 // одного намерения обязаны нести ОДНО значение, иначе гашение редоставки у
 // принимающей стороны зависит от того, кто выиграл гонку.
+//
+// ПРЯМОЙ ФАКТ ОТНОШЕНИЯ ЗДЕСЬ НЕ ПИШЕТСЯ, И ЭТО НЕ УПУЩЕНИЕ. Он складывается из
+// строки журнала, которую кладёт `EmitWriteTx`, — схемой, одинаково для всех
+// производителей кортежа (use-case, реконсайлер, посев старта, сырой SQL
+// миграции). Писатель, добавленный сюда, стал бы вторым местом об одном
+// предмете: SQL-производителей он не покрывает вовсе, а с первым разошёлся бы
+// версией. Отсюда же следует, что состояние формы E есть свёртка ТОГО ЖЕ
+// журнала, из которого складывается состояние движка, — а значит расхождение
+// между ними больше не может завестись от того, что кто-то забыл написать
+// вторую строку.
 func (uc *RegisterResourceUseCase) emitGrant(ctx context.Context, t tupleIntent, write bool, version time.Time) (bool, error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
@@ -748,19 +732,6 @@ func (uc *RegisterResourceUseCase) emitGrant(ctx context.Context, t tupleIntent,
 	}
 	if err != nil {
 		return false, fmt.Errorf("emit fga outbox: %w", err)
-	}
-	// Факт ложится в ТУ ЖЕ транзакцию, что намерение доставки: откат обязан
-	// снимать оба, иначе своя БД разойдётся с чужой и расхождение проявится не
-	// отказом, а неверным вердиктом.
-	if uc.facts != nil {
-		if write {
-			err = uc.facts.WriteFactsTx(ctx, tx, tuples, version)
-		} else {
-			err = uc.facts.DeleteFactsTx(ctx, tx, tuples, version)
-		}
-		if err != nil {
-			return false, fmt.Errorf("relation fact: %w", err)
-		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
