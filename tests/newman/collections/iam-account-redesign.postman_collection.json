@@ -314,6 +314,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -400,6 +402,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -987,6 +991,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -1073,6 +1079,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -1460,6 +1468,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -1546,6 +1556,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -1937,6 +1949,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -2023,6 +2037,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -2120,6 +2136,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -2605,6 +2623,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -3064,6 +3084,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -3150,6 +3172,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
@@ -3345,6 +3369,8 @@
                 "exec": [
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
                   "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
                   "  pm.environment.set('_authRetryCount', '0');",
                   "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
