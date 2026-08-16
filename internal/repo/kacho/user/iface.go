@@ -109,7 +109,7 @@ type WriterIface interface {
 type ListFilter struct {
 	PageSize  int32
 	PageToken string
-	Filter    string // filter-syntax: email="..." | externalId="..."
+	Filter    string // filter-syntax: email="…" | external_id="…" | invite_status="…" | search="…"
 
 	// AccountID — фильтр по конкретному Account (default-deny scope).
 	// Пустой → no per-account filter (caller обязан добавить AccountIDs).
