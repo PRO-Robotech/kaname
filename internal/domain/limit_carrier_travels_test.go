@@ -36,13 +36,29 @@ import (
 // Догадка в этом месте не отказывает громко — она считает верные строки против
 // неверного владельца.
 
-// TestResolveEffective_CarriesTheCarrierOfEveryKind — у каждой разрешённой
+// TestResolveEffective_CarriesTheCarrierOfEveryKind — у каждой ОТВЕЧЕННОЙ
 // величины назван носитель, и он тот же, что в каталоге.
+//
+// Отвечаются виды корня аренды, а не все виды каталога: вложенные считаются в
+// родительском ресурсе и этим чтением не отдаются вовсе
+// (`TestResolveEffective_AnswersOnlyTenancyRootKinds` рядом). Ожидание здесь
+// выводится из каталога тем же признаком, каким фильтрует резолв, — выписанное
+// число разошлось бы с деревом на первом же новом виде и молча.
 func TestResolveEffective_CarriesTheCarrierOfEveryKind(t *testing.T) {
 	const service = "vpc"
 
 	kinds := domain.CountableKindsOfService(service)
 	require.NotEmpty(t, kinds, "предусловие: у домена есть виды — иначе проба вакуумна")
+
+	wantAnswered := 0
+	for _, k := range kinds {
+		if c, ok := domain.CarrierOfKind(k); ok &&
+			(c == domain.CarrierProject || c == domain.CarrierAccount) {
+			wantAnswered++
+		}
+	}
+	require.NotZero(t, wantAnswered,
+		"предмет пробы: у домена есть виды корня аренды — иначе утверждать нечего")
 
 	stated := make([]domain.Limit, 0, len(kinds))
 	for i, k := range kinds {
@@ -54,7 +70,7 @@ func TestResolveEffective_CarriesTheCarrierOfEveryKind(t *testing.T) {
 	}
 
 	got := domain.ResolveEffective(service, stated)
-	require.Len(t, got, len(kinds), "отвечено по каждому виду каталога")
+	require.Len(t, got, wantAnswered, "отвечено по каждому виду корня аренды")
 
 	for _, e := range got {
 		want, ok := domain.CarrierOfKind(e.Kind)
@@ -65,37 +81,24 @@ func TestResolveEffective_CarriesTheCarrierOfEveryKind(t *testing.T) {
 	}
 }
 
-// TestResolveEffective_NestedKindsDoNotClaimTheProjectAsCarrier — вложенные
-// виды называют носителем РОДИТЕЛЯ.
+// Здесь стояла TestResolveEffective_NestedKindsDoNotClaimTheProjectAsCarrier —
+// она СТАЛА ВАКУУМНОЙ и снята вместе со своим предметом.
 //
-// Это и есть та четвёрка, из-за которой заведена задача. Проба названа отдельно
-// от общей выше, потому что общая осталась бы зелёной и на реализации,
-// проставляющей `project` всем подряд, если бы каталог вдруг оказался плоским, —
-// а здесь предмет утверждения именно НЕплоскость.
-func TestResolveEffective_NestedKindsDoNotClaimTheProjectAsCarrier(t *testing.T) {
-	nested := map[domain.LimitKind]domain.LimitCarrier{}
-	for _, k := range domain.CountableKindsOfService("vpc") {
-		c, ok := domain.CarrierOfKind(k)
-		require.True(t, ok)
-		if c != domain.CarrierProject && c != domain.CarrierAccount {
-			nested[k] = c
-		}
-	}
-	require.NotEmpty(t, nested,
-		"предмет пробы: у домена есть виды, считаемые в родителе. Исчезнут — проба вакуумна, и это надо заметить")
-
-	stated := make([]domain.Limit, 0, len(nested))
-	for k := range nested {
-		stated = append(stated, domain.Limit{Scope: domain.LimitScopeDefault, Kind: k, Value: 4})
-	}
-
-	for _, e := range domain.ResolveEffective("vpc", stated) {
-		want := nested[e.Kind]
-		require.Equal(t, want, e.Carrier,
-			"вид %s считается в %s, а не в проекте", e.Kind, want)
-		require.NotEqual(t, domain.CarrierProject, e.Carrier)
-	}
-}
+// Проба подавала резолву только вложенные виды и утверждала о каждой строке
+// ответа, что её носитель — родитель. С тех пор как резолв такие виды не
+// отвечает вовсе, ответ на этот вход ПУСТ: цикл не выполняется ни разу, и проба
+// зеленеет, ничего не утверждая. Форма проверки осталась бы, содержания — нет.
+//
+// Оба её утверждения живут рядом и выражены по существу:
+//   - «каталог называет носителем вложенного вида родительский тип» —
+//     TestNestedKindCarrierNamesAParentType (утверждает о КАТАЛОГЕ, где это
+//     свойство и решается, а не о чтении, которое такие виды не отдаёт);
+//   - «вложенные виды в ответ не попадают» —
+//     TestResolveEffective_AnswersOnlyTenancyRootKinds с положительным контролем
+//     TestResolveEffective_KeepsEveryTenancyRootKind.
+//
+// Обе — в limit_resolve_carrier_test.go. Запись оставлена, потому что снятая
+// проба выглядит как потерянное покрытие, а это не оно.
 
 // TestResolveEffective_FlatKindsStillSayProject — положительный контроль.
 //
