@@ -291,6 +291,24 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 			conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
 			args = append(args, st)
 			argIdx++
+		} else if q, ok := parseFieldFilter(f.Filter, "search"); ok {
+			// Поиск по ПОДСТРОКЕ — по тому, чем пользователя знают: почта и
+			// идентификатор. `name` у пользователя нет вовсе, а полное совпадение
+			// `email="…"` отвечает только тому, кто уже знает адрес целиком.
+			//
+			// Сузить список на клиенте нельзя: клиент видит только загруженную
+			// страницу и о том, что в неё не поместилось, врёт молча.
+			//
+			// Индекса под этот предикат нет намеренно. Строки таблицы сужены
+			// аккаунтом вызывающего условием выше, и разбор здесь идёт по уже
+			// суженному набору; триграммный индекс заводится ЗАМЕРОМ на боевом
+			// объёме, а не догадкой о нём — заведённый вслепую, он стоил бы
+			// расширения и записи на каждой правке почты, ничего не ускорив.
+			pattern := "%" + escapeLikePattern(strings.ToLower(q)) + "%"
+			conditions = append(conditions, fmt.Sprintf(
+				`(lower(email) LIKE $%d ESCAPE '\' OR lower(id) LIKE $%d ESCAPE '\')`, argIdx, argIdx))
+			args = append(args, pattern)
+			argIdx++
 		}
 	}
 	if f.PageToken != "" {
@@ -762,6 +780,17 @@ func nullableInvitedBy(id domain.UserID) any {
 	}
 	return string(id)
 }
+
+// escapeLikePattern экранирует служебные знаки LIKE, чтобы образец искался как
+// СИМВОЛЫ.
+//
+// Без этого ввод `%` находил бы всех, а `_` — любой одиночный знак: поиск
+// отвечал бы не на тот вопрос, который задали, и выглядел бы при этом
+// работающим. Обратный слэш экранируется первым — иначе экранирующий знак,
+// добавленный следующими заменами, сам оказался бы экранирован.
+var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func escapeLikePattern(s string) string { return likePatternEscaper.Replace(s) }
 
 // parseFieldFilter — generalized parseNameFilter для arbitrary field-name.
 // Принимает `<field>="value"` либо `<field> = "value"`.
