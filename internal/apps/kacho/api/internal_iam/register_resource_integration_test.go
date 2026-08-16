@@ -62,20 +62,23 @@ func TestRegisterResource_A01_EnqueuesWriteTupleInTx(t *testing.T) {
 	ctx := context.Background()
 	uc, h := newRegisterUC(t)
 
+	// Один литерал объекта на запрос И на область отбора — разойтись не могут.
+	const obj = "vpc_network:enp00000000000000001"
+
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:prj-1",
 		Relation:  "parent",
-		Object:    "vpc_network:enp00000000000000001",
+		Object:    obj,
 	})
 	require.NoError(t, err)
 
-	n, et, payload := h.lastOutbox(t, ctx)
+	n, et, payload := h.lastOutbox(t, ctx, obj)
 	require.Equal(t, 1, n, "exactly one outbox row enqueued")
 	require.Equal(t, "fga.tuple.write", et)
 	require.Equal(t, "project:prj-1", payload["user"])
 	require.Equal(t, "parent", payload["relation"])
-	require.Equal(t, "vpc_network:enp00000000000000001", payload["object"])
-	require.True(t, h.outboxUnsent(t, ctx), "sent_at IS NULL until drainer applies")
+	require.Equal(t, obj, payload["object"])
+	require.True(t, h.outboxUnsent(t, ctx, obj), "sent_at IS NULL until drainer applies")
 }
 
 func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
@@ -85,8 +88,9 @@ func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
 	ctx := context.Background()
 	uc, h := newRegisterUC(t)
 
+	const obj = "vpc_network:enp00000000000000001"
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp00000000000000001",
+		SubjectId: "project:prj-1", Relation: "parent", Object: obj,
 	}
 	err := uc.Register(ctx, req)
 	require.NoError(t, err)
@@ -95,7 +99,7 @@ func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
 
 	// Two write rows enqueued; the drainer (fga_applier already_exists→success)
 	// collapses them to a single FGA tuple. The RPC never surfaces AlreadyExists.
-	n, _, _ := h.lastOutbox(t, ctx)
+	n, _, _ := h.lastOutbox(t, ctx, obj)
 	require.Equal(t, 2, n)
 }
 
@@ -106,12 +110,14 @@ func TestRegisterResource_A03_UnregisterEnqueuesDeleteTuple(t *testing.T) {
 	ctx := context.Background()
 	uc, h := newRegisterUC(t)
 
+	const obj = "vpc_network:enp00000000000000001"
+
 	err := uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp00000000000000001",
+		SubjectId: "project:prj-1", Relation: "parent", Object: obj,
 	})
 	require.NoError(t, err)
 
-	n, et, _ := h.lastOutbox(t, ctx)
+	n, et, _ := h.lastOutbox(t, ctx, obj)
 	require.Equal(t, 1, n)
 	require.Equal(t, "fga.tuple.delete", et)
 }
@@ -147,15 +153,25 @@ func TestRegisterResource_A05_InvalidArgsNoOutbox(t *testing.T) {
 		{"object with space", &iamv1.RegisterResourceRequest{SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp 1"}},
 		{"object missing colon", &iamv1.RegisterResourceRequest{SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network"}},
 	}
+	// Область отбора ВЫВОДИТСЯ из тех же запросов, что уходят в use-case, —
+	// её нельзя забыть обновить при правке случая.
+	objects := make([]string, 0, len(cases))
+	// Снимок размера таблицы ДО: «ничего не записано» — утверждение обо всей
+	// таблице, и дельта проверяет его там, куда объектный отбор не смотрит
+	// (строка, записанная под чужим объектом).
+	before := h.totalRows(t, ctx)
+
 	for _, c := range cases {
+		objects = append(objects, c.req.GetObject())
 		t.Run(c.name, func(t *testing.T) {
 			err := uc.Register(ctx, c.req)
 			require.Error(t, err)
 			require.Equal(t, codes.InvalidArgument, status.Code(err), "validation → InvalidArgument")
 		})
 	}
-	n, _, _ := h.lastOutbox(t, ctx)
-	require.Equal(t, 0, n, "no outbox row on validation failure")
+	n, _, _ := h.lastOutbox(t, ctx, objects...)
+	require.Equal(t, 0, n, "no outbox row for any object the request named")
+	require.Equal(t, before, h.totalRows(t, ctx), "no outbox row on validation failure — at all")
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -163,39 +179,86 @@ func TestRegisterResource_A05_InvalidArgsNoOutbox(t *testing.T) {
 // outboxProbe reads back kacho_iam.fga_outbox rows for assertions.
 type outboxProbe struct{ pool *pgxpool.Pool }
 
-// lastOutbox returns the row count and the latest row's event_type + payload,
-// scoped to test-created tuples. It excludes EVERY migration-seeded relation-
-// tuple: the SEC-C fga_writer tuples (object `iam_fgaproxy:system`, 0009) AND
-// the cluster-root seeds (object `cluster:cluster_kacho_root`: the SEC-L
-// operator system_viewer, 0010, and the 5.1 reader system_viewer tuples, 0014).
-// A static "exclude iam_fgaproxy only" filter silently miscounted once any
-// cluster-root seed landed.
-func (p *outboxProbe) lastOutbox(t *testing.T, ctx context.Context) (count int, eventType string, payload map[string]string) {
+// scopedToOwnObjects — область отбора ПО СВОИМ объектам, а не «всё, кроме
+// известного посева». Пустая область запрещена: она не отбирает ничего и не
+// утверждает ничего.
+//
+// Прежняя форма перечисляла посевные объекты списком (`object NOT IN
+// ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')`), а такой список
+// стареет молча: он растёт от работы, к пробе отношения не имеющей, и
+// сопровождать его никто не обязан. Миграции 0093/0096 завели членство
+// служебных учёток в группе читателей потолков — объект `group:<gid>`, ни в
+// одну из двух перечисленных строк не попадающий, — и пять посевных строк
+// стали засчитываться пробе как «созданные тестом».
+//
+// Красная сторона этой формы шумит и потому заметна. Тихая — хуже: тот же
+// список, исключив лишнее, даёт «ноль», и утверждение зеленеет, не посмотрев
+// ни на одну строку. У положительного отбора этой слепой зоны нет by
+// construction — фикстура знает свои объекты, и она же передаёт их в запрос,
+// поэтому область отбора и вход не могут разойтись.
+//
+// Прецеденты того же класса на той же таблице, каждый со своей записью:
+// fga_outbox/emitter_integration_test.go (перешла на отбор по своим объектам),
+// cluster_admin_grant_integration_test.go (отбор по relation+user — там
+// объектный blocklist исключал ещё и СОБСТВЕННЫЕ строки теста, давая ноль),
+// access_binding_fga_outbox_integration_test.go (счёт дельты).
+//
+// Класс держится гейтом `internal/repohygiene`
+// `TestProbeSelectsItsOwnRowsPositively`.
+func scopedToOwnObjects(t *testing.T, objects []string) []string {
 	t.Helper()
-	const notSeed = `payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')`
+	require.NotEmpty(t, objects,
+		"проба обязана назвать свои объекты: пустая область отбора считает ноль строк и не утверждает ничего")
+	return objects
+}
+
+// outboxTotalRows — размер всей таблицы. Годен ТОЛЬКО как дельта (до/после):
+// абсолютное число здесь было бы утверждением о посевных миграциях, а не о
+// проверяемом коде. Один на обе пробы пакета — двух копий одного предмета в
+// этом дереве не заводят.
+func outboxTotalRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox`).Scan(&n))
+	return n
+}
+
+// lastOutbox returns the row count and the latest row's event_type + payload,
+// scoped to the objects THIS test named in its own requests.
+func (p *outboxProbe) lastOutbox(t *testing.T, ctx context.Context, objects ...string) (count int, eventType string, payload map[string]string) {
+	t.Helper()
+	own := scopedToOwnObjects(t, objects)
+	const mine = `payload->>'object' = ANY($1::text[])`
 	require.NoError(t, p.pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.fga_outbox WHERE `+notSeed).Scan(&count))
+		`SELECT count(*) FROM kacho_iam.fga_outbox WHERE `+mine, own).Scan(&count))
 	payload = map[string]string{}
 	if count == 0 {
 		return count, "", payload
 	}
 	var raw string
 	require.NoError(t, p.pool.QueryRow(ctx,
-		`SELECT event_type, payload::text FROM kacho_iam.fga_outbox WHERE `+notSeed+
-			` ORDER BY id DESC LIMIT 1`).
+		`SELECT event_type, payload::text FROM kacho_iam.fga_outbox WHERE `+mine+
+			` ORDER BY id DESC LIMIT 1`, own).
 		Scan(&eventType, &raw))
 	require.NoError(t, json.Unmarshal([]byte(raw), &payload))
 	return count, eventType, payload
 }
 
-// outboxUnsent reports whether the latest test-created outbox row has
-// sent_at IS NULL.
-func (p *outboxProbe) outboxUnsent(t *testing.T, ctx context.Context) bool {
+func (p *outboxProbe) totalRows(t *testing.T, ctx context.Context) int {
 	t.Helper()
+	return outboxTotalRows(t, ctx, p.pool)
+}
+
+// outboxUnsent reports whether the latest row for the test's OWN objects has
+// sent_at IS NULL.
+func (p *outboxProbe) outboxUnsent(t *testing.T, ctx context.Context, objects ...string) bool {
+	t.Helper()
+	own := scopedToOwnObjects(t, objects)
 	var unsent bool
 	require.NoError(t, p.pool.QueryRow(ctx,
 		`SELECT sent_at IS NULL FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' NOT IN ('iam_fgaproxy:system', 'cluster:cluster_kacho_root')
-		  ORDER BY id DESC LIMIT 1`).Scan(&unsent))
+		  WHERE payload->>'object' = ANY($1::text[])
+		  ORDER BY id DESC LIMIT 1`, own).Scan(&unsent))
 	return unsent
 }
