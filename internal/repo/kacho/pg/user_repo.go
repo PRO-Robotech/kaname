@@ -28,6 +28,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/kacho/pkg/filter"
+
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
@@ -292,6 +294,26 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 			return nil, "", ferr
 		}
 		if ast != nil {
+			// The grammar carries an OPERATOR, and this switch reads only ast.Value —
+			// so before #460 `email CONTAINS "acme"` was answered as `email = "acme"`:
+			// the caller asked for everyone at that domain and got the single exact
+			// match under a 200, with nothing in the response to tell the two apart.
+			// api-conventions.md §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows
+			// implement, refuse by name, or drop from the contract; this is the second.
+			//
+			// Refusing rather than implementing is the deliberate choice, not the cheap
+			// one: substring search on User already EXISTS and is published as
+			// `search="…"` (ListUsersRequest.filter), spanning email and id. Adding
+			// LIKE to `email` / `external_id` / `invite_status` would give one question
+			// two spellings that must then be kept in step forever, and on
+			// `invite_status` — a closed enum — a substring means nothing at all. So the
+			// message names the operator, the field, AND where substring search lives,
+			// because a caller told only "invalid" tries the same expression again.
+			if ast.Op != filter.OpEquals {
+				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
+					`Operator %s is not supported for filter field %q. Substring search on User is spelled search="<value>"`,
+					ast.Op, ast.Field)
+			}
 			switch ast.Field {
 			case "email":
 				conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))

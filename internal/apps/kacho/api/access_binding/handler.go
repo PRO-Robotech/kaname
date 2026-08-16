@@ -13,6 +13,7 @@ package access_binding
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -270,10 +271,10 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 var abListFilterFields = []string{"subject", "role", "scope", "scopeId"}
 
 // parseABListFilter parses the optional single-predicate whitelist filter into the
-// repo ListFilter. An unknown key or malformed expression → INVALID_ARGUMENT. The
-// `scope` value is the dotted scope-type (iam.account|iam.project|iam.cluster),
-// mapped to the bare within-service anchor kind; an unknown dotted scope →
-// INVALID_ARGUMENT.
+// repo ListFilter. An unknown key, an unsupported operator or a malformed
+// expression → INVALID_ARGUMENT. The `scope` value is the dotted scope-type
+// (iam.account|iam.project|iam.cluster), mapped to the bare within-service anchor
+// kind; an unknown dotted scope → INVALID_ARGUMENT.
 func parseABListFilter(expr string) (repoab.ListFilter, error) {
 	ast, err := filter.Parse(expr, abListFilterFields)
 	if err != nil {
@@ -282,6 +283,23 @@ func parseABListFilter(expr string) (repoab.ListFilter, error) {
 	var f repoab.ListFilter
 	if ast == nil {
 		return f, nil // empty filter → no predicate
+	}
+	// The operator is part of the expression, not decoration. All four keys hold
+	// exact identifiers — a subject id, a role id, a scope kind, a scope id — and a
+	// substring of an identifier addresses nothing, so CONTAINS has no meaning here.
+	// Taking ast.Value and building `=` regardless would answer a substring question
+	// with an equality page under a 200, which api-conventions.md
+	// §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" rules out: implement, refuse by name,
+	// or drop from the contract. This is the second outcome, and it names both the
+	// operator and the key so the caller learns which token was not honoured (#460).
+	//
+	// It stands BEFORE the switch on purpose: `scope CONTAINS "x"` must be refused
+	// for its operator, not for the value failing the dotted-scope vocabulary — the
+	// second message would send the caller to fix the wrong token.
+	if ast.Op != filter.OpEquals {
+		return repoab.ListFilter{}, shared.InvalidArg("filter", fmt.Sprintf(
+			"Operator %s is not supported for filter field %q. AccessBinding filters compare exact identifiers, so only = is accepted",
+			ast.Op, ast.Field))
 	}
 	switch ast.Field {
 	case "subject":
