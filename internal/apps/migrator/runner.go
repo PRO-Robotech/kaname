@@ -73,11 +73,6 @@ func (r *Runner) Status(out io.Writer) error {
 	return r.cfg.Dialect.Status(context.Background(), r.cfg.DSN, r.cfg.FS, r.cfg.MigrationsDir, out)
 }
 
-// Create создает новый sql-файл миграции на диске.
-func (r *Runner) Create(physDir, name string) error {
-	return r.cfg.Dialect.Create(physDir, name)
-}
-
 // parseTargetVersion парсит CLI-строку target version в int64 для goose.
 func parseTargetVersion(s string) (int64, error) {
 	var v int64

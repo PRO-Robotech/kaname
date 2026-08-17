@@ -8,7 +8,6 @@ package migrator
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -76,19 +75,6 @@ func (p *Dialect) Status(ctx context.Context, dsn string, fsys fs.FS, dir string
 	}
 	_ = out // goose v3 пишет в свой logger
 	return goose.StatusContext(ctx, db, dir)
-}
-
-func (p *Dialect) Create(physDir, name string) error {
-	if name == "" {
-		return errors.New("migration name is empty")
-	}
-	if physDir == "" {
-		return errors.New("physical migrations directory is empty (--dir)")
-	}
-	if err := goose.SetDialect(p.Spec().GooseDialect); err != nil {
-		return fmt.Errorf("goose set dialect %q: %w", p.Spec().GooseDialect, err)
-	}
-	return goose.Create(nil, physDir, name, "sql")
 }
 
 // openPgxDB / setupGoose — helpers, параметризованные DialectSpec.
