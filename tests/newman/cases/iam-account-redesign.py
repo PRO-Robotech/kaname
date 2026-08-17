@@ -93,6 +93,11 @@ CASES.append(Case(
                 *assert_iam_op(),
                 *save_from_response("j.id", "opId"),
                 *save_from_response("j.metadata && j.metadata.accountId", "rdAccId"),
+                # Захват потомка САГИ — ради уборки, а не ради утверждения (его
+                # предмет — соседний кейс SAGA-TWO-ID). Без него снять аккаунт
+                # нельзя: `Account.Delete` отвергает непустой аккаунт (RESTRICT),
+                # а `default`-проект приезжает только этими метаданными.
+                *save_from_response("j.metadata && j.metadata.defaultProjectId", "rdDefPrjId"),
             ],
         ),
         poll_operation_until_done(),
@@ -114,6 +119,16 @@ CASES.append(Case(
                 *assert_created_at_seconds(),
             ],
         )),
+        # Уборка: сперва дочерний проект (FK RESTRICT), затем аккаунт — тем же
+        # `reliable_delete`, каким её делают IAM-ACC-CR-BVA-NAME-MIN/MAX и
+        # IAM-ACC-LSOP-CRUD-OK. Аккаунт занимает слот потолка своей ЛИЧНОСТИ
+        # (`iam.account`, умолчание 5 на внешний идентификатор входа), а вся волна
+        # церемонии идёт под одним человеком: несобранный слот доживает до конца
+        # прогона и отказ достаётся кейсу, который создаёт аккаунт последним.
+        *reliable_delete("teardown-rdown-project", "/iam/v1/projects/{{rdDefPrjId}}",
+                         auth=_HUMAN_STEPUP, op_key="rdownPrj"),
+        *reliable_delete("teardown-rdown-account", "/iam/v1/accounts/{{rdAccId}}",
+                         auth=_HUMAN_STEPUP, op_key="rdownAcc"),
     ],
 ))
 
@@ -279,6 +294,15 @@ CASES.append(Case(
                 "});",
             ],
         ),
+        # Уборка — после утверждений о САГЕ, а не вместо них: снимается ровно то,
+        # что кейс завёл. Порядок обязателен (потомок → родитель): непустой аккаунт
+        # отвергается RESTRICT, и это предмет соседнего кейса RD-DL-NONEMPTY.
+        # Владельческая привязка снятию не мешает — `Account.Delete` вычищает
+        # выдачи аккаунта сам (так же снимаются аккаунты BVA/LSOP).
+        *reliable_delete("teardown-saga-project", "/iam/v1/projects/{{sagaDefProjId}}",
+                         auth=_HUMAN_STEPUP, op_key="sagaPrj"),
+        *reliable_delete("teardown-saga-account", "/iam/v1/accounts/{{sagaAccId}}",
+                         auth=_HUMAN_STEPUP, op_key="sagaAcc"),
     ],
 ))
 
@@ -302,6 +326,11 @@ CASES.append(Case(
                 *assert_status(200), *assert_iam_op(),
                 *save_from_response("j.id", "opId"),
                 *save_from_response("j.metadata && j.metadata.accountId", "rstAccId"),
+                # Тот самый проект, из-за которого аккаунт непуст, — предмет
+                # утверждения ниже и одновременно единственный способ убрать за
+                # собой: пока он есть, аккаунт не снять, а после его снятия
+                # аккаунт снимается обычным порядком.
+                *save_from_response("j.metadata && j.metadata.defaultProjectId", "rstDefPrjId"),
             ],
         ),
         poll_operation_until_done(),
@@ -319,6 +348,14 @@ CASES.append(Case(
             ],
         )),
         assert_op_error(9, "FAILED_PRECONDITION", msg_substr="contains projects"),
+        # Уборка идёт ПОСЛЕ утверждения об отказе и ничего в нём не меняет: отказ
+        # уже зафиксирован на непустом аккаунте. Сняв потомка, снимаем и родителя —
+        # иначе аккаунт, чьё удаление кейс проверяет, переживает прогон и держит
+        # слот потолка личности, под которой идёт вся волна церемонии.
+        *reliable_delete("teardown-rst-project", "/iam/v1/projects/{{rstDefPrjId}}",
+                         auth=_HUMAN_STEPUP, op_key="rstPrj"),
+        *reliable_delete("teardown-rst-account", "/iam/v1/accounts/{{rstAccId}}",
+                         auth=_HUMAN_STEPUP, op_key="rstAcc"),
     ],
 ))
 
