@@ -112,7 +112,15 @@ var Profile = listfiltergate.Profile{
 	// shared_operations_test.go in this package, so "the shared use-case narrows by
 	// the caller" is an assertion rather than an assumption. Without that test this
 	// entry would just be moving the unchecked claim one package over.
-	SubjectScopers: []string{"ListForCaller", "listOp.Execute"},
+	//
+	// "identityOfAuthenticatedCaller" — quota reading of an identity. Unlike the
+	// delegation above, this one needs no companion test: the function lives in the
+	// SAME package as the method it narrows, so the analyser walks into it and sees
+	// the whole of it. Its signature is the evidence — it takes ctx and nothing
+	// else, so there is no request field through which a caller could name someone
+	// else's identity, and the narrowing cannot be widened without changing the
+	// signature the gate reads.
+	SubjectScopers: []string{"ListForCaller", "listOp.Execute", "identityOfAuthenticatedCaller"},
 
 	ProtoFiles: []string{
 		"kacho/cloud/iam/v1/internal_cluster_service.proto",
@@ -146,6 +154,12 @@ var Profile = listfiltergate.Profile{
 		"role.ListOperations":            subjectScoped,
 		"service_account.ListOperations": subjectScoped,
 		"user.ListOperations":            subjectScoped,
+		// Квоты личности: страница целиком принадлежит вызывающему, потому что
+		// личность берётся из проверенного принципала, а поля, которым её можно было
+		// бы назвать, в запросе НЕ СУЩЕСТВУЕТ. Пообъектный фильтр здесь утверждал бы
+		// сужение, которому нечего сужать — форма проверки без содержания; сужение
+		// уже сделано формой запроса, и это сильнее.
+		"identityquota.List": subjectScoped,
 
 		// ---- one containing object, checked before the page is read ----
 		"access_binding.ListBySubject":         subjectGate("requireGroupMembership"),

@@ -71,35 +71,9 @@ func (h *Handler) List(
 		return nil, status.Error(codes.Internal, "identity quota reader is not wired")
 	}
 
-	// Проверяется РОД принципала, а не только непустота его идентификатора.
-	//
-	// `authzguard.PrincipalUserID` — accessor АУДИТНЫЙ: его godoc прямо
-	// перечисляет «user / service-account / system», потому что он отвечает на
-	// вопрос «кто совершил действие», а не «кто является личностью». Машинной
-	// учётке он отдаёт `sva…`, и проверка на пустоту её пропускает — строка
-	// пользователя с таким идентификатором не найдётся, и вызывающий получил бы
-	// `NotFound` про несуществующего человека вместо ответа по существу.
-	//
-	// Тот же самый accessor уже использовался для вывода ВЛАДЕЛЬЦА аккаунта и там
-	// стоил принятого запроса, предвыделенного идентификатора и отказа на
-	// фиксации. Здесь он стоил бы меньше — и всё же неверного ответа.
-	principal := operations.PrincipalFromContext(ctx)
-	if principal.Type != "user" {
-		// Машинная учётка личностью не является: аккаунтом владеет человек, и
-		// счёт ведётся по тому, кто способен войти. Отказ называет предмет, а не
-		// отдаёт пустой набор.
-		return nil, status.Error(codes.FailedPrecondition,
-			"quotas of an identity are readable by a user principal only")
-	}
-	userID := authzguard.PrincipalUserID(ctx)
-	if userID == "" {
-		return nil, status.Error(codes.FailedPrecondition,
-			"quotas of an identity are readable by a user principal only")
-	}
-
-	identity, err := h.reader.IdentityOfUser(ctx, domain.UserID(userID))
+	identity, err := h.identityOfAuthenticatedCaller(ctx)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return nil, err
 	}
 	states, err := h.reader.States(ctx, identity)
 	if err != nil {
@@ -109,6 +83,47 @@ func (h *Handler) List(
 	// Перевод — ОБЩИЙ (`pkg/quota/quotapb`). Он несёт решение, а не механику:
 	// неопознанная область отображается в `SCOPE_UNSPECIFIED`, а не в `DEFAULT`.
 	return &quotav1.ListIdentityQuotasResponse{Quotas: quotapb.Quotas(states)}, nil
+}
+
+// identityOfAuthenticatedCaller — личность ВЫЗЫВАЮЩЕГО, и ничья больше.
+//
+// Шаг назван и вынесен не ради читаемости: он и есть доказательство сужения,
+// которое читает страж списочных методов (`services/iam/tools/auditlistfilter`,
+// форма `SubjectScoped`). Сужение здесь держится ПОДПИСЬЮ — на входе только
+// `ctx`, — поэтому назвать чужую личность нечем, и расширить это, не тронув
+// подписи, которую страж и читает, нельзя.
+//
+// Проверяется РОД принципала, а не только непустота его идентификатора.
+// `authzguard.PrincipalUserID` — accessor АУДИТНЫЙ: его godoc прямо перечисляет
+// «user / service-account / system», потому что он отвечает на вопрос «кто
+// совершил действие», а не «кто является личностью». Машинной учётке он отдаёт
+// `sva…`, и проверка на пустоту её пропускает — строка пользователя с таким
+// идентификатором не найдётся, и вызывающий получил бы `NotFound` про
+// несуществующего человека вместо ответа по существу.
+//
+// Тот же самый accessor уже использовался для вывода ВЛАДЕЛЬЦА аккаунта и там
+// стоил принятого запроса, предвыделенного идентификатора и отказа на фиксации.
+// Здесь он стоил бы меньше — и всё же неверного ответа.
+func (h *Handler) identityOfAuthenticatedCaller(ctx context.Context) (string, error) {
+	principal := operations.PrincipalFromContext(ctx)
+	if principal.Type != "user" {
+		// Машинная учётка личностью не является: аккаунтом владеет человек, и
+		// счёт ведётся по тому, кто способен войти. Отказ называет предмет, а не
+		// отдаёт пустой набор.
+		return "", status.Error(codes.FailedPrecondition,
+			"quotas of an identity are readable by a user principal only")
+	}
+	userID := authzguard.PrincipalUserID(ctx)
+	if userID == "" {
+		return "", status.Error(codes.FailedPrecondition,
+			"quotas of an identity are readable by a user principal only")
+	}
+
+	identity, err := h.reader.IdentityOfUser(ctx, domain.UserID(userID))
+	if err != nil {
+		return "", shared.MapRepoErr(err)
+	}
+	return identity, nil
 }
 
 // Гарантия соответствия контракту на этапе сборки.
