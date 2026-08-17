@@ -239,7 +239,18 @@ var countableKinds = []CountableKind{
 	{"vpc.network.subnet", "vpc.network"},
 	{"vpc.network.routeTable", "vpc.network"},
 	{"vpc.network.securityGroup", "vpc.network"},
-	{"vpc.subnet.networkInterface", "vpc.subnet"},
+	// Здесь стоял `vpc.subnet.networkInterface` — «сколько интерфейсов в одной
+	// подсети». Снят вместе с посевом: решение по этой паре — НЕ ограничивать, а
+	// вид без списания есть величина, которую администратор задаёт впустую.
+	//
+	// Причина решения содержательна, а не «руки не дошли»: число интерфейсов в
+	// подсети ограничено её адресным пространством, и отказ по исчерпанию уже
+	// реализован. Второй предел поверх конечного ресурса способен лишь отказать
+	// раньше, чем кончатся адреса, — то есть отнять у арендатора часть уже
+	// оплаченного им пространства.
+	//
+	// Плоский `vpc.networkInterface` (сколько их у ПРОЕКТА) остаётся ниже и
+	// продолжает списываться: снята ось «в одной подсети», а не учёт вообще.
 
 	// iam — the account is the tenancy root, and these have no project to live
 	// in. `iam.project` is the entry that makes "two parts ⇒ project" false.
