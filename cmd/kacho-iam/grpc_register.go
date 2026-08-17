@@ -15,6 +15,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler"
 )
@@ -27,6 +28,13 @@ func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations
 	}
 	if svcs != nil && svcs.projectHandler != nil {
 		iamv1.RegisterProjectServiceServer(srv, svcs.projectHandler)
+	}
+	// Квоты личности. Регистрируется, ТОЛЬКО когда чтение собрано: иначе метод
+	// отвечал бы пустым набором на каждый запрос — то есть «у вас нет пределов»,
+	// ровно то утверждение, которое контракт запрещает делать.
+	// Незарегистрированный метод отвечает `Unimplemented`, и это честно.
+	if svcs != nil && svcs.identityQuotaHandler != nil {
+		quotav1.RegisterIdentityQuotaServiceServer(srv, svcs.identityQuotaHandler)
 	}
 	if svcs != nil && svcs.userHandler != nil {
 		iamv1.RegisterUserServiceServer(srv, svcs.userHandler)

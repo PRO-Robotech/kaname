@@ -24,6 +24,7 @@ import (
 	bootstraptoken "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/cluster"
 	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
+	identityquotaapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/identityquota"
 	interactiveclientapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/interactive_client"
 	internalauthorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_authorize"
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
@@ -96,6 +97,10 @@ type services struct {
 	// one kind a tenant may hold, plus the two reads owner-services live on
 	// (Resolve / ListChangedSince). Internal-only (ban #6), registered on :9091.
 	limitHandler *limitapp.Handler
+
+	// identityQuotaHandler — чтение квот, носителем которых является личность
+	// (число аккаунтов). ТОЛЬКО чтение: величину назначает администратор облака.
+	identityQuotaHandler *identityquotaapp.Handler
 
 	// sessionRevocationsHandler — InternalSessionRevocationsService:
 	// token revocation on logout / force-logout + the api-gateway
@@ -794,6 +799,18 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		limitapp.NewListChangedUseCase(limitRepo, limitRepo).WithQuotaReaderChecker(relationStore),
 	)
 
+	// ── IdentityQuotaService — квоты, носителем которых является ЛИЧНОСТЬ ──
+	// Сегодня такой вид один — число аккаунтов, — и он единственный, чей носитель
+	// не проект и не аккаунт: аккаунт есть корень аренды, и потолок над ним лежит
+	// на том, что существует ДО него.
+	//
+	// Читается ТОЛЬКО о себе: поля запроса, которым можно было бы назвать чужую
+	// личность, у контракта нет. Без этой поверхности потолок над аккаунтом
+	// ограничивал бы невидимо — а самообслуживаемое создание аккаунта есть первое
+	// действие, к которому платформа приглашает, и отказ на нём без объяснения
+	// неотличим от поломки.
+	identityQuotaHandler := identityquotaapp.NewHandler(kachopg.NewIdentityQuotaRepo(pool))
+
 	// ── PermissionCatalogService — RBAC rules-model G public catalog ──
 	// In-code projection (authzmap + domain): no repo, no peer-call. Stateless.
 	permissionCatalogHandler := permissioncatalogapp.NewHandler(
@@ -816,6 +833,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// resource-count ceilings (admin CRUD + owner-facing resolve/delta).
 		limitHandler: limitHandler,
+
+		// квоты личности — единственная поверхность, читаемая о себе самом.
+		identityQuotaHandler: identityQuotaHandler,
 
 		// token revocation (logout / force-logout).
 		sessionRevocationsHandler: sessionRevocationsHandler,

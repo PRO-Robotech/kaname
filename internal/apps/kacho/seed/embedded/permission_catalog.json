@@ -1842,6 +1842,16 @@
     }
   },
   {
+    "fqn": "kacho.cloud.quota.v1.IdentityQuotaService/List",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.registry.v1.InternalRegistryService/GetRegistryStats",
     "permission": "registry.registries.getStats",
     "required_relation": "system_viewer",

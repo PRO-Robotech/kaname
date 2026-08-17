@@ -58,9 +58,6 @@ import (
 // арендатор заводит себе сам.
 var excludedKinds = map[string]string{
 	"vpc.addressPool": "админский ресурс Internal*-сервиса: пул адресов заводит оператор платформы, не арендатор",
-	"iam.account": "у аккаунта нет родителя кроме кластера, и его заводит себе сам свежеаутентифицированный человек: " +
-		"носителем был бы кластер, то есть это защита платформы от регистраций, а не квота арендатора " +
-		"(§6 приёмки quota-v2; преемник заводится, когда владелец назовёт предмет «ограничение регистраций»)",
 }
 
 // TestLimitKindsAreKnownObjectTypes — каждый вид каталога называет РЕАЛЬНЫЕ типы
@@ -91,6 +88,18 @@ func TestLimitKindsAreKnownObjectTypes(t *testing.T) {
 	t.Logf("перепись: видов каталога сверено %d, из них трёхчастных %d", len(kinds), nested)
 }
 
+// tenancyRoots — носители, которые НЕ являются типами модели прав: корни аренды.
+//
+// Перечень собран из объявленных констант доменного пакета. Выписанный
+// литералами, он разошёлся бы с ними на первом же новом корне — и разошёлся бы
+// тихо: гейт отправил бы законный корень на резолв, не нашёл его среди типов и
+// объявил находкой то, что является решением.
+var tenancyRoots = map[domain.LimitCarrier]bool{
+	domain.CarrierProject:  true,
+	domain.CarrierAccount:  true,
+	domain.CarrierIdentity: true,
+}
+
 // TestEveryCatalogKindDeclaresACarrier — запись каталога есть ПАРА, и носитель
 // объявлен, а не выведен.
 //
@@ -109,7 +118,12 @@ func TestEveryCatalogKindDeclaresACarrier(t *testing.T) {
 
 		// Носитель, не являющийся корнем аренды, обязан РЕЗОЛВИТЬСЯ — иначе учёт
 		// вёлся бы в объекте, которого модель прав не знает.
-		if e.Carrier != domain.CarrierProject && e.Carrier != domain.CarrierAccount {
+		//
+		// Корни перечислены ОБЪЯВЛЕННЫМИ константами, а не литералами: корень —
+		// решение доменного пакета, и гейт, знающий их по написанию, разошёлся бы
+		// с ним ровно на добавлении следующего. Слово, не являющееся объявленным
+		// корнем, сюда не попадает — оно уходит на резолв и краснеет там.
+		if !tenancyRoots[e.Carrier] {
 			require.Emptyf(t, findUnknownKindParts(domain.LimitKind(e.Carrier), authzmapResolves),
 				"носитель %q вида %q не найден в закрытой таблице типов модели прав", e.Carrier, e.Kind)
 		}
@@ -124,8 +138,10 @@ func TestEveryCatalogKindDeclaresACarrier(t *testing.T) {
 		}
 		byCarrier[e.Carrier]++
 	}
-	t.Logf("перепись: записей каталога %d, носителей различных %d (project %d, account %d)",
-		len(entries), len(byCarrier), byCarrier[domain.CarrierProject], byCarrier[domain.CarrierAccount])
+	t.Logf("перепись: записей каталога %d, носителей различных %d (project %d, account %d, identity %d)",
+		len(entries), len(byCarrier),
+		byCarrier[domain.CarrierProject], byCarrier[domain.CarrierAccount],
+		byCarrier[domain.CarrierIdentity])
 }
 
 // TestEveryTenantTypeIsCountable — ни один тенантный тип НИ ОДНОГО домена не

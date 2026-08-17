@@ -127,15 +127,40 @@ func (k LimitKind) ChildKind() LimitKind {
 // of the catalogue.
 type LimitCarrier string
 
-// The two carriers that are not resource kinds: the tenancy roots. Any other
-// carrier is a two-part token of the closed table (`vpc.network`), naming the
-// parent a nested kind is counted within.
+// The carriers that are not resource kinds: the tenancy roots. Any other carrier
+// is a two-part token of the closed table (`vpc.network`), naming the parent a
+// nested kind is counted within.
 const (
 	// CarrierProject — counted per project. The common case.
 	CarrierProject LimitCarrier = "project"
 	// CarrierAccount — counted per account. Used by kinds that have no project
 	// to live in: projects themselves, and the account-scoped iam subjects.
 	CarrierAccount LimitCarrier = "account"
+	// CarrierIdentity — counted per HUMAN, across every account they hold.
+	//
+	// # Why a third root had to exist
+	//
+	// A carrier must be EXTERNAL to the thing it counts, and for the account
+	// neither of the two above is: an account cannot be counted inside an
+	// account, and it has no project. That is not an implementation gap but the
+	// shape of the tenancy: the account is its root, and the root has no parent
+	// below the cluster.
+	//
+	// Counting per cluster was the obvious alternative and it is worse in the way
+	// that matters: the refusal reaches the NEXT honest tenant rather than the one
+	// who exhausted the shelf. The identity is the only thing that exists BEFORE
+	// an account and outlives it, so it is the only carrier on which the refusal
+	// lands on its cause.
+	//
+	// # What identifies it, and why not the user row
+	//
+	// The identity is the external login subject (`users.external_id`), NOT the
+	// user row. A user row is a MEMBERSHIP: it is scoped to one account, and one
+	// human legitimately holds one per account. Counting per user row would tie
+	// the ceiling to the very thing that multiplies as soon as the account
+	// coupling is removed — that is, it would hand out the bypass together with
+	// the change it is meant to survive.
+	CarrierIdentity LimitCarrier = "identity"
 )
 
 // Validate — the carrier names one of the tenancy roots, or is shaped like a
@@ -149,14 +174,14 @@ func (c LimitCarrier) Validate() error {
 	if c == "" {
 		return fmt.Errorf("carrier: required")
 	}
-	if c == CarrierProject || c == CarrierAccount {
+	if c == CarrierProject || c == CarrierAccount || c == CarrierIdentity {
 		return nil
 	}
 	if parts := strings.Split(string(c), "."); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
 		return nil
 	}
 	return fmt.Errorf(
-		"Illegal argument carrier: %s is neither project, account, nor a <domain>.<resource> type", c)
+		"Illegal argument carrier: %s is neither project, account, identity, nor a <domain>.<resource> type", c)
 }
 
 // CountableKind — one catalogue record: WHAT is counted and WHERE it is counted.
@@ -218,6 +243,16 @@ var countableKinds = []CountableKind{
 
 	// iam — the account is the tenancy root, and these have no project to live
 	// in. `iam.project` is the entry that makes "two parts ⇒ project" false.
+	//
+	// The account itself is counted per IDENTITY, and it is the only entry whose
+	// carrier is neither of the first two roots. Without it every ceiling inside
+	// an account is bought back by the same self-service action that produced the
+	// account: a second account is a second full set of ceilings, obtained by the
+	// gesture that obtained the first. This entry is also the one that makes iam a
+	// service that CHARGES, not only the one that states values — the accounts it
+	// counts live in its own database, so the charge is in the same transaction as
+	// the insert and needs no distributed transaction.
+	{"iam.account", CarrierIdentity},
 	{"iam.project", CarrierAccount},
 	{"iam.user", CarrierAccount},
 	{"iam.serviceAccount", CarrierAccount},
