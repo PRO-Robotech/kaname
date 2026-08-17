@@ -371,6 +371,16 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.compute.v1.QuotaService/List",
+    "permission": "compute.quotas.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.geo.v1.InternalRegionService/Create",
     "permission": "geo.regions.create",
     "required_relation": "system_admin",
@@ -1713,6 +1723,16 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.loadbalancer.v1.QuotaService/List",
+    "permission": "loadbalancer.quotas.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.loadbalancer.v1.TargetGroupService/AddTargets",
     "permission": "loadbalancer.targetGroups.addTargets",
     "required_relation": "v_addtargets",
@@ -1838,6 +1858,16 @@
     "scope_extractor": {
       "object_type": "registry_registry",
       "from_request_field": "registry_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.registry.v1.QuotaService/List",
+    "permission": "registry.quotas.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
     },
     "required_acr_min": "1"
   },
@@ -2273,6 +2303,16 @@
     },
     "required_acr_min": "1",
     "scope_filtered": true
+  },
+  {
+    "fqn": "kacho.cloud.storage.v1.QuotaService/List",
+    "permission": "storage.quotas.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "project",
+      "from_request_field": "project_id"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.SnapshotService/Copy",
