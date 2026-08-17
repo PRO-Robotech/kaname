@@ -51,6 +51,12 @@ func MapRepoErr(err error) error {
 	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
 		return err
 	}
+	// Отказ учёта — ДО общего switch'а: он несёт не только код, но и признак
+	// полосы в `google.rpc.ErrorInfo`, а sentinel-ветка ниже пересобирает статус
+	// голым `status.Error(code, text)` и признак потеряла бы.
+	if refusal, ok := quotaRefusal(err); ok {
+		return refusal
+	}
 	switch {
 	case stderrors.Is(err, iamerr.ErrNotFound):
 		return status.Error(codes.NotFound, iamerr.StripSentinel(err))

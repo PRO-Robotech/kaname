@@ -39,6 +39,21 @@ var (
 	// authentication assurance (step-up acr). Maps to gRPC UNAUTHENTICATED.
 	ErrUnauthenticated = stderrors.New("unauthenticated")
 
+	// ErrQuotaExceeded — потолок на число ресурсов вида у носителя достигнут:
+	// строка учёта есть, место выбрано. Маппится в RESOURCE_EXHAUSTED (край →
+	// HTTP 429) с признаком `QUOTA_EXCEEDED`; администратору требуется ПОДНЯТЬ
+	// предел.
+	ErrQuotaExceeded = stderrors.New("resource count quota exceeded")
+
+	// ErrQuotaNotProvisioned — потолок не назван НИ НА ОДНОЙ области видимости.
+	//
+	// Отдельный sentinel, а не оттенок предыдущего, и это не стиль: сведи их в
+	// один — и читающий «место кончилось» пойдёт искать, что понизить, там, где
+	// ничего не назначено. Маппится в FAILED_PRECONDITION с признаком
+	// `QUOTA_NOT_PROVISIONED`: ввод арендатора корректен, не выполнено
+	// предусловие ПЛАТФОРМЫ.
+	ErrQuotaNotProvisioned = stderrors.New("resource count quota not provisioned")
+
 	// ErrAborted — a transient concurrency conflict the caller can retry (the
 	// operation was aborted, typically a transaction serialization failure).
 	// Maps to gRPC ABORTED, the idiomatic "retry the transaction" code — unlike
@@ -80,7 +95,7 @@ func StripSentinel(err error) string {
 		return ""
 	}
 	msg := err.Error()
-	for _, s := range []error{ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrSelfRevoke, ErrLastAdmin} {
+	for _, s := range []error{ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrSelfRevoke, ErrLastAdmin} {
 		prefix := s.Error() + ": "
 		if rest, ok := strings.CutPrefix(msg, prefix); ok {
 			return rest

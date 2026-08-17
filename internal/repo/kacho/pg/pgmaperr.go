@@ -45,6 +45,23 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		return err
 	}
 	switch pgErr.Code {
+	// Отказ учёта числа ресурсов — ПЕРЕД общими классами. Его SQLSTATE'ы
+	// поднимает единственный производитель платформы (`kacho_quota_refuse`,
+	// миграция 484001, рендер `pkg/quota/refusal.sql.tmpl`), общий на всех шести
+	// владельцев учёта. Классы за пределами зарезервированных Postgres'ом букв —
+	// поэтому совпасть с кодом сервера или расширения они не могут.
+	//
+	// Текст двух первых исходов сохраняется ДОСЛОВНО: он и есть контракт
+	// («<носитель> <id> has reached its limit of <N> <вид>»), а не диагностика
+	// хранилища, поэтому пересказывать его здесь значило бы завести второе место
+	// об одном предмете. Текст третьего НЕ сохраняется — он про нашу схему, и
+	// арендатору о ней знать нечего.
+	case "KQ001": // место кончилось: строка учёта есть, used >= limit
+		return iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", pgErr.Message)
+	case "KQ002": // потолок не назван ни на одной области видимости
+		return iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message)
+	case "KQ003": // строка ресурса не несёт носителя — дефект схемы, не арендатора
+		return iamerr.Wrapf(iamerr.ErrInternal, "quota accounting")
 	case "23505": // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case "23503": // foreign_key_violation
