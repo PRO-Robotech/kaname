@@ -56,6 +56,19 @@ const (
 // to 4-segment by inserting a wildcard resourceName ('*') as the third
 // segment. The seed NLB permissions land in their promoted form, so the
 // expected baselines here track that shape.
+//
+// `loadbalancer.operations.*.get` СНЯТА С ОБЕИХ РОЛЕЙ миграцией 0101
+// (kacho#513), и это не сокращение доступа. `operations` не является типом
+// закрытого каталога и им не станет: операция — не объект выдачи, доступ к ней
+// решается на её ресурсе-владельце (балансировщик, слушатель, группа целей), и
+// все три у обеих ролей названы своими строками. Пара `loadbalancer.operations`
+// не резолвилась НИ ВО ЧТО, поэтому зеркалящее её правило не материализовало ни
+// одного кортежа за всё время жизни ролей — снятие строки убирает объявление
+// возможности, которой не было, а не саму возможность.
+//
+// Право читать операции своего балансировщика при этом остаётся: его несут
+// `…networkLoadBalancers.*.listOperations`, `…listeners.*.listOperations` и
+// `…targetGroups.*.listOperations`, оставшиеся в обоих перечнях.
 var expectedOperatorPermissions = []string{
 	"loadbalancer.listeners.*.get",
 	"loadbalancer.listeners.*.list",
@@ -64,7 +77,6 @@ var expectedOperatorPermissions = []string{
 	"loadbalancer.networkLoadBalancers.*.getTargetStates",
 	"loadbalancer.networkLoadBalancers.*.list",
 	"loadbalancer.networkLoadBalancers.*.listOperations",
-	"loadbalancer.operations.*.get",
 	"loadbalancer.targetGroups.*.get",
 	"loadbalancer.targetGroups.*.list",
 	"loadbalancer.targetGroups.*.listOperations",
@@ -76,7 +88,6 @@ var expectedTargetManagerPermissions = []string{
 	"loadbalancer.networkLoadBalancers.*.get",
 	"loadbalancer.networkLoadBalancers.*.getTargetStates",
 	"loadbalancer.networkLoadBalancers.*.list",
-	"loadbalancer.operations.*.get",
 	"loadbalancer.targetGroups.*.addTargets",
 	"loadbalancer.targetGroups.*.get",
 	"loadbalancer.targetGroups.*.list",
