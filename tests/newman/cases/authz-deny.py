@@ -110,11 +110,39 @@ EXPECT = {
     # of the caller's account/project role. DENY for all (the request never
     # reaches the repo to return 404).
     "garbage-perresource":    {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"},
-    # UserService.Get of a specific user — only that user
-    # themselves resolves (`iam_user.viewer` includes `subject`); each base
-    # test-user owns their own home account so no cross-user admin path exists.
-    "user-get-nob":           {"ANON":"DENY","NOB":"ALLOW","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"},
-    "user-get-inv":           {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"ALLOW"},
+    # UserService.Get записи пользователя — читать её вправе САМ пользователь
+    # (`iam_user.v_get` содержит `subject`); каждый базовый тест-пользователь
+    # владеет своим домашним аккаунтом, поэтому пути «через администратора» нет.
+    #
+    # НО НИ ОДИН СУБЪЕКТ ЭТОЙ МАТРИЦЫ САМИМ ПОЛЬЗОВАТЕЛЕМ НЕ ЯВЛЯЕТСЯ, И БЫТЬ ИМ
+    # НЕ МОЖЕТ — поэтому здесь DENY по всей строке, а не ALLOW на «своей» клетке.
+    # Основание структурное, а не «не хватает выдачи»:
+    #
+    #   * `define subject: [user]` (proto/kacho/cloud/iam/v1/fga_model.fga, тип
+    #     `iam_user`) — отношение принимает ТОЛЬКО тип `user`;
+    #   * каждый предъявитель этой матрицы аутентифицируется как
+    #     `service_account` — объявлено данными в
+    #     tests/authz-fixtures/principal_pairings.py, где прямо сказано, что
+    #     `userNOBId` / `userINVId` / `userPureNoBindingsId` — ТОЛЬКО цели
+    #     привязки, и «ни один выдаваемый токен ими не аутентифицируется и не
+    #     может»: машинный посев добывает `client_credentials`, то есть
+    #     служебную учётку (почему именно так — tests/authz-fixtures/mint_rs256.py,
+    #     раздел `user_rs256`: у пользовательского токена `aud` жёстко
+    #     kacho-внутренний и не совпадает с ExpectedAudience края, плюс он не
+    #     несёт `acr` и не проходит порог повышения, от которого машина
+    #     освобождена, а человек — нет).
+    #
+    # Значит `service_account` не удовлетворяет `subject` НИ ПРИ КАКОЙ выдаче, и
+    # прежняя клетка ALLOW не имела производителя: 404 (скрытие существования) —
+    # правильный ответ продукта на запрос, который шаг РЕАЛЬНО делает. Клетка была
+    # ALLOW с 2026-07-26 (c4960673, «self всё ещё значит self»), где цель
+    # переставили вслед за субъектом; переставили ЦЕЛЬ, но принципал остался
+    # служебной учёткой, поэтому самочтением строка так и не стала ни разу.
+    #
+    # ALLOW-полоса самочтения НЕ потеряна — она вынесена туда, где у неё есть
+    # производитель: AUTHZ-USR-GT-SELF-CEREMONY ниже, человеческим предъявителем.
+    "user-get-nob":           {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"},
+    "user-get-inv":           {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"},
 }
 
 
@@ -169,12 +197,155 @@ def unauth_asserts(case_id):
     ]
 
 
-def allow_asserts(case_id):
+# ---------------------------------------------------------------------------
+# ALLOW-ПОЛОСЫ: ИСХОД ОДИН, УСТАНОВЛЕННЫЙ, И УТВЕРЖДАЕТСЯ ПАРОЙ
+#
+# Здесь стояла ОДНА функция на все 74 ALLOW-позиции матрицы, и она утверждала
+# «код не 403» и «код не 16». Отрицание проходит на любом ответе, кроме этих двух:
+# на успехе, на отказе валидации, на 409, на 500, на 503. То есть строка не
+# отличала исправную систему ни от одной поломки, кроме подписанной 403 — а на
+# полосах ниже она скрывала ДВА живых дефекта самих кейсов (см. lane «sync-reject»).
+# Отдельно: шаг, у которого ВСЕ утверждения о статусе отрицательные, читается
+# гейтами дерева (`internal/repohygiene`) как ПРОБА ОТКАЗА и выпадает из их
+# рассмотрения. verifies #668.
+#
+# Полос четыре, и выбирается полоса ПО ФОРМЕ ЗАПРОСА, а не по имени кейса, —
+# поэтому новая строка матрицы попадает в свою полосу автоматически:
+#
+#   read   — одиночное чтение (`GET /res/{id}`): sync, ответ — сам ресурс.
+#            Пара: HTTP 200 + `id` ответа РАВЕН запрошенному. `google.rpc.Status`
+#            успешное чтение не несёт, поэтому вторым членом пары служит форма.
+#   list   — перечисление (`GET /res` либо `GET /res?scope=`): sync, ответ —
+#            конверт выдачи. Пара: HTTP 200 + верхний уровень тела состоит только
+#            из объявленных полей ответа (`<plural>` + `nextPageToken`), то есть
+#            это НЕ конверт ошибки (`code`/`message`/`details`).
+#   op     — мутация: async по контракту (`api-conventions.md`; все мутирующие RPC
+#            iam возвращают `operation.Operation`). Пара: HTTP 200 + конверт
+#            Operation с iam-префиксом `iop` и объектом `metadata`.
+#   sync-reject — мутация, которую ВЛАДЕЛЕЦ отвергает СИНХРОННО, до Operation,
+#            по телу запроса. Пара: HTTP 400 + `code` 3 + названный текст.
+#
+# ПРЕДМЕТ МАТРИЦЫ ПРИ ЭТОМ СОХРАНЁН СТРОГО. До сервиса доходит только запрос,
+# который край ПРОПУСТИЛ; отказ в правах край отдаёт `403` (полоса DENY) либо
+# скрывает существование `404` (полоса READ-DENY). Значит любой из четырёх исходов
+# выше достижим ровно тем субъектом, которому доступ дан, и регрессия прав валит
+# кейс по первому же утверждению.
+
+
+def _allow_id_expr(path):
+    """Выражение, дающее тот же идентификатор, что ушёл в АДРЕСЕ запроса.
+
+    Подстановка `{{…}}` работает в адресе и теле, но НЕ в скрипте, поэтому
+    ожидаемое значение собирается из того же источника, что и запрос, — двух мест
+    об одном предмете не заводится.
+    """
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    if last.startswith("{{") and last.endswith("}}"):
+        return f"pm.environment.get('{last[2:-2]}')"
+    return f"'{last}'"
+
+
+def _allow_list_key(path):
+    """Ключ выдачи — последний сегмент КОЛЛЕКЦИИ адреса.
+
+    Он совпадает с именем поля ответа by construction: REST-путь ресурса —
+    `/iam/v1/<plural>`, а поле списка в `List<Res>Response` называется тем же
+    `<plural>` в camelCase (`accounts`, `users`, `roles`, `groups`, `projects`,
+    `serviceAccounts`). Выводить его из адреса, а не принимать параметром, —
+    решение осознанное: параметр `empty_list_key` имеет умолчание `users`, и на
+    вызовах `/accounts` / `/roles` / `/projects` оно неверно; для полосы EMPTY это
+    никогда не выстреливало, потому что EMPTY на них не достижим, но полосе ALLOW
+    досталось бы утверждение про чужой ключ.
+    """
+    return path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+
+
+def allow_read_asserts(case_id, id_expr):
+    """ALLOW, одиночное чтение: 200 + ответ есть ЗАПРОШЕННЫЙ ресурс."""
     return [
-        f"pm.test('[{case_id}] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+        f"pm.test('[{case_id}] ALLOW: HTTP 200 (чтение разрешено)', () => "
+        "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
         "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-        f"pm.test('[{case_id}] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));",
+        f"pm.test('[{case_id}] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {{",
+        "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+        f"  pm.expect(_j.id, JSON.stringify(_j)).to.equal({id_expr});",
+        "});",
     ]
+
+
+def allow_list_asserts(case_id, list_key):
+    """ALLOW, перечисление: 200 + конверт выдачи (а не конверт отказа).
+
+    Ключ выдачи может ОТСУТСТВОВАТЬ — пустая страница законна, и protojson пустое
+    повторяющееся поле не печатает. Поэтому утверждается не «ключ есть», а «сверх
+    объявленных полей ответа в теле ничего нет»: конверт ошибки этим и падает.
+    """
+    return [
+        f"pm.test('[{case_id}] ALLOW: HTTP 200 (перечисление разрешено)', () => "
+        "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
+        "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
+        f"pm.test('[{case_id}] ALLOW: конверт выдачи, а не конверт отказа', () => {{",
+        "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+        f"  pm.expect(Object.keys(_j).filter(k => ['{list_key}', 'nextPageToken'].indexOf(k) < 0),",
+        "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+        f"  pm.expect(_j['{list_key}'] === undefined || Array.isArray(_j['{list_key}']),",
+        f"    'поле {list_key} присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+        "});",
+    ]
+
+
+def allow_operation_asserts(case_id):
+    """ALLOW, мутация: 200 + конверт Operation с iam-префиксом.
+
+    Мутации iam async по контракту — все мутирующие RPC возвращают
+    `operation.Operation`. Исход самой операции (конфликт активного гранта, занятое
+    имя) приезжает в `Operation.error` и синхронного статуса не меняет: повторный
+    прогон на том же стенде остаётся 200, а не 409.
+    """
+    return [
+        f"pm.test('[{case_id}] ALLOW: HTTP 200 (мутация принята)', () => "
+        "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
+        "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
+        f"pm.test('[{case_id}] ALLOW: конверт Operation', () => {{",
+        "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+        "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+        "});",
+    ]
+
+
+def allow_sync_reject_asserts(case_id, message_token):
+    """ALLOW, полоса «край ПРОПУСТИЛ — владелец отверг ТЕЛО, синхронно».
+
+    Пара: HTTP 400 + `code` 3 (`INVALID_ARGUMENT`) + названный текст отказа.
+    Отображение кода в статус задаёт библиотека края (`runtime.HTTPStatusFromCode`;
+    край собирается без `WithErrorHandler`).
+
+    Текст сверяется ВХОЖДЕНИЕМ, а не равенством, и это осознанно: проверка домена
+    склеивает ошибки полей через multierr, поэтому равенство сломалось бы от
+    появления второго нарушения — то есть от изменения, к предмету кейса
+    отношения не имеющего. Названная часть при этом однозначно указывает на
+    производителя отказа.
+    """
+    return [
+        f"pm.test('[{case_id}] ALLOW→отказ тела: HTTP 400', () => "
+        "pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
+        "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
+        f"pm.test('[{case_id}] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => "
+        "pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+        f"pm.test('[{case_id}] ALLOW→отказ тела: названный производитель отказа', () => "
+        f"pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain({message_token!r}));",
+    ]
+
+
+def allow_asserts(case_id, method, path, lane=None, message_token=None):
+    """Выбор ALLOW-полосы ПО ФОРМЕ ЗАПРОСА (разбор — в комментарии выше)."""
+    if lane == "sync-reject":
+        return allow_sync_reject_asserts(case_id, message_token)
+    if method == "GET":
+        if _is_single_resource_get(path):
+            return allow_read_asserts(case_id, _allow_id_expr(path))
+        return allow_list_asserts(case_id, _allow_list_key(path))
+    return allow_operation_asserts(case_id)
 
 
 def empty_asserts(case_id, list_key="users"):
@@ -204,7 +375,8 @@ def reject_asserts(case_id):
     ]
 
 
-def emit(case_id_prefix, title, scope, method, path, body, subject, empty_list_key="users"):
+def emit(case_id_prefix, title, scope, method, path, body, subject, empty_list_key="users",
+         allow_lane=None, allow_message_token=None):
     code, label, auth = subject
     decision = EXPECT[scope][code]
     case_id = f"AUTHZ-{case_id_prefix}-{code}"
@@ -231,7 +403,8 @@ def emit(case_id_prefix, title, scope, method, path, body, subject, empty_list_k
         else:
             asserts = deny_asserts(case_id)
     elif decision == "ALLOW":
-        asserts = allow_asserts(case_id)
+        asserts = allow_asserts(case_id, method, path,
+                                lane=allow_lane, message_token=allow_message_token)
     elif decision == "EMPTY":
         asserts = empty_asserts(case_id, empty_list_key)
     else:
@@ -271,10 +444,27 @@ for subj in SUBJECTS:
          "GET", "/iam/v1/accounts/{{accountAId}}", None, subj)
     emit("ACCT-GT-CROSS", "Get account-B", "account-B",
          "GET", "/iam/v1/accounts/{{accountBId}}", None, subj)
+    # ALLOW-полоса этих двух строк — СИНХРОННЫЙ ОТКАЗ ТЕЛА, и это НАХОДКА, а не выбор.
+    #
+    # Имя `"x"` контракту не удовлетворяет: `AccountName.Validate` требует
+    # `^[a-z][-a-z0-9]{2,62}$` (минимум три символа,
+    # `services/iam/internal/domain/types.go`), а `Account.Validate` вызывается
+    # СИНХРОННО — `UpdateAccountUseCase.Execute` зовёт `target.Validate()` до
+    # `operations.NewFromContext`. Значит субъект с правом получает `400` +
+    # `INVALID_ARGUMENT` и Operation не появляется ВООБЩЕ: путь обновления аккаунта
+    # эта строка не проходила ни разу за свою жизнь, а прежнее «код не 403» этого
+    # не показывало.
+    #
+    # Полоса объявлена по ФАКТУ, а тело НЕ чинится здесь намеренно: годное имя
+    # переименовало бы общий посевной аккаунт на каждом прогоне — правка фикстуры
+    # с последствиями для соседних наборов, и она принимается отдельным решением, а
+    # не побочно. Пока полоса названа, «строка не обновляет аккаунт» стало видно.
     emit("ACCT-UP-OWN", "Update account-A", "account-A",
-         "PATCH", "/iam/v1/accounts/{{accountAId}}", {"name": "x", "updateMask": "name"}, subj)
+         "PATCH", "/iam/v1/accounts/{{accountAId}}", {"name": "x", "updateMask": "name"}, subj,
+         allow_lane="sync-reject", allow_message_token="Illegal argument name")
     emit("ACCT-UP-CROSS", "Update account-B", "account-B",
-         "PATCH", "/iam/v1/accounts/{{accountBId}}", {"name": "x", "updateMask": "name"}, subj)
+         "PATCH", "/iam/v1/accounts/{{accountBId}}", {"name": "x", "updateMask": "name"}, subj,
+         allow_lane="sync-reject", allow_message_token="Illegal argument name")
     # garbage-id Delete is per-resource-gated on a non-existent
     # `account:<garbage>` object → `no path` → 403 for every subject (never
     # reaches the repo). See garbage-perresource note in define_account_scoped.
@@ -648,12 +838,33 @@ for subj in SUBJECTS:
 # ---------------------------------------------------------------------------
 
 for subj in SUBJECTS:
+    # ALLOW-полоса приглашения — тоже СИНХРОННЫЙ ОТКАЗ ТЕЛА, и тоже находка.
+    #
+    # Тело несёт `roleId` БЕЗ `projectId`, а `InviteUserUseCase.Execute` объявляет
+    # эти два поля парными: `project_id == "" && role_id != ""` → синхронный
+    # `INVALID_ARGUMENT "Illegal argument project_id: required when role_id is set"`
+    # (`services/iam/internal/apps/kacho/api/user/invite.go`, шаг 1 «Sync validation»).
+    # Проверка `canInviteUsers` идёт ШАГОМ ПОЗЖЕ — значит ALLOW-строки до неё не
+    # доходили никогда, и заявленный предмет кейса (`CanInviteUsers`) ими не
+    # проверялся. Прежнее «код не 403» это скрывало.
+    #
+    # DENY-строки предмет сохраняют: `UserService/Invite` гейтится краем (`editor`
+    # на `account` из `account_id`, запись каталога прав), поэтому субъект без
+    # права получает `403` ДО тела. Отличие ALLOW от DENY остаётся строгим.
+    #
+    # Тело здесь НЕ чинится: добавить `projectId` значит сменить предмет строки
+    # (приглашение в проект — другой сценарий со своей матрицей), а снять `roleId` —
+    # сменить его же. Выбор между ними продуктовый и принимается отдельно.
     emit("INV-A", "Invite user в account-A", "invite-to-account-A",
          "POST", "/iam/v1/users:invite",
-         {"accountId":"{{accountAId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com","roleId":ROLE_VIEW}, subj)
+         {"accountId":"{{accountAId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com","roleId":ROLE_VIEW}, subj,
+         allow_lane="sync-reject",
+         allow_message_token="Illegal argument project_id: required when role_id is set")
     emit("INV-B", "Invite user в account-B", "invite-to-account-B",
          "POST", "/iam/v1/users:invite",
-         {"accountId":"{{accountBId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com","roleId":ROLE_VIEW}, subj)
+         {"accountId":"{{accountBId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com","roleId":ROLE_VIEW}, subj,
+         allow_lane="sync-reject",
+         allow_message_token="Illegal argument project_id: required when role_id is set")
 
 
 # ---------------------------------------------------------------------------
@@ -662,18 +873,23 @@ for subj in SUBJECTS:
 
 for subj in SUBJECTS:
     # UserService.Get is per-resource-gated on `iam_user:<id>`.
-    # The `iam_user.viewer` cascade is `subject or editor or viewer from
-    # account` — i.e. the user themselves, or someone with viewer on the
-    # user's HOME account. Each base test-user owns their own bootstrap
-    # (home) account, so only the target user themselves can Get their own
-    # record; no cross-user account-admin path exists (AAA is admin of
-    # account-A, not of NOB's home account). USR-GT-A targets userNOB →
-    # ALLOW only for NOB; USR-GT-B targets userINV → ALLOW only for INV.
-    # The target follows the SUBJECT: the row is "only the user themselves may Get
-    # their own record", so it must point at the record of the acting NOB principal
-    # — which is now userPureNoBindingsId (see the SUBJECTS note above). Left on
-    # userNOBId it would have asserted self-access for a DIFFERENT user.
-    emit("USR-GT-A", "Get own user record (self-viewable only)", "user-get-nob",
+    # Читать запись пользователя вправе САМ пользователь (`iam_user.v_get`
+    # содержит `subject`) либо носитель прямой выдачи на этот объект. Каждый
+    # базовый тест-пользователь владеет своим домашним аккаунтом, поэтому пути
+    # «через администратора чужого аккаунта» нет (AAA — админ account-A, а не
+    # домашнего аккаунта NOB).
+    #
+    # ОБЕ СТРОКИ — СПЛОШНОЙ DENY, и это не ослабление, а исправление ложного
+    # ожидания: субъекты матрицы — служебные учётки, а `define subject: [user]`
+    # принимает только тип `user` (разбор и предикаты — у EXPECT выше). Прежняя
+    # клетка ALLOW описывала запрос, которого шаг не делает, и производителя не
+    # имела; 404 здесь — правильный ответ продукта, и он утверждается СТРОГО
+    # (read_deny_asserts: скрытие существования, дословный контракт-тон).
+    #
+    # Ценность строки от этого не падает — она остаётся анти-BOLA утверждением:
+    # НИ администратор соседнего аккаунта, НИ администратор проекта, НИ
+    # приглашённый не читают чужую запись пользователя.
+    emit("USR-GT-A", "Get user record (self-viewable only)", "user-get-nob",
          "GET", "/iam/v1/users/{{userPureNoBindingsId}}", None, subj)
     emit("USR-GT-B", "Get userINV (self-viewable only)", "user-get-inv",
          "GET", "/iam/v1/users/{{userINVId}}", None, subj)
@@ -686,6 +902,67 @@ for subj in SUBJECTS:
     # `iam_user:<garbage>` → `no path` → 403 for all subjects.
     emit("USR-DL-A", "Delete user (garbage id — no FGA path)", "garbage-perresource",
          "DELETE", f"/iam/v1/users/{GARBAGE_USER}", None, subj)
+
+
+# ---------------------------------------------------------------------------
+# ALLOW-полоса самочтения — ЧЕЛОВЕЧЕСКИМ предъявителем (её производитель)
+# ---------------------------------------------------------------------------
+# Строки USR-GT-* выше — сплошной DENY, и это верно: их субъекты суть служебные
+# учётки, а `define subject: [user]` принимает только тип `user`. Но отрицание без
+# положительного контроля не отличает «читать чужое нельзя» от «UserService.Get
+# сломан для ВСЕХ»: полностью отказавший глагол оставил бы матрицу зелёной.
+#
+# Поэтому положительный контроль стоит ЗДЕСЬ, а не подразумевается: предъявителем,
+# который действительно принадлежит человеку. Он добывается настоящим входом
+# паролем у провайдера личности (волна церемонии), и коллекция authz-deny в эту
+# волну уже входит — проверяется машинно:
+#     python3 tests/authz-fixtures/ceremony_credentials.py --stems \
+#         --suite services/iam/tests/newman
+# то есть credential здесь доступен, а не заведён «на будущее».
+#
+# ПОЧЕМУ ВТОРОЙ ЧЕЛОВЕК, А НЕ ГЛАВНЫЙ. `ceremonyNoBindingsUserId` не является целью
+# привязки НИ В ОДНОЙ суите дерева, поэтому его 200 не может прийти от чужой выдачи,
+# залетевшей из соседней коллекции, и не зависит от порядка прогона. Главный человек
+# церемонии — владелец своего аккаунта и цель выдач, на нём тот же ответ был бы
+# слабее ровно на эту величину. (Его собственный положительный контроль живёт в
+# наборе iam-user, IAM-USR-GT-CRUD-OK.)
+#
+# ЧТО ИМЕННО УТВЕРЖДАЕТСЯ: человек читает СВОЮ запись и получает её. Отношение, по
+# которому это разрешено, — `iam_user.v_get ⊇ subject`; кортеж `iam_user:<usr>#subject
+# @ user:<usr>` пишется на заведении пользователя (bootstrapTuples в
+# services/iam/internal/apps/kacho/api/user/internal_upsert.go, ветка ownedAccounts==0
+# — то есть у КАЖДОГО пользователя). До восстановления `subject` в читающем глаголе
+# самочтение не работало ни у кого, и отказ был неотличим от «пользователя нет»:
+# скрытие существования отвечает тем же текстом, что и настоящее отсутствие. Здесь
+# это отличимо — предъявитель и цель названы, а ответ обязан НЕСТИ id.
+#
+# Проба не оборачивается ожиданием: запись пользователя и её кортеж существуют с
+# момента посева волны, а не создаются этим кейсом, — read-your-writes окна здесь нет.
+CASES.append(Case(
+    id="AUTHZ-USR-GT-SELF-CEREMONY",
+    title="[ALLOW] Get own user record as human ceremony principal (self via iam_user.v_get ⊇ subject)",
+    classes=["AUTHZ", "POS"],
+    priority="P1",
+    steps=[
+        Step(
+            name="get-self",
+            method="GET",
+            path="/iam/v1/users/{{ceremonyNoBindingsUserId}}",
+            auth="jwtHumanCeremonyNoBindings",
+            test_script=[
+                *assert_status(200),
+                # Ответ обязан быть ИМЕННО той записью, которую спрашивали. Без этого
+                # утверждения кейс зеленел бы на любом 200 — в том числе на чужой
+                # записи, а это ровно та ошибка, которую он призван исключать.
+                "pm.test('AUTHZ-USR-GT-SELF-CEREMONY: вернулась СВОЯ запись', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.id, JSON.stringify(j)).to.eql(",
+                "    pm.environment.get('ceremonyNoBindingsUserId'));",
+                "});",
+            ],
+        ),
+    ],
+))
 
 
 # ---------------------------------------------------------------------------
@@ -762,7 +1039,14 @@ for subj in SUBJECTS:
           "rules": [
               {"module": "iam", "resources": ["user", "role", "account", "project"], "verbs": ["*"]},
               {"module": "vpc", "resources": ["network", "subnet", "securityGroup"], "verbs": ["*"]},
-              {"module": "compute", "resources": ["instance", "disk"], "verbs": ["*"]},
+              # `disk` здесь стоял до раскола блочного хранения и пережил его: тип
+              # `compute.disk` отставлен (владелец — storage), и iam отвергает
+              # правило, называющее снятый ресурс, — `domain.validateRetirementGate`.
+              # Отказ приходил на ALLOW-полосу как 400, то есть кейс проверял не
+              # эскалацию прав, а собственную несвежесть. Гейт верен, фикстура была
+              # мертва: перепись по дереву дала ровно одно такое место из 13 правил
+              # с `"module": "compute"`.
+              {"module": "compute", "resources": ["instance"], "verbs": ["*"]},
           ]}, subj)
 
 # HIGH-1: User.List unqualified (без accountId) — scope-filter RPC: 200 со

@@ -114,9 +114,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-NET-GT-A1] ALLOW: not 403 (PermissionDenied)', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-NET-GT-A1] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-NET-GT-A1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-NET-GT-A1] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('seedNetworkA1Id'));",
+                  "});"
                 ]
               }
             }
@@ -193,9 +196,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-NET-LS-A1] ALLOW: not 403 (PermissionDenied)', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-NET-LS-A1] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-NET-LS-A1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-NET-LS-A1] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['networks', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['networks'] === undefined || Array.isArray(_j['networks']),",
+                  "    'поле networks присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -281,9 +290,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-NET-CR-A1] ALLOW: not 403 (PermissionDenied)', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-NET-CR-A1] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-NET-CR-A1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-NET-CR-A1] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^enp[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -1639,9 +1651,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-APITOK-NET-GT-A1] ALLOW: not 403 (PermissionDenied)', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-APITOK-NET-GT-A1] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-APITOK-NET-GT-A1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-APITOK-NET-GT-A1] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('seedNetworkA1Id'));",
+                  "});"
                 ]
               }
             }
@@ -1718,9 +1733,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-APITOK-NET-LS-A1] ALLOW: not 403 (PermissionDenied)', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-APITOK-NET-LS-A1] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-APITOK-NET-LS-A1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-APITOK-NET-LS-A1] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['networks', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['networks'] === undefined || Array.isArray(_j['networks']),",
+                  "    'поле networks присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }

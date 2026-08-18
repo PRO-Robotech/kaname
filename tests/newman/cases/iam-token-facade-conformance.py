@@ -262,14 +262,17 @@ CASES.append(Case(
             test_script=[
                 *assert_answered("edge acceptance"),
                 *_JOSE_HELPERS,
-                # Named separately from `status 200` on purpose. The acceptance says
-                # "NOT 401, NOT 403"; a bare equality assertion reports "expected 403
-                # to equal 200" and leaves the reader to work out which lane broke.
-                "pm.test('edge did NOT reject authN (401 would mean the facade-signed token failed verification)',",
-                "  () => pm.expect(pm.response.code, pm.response.text()).to.not.eql(401));",
-                "pm.test('edge did NOT reject authZ (403 on an <exempt> RPC would mean the principal did not resolve)',",
-                "  () => pm.expect(pm.response.code, pm.response.text()).to.not.eql(403));",
-                *assert_status(200),
+                # ОДНО утверждение, а не три. Прежде рядом со `status 200` стояли «не
+                # 401» и «не 403», объяснённые тем, что голое равенство не называет
+                # сломавшуюся полосу. Довод верен, средство — нет: оба отрицания
+                # подчинены утверждению о статусе (401 и 403 роняют его первыми) и
+                # ОТДЕЛЬНО упасть не могут, а сами по себе проходят на 500 и 503.
+                # Полосы теперь названы В СООБЩЕНИИ утверждения — диагностика та же,
+                # а мёртвых строк нет. verifies #668.
+                "pm.test('edge accepted the presented Bearer: HTTP 200', () => pm.expect(pm.response.code,",
+                "  '401 here means the facade-signed token failed verification; 403 on an <exempt> RPC'",
+                "  + ' means the principal did not resolve; any other code means the edge never reached'",
+                "  + ' this lane. Body: ' + pm.response.text()).to.eql(200));",
                 "const _sent = _sentBearer();",
                 "pm.test('a Bearer was actually presented (an unauthenticated 200 would prove nothing)',",
                 "  () => pm.expect(_sent, 'Authorization header').to.be.a('string').with.length.greaterThan(0));",

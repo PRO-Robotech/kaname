@@ -28,6 +28,59 @@ the fail-closed OpenFGA-outage case — i.e. the reason the suite exists.
 
 `pm.execution.skipRequest()` is the primitive that skips exactly one request.
 
+КАКИЕ ОБЛАСТИ СКРИПТОВ ЧИТАЮТСЯ (и почему это отдельный абзац)
+--------------------------------------------------------------
+Postman исполняет перед каждым запросом ТРИ пре-скрипта: корневой
+(`collection.event`), скрипты всех объемлющих папок и собственный скрипт шага.
+Эта перепись читала ТОЛЬКО третий, и `collection.event` не читался нигде.
+
+Цена измерена, а не предположена. Замер по дереву на `dfd2c027` (предикат — в
+теле задачи #661): коллекций 89, корневого стража несут 57 — vpc 18/18, nlb 9/9,
+storage 9/9, compute 7/7, geo 7/7, registry 5/5, gateway 2/2 и **iam 0/32**. Гейт
+писался в iam, где этой формы нет ни в одной коллекции, поэтому слепота пережила
+и обзор, и инъекцию: доказательство существовало и не касалось той области, в
+которой страж применяется чаще всего.
+
+Следствий было два, и второе тише первого:
+
+  * ЛОЖНЫЕ СРАБАТЫВАНИЯ. Шаг, пропущенный корневым стражем по предписанной этим
+    же гейтом форме, метился находкой `ASSERTED-NOT-EXECUTED`. На прогоне
+    32077150454 (шард nlb) — 157 находок, при том что в той же сводке стояло
+    `SKIPS: 0 RECORDED-SKIP`: о записанных пропусках гейт отчитался нулём, имея
+    их все 157. Перечень такой длины перестают читать, а перестав читать,
+    возвращаются к вердикту по коду возврата;
+  * СЛЕПАЯ ЗОНА ЗАПРЕТОВ. Статические запреты читали те же элементные скрипты,
+    поэтому для 57 коллекций из 89 не проверялись ВООБЩЕ. Маска, внесённая в
+    корневой скрипт, гейтом не ловилась — при том что маски запрещены директивой
+    владельца.
+
+Теперь: запреты судят КАЖДУЮ область отдельно (утверждение из корня не делает
+«слышимым» немой пропуск элемента); классификатор записанного пропуска читает
+ЭФФЕКТИВНЫЙ пре-скрипт (корень + папки + элемент); объём прочитанного печатается
+строкой `SCOPES:` — по областям и всегда, включая нули, иначе «ноль находок»
+снова станет неотличимо от «ноль прочитанного».
+
+ЧТО СЮДА НАМЕРЕННО НЕ СЛОЖЕНО. Корневой `skipRequest()` НЕ засчитывается в
+«объяснённые пропуски» (`_explained_skippable`). Он исполняется перед каждым
+запросом, поэтому такой зачёт объявил бы объяснённым ЛЮБОЕ усечение — то есть
+убил бы класс, ради которого перепись заведена, разом в 57 коллекциях. Корень
+читается там, где вывод делается ПО ОТЧЁТУ: он даёт шаблон имени, а извиняет шаг
+только фактически упавшее утверждение стража.
+
+ИМЯ УТВЕРЖДЕНИЯ СОБИРАЕТСЯ КОНКАТЕНАЦИЕЙ, и сверка это выдерживает. Стражи дерева
+пишут `pm.test('предусловие: {{' + _n + '}} …')` и `pm.test('FIXTURE REQUIRED: ' +
+__missing.join(', '))`. Прежний разбор вынимал первый ЛИТЕРАЛ и сравнивал его с
+именем из отчёта целиком, поэтому не сошёлся бы ни с одним из них даже после того,
+как страж прочитан. Теперь из выражения строится шаблон: литеральные члены —
+дословно, вычисляемые — подстановкой; выражение БЕЗ единого непустого литерала
+шаблона не даёт вовсе (иначе он совпал бы с чем угодно — амнистия).
+
+СКРИПТ ЧИТАЕТСЯ РАЗБОРОМ, А НЕ КАК ТЕКСТ. Комментарий — не код: без этого запрет
+краснел бы на объяснении, которое он сам предписывает держать рядом с собой.
+Упоминание запрета внутри строкового литерала — тоже не вызов (наши генераторы
+пишут в имена утверждений длинную прозу). Последовательность `//` внутри
+регулярного выражения — код, а не начало комментария.
+
 WHAT THIS CHECKS
 ----------------
 Per collection, two independent things:
@@ -292,19 +345,394 @@ def _transport_error(ex):
     return "no response"
 
 
-# Литералы имён утверждений и текстов провала, объявленных В САМОМ пре-скрипте:
+# Вызовы, которыми страж ОБЪЯВЛЯЕТ пропуск:
 #   pm.test('<имя>', () => { pm.expect.fail('<текст>'); })
 # Ими различается «пропуск, ЗАПИСАННЫЙ утверждением стража» и «шаг, чьи проверки
 # исполнились, а записи об исполнении нет».
-_TEST_NAME_RE = re.compile(r"""pm\.test\s*\(\s*(['"])(.*?)\1""", re.S)
-_EXPECT_FAIL_RE = re.compile(r"""pm\.expect\.fail\s*\(\s*(['"])(.*?)\1""", re.S)
+#
+# Здесь стоял разбор ЛИТЕРАЛА: `pm\.test\(\s*(['"])(.*?)\1`. Он вынимал первую
+# строку и сравнивал её с именем из отчёта целиком — то есть работал ровно на тех
+# стражах, чьё имя литералом и является. Все корневые стражи дерева собирают имя
+# КОНКАТЕНАЦИЕЙ, поэтому с ними он не сошёлся бы никогда, даже будучи прочитан.
+# Теперь берётся аргумент вызова целиком (`_argument_source`) и из него строится
+# шаблон (`_expression_pattern`).
+_TEST_CALL_RE = re.compile(r"pm\.test\s*\(")
+_FAIL_CALL_RE = re.compile(r"pm\.expect\.fail\s*\(")
+# ─────────────────────────────────────────────────────────────────────────────
+# ЧТЕНИЕ СКРИПТА: код, строковый литерал, регулярное выражение, комментарий
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Гейт читает ИСПОЛНЯЕМУЮ часть, а не текст. Пока областью чтения были только
+# элементные скрипты, разница была почти незаметна: их пишет генератор и прозы в
+# них мало. С корневыми скриптами она становится решающей — там живут объяснения
+# рядом с самим запретом, и запрет по сырому тексту краснел бы на комментарии,
+# который его же и предписывает. Такой запрет снимают первым.
+#
+# Отсюда ОДИН разборщик и ДВЕ проекции, потому что вопросы разные:
+#   `_code`  — комментарии убраны, СТРОКИ НА МЕСТЕ. Отвечает «какой литерал сюда
+#              передали» (имя утверждения, цель перехода, имя переменной);
+#   `_calls` — комментарии убраны и тела строк выпотрошены. Отвечает «вызывается
+#              ли здесь X». Упоминание запрета внутри прозы — не вызов: наши
+#              генераторы пишут в имена утверждений и в тексты провалов длинные
+#              объяснения, и по сырому тексту запрет краснел бы на тексте о себе.
+#
+# Регулярное выражение распознаётся отдельно: последовательность `//` внутри него
+# — это код, а не начало комментария. Без этого строка с регуляркой съедала бы
+# собственный остаток, и вызов за ней стал бы невидим.
+_REGEX_KEYWORDS = frozenset(
+    "return typeof case in of new delete void do else yield await instanceof".split()
+)
 
 
-def _recorded_skip_guards(leaves):
-    """Индексы шагов, чей ПРЕ-СКРИПТ несёт САНКЦИОНИРОВАННУЮ форму стража:
-    «утвердить, назвав переменную, и только потом пропустить».
+def _skip_string(src, i):
+    """Индекс сразу за закрывающей кавычкой строки, начинающейся в `i`."""
+    q = src[i]
+    j = i + 1
+    n = len(src)
+    while j < n:
+        if src[j] == "\\":
+            j += 2
+            continue
+        if src[j] == q:
+            return j + 1
+        j += 1
+    return n
 
-    Возвращает {index: (имена pm.test, тексты pm.expect.fail)} — по ним ниже
+
+def _regex_here(last_sig, last_word):
+    """Может ли `/` в этой позиции начинать регулярное выражение (а не деление)."""
+    if not last_sig:
+        return True
+    if last_word:
+        return last_word in _REGEX_KEYWORDS
+    return last_sig in "(,=:[!&|?{};+-*%<>~^"
+
+
+def _tokenize(src):
+    """[(вид, текст)] — вид ∈ {code, string, regex, comment}."""
+    out = []
+    buf = []
+    i, n = 0, len(src)
+    last_sig = ""
+    last_word = ""
+
+    def flush():
+        if buf:
+            out.append(("code", "".join(buf)))
+            del buf[:]
+
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            flush()
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            out.append(("comment", src[i:j]))
+            i = j
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] == "*":
+            flush()
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(("comment", src[i:j]))
+            i = j
+            continue
+        if c in "'\"`":
+            flush()
+            j = _skip_string(src, i)
+            out.append(("string", src[i:j]))
+            last_sig, last_word = c, ""
+            i = j
+            continue
+        if c == "/" and _regex_here(last_sig, last_word):
+            j, in_class, closed = i + 1, False, False
+            while j < n:
+                d = src[j]
+                if d == "\\":
+                    j += 2
+                    continue
+                if d == "\n":
+                    break
+                if d == "[":
+                    in_class = True
+                elif d == "]":
+                    in_class = False
+                elif d == "/" and not in_class:
+                    j += 1
+                    closed = True
+                    break
+                j += 1
+            if closed:
+                flush()
+                out.append(("regex", src[i:j]))
+                last_sig, last_word = "/", ""
+                i = j
+                continue
+        buf.append(c)
+        if not c.isspace():
+            last_sig = c
+            last_word = (last_word + c) if (c.isalnum() or c in "_$") else ""
+        i += 1
+    flush()
+    return out
+
+
+def _code(src):
+    """Скрипт без комментариев, строковые литералы сохранены + маска строк.
+
+    Маска нужна, чтобы поиск ВЫЗОВА не срабатывал внутри литерала: строка
+    `'зови pm.test(…)'` содержит текст вызова и вызовом не является.
+    """
+    parts = []
+    mask = bytearray()
+    for kind, text in _tokenize(src):
+        if kind == "comment":
+            continue
+        parts.append(text)
+        mask.extend(b"\x01" * len(text) if kind == "string" else b"\x00" * len(text))
+    return "".join(parts), mask
+
+
+def _calls(src):
+    """Скрипт без комментариев, тела строковых литералов выпотрошены."""
+    parts = []
+    for kind, text in _tokenize(src):
+        if kind == "comment":
+            continue
+        parts.append(text[0] + text[-1] if kind == "string" and len(text) >= 2 else text)
+    return "".join(parts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ИМЯ УТВЕРЖДЕНИЯ, СОБРАННОЕ КОНКАТЕНАЦИЕЙ
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Стражи дерева называют утверждение не литералом, а склейкой:
+#   pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', …)
+#   pm.test('FIXTURE REQUIRED: ' + __missing.join(', '), …)
+# Сверка «литерал == имя из отчёта» не сошлась бы ни с одним из них даже после
+# того, как страж ПРОЧИТАН: она вынимает первый литерал и сравнивает с целым.
+#
+# Поэтому из выражения строится ШАБЛОН: литеральные члены — дословно, остальные —
+# подстановкой. Это не ослабление: `.*` появляется ровно там, где исходник
+# действительно склеивает вычисляемое, и нигде больше. Выражение БЕЗ единого
+# непустого литерала шаблона не даёт вовсе — иначе он совпал бы с чем угодно, то
+# есть страж превратился бы в амнистию (fail-closed).
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "v": "\v",
+            "0": "\0", "\\": "\\", "'": "'", '"': '"', "`": "`", "/": "/"}
+
+
+def _unescape(s):
+    out = []
+    i, n = 0, len(s)
+    while i < n:
+        if s[i] == "\\" and i + 1 < n:
+            nxt = s[i + 1]
+            if nxt == "u" and i + 5 < n + 1:
+                try:
+                    out.append(chr(int(s[i + 2:i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            if nxt == "x" and i + 3 < n + 1:
+                try:
+                    out.append(chr(int(s[i + 2:i + 4], 16)))
+                    i += 4
+                    continue
+                except ValueError:
+                    pass
+            out.append(_ESCAPES.get(nxt, nxt))
+            i += 2
+            continue
+        out.append(s[i])
+        i += 1
+    return "".join(out)
+
+
+def _argument_source(code, open_paren):
+    """Текст ПЕРВОГО аргумента вызова, чья `(` стоит в позиции `open_paren`."""
+    depth = 0
+    j, n = open_paren, len(code)
+    start = open_paren + 1
+    while j < n:
+        c = code[j]
+        if c in "'\"`":
+            j = _skip_string(code, j)
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return code[start:j]
+        elif c == "," and depth == 1:
+            return code[start:j]
+        j += 1
+    return None
+
+
+def _split_concatenation(expr):
+    """Члены выражения по верхнеуровневому `+` (строки не разрезаются)."""
+    terms, buf = [], []
+    depth = 0
+    i, n = 0, len(expr)
+    while i < n:
+        c = expr[i]
+        if c in "'\"`":
+            j = _skip_string(expr, i)
+            buf.append(expr[i:j])
+            i = j
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "+" and depth == 0:
+            terms.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    terms.append("".join(buf))
+    return terms
+
+
+def _term_pattern(term):
+    """(кусок регулярного выражения, это_литерал) для одного члена склейки."""
+    t = term.strip()
+    if len(t) >= 2 and t[0] in "'\"" and _skip_string(t, 0) == len(t) and t[-1] == t[0]:
+        lit = _unescape(t[1:-1])
+        return re.escape(lit), lit
+    if len(t) >= 2 and t[0] == "`" and _skip_string(t, 0) == len(t) and t[-1] == "`":
+        body = t[1:-1]
+        out, lit_seen = [], ""
+        i, n = 0, len(body)
+        chunk = []
+        while i < n:
+            if body[i] == "\\" and i + 1 < n:
+                chunk.append(body[i:i + 2])
+                i += 2
+                continue
+            if body[i] == "$" and i + 1 < n and body[i + 1] == "{":
+                lit = _unescape("".join(chunk))
+                chunk = []
+                if lit:
+                    out.append(re.escape(lit))
+                    lit_seen = lit_seen or lit
+                depth = 1
+                i += 2
+                while i < n and depth:
+                    if body[i] == "{":
+                        depth += 1
+                    elif body[i] == "}":
+                        depth -= 1
+                    i += 1
+                out.append(".*")
+                continue
+            chunk.append(body[i])
+            i += 1
+        lit = _unescape("".join(chunk))
+        if lit:
+            out.append(re.escape(lit))
+            lit_seen = lit_seen or lit
+        return "".join(out), lit_seen
+    return ".*", ""
+
+
+def _expression_pattern(expr, anchored_end):
+    """Скомпилированный шаблон имени/текста, либо None (нечего сверять)."""
+    parts, first_literal = [], ""
+    for term in _split_concatenation(expr):
+        piece, literal = _term_pattern(term)
+        if literal and not first_literal:
+            first_literal = literal
+        parts.append(piece)
+    if not first_literal:
+        return None  # ни одного непустого литерала — шаблон был бы «что угодно»
+    body = re.sub(r"(?:\.\*){2,}", ".*", "".join(parts))
+    return re.compile("^" + body + ("$" if anchored_end else ""), re.S), first_literal
+
+
+def _guard_patterns(script_src):
+    """(шаблоны имён pm.test, шаблоны текстов pm.expect.fail) этого скрипта."""
+    code, mask = _code(script_src)
+    names, fails = [], []
+    for m in _TEST_CALL_RE.finditer(code):
+        if mask[m.start()]:
+            continue
+        expr = _argument_source(code, m.end() - 1)
+        if expr is None:
+            continue
+        got = _expression_pattern(expr, True)
+        if got:
+            names.append(got[0])
+    for m in _FAIL_CALL_RE.finditer(code):
+        if mask[m.start()]:
+            continue
+        expr = _argument_source(code, m.end() - 1)
+        if expr is None:
+            continue
+        got = _expression_pattern(expr, False)
+        if got:
+            fails.append(got)
+    return names, fails
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ОБЛАСТИ СКРИПТОВ: КОРЕНЬ КОЛЛЕКЦИИ И ПАПКИ, А НЕ ТОЛЬКО ЭЛЕМЕНТ
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Postman исполняет перед каждым запросом ТРИ пре-скрипта: корневой
+# (`collection.event`), скрипты всех объемлющих папок и собственный скрипт шага.
+# Перепись читала только третий. Замер по дереву (`dfd2c027`): коллекций 89, с
+# корневым стражем — 57 (vpc 18/18, nlb 9/9, storage 9/9, compute 7/7, geo 7/7,
+# registry 5/5, gateway 2/2, iam 0/32). Гейт писался в iam, где этой формы нет
+# вовсе, поэтому слепота пережила и обзор, и инъекцию.
+def _iter_script_scopes(col):
+    """[(метка, узел)] для КАЖДОЙ области скриптов: корень + каждая папка."""
+    scopes = [("корень коллекции", col)]
+
+    def walk(items, path):
+        for it in items:
+            if "item" in it:
+                nm = it.get("name", "?")
+                here = f"{path}/{nm}" if path else nm
+                scopes.append((f"папка {here!r}", it))
+                walk(it["item"], here)
+
+    walk(col.get("item", []), "")
+    return scopes
+
+
+def _iter_leaf_inherited(col, listen="prerequest"):
+    """Унаследованный скрипт каждого листа (корень + объемлющие папки).
+
+    Порядок — тот же, что у `_iter_leaves`, потому что обход тот же.
+    """
+    out = []
+
+    def walk(items, acc):
+        for it in items:
+            if "request" in it:
+                out.append(acc)
+            if "item" in it:
+                walk(it["item"], acc + "\n" + _scripts(it, listen))
+
+    walk(col.get("item", []), _scripts(col, listen))
+    return out
+
+
+def _recorded_skip_guards(leaves, inherited_pre=None):
+    """Индексы шагов, чей ЭФФЕКТИВНЫЙ пре-скрипт несёт САНКЦИОНИРОВАННУЮ форму
+    стража: «утвердить, назвав переменную, и только потом пропустить».
+
+    Эффективный пре-скрипт = корень коллекции + объемлющие папки + собственный
+    скрипт шага, в том порядке, в котором их исполняет newman. Раньше читался
+    только третий — а в 57 коллекциях дерева из 89 страж живёт в первом.
+
+    Возвращает {index: (шаблоны имён, шаблоны текстов провала)} — по ним ниже
     сверяется, что упавшее утверждение шага принадлежит ИМЕННО стражу.
 
     ЗАЧЕМ ОТДЕЛЬНАЯ КАТЕГОРИЯ. Форма «утвердить → skipRequest()» объявлена
@@ -321,21 +749,30 @@ def _recorded_skip_guards(leaves):
     стража». Шаг, у которого провалилось утверждение тест-скрипта, ИСПОЛНЯЛСЯ —
     тест-скрипт не выполняется без ответа, — и он остаётся находкой, даже если
     страж в пре-скрипте у него есть. Именно эту половину класса гейт и заводился
-    ловить (пропавшие записи об исполнении в executions).
+    ловить (пропавшие записи об исполнении в executions). Корневой страж эту
+    границу не сдвигает: он даёт шаблон имени, а решает по-прежнему отчёт.
     """
     guards = {}
     for i, it in enumerate(leaves):
-        pre = _scripts(it, "prerequest")
-        if not (_SKIP_RE.search(pre) and _ASSERT_RE.search(pre)):
+        own = _scripts(it, "prerequest")
+        pre = (inherited_pre[i] + "\n" + own) if inherited_pre else own
+        calls = _calls(pre)
+        if not (_SKIP_RE.search(calls) and _ASSERT_RE.search(calls)):
             continue
-        names = {m.group(2).strip() for m in _TEST_NAME_RE.finditer(pre)}
-        fails = {m.group(2).strip() for m in _EXPECT_FAIL_RE.finditer(pre)}
+        names, fails = _guard_patterns(pre)
+        if not names and not fails:
+            continue  # объявить нечем — сверять не с чем (fail-closed)
         guards[i] = (names, fails)
     return guards
 
 
 def _failure_belongs_to_guard(failure, names, fails):
     """Принадлежит ли упавшее утверждение самому стражу.
+
+    `names` — шаблоны имён, привязанные с обоих концов: имя из отчёта обязано
+    отвечать шаблону ЦЕЛИКОМ, а не начинаться с него. `fails` — пары (шаблон без
+    правой привязки, первый литерал): текст провала chai дописывает справа,
+    поэтому там сверка префиксная.
 
     FAIL-CLOSED: если отчёт не позволяет установить, ЧТО именно упало, шаг НЕ
     извиняется. Неустановимое остаётся находкой — иначе «объяснённый пропуск»
@@ -344,21 +781,35 @@ def _failure_belongs_to_guard(failure, names, fails):
     err = failure.get("error") or {}
     test = (err.get("test") or "").strip()
     if test:
-        return test in names
+        return any(p.match(test) for p in names)
     msg = (err.get("message") or "").strip()
     if msg:
-        return any(msg.startswith(f) or f.startswith(msg) for f in fails if f)
+        for pat, literal in fails:
+            if pat.match(msg):
+                return True
+            if literal and literal.startswith(msg):
+                return True  # отчёт обрезал сообщение стража
     return False
 
 
 def _explained_skippable(leaves):
     """Indices that are allowed to not execute, with the reason.
 
-    (a) explicit `skipRequest()` in the item's own pre-request script;
+    (a) explicit `skipRequest()` in the item's OWN pre-request script;
     (b) jumped over by a literal forward `setNextRequest('<later item>')`.
     Both are static over-approximations of newman's runtime control flow — they
     never mask a truncation, because a truncated tail has no jump pointing past
     it and no skip guard of its own.
+
+    КОРНЕВОЙ И ПАПОЧНЫЙ ПРОПУСК СЮДА НЕ СКЛАДЫВАЕТСЯ — НАМЕРЕННО, и это не
+    недосмотр расширения. Корневой пре-скрипт исполняется перед КАЖДЫМ запросом,
+    поэтому засчитать его `skipRequest()` в «объяснённые пропуски» значило бы
+    объявить объяснённым ЛЮБОЕ усечение: у пропавшего хвоста появился бы страж,
+    которого у него нет. Это ровно тот класс, ради которого перепись заведена, и
+    он умер бы разом в 57 коллекциях из 89.
+    Корень читается там, где вывод делается ПО ОТЧЁТУ, а не по форме кода:
+    `_recorded_skip_guards` даёт шаблон имени, а извиняет шаг только фактически
+    упавшее утверждение стража. Немой корневой пропуск остаётся UNEXPLAINED.
     """
     by_name = {}
     for i, it in enumerate(leaves):
@@ -366,11 +817,15 @@ def _explained_skippable(leaves):
 
     reasons = {}
     for i, it in enumerate(leaves):
-        if _SKIP_RE.search(_scripts(it, "prerequest")):
+        if _SKIP_RE.search(_calls(_scripts(it, "prerequest"))):
             reasons[i] = "skipRequest() guard"
 
     for i, it in enumerate(leaves):
-        for _q, target in _JUMP_RE.findall(_scripts(it)):
+        code, mask = _code(_scripts(it))
+        for m in _JUMP_RE.finditer(code):
+            if mask[m.start()]:
+                continue  # текст перехода внутри литерала — не переход
+            target = m.group(2)
             j = by_name.get(target)
             if j is None or j <= i + 1:
                 continue  # unknown target, self, or adjacent → nothing skipped
@@ -379,33 +834,75 @@ def _explained_skippable(leaves):
     return reasons
 
 
-def check_collection(col_path, out_dir):
-    """Returns (ok, coverage_line, [problem lines])."""
+def check_collection(col_path, out_dir, census=None):
+    """Returns (ok, judged, coverage_line, [problem lines]).
+
+    `census` — необязательный словарь-счётчик ОБЪЁМА ОСМОТРЕННОГО: сколько
+    областей скриптов прочитано (корней, папок, элементов) и сколько из них
+    несут стража. Без этой величины «ноль находок» неотличимо от «ноль
+    прочитанного» — а именно так и выглядела слепота к корневым скриптам: гейт
+    молчал не потому, что нарушений нет, а потому, что 57 коллекций из 89 он в
+    этой части не читал вовсе.
+    """
     name = os.path.basename(col_path).replace(".postman_collection.json", "")
     problems = []
     with open(col_path, encoding="utf-8") as fh:
         col = json.load(fh)
     leaves = list(_iter_leaves(col.get("item", [])))
     parents = list(_iter_leaf_parents(col.get("item", [])))
+    inherited = _iter_leaf_inherited(col)
     total = len(leaves)
 
+    # ── ОБЛАСТИ СКРИПТОВ: корень + папки + элементы ──────────────────────────
+    # Статические запреты судят КАЖДУЮ область отдельно, а не их склейку: страж
+    # объявляется утверждением В ТОМ ЖЕ скрипте, где пропускает, поэтому
+    # утверждение из корня не вправе делать «слышимым» немой пропуск элемента.
+    scopes = [(lbl, _scripts(node), _scripts(node, "prerequest"))
+              for lbl, node in _iter_script_scopes(col)]
+    scopes += [(repr(it.get("name", "?")), _scripts(it), _scripts(it, "prerequest"))
+               for it in leaves]
+
+    if census is not None:
+        census["collections"] += 1
+        folders = len(_iter_script_scopes(col)) - 1
+        census["folders"] += folders
+        census["leaves"] += total
+        if _scripts(col).strip():
+            census["roots_with_script"] += 1
+        for lbl, allsrc, _pre in scopes[1:1 + folders]:
+            if allsrc.strip():
+                census["folders_with_script"] += 1
+        for it in leaves:
+            if _scripts(it).strip():
+                census["leaves_with_script"] += 1
+        # «Унаследованный страж» считается по ПУТИ до листа (корень + его папки),
+        # а не по объединению всех папок сразу: иначе пропуск из одной ветки и
+        # утверждение из другой сложились бы в стража, которого нет ни на одном
+        # пути, и число говорило бы не то, что называет.
+        for inh in inherited:
+            calls = _calls(inh)
+            if _SKIP_RE.search(calls) and _ASSERT_RE.search(calls):
+                census["inherited_guard_collections"] += 1
+                break
+
     # (1a) static ban — setNextRequest(null) ends the run
-    for it in leaves:
-        if _BAN_RE.search(_scripts(it)):
+    for where, allsrc, _pre in scopes:
+        if _BAN_RE.search(_calls(allsrc)):
             problems.append(
-                f"  BANNED setNextRequest(null) in {it.get('name','?')!r} — it ENDS THE RUN, "
+                f"  BANNED setNextRequest(null) in {where} — it ENDS THE RUN, "
                 f"it does not skip a request. Use pm.execution.skipRequest()."
             )
 
     # (1b) static ban — an environment guard that skips without saying so
     silent = []
-    for it in leaves:
-        src = _scripts(it, "prerequest")
-        if not _SKIP_RE.search(src):
+    for where, _allsrc, src in scopes:
+        calls = _calls(src)
+        if not _SKIP_RE.search(calls):
             continue
-        env_vars = sorted(set(_ENV_URL_VAR_RE.findall(src)))
-        if env_vars and not _ASSERT_RE.search(src):
-            silent.append((it.get("name", "?"), "/".join(env_vars)))
+        code, _mask = _code(src)
+        env_vars = sorted(set(_ENV_URL_VAR_RE.findall(code)))
+        if env_vars and not _ASSERT_RE.search(calls):
+            silent.append((where, "/".join(env_vars)))
     if silent:
         problems.append(
             f"  {len(silent)} SILENT environment guard(s) — skip when a harness variable is "
@@ -541,7 +1038,7 @@ def check_collection(col_path, out_dir):
     # An unanswered request is NOT explained by a skip guard: the guard says "this
     # request did not run", the transport error says "it ran and got nothing back".
     # Folding the second into the first is how the class hid in the first place.
-    guards = _recorded_skip_guards(leaves)
+    guards = _recorded_skip_guards(leaves, inherited)
 
     # ЗАПИСАННЫЙ ПРОПУСК vs НЕМОЙ РАЗРЫВ — две разные вещи, и до сих пор они
     # считались одной. Шаг «утвердил и не исполнился» может быть:
@@ -665,9 +1162,12 @@ def main(argv=None):
     unjudged = []
     tot_items = tot_exec = 0
     tot_recorded = tot_explained = 0
+    census = {"collections": 0, "roots_with_script": 0, "folders": 0,
+              "folders_with_script": 0, "leaves": 0, "leaves_with_script": 0,
+              "inherited_guard_collections": 0}
     print("===== execution coverage (did every request actually run?) =====")
     for col in cols:
-        ok, judged, line, problems = check_collection(col, args.out_dir)
+        ok, judged, line, problems = check_collection(col, args.out_dir, census)
         print(line)
         for p in problems:
             print(p)
@@ -693,6 +1193,16 @@ def main(argv=None):
     # same, and the number that separates them is how many collections were judged.
     print(f"CENSUS: {len(cols)} collection(s) matched; judged {len(cols) - len(unjudged)}; "
           f"not judged {len(unjudged)} (no usable report)")
+    # ОБЪЁМ ОСМОТРЕННОГО по областям скриптов. Печатается ВСЕГДА, включая нули:
+    # запрет, который «ничего не нашёл», обязан быть отличим от запрета, который
+    # целый вид области не читал. Строка заведена потому, что второе и было
+    # правдой: корневые скрипты 57 коллекций из 89 не читались, и по выводу это
+    # было неотличимо от чистого дерева.
+    print(f"SCOPES: прочитано областей скриптов — корней {census['roots_with_script']}/"
+          f"{census['collections']}, папок {census['folders_with_script']}/{census['folders']}, "
+          f"элементов {census['leaves_with_script']}/{census['leaves']}; "
+          f"коллекций с УНАСЛЕДОВАННЫМ стражем (корень/папка) — "
+          f"{census['inherited_guard_collections']}")
     if tot_items:
         print(f"TOTAL executed {tot_exec}/{tot_items} ({100.0 * tot_exec / tot_items:.1f}%)")
     # ПОПУЛЯЦИЯ ОБЪЯСНЁННЫХ ПРОПУСКОВ — счётна и РАЗДЕЛЕНА на два вида, потому что

@@ -5,6 +5,48 @@ It reports the counts newman reported — assertions failed, script crashes, una
 requests, reports with no assertions — and any of them above zero fires it. Outstanding
 red is carried here, as a number and a case list, never as a deduction in the gate.
 
+## Самочтение записи пользователя: ALLOW-полоса перенесена к своему производителю (2026-08-18)
+
+Последние **4** упавших утверждения релиза `gates-verdict` — **2** шага набора
+`authz-deny`, `AUTHZ-USR-GT-A-NOB` и `AUTHZ-USR-GT-B-INV`, оба с
+`expected 404 to equal 200` на `User <id> not found`.
+
+**Продуктового дефекта здесь не было: 404 — правильный ответ на запрос, который эти
+шаги делают.** Клетка ALLOW не имела производителя, и основание структурное, а не
+«не доехала выдача»:
+
+| факт | предикат |
+|---|---|
+| читать свою запись разрешает отношение, принимающее ТОЛЬКО тип `user` | `awk '/^type iam_user/,/^type [^i]/' proto/kacho/cloud/iam/v1/fga_model.fga \| grep 'define subject'` → `[user]` |
+| каждый предъявитель матрицы — служебная учётка | `tests/authz-fixtures/principal_pairings.py`, раздел про то, что `userNOBId` / `userINVId` / `userPureNoBindingsId` — ТОЛЬКО цели привязки |
+| пользовательский токен край не принимает | `tests/authz-fixtures/mint_rs256.py`, раздел `user_rs256`: `aud` жёстко kacho-внутренний, и `acr` не несётся |
+
+Значит служебная учётка не удовлетворяет это отношение НИ ПРИ КАКОЙ выдаче. Клетка
+стояла ALLOW с 2026-07-26 (`c4960673`, раздел ниже): тогда цель переставили вслед за
+субъектом, но принципал остался служебной учёткой — переставили ЦЕЛЬ, а не
+ПРЕДЪЯВИТЕЛЯ, поэтому самочтением строка не стала ни разу.
+
+**Сделано — не вычет и не маска:**
+
+- обе клетки → `DENY`; строка утверждается СТРОГО (`read_deny_asserts`: 404 **и**
+  grpc 5 **и** отсутствие утечки причин отказа) и сохраняет свой предмет — анти-BOLA:
+  ни администратор соседнего аккаунта, ни администратор проекта, ни приглашённый не
+  читают чужую запись пользователя;
+- ALLOW-полоса **не потеряна, а перенесена туда, где у неё есть производитель** —
+  `AUTHZ-USR-GT-SELF-CEREMONY`, человеческим предъявителем волны церемонии
+  (`jwtHumanCeremonyNoBindings` + `ceremonyNoBindingsUserId`). Коллекция `authz-deny`
+  в эту волну входит уже, проверяется машинно:
+  `python3 tests/authz-fixtures/ceremony_credentials.py --stems --suite services/iam/tests/newman`.
+
+Без этого переноса строки `USR-GT-*` стали бы сплошным отрицанием, и полностью
+отказавший `UserService.Get` оставил бы матрицу зелёной.
+
+**Остаточный долг, названный явно, чтобы клетку не «восстановили» обратно:**
+самочтение проверяемо **только** в волне церемонии — машинный посев принципала типа
+`user` не производит и не может (см. предикаты выше). В машинной волне у этой полосы
+производителя нет; относиться к её отсутствию там как к пробелу фикстуры — ошибка,
+это свойство модели аутентификации, а не пропуск.
+
 ## Known-RED subtraction removed (2026-07-30)
 
 The gate used to deduct a "known-RED" set from each suite's failure count before
@@ -172,6 +214,14 @@ several were strengthened.
   (`USR-GT-A` self-get, `ESC-SELF-ADMIN-*` self-grant) were re-targeted to
   `userPureNoBindingsId` so "self" still means self. Stale titles naming `jwtNoBindings`
   on steps that already used the pure subject were corrected.
+
+  > **Позднее уточнение (2026-08-18, раздел «Самочтение записи пользователя» выше):**
+  > для `USR-GT-*` этого было НЕ достаточно, и запись оставлена как свидетельство о
+  > сделанном тогда, а не как действующее указание. Переставили ЦЕЛЬ вслед за
+  > субъектом, но ПРЕДЪЯВИТЕЛЬ остался служебной учёткой, тогда как отношение
+  > самочтения принимает только тип `user`, — поэтому клетка ALLOW производителя не
+  > получила и красной оставалась до 2026-08-18. Клетки переведены в `DENY`,
+  > ALLOW-полоса перенесена в `AUTHZ-USR-GT-SELF-CEREMONY`.
 
 - **`IAM-USR-DL-CRUD-OK` deleted a user that cannot be deleted** (surfaced *by* the poll
   fix — the 404 had been hiding it). `userINVId` holds active AccessBindings by

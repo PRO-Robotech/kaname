@@ -139,11 +139,68 @@ def read_deny_asserts(case_id):
     ]
 
 
-def allow_asserts(case_id):
+# ALLOW-ПОЛОСЫ: ИСХОД ОДИН, УСТАНОВЛЕННЫЙ, УТВЕРЖДАЕТСЯ ПАРОЙ.
+#
+# Здесь стояло «код не 403» и «код не 16» на все пять ALLOW-позиций. Отрицание
+# проходит на любом другом ответе — на отказе валидации, на 500, на 503, — то есть
+# не отличает исправную систему ни от одной поломки, кроме подписанной 403. Заодно
+# шаг, у которого все утверждения о статусе отрицательные, читается гейтами дерева
+# как ПРОБА ОТКАЗА и выпадает из их рассмотрения. verifies #668.
+#
+# Полосы выбираются ПО ФОРМЕ ЗАПРОСА (та же раскладка, что в cases/authz-deny.py):
+#   read — `GET /res/{id}` sync → 200 + `id` ответа равен запрошенному;
+#   list — `GET /res?scope=` sync → 200 + конверт выдачи (только объявленные поля);
+#   op   — мутация async → 200 + конверт Operation. Эта суита мутирует ресурс vpc,
+#          поэтому префикс идентификатора операции — `enp` (`ids.PrefixOperationVPC`),
+#          а не iam-шный `iop`.
+_VPC_OPERATION_PREFIX = "enp"
+
+
+def _allow_id_expr(path):
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    if last.startswith("{{") and last.endswith("}}"):
+        return f"pm.environment.get('{last[2:-2]}')"
+    return f"'{last}'"
+
+
+def _allow_list_key(path):
+    return path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+
+
+def allow_asserts(case_id, method, path):
+    """ALLOW: субъект с правом получает ИСХОД, а не «не отказ»."""
+    if method == "GET" and _is_single_resource_get(path):
+        return [
+            f"pm.test('[{case_id}] ALLOW: HTTP 200 (чтение разрешено)', () => "
+            "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
+            "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
+            f"pm.test('[{case_id}] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {{",
+            "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+            f"  pm.expect(_j.id, JSON.stringify(_j)).to.equal({_allow_id_expr(path)});",
+            "});",
+        ]
+    if method == "GET":
+        key = _allow_list_key(path)
+        return [
+            f"pm.test('[{case_id}] ALLOW: HTTP 200 (перечисление разрешено)', () => "
+            "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
+            "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
+            f"pm.test('[{case_id}] ALLOW: конверт выдачи, а не конверт отказа', () => {{",
+            "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+            f"  pm.expect(Object.keys(_j).filter(k => ['{key}', 'nextPageToken'].indexOf(k) < 0),",
+            "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+            f"  pm.expect(_j['{key}'] === undefined || Array.isArray(_j['{key}']),",
+            f"    'поле {key} присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+            "});",
+        ]
     return [
-        f"pm.test('[{case_id}] ALLOW: not 403 (PermissionDenied)', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+        f"pm.test('[{case_id}] ALLOW: HTTP 200 (мутация принята)', () => "
+        "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
         "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-        f"pm.test('[{case_id}] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));",
+        f"pm.test('[{case_id}] ALLOW: конверт Operation', () => {{",
+        f"  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^{_VPC_OPERATION_PREFIX}[a-z0-9]+$/);",
+        "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+        "});",
     ]
 
 
@@ -172,7 +229,7 @@ def emit(case_id, title, decision, method, path, body, subject, list_key="networ
         asserts = read_deny_asserts(case_id) if (method == "GET" and _is_single_resource_get(path)) else deny_asserts(case_id)
         cls = ["AUTHZ", "NEG"]
     elif decision == "ALLOW":
-        asserts = allow_asserts(case_id)
+        asserts = allow_asserts(case_id, method, path)
         cls = ["AUTHZ", "POS"]
     elif decision == "UNAUTH":
         asserts = unauth_asserts(case_id)

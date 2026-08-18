@@ -35,11 +35,21 @@ def _item(name, prereq=None, test=None):
     return it
 
 
-def _collection(tmp, name, items):
+def _collection(tmp, name, items, root_pre=None):
+    """`root_pre` — пре-скрипт КОРНЯ коллекции (`collection.event`).
+
+    Postman исполняет его перед КАЖДЫМ запросом наравне с элементным. Пока гейт
+    читал только элементные скрипты, эта область не проверялась вовсе: замер по
+    дереву на `dfd2c027` — 57 коллекций из 89 держат стража именно здесь, и iam
+    (где гейт писался) не держит его ни в одной из 32.
+    """
     d = tmp / "collections"
     d.mkdir(exist_ok=True)
     p = d / f"{name}.postman_collection.json"
-    p.write_text(json.dumps({"info": {"name": name}, "item": items}))
+    doc = {"info": {"name": name}, "item": items}
+    if root_pre is not None:
+        doc["event"] = [{"listen": "prerequest", "script": {"exec": root_pre}}]
+    p.write_text(json.dumps(doc))
     return p
 
 
@@ -519,3 +529,148 @@ def test_static_ban_still_reds_without_any_report(tmp_path):
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout + r.stderr
     assert "BANNED setNextRequest(null)" in r.stdout
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# СТРАЖ В КОРНЕ КОЛЛЕКЦИИ — область, которой гейт не читал (#661)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Форма, стоящая в 57 коллекциях дерева из 89: имя утверждения СОБИРАЕТСЯ
+# конкатенацией, потому что называет переменную, которой не оказалось.
+_ROOT_GUARD = [
+    "(function () {",
+    "  var _u = pm.request.url.toString();",
+    "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+    "  if (!_all) { return; }",
+    "  var _n = _all[0].slice(2, -2);",
+    "  if (pm.variables.has(_n)) { return; }",
+    "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+    "    pm.expect.fail(_n + ' не определена ни в одной области.');",
+    "  });",
+    "  pm.execution.skipRequest();",
+    "})();",
+]
+_ROOT_GUARD_FAILED = "предусловие: {{lbId}} не было захвачено — запрос не отправлен"
+
+
+def _report_named_failures(tmp, name, positions, total, failures):
+    """Как `_report`, но имена упавших утверждений задаются дословно.
+
+    `_report` подставляет `assertion on <шаг>`; здесь нужен ТОТ ЖЕ текст, что
+    печатает страж, иначе проба утверждала бы не о том — сверка идёт по имени.
+    """
+    d = tmp / "out"
+    d.mkdir(exist_ok=True)
+    execs = [{"cursor": {"position": p, "length": total, "iteration": 0},
+              "item": {"name": f"i{p}"}, "response": {"code": 200}} for p in positions]
+    fails = [{"error": {"test": t, "message": m}, "source": {"name": n},
+              "parent": {"name": "F"}} for n, t, m in failures]
+    on_disk = json.loads((tmp / "collections" / f"{name}.postman_collection.json").read_text())
+    (d / f"{name}.json").write_text(json.dumps({
+        "collection": on_disk,
+        "run": {"executions": execs,
+                "stats": {"assertions": {"total": len(execs) + len(fails), "failed": len(fails)},
+                          "requests": {"total": len(execs), "failed": 0}},
+                "failures": fails},
+    }))
+
+
+def test_root_level_guard_records_the_skip(tmp_path):
+    """Пропуск корневым стражем — ЗАПИСАННЫЙ, а не находка.
+
+    На прогоне 32077150454 (шард nlb) гейт объявил 157 таких пропусков находкой
+    `ASSERTED-NOT-EXECUTED` и в той же сводке напечатал `SKIPS: 0 RECORDED-SKIP` —
+    то есть о записанных пропусках отчитался нулём, имея их все 157. Причина
+    механическая: читались скрипты только самого шага.
+    """
+    _collection(tmp_path, "c", [_item("i0"), _item("i1"), _item("i2")], root_pre=_ROOT_GUARD)
+    _report_named_failures(tmp_path, "c", [0, 2], 3,
+                           [("i1", _ROOT_GUARD_FAILED, "lbId не определена ни в одной области.")])
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    line = _coverage_line(r.stdout)
+    assert "RECORDED-SKIP" in line, line
+    assert "ASSERTED" not in line, line
+
+
+def test_root_level_guard_does_not_amnesty_a_failed_test_script(tmp_path):
+    """Положительный контроль к предыдущей: «корень прочитан» не значит «извинено».
+
+    Тот же корневой страж, тот же отсутствующий шаг — но упало утверждение
+    ТЕСТ-скрипта, значит запрос ушёл и ответ пришёл. Это находка, ради которой
+    гейт и заведён, и корневой страж её не покрывает.
+    """
+    _collection(tmp_path, "c", [_item("i0"), _item("i1"), _item("i2")], root_pre=_ROOT_GUARD)
+    _report_named_failures(tmp_path, "c", [0, 2], 3,
+                           [("i1", "status 200", "expected 403 to equal 200")])
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    line = _coverage_line(r.stdout)
+    assert "ASSERTED-NOT-EXECUTED" in line, line
+    assert "RECORDED-SKIP" not in line, line
+
+
+def test_setNextRequest_null_in_the_root_script_is_banned(tmp_path):
+    """Запрет читает КАЖДУЮ область скриптов, а не только элементную.
+
+    Иначе маска, внесённая в корневой скрипт, гейтом не ловится — а маски
+    запрещены директивой владельца. Область молчания была не гипотетической:
+    57 коллекций из 89.
+    """
+    _collection(tmp_path, "c", [_item("i0")],
+                root_pre=["if (!pm.environment.get('opId')) { pm.execution.setNextRequest(null); }"])
+    _report(tmp_path, "c", [0], 1)
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "BANNED setNextRequest(null)" in r.stdout
+    assert "корень коллекции" in r.stdout, "находка обязана назвать координату"
+
+
+def test_the_same_ban_written_as_a_comment_stays_silent(tmp_path):
+    """Законный близнец той же внешности: объяснение рядом с запретом — не вызов.
+
+    Без разбора на код/строку/комментарий запрет краснел бы на тексте о самом
+    себе, и первым же ложным срабатыванием его бы сняли.
+    """
+    _collection(tmp_path, "c", [_item("i0")], root_pre=[
+        "// НИКОГДА не пиши pm.execution.setNextRequest(null): он завершает ПРОГОН.",
+        "/* и в блочном комментарии тоже: setNextRequest(null) */",
+        "pm.environment.set('_ok', '1');",
+    ])
+    _report(tmp_path, "c", [0], 1)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "BANNED" not in r.stdout
+
+
+def test_a_mute_root_skip_does_not_explain_a_truncated_tail(tmp_path):
+    """АНТИ-МАСКИРОВКА: корневой `skipRequest()` не объясняет пропавший хвост.
+
+    Корневой пре-скрипт исполняется перед КАЖДЫМ запросом, поэтому засчитать его
+    в «объяснённые пропуски» значило бы объявить объяснённым любое усечение — то
+    есть убить ровно тот класс, ради которого перепись заведена, и убить его
+    разом в 57 коллекциях из 89. Корень читается там, где вывод делается по
+    ОТЧЁТУ (упало ли утверждение стража), а не по форме кода.
+    """
+    _collection(tmp_path, "c", [_item(f"i{i}") for i in range(4)],
+                root_pre=["if (!pm.variables.has('zzz')) { pm.execution.skipRequest(); }"])
+    _report(tmp_path, "c", [0], 4)  # хвост исчез, отчёт о нём молчит
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    line = _coverage_line(r.stdout)
+    assert "UNEXPLAINED" in line, line
+
+
+def test_the_census_names_which_script_scopes_were_read(tmp_path):
+    """Объём осмотренного печатается по ОБЛАСТЯМ, включая нули.
+
+    «Ноль находок» обязано быть отличимо от «ноль прочитанного» — и слепота к
+    корневым скриптам выглядела именно как первое, будучи вторым.
+    """
+    _collection(tmp_path, "c", [_item("i0")], root_pre=["pm.environment.set('_ok', '1');"])
+    _report(tmp_path, "c", [0], 1)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "SCOPES:" in r.stdout
+    assert "корней 1/1" in r.stdout, r.stdout
+    assert "элементов" in r.stdout

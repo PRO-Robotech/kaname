@@ -318,7 +318,22 @@ type iam_user
     # (poison). v_* НЕ union-ятся в tier (Design B развязка, D-6a).
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or subject or editor
-    define v_get: [user, service_account, group#member] or super_admin
+    # `subject` — сам пользователь. Он ЧИТАЕТ свою запись, и это не послабление,
+    # а восстановление того, что уже было задумано и уже эмитируется: кортеж
+    # `iam_user:<usr> # subject @ user:<usr>` пишется на заведении пользователя
+    # (services/iam/.../user/internal_upsert.go), и его собственный комментарий
+    # говорит, что он существует «чтобы пользователь мог получить сам себя».
+    #
+    # Но читающий глагол — `v_get`, а `subject` стоял только в `viewer`. Разводка
+    # тиров и глаголов (Design B) оставила кортеж без потребителя: он писался,
+    # проверкой не читался, и самочтение не работало НИ У КОГО — ни у обычного
+    # арендатора, ни у администратора своего же аккаунта. Со стороны это выглядит
+    # как «пользователя нет» (скрытие существования отвечает тем же текстом, что
+    # и настоящее отсутствие), поэтому дефект был тихим.
+    #
+    # Добавляется ТОЛЬКО к чтению. Править и удалять себя из факта «я — это я» не
+    # следует: это другие вопросы, и у них другие источники права.
+    define v_get: [user, service_account, group#member] or subject or super_admin
     define v_list: [user, service_account, group#member] or super_admin
     define v_update: [user, service_account, group#member] or super_admin
     define v_delete: [user, service_account, group#member] or super_admin

@@ -985,9 +985,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-LS-NOB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-LS-NOB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-LS-NOB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-LS-NOB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['accounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['accounts'] === undefined || Array.isArray(_j['accounts']),",
+                  "    'поле accounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -1487,9 +1493,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-LS-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-LS-PA1] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-LS-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-LS-PA1] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['accounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['accounts'] === undefined || Array.isArray(_j['accounts']),",
+                  "    'поле accounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -1567,9 +1579,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-GT-OWN-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-GT-OWN-AAA] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-GT-OWN-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-GT-OWN-AAA] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('accountAId'));",
+                  "});"
                 ]
               }
             }
@@ -1737,9 +1752,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-UP-OWN-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-UP-OWN-AAA] ALLOW→отказ тела: HTTP 400', () => pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-UP-OWN-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-UP-OWN-AAA] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+                  "pm.test('[AUTHZ-ACCT-UP-OWN-AAA] ALLOW→отказ тела: названный производитель отказа', () => pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain('Illegal argument name'));"
                 ]
               }
             }
@@ -1987,9 +2003,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-LS-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-LS-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-LS-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-LS-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['accounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['accounts'] === undefined || Array.isArray(_j['accounts']),",
+                  "    'поле accounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -2148,9 +2170,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-GT-CROSS-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-GT-CROSS-AAB] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-GT-CROSS-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-GT-CROSS-AAB] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('accountBId'));",
+                  "});"
                 ]
               }
             }
@@ -2327,9 +2352,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-UP-CROSS-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-UP-CROSS-AAB] ALLOW→отказ тела: HTTP 400', () => pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-UP-CROSS-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-UP-CROSS-AAB] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+                  "pm.test('[AUTHZ-ACCT-UP-CROSS-AAB] ALLOW→отказ тела: названный производитель отказа', () => pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain('Illegal argument name'));"
                 ]
               }
             }
@@ -2487,9 +2513,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-LS-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-LS-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-LS-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-LS-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['accounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['accounts'] === undefined || Array.isArray(_j['accounts']),",
+                  "    'поле accounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -2648,9 +2680,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-GT-CROSS-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-GT-CROSS-INV] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-GT-CROSS-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-GT-CROSS-INV] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('accountBId'));",
+                  "});"
                 ]
               }
             }
@@ -2827,9 +2862,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-UP-CROSS-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-UP-CROSS-INV] ALLOW→отказ тела: HTTP 400', () => pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-UP-CROSS-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-UP-CROSS-INV] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+                  "pm.test('[AUTHZ-ACCT-UP-CROSS-INV] ALLOW→отказ тела: названный производитель отказа', () => pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain('Illegal argument name'));"
                 ]
               }
             }
@@ -2987,9 +3023,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ACCT-LS-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ACCT-LS-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ACCT-LS-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ACCT-LS-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['accounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['accounts'] === undefined || Array.isArray(_j['accounts']),",
+                  "    'поле accounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -4684,9 +4726,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-GT-A1-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-GT-A1-PA1] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-GT-A1-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-GT-A1-PA1] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('projectA1Id'));",
+                  "});"
                 ]
               }
             }
@@ -4854,9 +4899,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-UP-A1-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-UP-A1-PA1] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-UP-A1-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-UP-A1-PA1] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -5104,9 +5152,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-LS-A-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-LS-A-PA1] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-LS-A-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-LS-A-PA1] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['projects', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['projects'] === undefined || Array.isArray(_j['projects']),",
+                  "    'поле projects присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -5271,9 +5325,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-CR-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-CR-A-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-CR-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-CR-A-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -5440,9 +5497,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-GT-A1-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-GT-A1-AAA] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-GT-A1-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-GT-A1-AAA] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('projectA1Id'));",
+                  "});"
                 ]
               }
             }
@@ -5610,9 +5670,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-UP-A1-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-UP-A1-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-UP-A1-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-UP-A1-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -5860,9 +5923,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-LS-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-LS-A-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-LS-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-LS-A-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['projects', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['projects'] === undefined || Array.isArray(_j['projects']),",
+                  "    'поле projects присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -6116,9 +6185,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-CR-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-CR-B-AAB] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-CR-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-CR-B-AAB] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -6277,9 +6349,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-GT-B1-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-GT-B1-AAB] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-GT-B1-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-GT-B1-AAB] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('projectB1Id'));",
+                  "});"
                 ]
               }
             }
@@ -6456,9 +6531,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-UP-B1-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-UP-B1-AAB] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-UP-B1-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-UP-B1-AAB] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -6695,9 +6773,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-LS-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-LS-B-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-LS-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-LS-B-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['projects', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['projects'] === undefined || Array.isArray(_j['projects']),",
+                  "    'поле projects присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -6872,9 +6956,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-CR-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-CR-B-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-CR-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-CR-B-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -6952,9 +7039,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-GT-A1-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-GT-A1-INV] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-GT-A1-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-GT-A1-INV] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('projectA1Id'));",
+                  "});"
                 ]
               }
             }
@@ -7032,9 +7122,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-GT-B1-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-GT-B1-INV] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-GT-B1-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-GT-B1-INV] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal(pm.environment.get('projectB1Id'));",
+                  "});"
                 ]
               }
             }
@@ -7121,9 +7214,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-UP-A1-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-UP-A1-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-UP-A1-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-UP-A1-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -7210,9 +7306,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-UP-B1-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-UP-B1-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-UP-B1-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-UP-B1-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -7370,9 +7469,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-LS-A-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-LS-A-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-LS-A-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-LS-A-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['projects', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['projects'] === undefined || Array.isArray(_j['projects']),",
+                  "    'поле projects присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -7449,9 +7554,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-PRJ-LS-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-PRJ-LS-B-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-PRJ-LS-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-PRJ-LS-B-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['projects', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['projects'] === undefined || Array.isArray(_j['projects']),",
+                  "    'поле projects присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -8979,9 +9090,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-CR-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-CR-A-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-CR-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-CR-A-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -9228,9 +9342,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-LS-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-LS-A-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-LS-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-LS-A-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['groups', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['groups'] === undefined || Array.isArray(_j['groups']),",
+                  "    'поле groups присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -9565,9 +9685,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-CR-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-CR-B-AAB] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-CR-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-CR-B-AAB] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -9804,9 +9927,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-LS-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-LS-B-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-LS-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-LS-B-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['groups', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['groups'] === undefined || Array.isArray(_j['groups']),",
+                  "    'поле groups присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -10062,9 +10191,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-CR-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-CR-B-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-CR-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-CR-B-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -10222,9 +10354,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-LS-A-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-LS-A-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-LS-A-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-LS-A-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['groups', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['groups'] === undefined || Array.isArray(_j['groups']),",
+                  "    'поле groups присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -10301,9 +10439,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-GRP-LS-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-GRP-LS-B-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-GRP-LS-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-GRP-LS-B-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['groups', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['groups'] === undefined || Array.isArray(_j['groups']),",
+                  "    'поле groups присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -11912,9 +12056,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-CR-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-CR-A-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-CR-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-CR-A-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -12161,9 +12308,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-LS-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-LS-A-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-LS-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-LS-A-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['serviceAccounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['serviceAccounts'] === undefined || Array.isArray(_j['serviceAccounts']),",
+                  "    'поле serviceAccounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -12498,9 +12651,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-CR-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-CR-B-AAB] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-CR-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-CR-B-AAB] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -12737,9 +12893,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-LS-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-LS-B-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-LS-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-LS-B-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['serviceAccounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['serviceAccounts'] === undefined || Array.isArray(_j['serviceAccounts']),",
+                  "    'поле serviceAccounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -12995,9 +13157,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-CR-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-CR-B-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-CR-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-CR-B-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -13155,9 +13320,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-LS-A-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-LS-A-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-LS-A-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-LS-A-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['serviceAccounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['serviceAccounts'] === undefined || Array.isArray(_j['serviceAccounts']),",
+                  "    'поле serviceAccounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -13234,9 +13405,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SA-LS-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-SA-LS-B-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-SA-LS-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-SA-LS-B-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['serviceAccounts', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['serviceAccounts'] === undefined || Array.isArray(_j['serviceAccounts']),",
+                  "    'поле serviceAccounts присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -14387,9 +14564,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-AB-CR-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-AB-CR-A-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-AB-CR-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));",
+                  "pm.test('[AUTHZ-AB-CR-A-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});",
                   "pm.environment.unset('_abTeardownOpId_AUTHZ_AB_CR_A_AAA'); pm.environment.unset('_abTeardownId_AUTHZ_AB_CR_A_AAA'); pm.environment.unset('_abDelOpId_AUTHZ_AB_CR_A_AAA');",
                   "try { const _op = pm.response.json(); if (_op && _op.id) pm.environment.set('_abTeardownOpId_AUTHZ_AB_CR_A_AAA', _op.id); } catch(e) {}"
                 ]
@@ -15095,9 +15275,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-AB-CR-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-AB-CR-B-AAB] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-AB-CR-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));",
+                  "pm.test('[AUTHZ-AB-CR-B-AAB] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});",
                   "pm.environment.unset('_abTeardownOpId_AUTHZ_AB_CR_B_AAB'); pm.environment.unset('_abTeardownId_AUTHZ_AB_CR_B_AAB'); pm.environment.unset('_abDelOpId_AUTHZ_AB_CR_B_AAB');",
                   "try { const _op = pm.response.json(); if (_op && _op.id) pm.environment.set('_abTeardownOpId_AUTHZ_AB_CR_B_AAB', _op.id); } catch(e) {}"
                 ]
@@ -15714,9 +15897,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-AB-CR-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-AB-CR-B-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-AB-CR-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));",
+                  "pm.test('[AUTHZ-AB-CR-B-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});",
                   "pm.environment.unset('_abTeardownOpId_AUTHZ_AB_CR_B_INV'); pm.environment.unset('_abTeardownId_AUTHZ_AB_CR_B_INV'); pm.environment.unset('_abDelOpId_AUTHZ_AB_CR_B_INV');",
                   "try { const _op = pm.response.json(); if (_op && _op.id) pm.environment.set('_abTeardownOpId_AUTHZ_AB_CR_B_INV', _op.id); } catch(e) {}"
                 ]
@@ -16763,9 +16949,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-LS-NOB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-LS-NOB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-LS-NOB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-LS-NOB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['roles', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['roles'] === undefined || Array.isArray(_j['roles']),",
+                  "    'поле roles присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -16843,9 +17035,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-GT-NOB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-GT-NOB] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-GT-NOB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-GT-NOB] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal('rol1bda80f2be4d3658e');",
+                  "});"
                 ]
               }
             }
@@ -17182,9 +17377,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-LS-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-LS-PA1] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-LS-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-LS-PA1] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['roles', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['roles'] === undefined || Array.isArray(_j['roles']),",
+                  "    'поле roles присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -17262,9 +17463,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-GT-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-GT-PA1] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-GT-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-GT-PA1] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal('rol1bda80f2be4d3658e');",
+                  "});"
                 ]
               }
             }
@@ -17601,9 +17805,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-LS-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-LS-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-LS-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-LS-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['roles', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['roles'] === undefined || Array.isArray(_j['roles']),",
+                  "    'поле roles присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -17681,9 +17891,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-GT-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-GT-AAA] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-GT-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-GT-AAA] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal('rol1bda80f2be4d3658e');",
+                  "});"
                 ]
               }
             }
@@ -18020,9 +18233,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-LS-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-LS-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-LS-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-LS-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['roles', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['roles'] === undefined || Array.isArray(_j['roles']),",
+                  "    'поле roles присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -18100,9 +18319,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-GT-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-GT-AAB] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-GT-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-GT-AAB] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal('rol1bda80f2be4d3658e');",
+                  "});"
                 ]
               }
             }
@@ -18439,9 +18661,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-LS-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-LS-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-LS-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-LS-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['roles', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['roles'] === undefined || Array.isArray(_j['roles']),",
+                  "    'поле roles присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -18519,9 +18747,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ROLE-GT-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ROLE-GT-INV] ALLOW: HTTP 200 (чтение разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ROLE-GT-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ROLE-GT-INV] ALLOW: ответ — запрошенный ресурс, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(_j.id, JSON.stringify(_j)).to.equal('rol1bda80f2be4d3658e');",
+                  "});"
                 ]
               }
             }
@@ -19383,9 +19614,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-INV-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-INV-A-AAA] ALLOW→отказ тела: HTTP 400', () => pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-INV-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-INV-A-AAA] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+                  "pm.test('[AUTHZ-INV-A-AAA] ALLOW→отказ тела: названный производитель отказа', () => pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain('Illegal argument project_id: required when role_id is set'));"
                 ]
               }
             }
@@ -19649,9 +19881,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-INV-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-INV-B-AAB] ALLOW→отказ тела: HTTP 400', () => pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-INV-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-INV-B-AAB] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+                  "pm.test('[AUTHZ-INV-B-AAB] ALLOW→отказ тела: названный производитель отказа', () => pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain('Illegal argument project_id: required when role_id is set'));"
                 ]
               }
             }
@@ -19826,9 +20059,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-INV-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-INV-B-INV] ALLOW→отказ тела: HTTP 400', () => pm.expect(pm.response.code, pm.response.text()).to.equal(400));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-INV-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-INV-B-INV] ALLOW→отказ тела: grpc code 3 (INVALID_ARGUMENT)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.equal(3));",
+                  "pm.test('[AUTHZ-INV-B-INV] ALLOW→отказ тела: названный производитель отказа', () => pm.expect((_j && _j.message) || '', JSON.stringify(_j)).to.contain('Illegal argument project_id: required when role_id is set'));"
                 ]
               }
             }
@@ -19837,7 +20071,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-ANON — [DENY] Get own user record (self-viewable only) as anon (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-ANON — [DENY] Get user record (self-viewable only) as anon (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -20195,8 +20429,8 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-NOB — [ALLOW] Get own user record (self-viewable only) as no-bind (user-get-nob)",
-      "description": "class:AUTHZ | class:POS | priority:P1",
+      "name": "AUTHZ-USR-GT-A-NOB — [DENY] Get user record (self-viewable only) as no-bind (user-get-nob)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
           "name": "AUTHZ-USR-GT-A-NOB :: get",
@@ -20264,9 +20498,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-USR-GT-A-NOB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
-                  "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-USR-GT-A-NOB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-USR-GT-A-NOB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('[AUTHZ-USR-GT-A-NOB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-USR-GT-A-NOB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -20595,7 +20830,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-PA1 — [DENY] Get own user record (self-viewable only) as proj-adm (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-PA1 — [DENY] Get user record (self-viewable only) as proj-adm (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -20996,7 +21231,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-AAA — [DENY] Get own user record (self-viewable only) as acct-adm-a (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-AAA — [DENY] Get user record (self-viewable only) as acct-adm-a (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -21226,9 +21461,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-USR-LS-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-USR-LS-A-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-USR-LS-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-USR-LS-A-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -21397,7 +21638,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-AAB — [DENY] Get own user record (self-viewable only) as acct-adm-b (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-AAB — [DENY] Get user record (self-viewable only) as acct-adm-b (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -21706,9 +21947,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-USR-LS-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-USR-LS-B-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-USR-LS-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-USR-LS-B-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -21798,7 +22045,7 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-A-INV — [DENY] Get own user record (self-viewable only) as invitee (user-get-nob)",
+      "name": "AUTHZ-USR-GT-A-INV — [DENY] Get user record (self-viewable only) as invitee (user-get-nob)",
       "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
@@ -21879,8 +22126,8 @@
       ]
     },
     {
-      "name": "AUTHZ-USR-GT-B-INV — [ALLOW] Get userINV (self-viewable only) as invitee (user-get-inv)",
-      "description": "class:AUTHZ | class:POS | priority:P1",
+      "name": "AUTHZ-USR-GT-B-INV — [DENY] Get userINV (self-viewable only) as invitee (user-get-inv)",
+      "description": "class:AUTHZ | class:NEG | priority:P1",
       "item": [
         {
           "name": "AUTHZ-USR-GT-B-INV :: get",
@@ -21948,9 +22195,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-USR-GT-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
-                  "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-USR-GT-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-USR-GT-B-INV] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
+                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                  "pm.test('[AUTHZ-USR-GT-B-INV] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-USR-GT-B-INV] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -22027,9 +22275,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-USR-LS-A-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-USR-LS-A-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-USR-LS-A-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-USR-LS-A-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -22106,9 +22360,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-USR-LS-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-USR-LS-B-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-USR-LS-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-USR-LS-B-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -22190,6 +22450,89 @@
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
                   "pm.test('[AUTHZ-USR-DL-A-INV] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
                   "pm.test('[AUTHZ-USR-DL-A-INV] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AUTHZ-USR-GT-SELF-CEREMONY — [ALLOW] Get own user record as human ceremony principal (self via iam_user.v_get ⊇ subject)",
+      "description": "class:AUTHZ | class:POS | priority:P1",
+      "item": [
+        {
+          "name": "AUTHZ-USR-GT-SELF-CEREMONY :: get-self",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{ceremonyNoBindingsUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{ceremonyNoBindingsUserId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremonyNoBindings'",
+                  "const __t = pm.environment.get('jwtHumanCeremonyNoBindings') || pm.variables.get('jwtHumanCeremonyNoBindings') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanCeremonyNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremonyNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('AUTHZ-USR-GT-SELF-CEREMONY: вернулась СВОЯ запись', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, JSON.stringify(j)).to.eql(",
+                  "    pm.environment.get('ceremonyNoBindingsUserId'));",
+                  "});"
                 ]
               }
             }
@@ -22791,9 +23134,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-A-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-A-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-A-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-A-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -23057,9 +23403,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-AAB] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-AAB] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -23234,9 +23583,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-INV] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ESC-SELF-ADMIN-B-INV] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -23791,7 +24143,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_anon\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"*\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_anon\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"*\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -23871,7 +24223,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_nob\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"*\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_nob\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"*\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -23960,7 +24312,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_pa1\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"*\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_pa1\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"*\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -24049,7 +24401,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_aaa\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"*\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_aaa\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"*\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -24100,9 +24452,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-ESC-CUSTOM-ROLE-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-ESC-CUSTOM-ROLE-AAA] ALLOW: HTTP 200 (мутация принята)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-ESC-CUSTOM-ROLE-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-ESC-CUSTOM-ROLE-AAA] ALLOW: конверт Operation', () => {",
+                  "  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -24137,7 +24492,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_aab\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"*\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_aab\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"*\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -24226,7 +24581,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_inv\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\", \"disk\"], \"verbs\": [\"*\"]}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"hack_role_inv\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"user\", \"role\", \"account\", \"project\"], \"verbs\": [\"*\"]}, {\"module\": \"vpc\", \"resources\": [\"network\", \"subnet\", \"securityGroup\"], \"verbs\": [\"*\"]}, {\"module\": \"compute\", \"resources\": [\"instance\"], \"verbs\": [\"*\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -24428,9 +24783,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-NOB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-NOB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-NOB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-NOB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -24507,9 +24868,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-PA1] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-PA1] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-PA1] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-PA1] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -24586,9 +24953,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAA] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAA] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAA] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAA] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -24665,9 +25038,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAB] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAB] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAB] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-AAB] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -24744,9 +25123,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-INV] ALLOW: not 403', () => pm.expect(pm.response.code, 'unexpected 403: ' + pm.response.text()).to.not.equal(403));",
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-INV] ALLOW: HTTP 200 (перечисление разрешено)', () => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
                   "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
-                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-INV] ALLOW: not Unauthenticated (16)', () => pm.expect(_j && _j.code, JSON.stringify(_j)).to.not.equal(16));"
+                  "pm.test('[AUTHZ-DATA-LEAK-USR-LS-INV] ALLOW: конверт выдачи, а не конверт отказа', () => {",
+                  "  pm.expect(_j, 'тело не разобралось как JSON: ' + pm.response.text()).to.be.an('object');",
+                  "  pm.expect(Object.keys(_j).filter(k => ['users', 'nextPageToken'].indexOf(k) < 0),",
+                  "    'посторонний ключ в конверте выдачи: ' + pm.response.text()).to.eql([]);",
+                  "  pm.expect(_j['users'] === undefined || Array.isArray(_j['users']),",
+                  "    'поле users присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
+                  "});"
                 ]
               }
             }

@@ -811,8 +811,13 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 // grant tuple is retained (D-4 class — not reconstructible by the reconciler, the
 // owner standing). TWO new tuples are added under the flat model:
 //   - iam_user:<usr>#subject @ user:<usr> — the self-tuple so the user can GET
-//     themselves (model `iam_user.viewer = subject or editor`; D-4 class —
+//     themselves (model `iam_user.v_get = … or subject or super_admin`; D-4 class —
 //     emitted explicitly at user creation, NOT reconstructible by the reconciler).
+//     ЧИТАЮЩИЙ ГЛАГОЛ НАЗВАН ТОЧНО, и это не педантизм: здесь стояло `viewer`,
+//     а гейт чтения — `v_get`, и `subject` в нём отсутствовал. Кортеж писался,
+//     проверкой не читался, самочтение не работало ни у кого. Восстановлено
+//     в модели (#715-follow-up); комментарий обязан называть то отношение, от
+//     которого зависит исход, иначе следующий читатель снова сверит не с тем.
 //   - account:<acc>#account @ iam_access_binding:<ownerBindingID> — the owner-
 //     binding OBJECT hierarchy parent-pointer (parity with account/create.go
 //     ownerBindingHierarchyTuples; lineage edge, access is per-object via reconcile).
@@ -829,7 +834,7 @@ func bootstrapTuples(
 		// the tier). project admin@project kept as the explicit project-admin self-grant.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "owner", Object: fmt.Sprintf("account:%s", accID)},
 		{User: fmt.Sprintf("user:%s", userID), Relation: "admin", Object: fmt.Sprintf("project:%s", prjID)},
-		// Self-tuple (flat-model get-self, D-4): iam_user.viewer = subject or editor.
+		// Self-tuple (flat-model get-self, D-4): iam_user.v_get включает `subject`.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "subject", Object: fmt.Sprintf("iam_user:%s", userID)},
 		// Hierarchy parent-pointer tuples (зеркалит relationhook helper).
 		{User: fmt.Sprintf("account:%s", accID), Relation: "account", Object: fmt.Sprintf("iam_user:%s", userID)},
