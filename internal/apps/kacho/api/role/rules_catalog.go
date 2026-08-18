@@ -62,17 +62,30 @@ const ruleWildcard = "*"
 // token repeated across rules is reported once. Returns nil when every pair is
 // grantable.
 //
-// systemCtx=true short-circuits to nil. The 58 seeded system roles carry a
-// DIFFERENT taxonomy in rules[]: their tokens mirror their permission strings
-// VERBATIM for tier-parity (`iam.service_account`, `iam.access_binding`,
-// `vpc.security_group`, `vpc.subnetses`, `iam.projectses`, `loadbalancer.operations`,
-// `compute.zones`, …), none of which is an authzmap object type. Their authority is
-// carried by permissions[]→tier tuples and by the migration-seeded
-// role_rule_selectors, not by per-object materialization of those tokens. They are
-// also unreachable from this gate in practice — Create forces is_system=false and
-// Update rejects a system role sync ("System role is read-only") before validating —
-// so the short-circuit is belt-and-braces documentation of the scoping, pinned by
-// TestRuleCatalogGate_SystemContextExempt.
+// systemCtx=true short-circuits to nil, and the reason is SCOPING — not a second
+// taxonomy. System roles are unreachable from this gate in practice: Create forces
+// is_system=false and Update rejects a system role sync ("System role is read-only")
+// before validating. The short-circuit is belt-and-braces documentation of that,
+// pinned by TestRuleCatalogGate_SystemContextExempt.
+//
+// Здесь стояло обоснование, ложное в обе стороны, и оба утверждения пережили свой
+// предмет (kacho#513):
+//
+//   - «токены системных ролей — другая таксономия, ни один не является типом
+//     каталога». Сегодня резолвятся ВСЕ пары действующего посева, и это
+//     утверждается пробой (TestSeededRoleRulesResolveOrArePinned: записей пина 0).
+//     Часть перечисленных имён (`vpc.subnetses`, `iam.projectses`, `compute.zones`)
+//     принадлежала служебным учёткам модулей, снятым миграциями 0076 и 0077, — то
+//     есть комментарий описывал роли, которых в дереве нет;
+//   - «их право несёт ярусный кортеж из permissions[]». Это опровергнуто пробой у
+//     самой эмиссии: ветвление идёт по наличию правил, и роль С правилами эмитит
+//     только иерархический указатель — ярусный кортеж кладёт ветка для роли БЕЗ
+//     правил. Пока пары не резолвились, эти роли не давали НИЧЕГО, и комментарий
+//     объяснял, почему это нормально.
+//
+// Урок, ради которого разбор оставлен: комментарий, объясняющий, почему
+// расхождение безвредно, переживает и расхождение, и его починку. Проверять надо
+// то, что он утверждает о дереве, а не то, насколько убедительно он звучит.
 func validateRuleCatalog(rules domain.Rules, systemCtx bool) error {
 	if systemCtx {
 		return nil
