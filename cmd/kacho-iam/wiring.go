@@ -123,9 +123,23 @@ type services struct {
 	// token), NOT that authN is waived.
 	internalBootstrapTokenHandler *bootstraptoken.Handler
 
-	// relationStore — shared OpenFGA client. Always non-nil (composition root
-	// fails fast on missing KACHO_IAM_OPENFGA_STORE_ID). Reused by runServe
-	// for the fga_outbox drainer.
+	// relationStore — shared OpenFGA client. Always non-nil: buildOpenFGAClient
+	// returns a client whatever the environment holds.
+	//
+	// It is NOT a refusal to start. On an empty KACHO_IAM_OPENFGA_STORE_ID the
+	// composition root logs a loud WARN and carries on, and the client then FAILS
+	// CLOSED — Check denies, Read/Write return ErrNotConfigured (→ UNAVAILABLE).
+	// That soft pass is deliberate and load-bearing: the store id is provisioned by
+	// the openfga-bootstrap Job, a helm `post-install,post-upgrade` hook, which runs
+	// only AFTER `helm upgrade --wait` sees the release Ready. An iam that refused to
+	// start without the id would never become Ready, the hook would never run, and
+	// the id would never be written — the first install would deadlock on itself.
+	//
+	// Said this plainly because the previous edition said the opposite ("composition
+	// root fails fast on missing …STORE_ID"), and a security comment that contradicts
+	// its code invites the next reader to "fix" the code to match it (#654).
+	//
+	// Reused by runServe for the fga_outbox drainer.
 	relationStore *clients.OpenFGAHTTPClient
 
 	// ownGates — ЗНАЧЕНИЕ, КОТОРОЕ ДЕРЖАТ СОБСТВЕННЫЕ СТРАЖИ iam: тот же клиент,
@@ -256,7 +270,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// read-after-write race where a Check immediately after Operation-done would
 		// otherwise miss the still-undrained fga_outbox tuple (403). The durable
 		// fga_outbox enqueue + async drainer remain the at-least-once backstop (idempotent
-		// re-apply). relationStore is always non-nil here (composition root fails fast).
+		// re-apply). relationStore is always non-nil here — buildOpenFGAClient returns a
+		// client whatever the environment holds; before the store id is provisioned that
+		// client fails CLOSED rather than the process refusing to start (see the field's
+		// doc on kachoServices).
 		WithSyncFGA(kachopg.NewSyncFGAWriter(relationStore, logger))
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
@@ -327,7 +344,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	userDelete := userapp.NewDeleteUserUseCase(kachoRepo, opsRepo)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
-		WithReconciler(rsabReconciler)
+		WithReconciler(rsabReconciler).
+		WithActivationObserver(metricsReg.InviteActivationRecorder())
 	userInvite := userapp.NewInviteUserUseCase(kachoRepo, opsRepo, relationStore).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)

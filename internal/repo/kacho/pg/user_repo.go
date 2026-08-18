@@ -347,7 +347,15 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 			argIdx++
 		}
 	}
-	if f.PageToken != "" {
+	// Курсор. Разобранный (After) имеет приоритет: путь, который его задаёт,
+	// токена не передаёт вовсе, поэтому «оба заданы» здесь не встречается — но
+	// порядок назван явно, чтобы это было свойством кода, а не совпадением.
+	switch {
+	case f.After != nil:
+		conditions = append(conditions, fmt.Sprintf("(created_at, id) > ($%d, $%d)", argIdx, argIdx+1))
+		args = append(args, f.After.CreatedAt, f.After.ID)
+		argIdx += 2
+	case f.PageToken != "":
 		ts, id, err := decodePageToken(f.PageToken)
 		if err != nil {
 			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page_token")
@@ -356,6 +364,22 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 		args = append(args, ts, id)
 		argIdx += 2
 	}
+
+	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// не после него: постфильтр по видимости теряет всякую запись, перед которой
+	// лежит больше `page_size` невидимых предшественников — она до фильтра просто
+	// не доезжает. Собственная строка вызывающего приходит в ObjectIDs (см. порт),
+	// поэтому пол этой поверхности — тоже условие отбора, а не постфильтр.
+	//
+	// nil — не сужать (администратор облака, bootstrap); непустой указатель с
+	// пустыми наборами не называет ни одной строки и потому не пропускает ни одной.
+	if f.Candidates != nil {
+		conditions = append(conditions,
+			fmt.Sprintf("(account_id = ANY($%d) OR id = ANY($%d))", argIdx, argIdx+1))
+		args = append(args, nonNilStrings(f.Candidates.AccountIDs), nonNilStrings(f.Candidates.ObjectIDs))
+		argIdx += 2
+	}
+
 	where := ""
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")

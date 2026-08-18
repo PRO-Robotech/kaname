@@ -6,8 +6,10 @@ package user
 
 import (
 	"context"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 type ReaderIface interface {
@@ -107,7 +109,10 @@ type WriterIface interface {
 }
 
 type ListFilter struct {
-	PageSize  int32
+	PageSize int32
+	// PageToken — токен, КАК ЕГО ПРИСЛАЛ КЛИЕНТ. Его разбирает use-case (форма
+	// токена принадлежит контракту RPC, а не таблице), поэтому на пути к
+	// репозиторию он пуст, а курсор приезжает разобранным в After.
 	PageToken string
 	Filter    string // filter-syntax: email="…" | external_id="…" | invite_status="…" | search="…"
 
@@ -117,4 +122,34 @@ type ListFilter struct {
 	// AccountIDs — множественный фильтр (список Account'ов, где principal является
 	// member; используется в `UserService.List` без explicit account_id).
 	AccountIDs []domain.AccountID
+
+	// After — курсор keyset В РАЗОБРАННОМ ВИДЕ: страница начинается со строки,
+	// строго следующей за (CreatedAt, ID). nil — с начала.
+	//
+	// Пара с PageToken взаимоисключающая по построению: одно значение выражается
+	// ровно одним способом, и путь, задающий After, PageToken не задаёт.
+	After *Cursor
+
+	// Candidates — сужение НАБОРА КАНДИДАТОВ до надмножества видимого
+	// вызывающему (задача #645): строка проходит, если её аккаунт назван, либо
+	// названа она сама.
+	//
+	// ПОЛ этой поверхности — собственная строка вызывающего — приезжает сюда же,
+	// в ObjectIDs, и это не хитрость, а требование: пол, применённый к уже взятой
+	// странице, повторяет исходный дефект — строка становится полом, только если
+	// она в страницу попала, а собственная строка вызывающего может лежать сколь
+	// угодно далеко за окном.
+	//
+	// nil ЗНАЧИТ «не сужать», и это НЕ то же, что пустой набор: пустой не
+	// называет ничего и потому не пропускает ничего.
+	//
+	// Сужение НЕ решает вопрос о доступе: оно отбирает кандидатов, вердикт по
+	// каждому выносит модель прав (`security.md` §«Авторизация живёт в МОДЕЛИ»).
+	Candidates *visibility.PageScope
+}
+
+// Cursor — граница keyset-обхода `(created_at, id) ASC`.
+type Cursor struct {
+	CreatedAt time.Time
+	ID        string
 }

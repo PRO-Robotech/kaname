@@ -9,8 +9,10 @@ package account
 
 import (
 	"context"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 // ReaderIface — read-only методы.
@@ -40,7 +42,40 @@ type WriterIface interface {
 // ListFilter — параметры List-RPC (ListAccountsRequest).
 // Set of fields and filter-string parsing through kacho-corelib/filter.
 type ListFilter struct {
-	PageSize  int32
+	PageSize int32
+	// PageToken — токен, КАК ЕГО ПРИСЛАЛ КЛИЕНТ. Его разбирает use-case (форма
+	// токена принадлежит контракту RPC, а не таблице), поэтому на пути к
+	// репозиторию он пуст, а курсор приезжает разобранным в After.
 	PageToken string
 	Filter    string // filter-syntax: name="..."
+
+	// After — курсор keyset В РАЗОБРАННОМ ВИДЕ: страница начинается со строки,
+	// строго следующей за (CreatedAt, ID). nil — с начала.
+	//
+	// Пара с PageToken взаимоисключающая по построению: одно значение выражается
+	// ровно одним способом, и путь, задающий After, PageToken не задаёт.
+	After *Cursor
+
+	// Candidates — сужение НАБОРА КАНДИДАТОВ до надмножества видимого
+	// вызывающему (задача #645).
+	//
+	// Аккаунт — сам себе аккаунт: строка проходит, если её id назван ЛИБО в
+	// AccountIDs (аккаунты, до которых вызывающий дотягивается), ЛИБО в ObjectIDs
+	// (аккаунт, названный выдачей поимённо). Оба набора сравниваются с одной и
+	// той же колонкой `id`, и это не совпадение, а свойство типа.
+	//
+	// nil ЗНАЧИТ «не сужать», и это НЕ то же, что пустой набор: пустой не
+	// называет ничего и потому не пропускает ничего. Различие — это различие
+	// между администратором облака и посторонним, и оно обязано быть представимо
+	// отдельно от значений.
+	//
+	// Сужение НЕ решает вопрос о доступе: оно отбирает кандидатов, вердикт по
+	// каждому выносит модель прав (`security.md` §«Авторизация живёт в МОДЕЛИ»).
+	Candidates *visibility.PageScope
+}
+
+// Cursor — граница keyset-обхода `(created_at, id) ASC`.
+type Cursor struct {
+	CreatedAt time.Time
+	ID        string
 }

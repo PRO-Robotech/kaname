@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 // ───────────── fake repo built specifically for list scenarios ───────────
@@ -245,12 +246,30 @@ func TestListProjects_RBACv2_CanonicalScenario_GrantsConcreteIDs(t *testing.T) {
 	// nothing else. Asserted as an exact SET rather than a subset: a stray extra
 	// relation is precisely how the page came to be wider than the read. (The filter
 	// is per-object, so a relation appears once per row it was needed for.)
-	seen := map[string]bool{}
+	// Вопросы разделены по предмету, потому что их теперь два вида и смешивать их
+	// в одно множество значило бы потерять оба утверждения.
+	//
+	// О СТРОКЕ спрашивается ровно одно отношение — то, которым каталог гейтит
+	// ProjectService/Get. Лишнее отношение здесь — ровно то, как страница
+	// становилась шире чтения.
+	//
+	// О СУБЪЕКТЕ спрашивается ровно один раз на запрос («администратор ли он
+	// облака»). Это не отношение страницы: у него нет объекта-строки вовсе, и
+	// его число обязано быть константой, не растущей ни с населением, ни с
+	// размером страницы.
+	perObject := map[string]bool{}
+	subjectQuestions := 0
 	for _, r := range fga.relations {
-		seen[r] = true
+		if r == "system_admin" {
+			subjectQuestions++
+			continue
+		}
+		perObject[r] = true
 	}
-	require.Equal(t, map[string]bool{"v_get": true}, seen,
+	require.Equal(t, map[string]bool{"v_get": true}, perObject,
 		"the list-filter must ask the relation that gates ProjectService/Get, and only that one")
+	require.Equal(t, 1, subjectQuestions,
+		"the question about the CALLER is asked once per request, outside any per-row loop")
 }
 
 // NoGrantsReturnsEmpty — resource-existence disclosure guard: a subject
@@ -349,10 +368,15 @@ func TestListProjects_OwnerBeyondTheAccountPage_StillSeesTheirProjects(t *testin
 	require.Len(t, out, 1, "the owner of the account must see the project in it")
 	assert.Equal(t, domain.ProjectID("prj-mine"), out[0].ID)
 
-	// And the cost is bounded by the page: one lookup per DISTINCT account named by
-	// the page, not one per account in the cluster.
-	assert.Equal(t, 1, repo.acctGets,
-		"a listing must ask about the accounts its page names and nothing else")
+	// И цена не следует за населением. Прежде она была «один просмотр аккаунта на
+	// каждый РАЗЛИЧНЫЙ аккаунт страницы»; теперь владение приходит одним вопросом
+	// о СУБЪЕКТЕ, заданным до чтения первой строки, и просмотров аккаунта по
+	// строкам страницы не остаётся ни одного.
+	//
+	// Ноль — утверждение более сильное, чем прежняя единица, и оно продолжает
+	// говорить о том же: цена принадлежит запросу, а не облаку.
+	assert.Equal(t, 0, repo.acctGets,
+		"ownership is resolved once, by asking about the caller — not row by row of the page")
 }
 
 // A page naming the same account many times pays for it once.
@@ -368,7 +392,9 @@ func TestListProjects_OwnershipLookupsAreDeduplicatedPerPage(t *testing.T) {
 	out, _, err := uc.Execute(ctxAs("usr-owner"), repoproject.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.Len(t, out, 25)
-	assert.Equal(t, 1, repo.acctGets, "25 rows of one account cost one account lookup")
+	assert.Equal(t, 0, repo.acctGets,
+		"25 rows of one account cost no account lookups at all: ownership is a fact about "+
+			"the CALLER, resolved once, not a fact re-read per row")
 }
 
 // BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
@@ -394,4 +420,42 @@ func (s *relationQueriesStub) BatchCheckWithContext(ctx context.Context, subject
 		out[i] = allowed
 	}
 	return out, nil
+}
+
+func (r *listFakeReader) Visibility() visibility.ReaderIface { return &listFakeVisibility{r.p} }
+
+// listFakeVisibility — структурные факты о вызывающем, выведенные из данных этой
+// фикстуры.
+//
+// ВЛАДЕНИЕ выводится точно так же, как его выводит настоящий запрос: аккаунты,
+// чей столбец владельца называет субъекта. Это существенно — пол владения не
+// спрашивает вердикта вовсе, и пробы ниже про него.
+//
+// ОТБОР КАНДИДАТОВ объявлен НЕСУЖЁННЫМ, и это НАМЕРЕННО снисходительнее
+// продукта. Цена названа вслух, а не умолчана: строк выдачи у этой фикстуры нет
+// вовсе (её грант живёт только в дублёре стора отношений), поэтому назвать
+// объекты, выданные поимённо, она не может — а сузив набор до одного владения,
+// она стёрла бы ровно то, о чём эти пробы спрашивают.
+//
+// Отсюда граница: предмет проб этого пакета — ВЕРДИКТ (каким отношением судится
+// строка страницы, как ведёт себя пол владения, что происходит на отказе стора).
+// ОТБОР кандидатов они не проверяют и проверять не могут; он проверяется на
+// настоящем Postgres и настоящей модели прав —
+// services/iam/internal/apps/kacho/api/listvisibility, где снисходительного
+// дублёра нет ни с одной стороны именно потому, что предмет там — ПОРЯДОК между
+// страницей и сужением.
+type listFakeVisibility struct{ p *listFakeRepo }
+
+func (v *listFakeVisibility) ScopeOf(_ context.Context, s visibility.Subject) (visibility.Scope, error) {
+	sc := visibility.Scope{Unrestricted: true, GrantedObjects: map[string][]string{}}
+	if s.Type != "user" || s.ID == "" {
+		return sc, nil
+	}
+	for id, acc := range v.p.accounts {
+		if string(acc.OwnerUserID) == s.ID {
+			sc.OwnedAccounts = append(sc.OwnedAccounts, id)
+			sc.ScopedAccounts = append(sc.ScopedAccounts, id)
+		}
+	}
+	return sc, nil
 }

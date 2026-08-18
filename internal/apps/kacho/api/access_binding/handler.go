@@ -243,7 +243,12 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 		return nil, err
 	}
 	// (2) page_token format: garbage → InvalidArgument, BEFORE listauthz.
-	if err := shared.ValidatePageToken("page_token", req.GetPageToken()); err != nil {
+	//
+	// Форма токена этого списка — граница ВИДИМОЙ последовательности (#645), а не
+	// сырой страницы. Общая ValidatePageToken приняла бы токен прежней формы, и
+	// обход, начатый до выкатки, продолжился бы приблизительно — молча пропуская
+	// строки.
+	if _, err := shared.DecodeVisiblePageToken("page_token", req.GetPageToken()); err != nil {
 		return nil, err
 	}
 	// (3) whitelist filter: subject/role/scope/scopeId; unknown key → InvalidArgument.

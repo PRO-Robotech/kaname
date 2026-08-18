@@ -99,7 +99,32 @@ var Profile = listfiltergate.Profile{
 	// page filter reaches; Visible is the single-object form. requireGrantAuthority
 	// is the per-row form used by ListByRole — see the caveat in the package comment.
 	Filters: []string{"VisibleSet", "Visible", "requireGrantAuthority"},
-	Banned:  []string{"ListAllowedIDs", "ListObjects"},
+	// The hand-written FLOOR only. `ListAllowedIDs` is another service's vocabulary
+	// and has no declaration anywhere in iam, so nothing can derive it; `ListObjects`
+	// is kept because a floor that shrinks when a derivation breaks is not a floor.
+	Banned: []string{"ListAllowedIDs", "ListObjects"},
+	// Where the ban actually comes FROM. iam asks the authorization question through
+	// exactly two declared surfaces, and both are named here so their method sets
+	// derive the ban instead of someone remembering to extend a list.
+	//
+	// The second one is why #651 exists. `ListObjects` and `ListAllowedIDs` name the
+	// store's enumeration, and for a while that was the whole ban — while a THIRD
+	// form sat in iam's own database: relverdict resolves verdicts a page at a time
+	// over iam's own tables, cursor by object id, default page 500. The gate could
+	// not see it, because a name it was never told about is a name it cannot refuse.
+	// Naming the TYPE instead of the call means the next method of that type is
+	// banned the day it is written.
+	//
+	// Being the service's own tables does not exempt the form. `security.md` refuses
+	// "enumerate the universe → filter" because the answer has a ceiling and the page
+	// is taken from the enumeration rather than judged after it is read; iam's tables
+	// have a ceiling too, it is just written in a different file. relverdict is
+	// legitimate where it is used today — the shadow comparison, which is not a
+	// listing — and would be exactly the old defect inside one.
+	EnumerationSources: []listfiltergate.EnumerationSource{
+		{Dir: "internal/clients", Type: "RelationQueries"},
+		{Dir: "internal/repo/kacho/pg/relverdict", Type: "Asker"},
+	},
 	// "listOp.Execute" is the delegation to shared.ListOperationsUseCase, which is
 	// where the narrowing actually happens. It has to be named this way because the
 	// use-case lives in a DIFFERENT package (internal/apps/kacho/shared) and the
@@ -173,16 +198,25 @@ var Profile = listfiltergate.Profile{
 		"internal_operations.ListIamOperations": subjectGate("requireClusterSystemAdmin"),
 		"group.ListMembers":                     subjectGate("AllowsVerb"),
 		"session_revocations.ListByUser":        subjectGate("authorizeListByUser"),
-		"authorize.ListSubjects":                subjectGate("authorizeCaller"),
 
 		// ---- the store's answer IS the response ----
 		//
-		// ListObjects is the RPC that exposes the authorization store's enumeration.
-		// The enumerate-then-narrow ban is about narrowing YOUR page by asking the
-		// store to enumerate; here the enumeration is what the caller asked for, so
-		// the ban is inapplicable by construction, not waived. What protects it is
-		// the gate on the subject the caller named.
-		"authorize.ListObjects": {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
+		// These two RPCs EXPOSE the authorization store's enumeration: ListObjects
+		// answers "which objects may this subject act on", ListSubjects the inverse.
+		// The enumerate-then-narrow ban is about narrowing YOUR OWN page by asking the
+		// store to enumerate; here the enumeration is what the caller came for, so the
+		// ban is inapplicable by construction, not waived. What protects them is the
+		// gate on the subject or the resource the caller named.
+		//
+		// ListSubjects was declared ParentGate until #651, and that was an
+		// under-declaration nothing could reveal: the ban held two names, neither of
+		// them `ListSubjects`, so the wrong shape cost nothing and stayed. Deriving the
+		// ban from the store's method set surfaced it on the first run. The evidence
+		// demanded is UNCHANGED by the correction — listfiltergate judges StoreQuery in
+		// the same branch as ParentGate, so `authorizeCaller` must still be reached AND
+		// its verdict must still stop the response.
+		"authorize.ListObjects":  {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
+		"authorize.ListSubjects": {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
 
 		// ---- settled by the per-RPC authorization at the edge ----
 		//

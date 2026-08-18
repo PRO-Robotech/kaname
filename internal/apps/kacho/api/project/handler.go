@@ -107,7 +107,11 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetProjectRequest) (*iamv1
 // ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
 // того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListProjectsRequest) (*iamv1.ListProjectsResponse, error) {
-	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+	// Форма токена этого списка — визуальная граница ВИДИМОЙ последовательности
+	// (#645), а не сырой страницы, поэтому и на границе транспорта судится она.
+	// Общая ValidateRawPagination приняла бы токен прежней формы, и обход,
+	// начатый до выкатки, продолжился бы приблизительно — молча пропуская строки.
+	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err
 	}
 	filter := repoproject.ListFilter{

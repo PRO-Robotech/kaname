@@ -45,6 +45,7 @@ import (
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	reposa "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 // failingFanout — a fan-out whose pass always fails, the way a lock wait that
@@ -178,3 +179,10 @@ func TestReconcileActiveBindings_ContinuesPastAFailingBinding(t *testing.T) {
 		[]domain.AccessBindingID{"iab_first", "iab_second", "iab_third"}, rec.attempts,
 		"every binding must be attempted — a failure in one is not a reason to leave the rest on the old rules")
 }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (rd *multiBindingReader) Visibility() visibility.ReaderIface { return nil }

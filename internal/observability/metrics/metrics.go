@@ -68,6 +68,13 @@ type Registry struct {
 	// Второй конструктор уронил бы старт на duplicate-register.
 	outboxOnce sync.Once
 	outbox     *OutboxRecorder
+
+	// inviteActivationOnce/inviteActivation — единственный экземпляр счётчика
+	// исходов активации приглашения. Потребителей два и собираются они в разных
+	// местах композиционного корня: gRPC-путь (buildServices) и ЖИВОЙ путь входа
+	// (buildHooksMux). Второй конструктор уронил бы старт на duplicate-register.
+	inviteActivationOnce sync.Once
+	inviteActivation     *InviteActivationRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

@@ -10,9 +10,29 @@ package group
 //	visible(id) = Check(subj,"viewer","iam_group:"+id)
 //	            ∨ Check(subj,"v_list","iam_group:"+id)
 //
-// спрашиваемых для групп СТРАНИЦЫ (страница читается курсором из своей БД
-// ПЕРВОЙ). Прежняя форма — «перечислить всё видимое и пересечь» — молча резалась
-// server-side пределом OpenFGA ListObjects (см. internal/authzfilter).
+// спрашиваемых для КАНДИДАТОВ, отобранных сужённо (задача #645, см. ниже).
+// Перечисление у МОДЕЛИ («перечислить всё видимое и пересечь») остаётся
+// запрещённым по своей исходной причине — оно молча режется server-side пределом
+// OpenFGA без continuation-token (см. internal/authzfilter).
+//
+// # Страница этого списка — страница ВИДИМОГО (задача #645)
+//
+// Прежде страница бралась окном по всей таблице, и видимое вычиталось после.
+// Такой порядок теряет всякую строку, перед которой по времени создания лежит
+// больше `page_size` невидимых: до сужения она не доезжает вовсе, и арендатор
+// получает 200 с пустым массивом, тогда как чтение того же объекта по
+// идентификатору отвечает 200.
+//
+// Теперь страница ОТБИРАЕТСЯ сужённой: КАНДИДАТЫ — из собственной БД iam
+// (`internal/repo/kacho/visibility`, надмножество видимого), ВЕРДИКТ — у модели
+// прав по каждому кандидату, ДОГРУЗКА — пока страница не полна. Форма цикла и
+// его инварианты изложены один раз, у соседа-проекта (api/project/list.go).
+//
+// Токен теперь обозначает границу ВИДИМОЙ последовательности — последнюю
+// ОТДАННУЮ строку, видимую по построению, — и выдаётся только когда за отданной
+// страницей уже прочитана и осуждена видимая строка. Форма токена сменилась и
+// несёт признак: обход, начатый прежней сборкой, отвергается, а не продолжается
+// приблизительно.
 //
 //   - ветка viewer — группы, на которые принципал держит viewer-tier (account-admin
 //     резолвит viewer на каждую группу своего аккаунта через account-tier cascade);
@@ -31,6 +51,7 @@ import (
 	"context"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
@@ -38,7 +59,9 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	repogroup "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 type ListGroupsUseCase struct {
@@ -59,70 +82,172 @@ func (u *ListGroupsUseCase) WithRelationStore(relations clients.RelationQueries)
 	return u
 }
 
+// fgaGroupType — the object type this list asks the model about.
+const fgaGroupType = "iam_group"
+
 func (u *ListGroupsUseCase) Execute(ctx context.Context, f repogroup.ListFilter) ([]domain.Group, string, error) {
-	// Формат пагинации — ПЕРВЫМ стейтментом, до решения о том, кто спрашивает.
-	//
-	// Ниже стоит замыкание по личности: анонимный (в том числе непроброшенный)
-	// вызывающий получает пустую страницу и до репозитория не доходит. Пока
-	// формат курсора проверял только репозиторий, один и тот же мусорный
-	// page_token получал разный ответ в зависимости от того, опознан ли
-	// вызывающий, — то есть проверка ввода зависела от прав. Репозиторий
-	// остаётся авторитетным на служимом пути.
-	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+	// C7 — формат ПЕРВЫМ стейтментом, до решения о том, кто спрашивает. Ниже
+	// стоит замыкание по личности: анонимный вызывающий до репозитория не
+	// доходит, поэтому проверка, живущая только там, для него не исполняется, и
+	// один и тот же мусорный курсор получал бы разный ответ в зависимости от
+	// того, что вызывающему выдано.
+	if err := shared.ValidateVisiblePagination(f.PageToken, f.PageSize); err != nil {
+		return nil, "", err
+	}
+	after, err := shared.DecodeVisiblePageToken("page_token", f.PageToken)
+	if err != nil {
 		return nil, "", err
 	}
 	// Anonymous → empty (default-deny) ДО любого FGA-вызова. authzguard.IsAnonymous
 	// относит сюда и не-forwarded principal (api-gateway не передал заголовки →
 	// system/bootstrap fallback) — fail-closed, без unfiltered-обхода.
 	if authzguard.IsAnonymous(ctx) {
-		return nil, "", nil
+		return []domain.Group{}, "", nil
 	}
 	principal := operations.PrincipalFromContext(ctx)
-
-	out, next, err := u.list(ctx, f)
-	if err != nil {
-		return nil, "", err
-	}
-	visible, err := u.visibleGroupIDs(ctx, principal, groupIDsOf(out))
-	if err != nil {
-		return nil, "", err
-	}
-	filtered := out[:0]
-	for _, g := range out {
-		if visible[string(g.ID)] {
-			filtered = append(filtered, g)
-		}
-	}
-	return filtered, next, nil
-}
-
-// visibleGroupIDs — отношение ЧТЕНИЯ на iam_group (предикат страницы берётся у
-// authzfilter.RelationsFor), спрашиваемое ПРЯМО по каждому объекту СТРАНИЦЫ:
-// строка попадает в страницу ровно тогда, когда вызывающий вправе прочитать её
-// одиночным Get.
-//
-// Здесь менялись ДВЕ независимые вещи, обе уже применены. Форма: прежний
-// ListObjects («перечисли все видимые группы») молча резался server-side
-// пределом OpenFGA (1000 объектов типа в сторе, без continuation-token), из-за
-// чего собственная группа тенанта выпадала из выдачи навсегда. Предикат: здесь
-// стоял союз `viewer ∪ v_list` — снят, потому что ярусные и глагольные
-// отношения развязаны намеренно и союз расходился с гейтом чтения в обе
-// стороны. См. package-doc internal/authzfilter.
-//
-// Fail-closed: nil-порт или FGA-ошибка на любом объекте → Unavailable.
-func (u *ListGroupsUseCase) visibleGroupIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
-	if u.relationQueries == nil {
-		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
-	}
 	subject := principalSubject(principal)
 	if subject == "" {
-		return map[string]bool{}, nil
+		// Тип принципала, который не резолвится в субъект модели, видит пусто.
+		return []domain.Group{}, "", nil
 	}
-	visible, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, "iam_group", ids)
+	if u.relationQueries == nil {
+		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+
+	// ВОПРОС О СУБЪЕКТЕ — один на запрос, вне цикла набора страницы. Его отказ —
+	// отказ запроса, а не «этот вызывающий не администратор».
+	clusterAdmin, err := authzguard.SubjectIsClusterAdminE(ctx, u.relationQueries, subject)
+	if err != nil {
+		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+
+	rd, err := u.repo.Reader(ctx)
+	if err != nil {
+		return nil, "", shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+
+	scope, err := u.subjectScope(ctx, rd, principal, clusterAdmin)
+	if err != nil {
+		return nil, "", err
+	}
+	return u.collectVisiblePage(ctx, rd, subject, scope, f, after)
+}
+
+// subjectScope resolves the structural facts of the caller once per request.
+//
+// A reader that cannot answer them is a REFUSAL, not a licence to list
+// un-narrowed: "I have nothing to narrow with" and "you may see nothing" are
+// different facts, and the second must never be produced by the first.
+func (u *ListGroupsUseCase) subjectScope(
+	ctx context.Context, rd kachorepo.Reader, principal operations.Principal, clusterAdmin bool,
+) (visibility.Scope, error) {
+	vr := rd.Visibility()
+	if vr == nil {
+		return visibility.Scope{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	scope, err := vr.ScopeOf(ctx, visibility.Subject{Type: principal.Type, ID: principal.ID})
+	if err != nil {
+		return visibility.Scope{}, shared.MapRepoErr(err)
+	}
+	// A cloud administrator's candidates are not narrowed: he holds no per-object
+	// row anywhere, so any narrowing by iam's tables would be narrower than the
+	// model.
+	if clusterAdmin {
+		scope.Unrestricted = true
+	}
+	return scope, nil
+}
+
+// collectVisiblePage fills one page with visible rows, reading candidates until
+// the page is full or the caller's own candidates are exhausted.
+func (u *ListGroupsUseCase) collectVisiblePage(
+	ctx context.Context, rd kachorepo.Reader, subject string,
+	scope visibility.Scope, f repogroup.ListFilter, after *shared.VisibleCursor,
+) ([]domain.Group, string, error) {
+	want := shared.EffectiveListPageSize(f.PageSize)
+	// One row beyond the page: a non-empty token is issued only when a visible row
+	// past this page has ALREADY been read and judged (C2).
+	need := want + 1
+	// Насыщающее сужение, а не голое int32(need): величина здесь заведомо мала
+	// (want ≤ MaxListPageSize), но «заведомо» — рассуждение автора, а не свойство
+	// типа, и проверяющий переполнение анализатор его не знает. Общий helper
+	// делает границу свойством кода.
+	chunk := safeconv.IntToInt32(need)
+	if chunk > shared.MaxListPageSize {
+		chunk = shared.MaxListPageSize
+	}
+	candidates := scope.Candidates(fgaGroupType)
+
+	var cursor *repogroup.Cursor
+	if after != nil {
+		cursor = &repogroup.Cursor{CreatedAt: after.CreatedAt, ID: after.ID}
+	}
+
+	// Собственный аккумулятор, а не массив репозитория: `rows[:0]` затирает и
+	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
+	visible := make([]domain.Group, 0, need)
+
+	for len(visible) < need {
+		rows, _, err := rd.Groups().List(ctx, repogroup.ListFilter{
+			AccountID:  f.AccountID,
+			Filter:     f.Filter,
+			PageSize:   chunk,
+			After:      cursor,
+			Candidates: candidates,
+		})
+		if err != nil {
+			return nil, "", shared.MapRepoErr(err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		last := rows[len(rows)-1]
+		cursor = &repogroup.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
+
+		judged, err := u.judge(ctx, subject, rows)
+		if err != nil {
+			return nil, "", err
+		}
+		visible = append(visible, judged...)
+
+		if len(rows) < int(chunk) {
+			break // кандидаты исчерпаны
+		}
+	}
+
+	// Токен считается от последней ОТДАННОЙ видимой строки в keyset-порядке —
+	// том самом, в котором их вернул обход.
+	if len(visible) > want {
+		boundary := visible[want-1]
+		return visible[:want], shared.EncodeVisiblePageToken(shared.VisibleCursor{
+			CreatedAt: boundary.CreatedAt,
+			ID:        string(boundary.ID),
+		}), nil
+	}
+	return visible, "", nil
+}
+
+// judge keeps the rows this caller may see, in the order they were read.
+//
+// Every candidate is put to the model — this surface has no floor. Fail-closed:
+// a verdict that could not be obtained aborts the request (UNAVAILABLE), because
+// a page filtered by an incomplete answer under-reports, and an under-report
+// reads to a reconciliation loop as "these are gone".
+func (u *ListGroupsUseCase) judge(
+	ctx context.Context, subject string, rows []domain.Group,
+) ([]domain.Group, error) {
+	granted, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, fgaGroupType, groupIDsOf(rows))
 	if err != nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
-	return visible, nil
+	out := make([]domain.Group, 0, len(rows))
+	for _, g := range rows {
+		if granted[string(g.ID)] {
+			out = append(out, g)
+		}
+	}
+	return out, nil
 }
 
 // groupIDsOf проецирует страницу групп в голые id.
@@ -132,19 +257,6 @@ func groupIDsOf(rows []domain.Group) []string {
 		out = append(out, string(g.ID))
 	}
 	return out
-}
-
-func (u *ListGroupsUseCase) list(ctx context.Context, f repogroup.ListFilter) ([]domain.Group, string, error) {
-	rd, err := u.repo.Reader(ctx)
-	if err != nil {
-		return nil, "", shared.MapRepoErr(err)
-	}
-	defer func() { _ = rd.Rollback(ctx) }()
-	out, next, err := rd.Groups().List(ctx, f)
-	if err != nil {
-		return nil, "", shared.MapRepoErr(err)
-	}
-	return out, next, nil
 }
 
 // principalSubject builds the FGA subject string: `user:<id>` / `service_account:<id>`.

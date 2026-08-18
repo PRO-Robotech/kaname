@@ -26,8 +26,16 @@ import (
 )
 
 // RequireAuthenticated returns PermissionDenied if the principal in ctx is
-// anonymous or absent. user / service_account / system-bootstrap are passed
-// through.
+// anonymous or absent. Only `user` and `service_account` are passed through.
+//
+// system/bootstrap is REFUSED, exactly as the package comment says: that pair is
+// what PrincipalFromContext returns when the request carried no principal at all,
+// so admitting it would turn "the edge forwarded nothing" into a privileged
+// identity. The previous edition of this sentence listed it among the passed-through
+// principals — two statements about one subject, of which one was true — and the
+// false one was read as a licence: three listing use-cases carried an
+// "unfiltered page for the bootstrap identity" branch that no input could reach,
+// because IsAnonymous had already refused (#648).
 //
 // Message text is the Kachō canonical `"permission denied"` (no leak of
 // internal details).

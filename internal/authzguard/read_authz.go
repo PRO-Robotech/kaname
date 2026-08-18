@@ -73,7 +73,7 @@ func AllowsVerb(ctx context.Context, checker RelationChecker, relation, fgaType,
 	}
 	// Cluster-admin short-circuit (D-9): a cluster-admin reads ANY object even
 	// without a per-object tuple.
-	admin, adminErr := subjectIsClusterAdminE(ctx, checker, subject)
+	admin, adminErr := SubjectIsClusterAdminPlainE(ctx, checker, subject)
 	if admin {
 		return true, nil
 	}

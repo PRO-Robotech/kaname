@@ -134,6 +134,586 @@
           ]
         }
       ]
+    },
+    {
+      "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 — every iam List refuses (503/14) while the authorization store is unreachable — never 200 with an empty page",
+      "description": "class:AUTHZ | class:FLOW | class:FAIL_CLOSED | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-projects-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects?accountId={{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects?accountId={{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] projects: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] projects: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] projects: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.projects) && j.projects.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-accounts-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] accounts: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] accounts: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] accounts: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.accounts) && j.accounts.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-users-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users?accountId={{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users?accountId={{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] users: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] users: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] users: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.users) && j.users.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-groups-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/groups?accountId={{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "groups?accountId={{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] groups: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] groups: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] groups: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.groups) && j.groups.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-service-accounts-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/serviceAccounts?accountId={{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "serviceAccounts?accountId={{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] service-accounts: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] service-accounts: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] service-accounts: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.serviceAccounts) && j.serviceAccounts.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-roles-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/roles?accountId={{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "roles?accountId={{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] roles: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] roles: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] roles: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.roles) && j.roles.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-access-bindings-during-openfga-outage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let j; try { j = pm.response.json(); } catch (_) { j = {}; }",
+                  "const body = JSON.stringify(j);",
+                  "pm.test('[FAIL-CLOSED] access-bindings: 503 Unavailable', () => {",
+                  "  pm.expect(pm.response.code, body).to.eql(503);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] access-bindings: grpc code 14 (Unavailable)', () => {",
+                  "  pm.expect(j.code, body).to.eql(14);",
+                  "});",
+                  "pm.test('[FAIL-CLOSED] access-bindings: never a successful empty page', () => {",
+                  "  const emptyOk = pm.response.code === 200 && Array.isArray(j.accessBindings) && j.accessBindings.length === 0;",
+                  "  pm.expect(emptyOk, 'answered 200 with an empty array while the authorization store was unreachable: a tenant cannot tell that from \"nothing has been granted to you\" — ' + body).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

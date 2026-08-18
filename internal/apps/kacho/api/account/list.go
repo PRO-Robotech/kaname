@@ -5,6 +5,36 @@ package account
 
 // list.go — ListAccountsUseCase. Sync read с pagination.
 //
+// # A page of this list is a page of the VISIBLE (task #645)
+//
+// It used to be a window over the whole `accounts` table, from which the visible
+// was subtracted afterwards. That order loses every account with more than
+// `page_size` invisible predecessors by creation time: the row never reaches the
+// narrowing at all, so the caller receives `200` with an empty array while a Get
+// on that same account answers `200`. The threshold depends on the population of
+// the cloud and on nothing else, so it arrives silently and reads, to the tenant,
+// as "you have nothing".
+//
+// The page is therefore SELECTED narrowed, in three parts that do not work apart
+// — CANDIDATES from iam's own database, VERDICT from the authorization model,
+// REFILL until the page is full. The shape, the reasoning behind each part and
+// the invariants of the loop are stated once, in the project sibling
+// (api/project/list.go); this file states only what is different here.
+//
+// # What is different on this surface
+//
+//   - An account IS its own account, so both halves of the candidate narrowing
+//     compare the same column. `Scope.Candidates("account")` carries the accounts
+//     the caller reaches in AccountIDs and a by-name grant in ObjectIDs; the
+//     repository ORs them over `id`.
+//   - There is NO ownership floor here, and that is not an omission. On the
+//     project surface owning the parent account makes its contents visible
+//     without a verdict; here the object IS the account, and the model decides
+//     whether its owner may read it. Owning an account still makes it a
+//     CANDIDATE — the narrowing must not be narrower than the model — but a
+//     candidate is not a verdict, and the predicate this list serves is
+//     unchanged from before the repair.
+//
 // The visibility filter is FGA-relation-driven. Instead of the legacy
 // owner-only Go post-filter (`OwnerUserID == principal.ID`), the use-case asks
 // OpenFGA which account ids the principal may see and returns only those rows.
@@ -16,10 +46,16 @@ package account
 //	visible(id) = Check(subject, "viewer", "account:"+id)
 //	            ∨ Check(subject, "v_list", "account:"+id)
 //
-// asked for the accounts ON THE PAGE (the page is read from the iam database by
-// cursor first). The previous shape — enumerate every visible account, then
-// intersect — was silently truncated by OpenFGA's ListObjects cap; see the
-// internal/authzfilter package doc.
+// asked for the CANDIDATES read from the iam database (§ above: they are
+// selected narrowed, and the verdict is put per candidate). The predicate is
+// unchanged; what changed is which rows reach it.
+//
+// It was never right to ask the MODEL which accounts are visible and then narrow
+// the query to that set — that enumeration is truncated server-side with no
+// continuation token, and past the cap a tenant's own account fell outside the
+// returned prefix. That remains forbidden: the candidate set above comes from
+// iam's OWN tables, has no cap, and decides nothing. See the internal/authzfilter
+// package doc.
 //
 //   - The `viewer` branch surfaces accounts the principal holds the viewer tier
 //     on (owner-binding admin/editor/viewer write-authz anchor). A viewer grant
@@ -55,6 +91,7 @@ import (
 	"context"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
@@ -62,7 +99,9 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 // ListAccountsUseCase.
@@ -86,27 +125,47 @@ func (u *ListAccountsUseCase) WithRelationStore(relations clients.RelationQuerie
 	return u
 }
 
+// fgaAccountType — the object type this list asks the model about.
+const fgaAccountType = "account"
+
 // Execute — sync read + cursor pagination, filtered to the principal's FGA
-// `viewer`-set. page_size валидируется repo-слоем (default 50, max 1000).
+// `viewer`-set.
 func (u *ListAccountsUseCase) Execute(ctx context.Context, f account.ListFilter) ([]domain.Account, string, error) {
-	// Формат пагинации — ПЕРВЫМ стейтментом, до решения о том, кто спрашивает.
-	//
-	// Ниже стоит замыкание по личности: анонимный (в том числе непроброшенный)
-	// вызывающий получает пустую страницу и до репозитория не доходит. Пока
-	// формат курсора проверял только репозиторий, один и тот же мусорный
-	// page_token получал разный ответ в зависимости от того, опознан ли
-	// вызывающий, — то есть проверка ввода зависела от прав. Репозиторий
-	// остаётся авторитетным на служимом пути.
-	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+	// C7 — формат ПЕРВЫМ стейтментом, до решения о том, кто спрашивает. Ниже
+	// стоит замыкание по личности: анонимный вызывающий до репозитория не
+	// доходит, поэтому проверка, живущая только там, для него не исполняется, и
+	// один и тот же мусорный курсор получал бы разный ответ в зависимости от
+	// того, что вызывающему выдано.
+	if err := shared.ValidateVisiblePagination(f.PageToken, f.PageSize); err != nil {
 		return nil, "", err
 	}
+	after, err := shared.DecodeVisiblePageToken("page_token", f.PageToken)
+	if err != nil {
+		return nil, "", err
+	}
+
 	// Anonymous / non-principal → empty (default-deny). Short-circuits BEFORE
 	// any FGA call so an FGA outage never turns an anonymous request into
 	// Unavailable (INV-3).
 	if authzguard.IsAnonymous(ctx) {
-		return nil, "", nil
+		return []domain.Account{}, "", nil
 	}
 	principal := operations.PrincipalFromContext(ctx)
+	subject := principalSubject(principal)
+	if subject == "" {
+		// Тип принципала, который не резолвится в субъект модели, видит пусто.
+		return []domain.Account{}, "", nil
+	}
+	if u.relationQueries == nil {
+		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+
+	// ВОПРОС О СУБЪЕКТЕ — один на запрос, вне цикла набора страницы. Его отказ —
+	// отказ запроса, а не «этот вызывающий не администратор».
+	clusterAdmin, err := authzguard.SubjectIsClusterAdminE(ctx, u.relationQueries, subject)
+	if err != nil {
+		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
 
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
@@ -114,54 +173,126 @@ func (u *ListAccountsUseCase) Execute(ctx context.Context, f account.ListFilter)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	out, next, err := rd.Accounts().List(ctx, f)
-	if err != nil {
-		return nil, "", shared.MapRepoErr(err)
-	}
-
-	// Resolve visibility for the accounts ON THIS PAGE (per-object, uncapped).
-	visible, err := u.visibleAccountIDs(ctx, principal, accountIDsOf(out))
+	scope, err := u.subjectScope(ctx, rd, principal, clusterAdmin)
 	if err != nil {
 		return nil, "", err
 	}
-
-	filtered := out[:0]
-	for _, a := range out {
-		if visible[string(a.ID)] {
-			filtered = append(filtered, a)
-		}
-	}
-	return filtered, next, nil
+	return u.collectVisiblePage(ctx, rd, subject, scope, f, after)
 }
 
-// visibleAccountIDs returns which of the given account ids the principal may
-// view, per the UNION of the FGA `viewer` and `v_list` relations on `account`
-// on the flat explicit model, asked DIRECTLY per object.
+// subjectScope resolves the structural facts of the caller once per request.
 //
-// It used to enumerate every visible account (`ListObjects`), which OpenFGA caps
-// server-side at 1000 objects of the type in the store with no continuation
-// token — past that population a tenant's own account fell outside the returned
-// prefix and disappeared from List. The predicate is unchanged (ListObjects
-// returns exactly what Check allows); only the shape is bounded to the page.
-// See the internal/authzfilter package doc.
-//
-// Fail-closed: a nil FGA port or an FGA error on ANY object returns Unavailable
-// (never an unfiltered/owner-only fallback).
-func (u *ListAccountsUseCase) visibleAccountIDs(ctx context.Context, principal operations.Principal, ids []string) (map[string]bool, error) {
-	if u.relationQueries == nil {
-		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
+// A reader that cannot answer them is a REFUSAL, not a licence to list
+// un-narrowed: "I have nothing to narrow with" and "you may see nothing" are
+// different facts, and the second must never be produced by the first.
+func (u *ListAccountsUseCase) subjectScope(
+	ctx context.Context, rd kachorepo.Reader, principal operations.Principal, clusterAdmin bool,
+) (visibility.Scope, error) {
+	vr := rd.Visibility()
+	if vr == nil {
+		return visibility.Scope{}, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
-	subject := principalSubject(principal)
-	if subject == "" {
-		// Unknown principal type with no resolvable subject → deny.
-		return map[string]bool{}, nil
-	}
-	visible, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, "account", ids)
+	scope, err := vr.ScopeOf(ctx, visibility.Subject{Type: principal.Type, ID: principal.ID})
 	if err != nil {
-		// FGA outage / timeout / non-200 → fail-closed Unavailable.
+		return visibility.Scope{}, shared.MapRepoErr(err)
+	}
+	// A cloud administrator's candidates are not narrowed: he holds no per-object
+	// row anywhere, so any narrowing by iam's tables would be narrower than the
+	// model.
+	if clusterAdmin {
+		scope.Unrestricted = true
+	}
+	return scope, nil
+}
+
+// collectVisiblePage fills one page with visible rows, reading candidates until
+// the page is full or the caller's own candidates are exhausted.
+func (u *ListAccountsUseCase) collectVisiblePage(
+	ctx context.Context, rd kachorepo.Reader, subject string,
+	scope visibility.Scope, f account.ListFilter, after *shared.VisibleCursor,
+) ([]domain.Account, string, error) {
+	want := shared.EffectiveListPageSize(f.PageSize)
+	// One row beyond the page: a non-empty token is issued only when a visible row
+	// past this page has ALREADY been read and judged (C2).
+	need := want + 1
+	// Насыщающее сужение, а не голое int32(need): величина здесь заведомо мала
+	// (want ≤ MaxListPageSize), но «заведомо» — рассуждение автора, а не свойство
+	// типа, и проверяющий переполнение анализатор его не знает. Общий helper
+	// делает границу свойством кода.
+	chunk := safeconv.IntToInt32(need)
+	if chunk > shared.MaxListPageSize {
+		chunk = shared.MaxListPageSize
+	}
+	candidates := scope.Candidates(fgaAccountType)
+
+	var cursor *account.Cursor
+	if after != nil {
+		cursor = &account.Cursor{CreatedAt: after.CreatedAt, ID: after.ID}
+	}
+
+	// Собственный аккумулятор, а не массив репозитория: `rows[:0]` затирает и
+	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
+	visible := make([]domain.Account, 0, need)
+
+	for len(visible) < need {
+		rows, _, err := rd.Accounts().List(ctx, account.ListFilter{
+			Filter:     f.Filter,
+			PageSize:   chunk,
+			After:      cursor,
+			Candidates: candidates,
+		})
+		if err != nil {
+			return nil, "", shared.MapRepoErr(err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		last := rows[len(rows)-1]
+		cursor = &account.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
+
+		judged, err := u.judge(ctx, subject, rows)
+		if err != nil {
+			return nil, "", err
+		}
+		visible = append(visible, judged...)
+
+		if len(rows) < int(chunk) {
+			break // кандидаты исчерпаны
+		}
+	}
+
+	// Токен считается от последней ОТДАННОЙ видимой строки в keyset-порядке —
+	// том самом, в котором их вернул обход.
+	if len(visible) > want {
+		boundary := visible[want-1]
+		return visible[:want], shared.EncodeVisiblePageToken(shared.VisibleCursor{
+			CreatedAt: boundary.CreatedAt,
+			ID:        string(boundary.ID),
+		}), nil
+	}
+	return visible, "", nil
+}
+
+// judge keeps the rows this caller may see, in the order they were read.
+//
+// Every candidate is put to the model — this surface has no floor. Fail-closed:
+// a verdict that could not be obtained aborts the request (UNAVAILABLE), because
+// a page filtered by an incomplete answer under-reports, and an under-report
+// reads to a reconciliation loop as "these are gone".
+func (u *ListAccountsUseCase) judge(
+	ctx context.Context, subject string, rows []domain.Account,
+) ([]domain.Account, error) {
+	granted, err := authzfilter.VisibleSet(ctx, u.relationQueries, subject, fgaAccountType, accountIDsOf(rows))
+	if err != nil {
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
-	return visible, nil
+	out := make([]domain.Account, 0, len(rows))
+	for _, a := range rows {
+		if granted[string(a.ID)] {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 // accountIDsOf projects an account page to its bare ids.

@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -191,3 +192,17 @@ func (o *lcgOps) List(context.Context, operations.ListFilter) ([]operations.Oper
 func (o *lcgOps) MarkDone(context.Context, string, *anypb.Any) error       { return nil }
 func (o *lcgOps) MarkError(context.Context, string, *gstatus.Status) error { return nil }
 func (o *lcgOps) Cancel(context.Context, string) error                     { return nil }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *lcgReader) Visibility() visibility.ReaderIface { return nil }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *lcgWriter) Visibility() visibility.ReaderIface { return nil }

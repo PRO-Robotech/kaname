@@ -885,7 +885,9 @@ type ListObjectsResult struct {
 const fgaListObjectsServerCap = 1000
 
 // ListObjects — "which objects of resource_type can subject act on?".
-// Requires a configured OpenFGA client (composition root fails fast otherwise).
+// Requires a configured OpenFGA client; on an unprovisioned store id the client
+// fails CLOSED (ErrNotConfigured → UNAVAILABLE) — the composition root does not
+// refuse to start, see clients.ErrNotConfigured (#654).
 //
 // # Bounded and NOT paginated — read this before relying on the result
 //

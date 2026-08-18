@@ -49,6 +49,7 @@ import (
 	role_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	sa_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	user_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -1042,3 +1043,41 @@ func (r *abFakeRepo) drainReconcileObjects() []string {
 	r.reconcileObjs = nil
 	return out
 }
+
+// Visibility — структурные факты о вызывающем, объявленные НЕСУЖЁННЫМИ.
+//
+// Это НАМЕРЕННО снисходительнее продукта, и цена названа вслух, а не умолчана:
+// строк выдачи у этой фикстуры нет вовсе (её гранты живут только в дублёре стора
+// отношений), поэтому назвать кандидатов она не может — а сузив набор до пустого,
+// она вернула бы пустую страницу везде и стёрла бы ровно то, о чём эти пробы
+// спрашивают.
+//
+// Отсюда граница: предмет проб этого пакета — ВЕРДИКТ (каким отношением судится
+// строка страницы, ведёт ли сверх-гейт администратора облака к нефильтрованной
+// выдаче, что происходит на отказе стора). ОТБОР кандидатов они не проверяют и
+// проверять не могут; он проверяется на настоящем Postgres и настоящей модели
+// прав — services/iam/internal/apps/kacho/api/listvisibility, где снисходительного
+// дублёра нет ни с одной стороны именно потому, что предмет там — ПОРЯДОК между
+// страницей и сужением.
+//
+// Прежде здесь стоял nil с комментарием «списочный use-case обязан ОТКАЗАТЬ».
+// Он и отказывает — ровно поэтому дублёру пришлось начать отвечать: nil означает
+// «сузить нечем», а эта фикстура сузить может (ничем не сужая), и это разные
+// утверждения.
+func (rd *abFakeReader) Visibility() visibility.ReaderIface { return unrestrictedVisibility{} }
+
+// unrestrictedVisibility — «кандидаты не сужаются». Ровно то, что означает
+// visibility.Scope{Unrestricted: true}: Candidates(...) вернёт nil, и репозиторий
+// не получит ни одного предиката отбора.
+type unrestrictedVisibility struct{}
+
+func (unrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject) (visibility.Scope, error) {
+	return visibility.Scope{Unrestricted: true, GrantedObjects: map[string][]string{}}, nil
+}
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *abFakeWriter) Visibility() visibility.ReaderIface { return nil }

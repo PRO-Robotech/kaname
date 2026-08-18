@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 // ── fake reader (без writer — LookupSubject use-case read-only) ──
@@ -278,3 +279,10 @@ func TestLookupSubject_RepoError_Wrapped(t *testing.T) {
 	st, _ := status.FromError(err)
 	assert.Equal(t, codes.Internal, st.Code())
 }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *fakeReader) Visibility() visibility.ReaderIface { return nil }

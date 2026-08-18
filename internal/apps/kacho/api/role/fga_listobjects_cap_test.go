@@ -46,7 +46,15 @@ type cappedRoleFGA struct {
 	clients.RelationQueries
 	granted          map[string]bool // "<relation>|<object>"
 	listObjectsCalls atomic.Int64
-	checkCalls       atomic.Int64
+	// checkCalls counts questions about a ROW of the page. subjectCalls counts the
+	// one asked about the CALLER ("is he a cloud administrator", #645).
+	//
+	// They are counted apart because they scale differently and mixing them loses
+	// both statements: the per-row number must not follow the population, the
+	// per-request number must be a constant. A single total can be kept under a
+	// bound by either of them shrinking while the other grows.
+	checkCalls   atomic.Int64
+	subjectCalls atomic.Int64
 }
 
 // newCappedRoleFGA grants `v_list` on the given bare iam_role ids.
@@ -77,7 +85,11 @@ func (c *cappedRoleFGA) ListObjects(_ context.Context, _, relation, objectType s
 
 func (c *cappedRoleFGA) CheckWithContext(_ context.Context, _, relation, object string,
 	_ map[string]any) (bool, error) {
-	c.checkCalls.Add(1)
+	if relation == "system_admin" {
+		c.subjectCalls.Add(1)
+	} else {
+		c.checkCalls.Add(1)
+	}
 	return c.granted[relation+"|"+object], nil
 }
 
@@ -132,6 +144,8 @@ func TestListRoles_OwnRoleBeyondFGAListObjectsCap(t *testing.T) {
 		"List must resolve visibility from the PAGE, never by enumerating the universe")
 	assert.LessOrEqual(t, fga.checkCalls.Load(), int64(2),
 		"visibility must be checked for the rows on the page only (1 custom role, ≤2 relations)")
+	assert.Equal(t, int64(1), fga.subjectCalls.Load(),
+		"the question about the CALLER is asked once per request, outside any per-row loop")
 }
 
 // No weakening: an ungranted custom role stays absent from List and NOT_FOUND

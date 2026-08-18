@@ -219,6 +219,21 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 	// SubjectIsClusterAdmin(ctx, checker, subject) — the subject IS argument 2 here,
 	// which is precisely why argument 2 is not globally the relation.
 	"SubjectIsClusterAdmin": {relationGuardRoot, 2, -1, -1},
+	// SubjectIsClusterAdminE(ctx, checker, subject) — same shape, and listed for
+	// the same reason: it is the ONE question a visible-page list puts about its
+	// caller (#645), asked once per request. That "once" is a property nothing but
+	// this gate can see — the call sits one package away and lexically outside any
+	// loop, so a copy of it moved INTO the page loop would cost a question per row
+	// and contribute to no counter at all.
+	"SubjectIsClusterAdminE": {relationGuardRoot, 2, -1, -1},
+	// SubjectIsClusterAdminPlainE(ctx, checker, subject) — the SAME question as the
+	// two above, over the plain `Check` port instead of the context-carrying one.
+	// It exists because the surfaces that hold only that port must still be able to
+	// keep the FAILURE of this question (access_binding's List), and it is listed
+	// here for the same reason its siblings are: the call sits one package away and
+	// lexically outside any loop, so a copy of it moved INTO a page loop would cost
+	// a question per row and contribute to no counter at all.
+	"SubjectIsClusterAdminPlainE": {relationGuardRoot, 2, -1, -1},
 }
 
 // useCaseTreeRoot — the volume THIS gate inspects; relationClientRoot /

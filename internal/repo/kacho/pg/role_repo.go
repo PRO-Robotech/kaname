@@ -126,7 +126,15 @@ func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role
 			argIdx += len(fargs)
 		}
 	}
-	if f.PageToken != "" {
+	// Курсор. Разобранный (After) имеет приоритет: путь, который его задаёт,
+	// токена не передаёт вовсе, поэтому «оба заданы» здесь не встречается — но
+	// порядок назван явно, чтобы это было свойством кода, а не совпадением.
+	switch {
+	case f.After != nil:
+		conditions = append(conditions, fmt.Sprintf("(created_at, id) > ($%d, $%d)", argIdx, argIdx+1))
+		args = append(args, f.After.CreatedAt, f.After.ID)
+		argIdx += 2
+	case f.PageToken != "":
 		ts, id, err := decodePageToken(f.PageToken)
 		if err != nil {
 			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page_token")
@@ -135,6 +143,28 @@ func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role
 		args = append(args, ts, id)
 		argIdx += 2
 	}
+
+	// Сужение набора КАНДИДАТОВ (задача #645), с ПОЛОМ этой поверхности внутри
+	// условия отбора.
+	//
+	// `is_system` стоит здесь, а не в постфильтре, и это не оптимизация: каталог
+	// системных ролей — самые старые строки таблицы и сам по себе заполняет
+	// страницу по умолчанию. Пол, применённый ПОСЛЕ взятия окна, превращается в
+	// «строка видна, если она в окно попала», то есть ровно в исходный дефект —
+	// на этой поверхности наступавший с первого дня, без всякого населения.
+	//
+	// Системная роль несёт `account_id IS NULL`, поэтому `account_id = ANY(…)`
+	// её не выбирает НИКОГДА: дизъюнкт обязателен, а не подстрахован.
+	//
+	// nil — не сужать (администратор облака); непустой указатель с пустыми
+	// наборами оставляет только пол.
+	if f.Candidates != nil {
+		conditions = append(conditions,
+			fmt.Sprintf("(is_system OR account_id = ANY($%d) OR id = ANY($%d))", argIdx, argIdx+1))
+		args = append(args, nonNilStrings(f.Candidates.AccountIDs), nonNilStrings(f.Candidates.ObjectIDs))
+		argIdx += 2
+	}
+
 	where := ""
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")

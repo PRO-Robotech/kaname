@@ -1,0 +1,340 @@
+{
+  "info": {
+    "_postman_id": "62809bdb-4282-5ecc-88a6-4ad6f10ba6bc",
+    "name": "kacho-iam / newman / iam-list-visibility",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runId') || pm.environment.get('runId') === '') {",
+          "  // runId формат: только [a-z0-9], без точки, начинается с буквы — чтобы проходить compute name regex",
+          "  const t = Date.now().toString(36);",
+          "  const r = Math.floor(Math.random() * 1e9).toString(36);",
+          "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
+          "}",
+          "pm.environment.set('_suiteProjectId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "try {",
+          "  const _ct = (pm.response && pm.response.headers && pm.response.headers.get('Content-Type')) || '';",
+          "  if (_ct.indexOf('json') !== -1) {",
+          "    const _j = pm.response.json();",
+          "    if (_j && _j.done === true && typeof _j.id === 'string' && _j.id !== '') {",
+          "      if (_j.error) {",
+          "        const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+          "        _pv.forEach(function (k) { pm.environment.unset(k); });",
+          "      }",
+          "      pm.environment.unset('_provisionalIds');",
+          "    }",
+          "  }",
+          "} catch (e) { /* не JSON, не Operation — регистрация остаётся как есть */ }"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "IAM-645-LIST-VISIBLE-PAGE-PROJECTS — projects: own object is on the FIRST small page though older invisible rows precede it, and no foreign row comes with it",
+      "description": "class:AUTHZ | class:CRUD | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "IAM-645-LIST-VISIBLE-PAGE-PROJECTS :: list-projects-small-page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects?pageSize=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects?pageSize=25"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const body = JSON.stringify(j);",
+                  "const rows = j.projects || [];",
+                  "const own = pm.environment.get('projectB1Id');",
+                  "const foreign = pm.environment.get('projectA1Id');",
+                  "pm.test('[645-projects] fixture supplies both ids', () => {",
+                  "  pm.expect(Boolean(own), 'own id (projectB1Id) missing from the environment').to.eql(true);",
+                  "  pm.expect(Boolean(foreign), 'foreign id (projectA1Id) missing from the environment').to.eql(true);",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('[645-projects] array present', () => pm.expect(rows, body).to.be.an('array'));",
+                  "pm.test('[645-projects] own object is on the first small page', () => {",
+                  "  pm.expect(rows.some(r => r.id === own), 'page of ' + rows.length + ' row(s) at pageSize=25 does not contain ' + own + ': older rows the caller cannot see occupy the window, so the row never reaches the narrowing — that IS the defect of #645. Page: ' + body).to.eql(true);",
+                  "});",
+                  "pm.test('[645-projects] the named foreign row is absent', () => {",
+                  "  pm.expect(rows.some(r => r.id === foreign), 'foreign row ' + foreign + ' leaked into the page: ' + body).to.eql(false);",
+                  "});",
+                  "pm.test('[645-projects] every returned row belongs to the caller', () => {",
+                  "  const alien = rows.filter(r => !(r.accountId === pm.environment.get('accountBId')));",
+                  "  pm.expect(alien.map(r => r.id), 'rows outside the caller account came back on the page: ' + body).to.eql([]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-645-LIST-VISIBLE-PAGE-ACCOUNTS — accounts: own object is on the FIRST small page though older invisible rows precede it, and no foreign row comes with it",
+      "description": "class:AUTHZ | class:CRUD | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "IAM-645-LIST-VISIBLE-PAGE-ACCOUNTS :: list-accounts-small-page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts?pageSize=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts?pageSize=25"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const body = JSON.stringify(j);",
+                  "const rows = j.accounts || [];",
+                  "const own = pm.environment.get('accountBId');",
+                  "const foreign = pm.environment.get('accountAId');",
+                  "pm.test('[645-accounts] fixture supplies both ids', () => {",
+                  "  pm.expect(Boolean(own), 'own id (accountBId) missing from the environment').to.eql(true);",
+                  "  pm.expect(Boolean(foreign), 'foreign id (accountAId) missing from the environment').to.eql(true);",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('[645-accounts] array present', () => pm.expect(rows, body).to.be.an('array'));",
+                  "pm.test('[645-accounts] own object is on the first small page', () => {",
+                  "  pm.expect(rows.some(r => r.id === own), 'page of ' + rows.length + ' row(s) at pageSize=25 does not contain ' + own + ': older rows the caller cannot see occupy the window, so the row never reaches the narrowing — that IS the defect of #645. Page: ' + body).to.eql(true);",
+                  "});",
+                  "pm.test('[645-accounts] the named foreign row is absent', () => {",
+                  "  pm.expect(rows.some(r => r.id === foreign), 'foreign row ' + foreign + ' leaked into the page: ' + body).to.eql(false);",
+                  "});",
+                  "pm.test('[645-accounts] every returned row belongs to the caller', () => {",
+                  "  const alien = rows.filter(r => !(r.id === pm.environment.get('accountBId')));",
+                  "  pm.expect(alien.map(r => r.id), 'rows outside the caller account came back on the page: ' + body).to.eql([]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-645-LIST-VISIBLE-PAGE-USERS — users: own object is on the FIRST small page though older invisible rows precede it, and no foreign row comes with it",
+      "description": "class:AUTHZ | class:CRUD | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "IAM-645-LIST-VISIBLE-PAGE-USERS :: list-users-small-page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users?pageSize=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users?pageSize=25"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const body = JSON.stringify(j);",
+                  "const rows = j.users || [];",
+                  "const own = pm.environment.get('userAABId');",
+                  "const foreign = pm.environment.get('userAAAId');",
+                  "pm.test('[645-users] fixture supplies both ids', () => {",
+                  "  pm.expect(Boolean(own), 'own id (userAABId) missing from the environment').to.eql(true);",
+                  "  pm.expect(Boolean(foreign), 'foreign id (userAAAId) missing from the environment').to.eql(true);",
+                  "});",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('[645-users] array present', () => pm.expect(rows, body).to.be.an('array'));",
+                  "pm.test('[645-users] own object is on the first small page', () => {",
+                  "  pm.expect(rows.some(r => r.id === own), 'page of ' + rows.length + ' row(s) at pageSize=25 does not contain ' + own + ': older rows the caller cannot see occupy the window, so the row never reaches the narrowing — that IS the defect of #645. Page: ' + body).to.eql(true);",
+                  "});",
+                  "pm.test('[645-users] the named foreign row is absent', () => {",
+                  "  pm.expect(rows.some(r => r.id === foreign), 'foreign row ' + foreign + ' leaked into the page: ' + body).to.eql(false);",
+                  "});",
+                  "pm.test('[645-users] every returned row belongs to the caller', () => {",
+                  "  const alien = rows.filter(r => !(r.accountId === pm.environment.get('accountBId')));",
+                  "  pm.expect(alien.map(r => r.id), 'rows outside the caller account came back on the page: ' + body).to.eql([]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": []
+}

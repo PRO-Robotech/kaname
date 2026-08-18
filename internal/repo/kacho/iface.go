@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 // Repository — корневой entry-point. Конкретная реализация — `pg` подпакет.
@@ -54,6 +55,16 @@ type Reader interface {
 	Groups() group.ReaderIface
 	Roles() role.ReaderIface
 	AccessBindings() access_binding.ReaderIface
+
+	// Visibility — структурные факты о ВЫЗЫВАЮЩЕМ, по которым списочный use-case
+	// сужает набор кандидатов ДО чтения первой строки (задача #645). Живёт на той
+	// же TX, что и страница, поэтому memo и её догрузка видят один снимок.
+	//
+	// Реализация может вернуть nil (дублёр, которому эти факты не нужны). Списочный
+	// use-case обязан трактовать nil как «сузить нечем» и отказать, а не листать
+	// ненаречённое: пустая страница и «мне нечем ответить» — разные ответы, и
+	// второй обязан быть отличим.
+	Visibility() visibility.ReaderIface
 
 	// Commit/Rollback — на Reader-TX оба noop'оподобны (read-only), но обязаны
 	// быть вызваны для возврата соединения в pool.

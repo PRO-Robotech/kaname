@@ -25,6 +25,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -52,6 +53,10 @@ func (r *readTx) Roles() role.ReaderIface {
 }
 func (r *readTx) AccessBindings() access_binding.ReaderIface {
 	return &abReader{tx: r.tx}
+}
+
+func (r *readTx) Visibility() visibility.ReaderIface {
+	return &visibilityReader{tx: r.tx}
 }
 
 func (r *readTx) Commit(ctx context.Context) error   { return r.tx.Commit(ctx) }

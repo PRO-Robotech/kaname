@@ -432,3 +432,56 @@ that read `details[]` updated together — and only after establishing that no
 external consumer pins the current domain.
 
 _Reviewed 2026-07-29 (contract-residue pass)._
+
+---
+
+## 13. `AccessBindingService.List` — two answers changed when the page became a page of the visible
+
+**Convention** (project-wide, `api-conventions.md`): a list answers `200` with a
+page; a caller who may see nothing gets an empty page, never an error. Existence
+is never disclosed by an error code.
+
+**Divergence**: two inputs that used to produce an empty `200` from this one RPC
+now produce `UNAVAILABLE`.
+
+1. **The relation port is not wired** (`queries == nil`). Previously the
+   use-case answered an empty page — "no visibility is resolvable, so nothing is
+   visible". It now refuses.
+2. **The cluster-admin question fails in transport.** Previously the answer was
+   folded into "not a cluster administrator" and the request continued down the
+   per-object path. It now refuses.
+
+A **nil** cluster-admin port is deliberately NOT in this list and keeps its old
+meaning: an unwired super-gate does not fire, and the per-object path runs.
+
+**Why (by design, not a defect)**: the convention above is about a caller who may
+see nothing. Neither case is that caller. Both are the service saying "I could
+not establish what you may see", and answering that with an empty page makes a
+misconfigured or degraded deployment indistinguishable, to every tenant, from a
+correctly locked-down one — the tenant reads "you have no grants" and has no way
+to learn otherwise. The second case is the quieter of the two: it narrows the
+page rather than emptying it, so the caller cannot tell it from a revocation.
+
+This is not a new rule invented for this RPC. It is the rule the other six iam
+list surfaces already followed; this one was the last still answering the old
+way, and the divergence is recorded because the CHANGE is observable, not because
+the destination is unusual.
+
+**Safety**: no widening — nothing becomes visible that was not visible before.
+Both changes turn a success into a refusal, which is the fail-closed direction.
+`UNAVAILABLE` maps to HTTP 503 (`api-conventions.md` §gRPC→HTTP), which is
+retryable, so a client that polls recovers on its own once the deployment is
+fixed; an empty page gave it nothing to retry.
+
+**Regression**: `services/iam/internal/apps/kacho/api/listvisibility`,
+`TestList645_23b_AnUnwiredRelationPortRefusesRatherThanReportingNothing` and
+`TestList645_16b_SubjectQuestionFailureIsUnavailableNotANarrowedPage` — both run
+all seven surfaces against real Postgres and a real relation store, and both
+carry a paired positive control in the same run (wired port → the object is
+there; live store → the administrator sees it), so "it refuses" cannot be
+satisfied by a build that refuses everything.
+
+**Convergence**: none sought. The previous behaviour is the one this entry exists
+to keep from being restored by someone reading the convention alone.
+
+_Reviewed 2026-08-18 (task #645, list page is a page of the visible)._

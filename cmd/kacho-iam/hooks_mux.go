@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	handlerinternal "github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -37,6 +38,7 @@ func buildHooksMux(
 	kachoRepo kachorepo.Repository,
 	opsRepo operations.Repo,
 	relationStore *clients.OpenFGAHTTPClient,
+	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
 ) http.Handler {
@@ -101,7 +103,10 @@ func buildHooksMux(
 	provisionReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool), logger)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
-		WithReconciler(provisionReconciler)
+		WithReconciler(provisionReconciler).
+		// ЖИВОЙ путь первого входа: именно здесь активируются приглашения на
+		// настоящем трафике. Счётчик без этой провязки был бы всегда нулевым.
+		WithActivationObserver(metricsReg.InviteActivationRecorder())
 	provisionHook := handlerinternal.NewProvisionHookHandler(
 		handlerinternal.ProvisionHookConfig{HookSharedSecret: hookSecret},
 		&userProvisionAdapter{uc: userUpsert},

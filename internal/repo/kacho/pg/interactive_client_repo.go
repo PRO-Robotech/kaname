@@ -213,6 +213,12 @@ func scanInteractiveClient(row pgx.Row) (domain.InteractiveClient, error) {
 
 // nonNilStrings — pgx encodes a nil slice as NULL, and the columns are NOT NULL.
 // An empty list is a legitimate value (no post-logout targets); NULL is not.
+//
+// The candidate narrowing of the visible-page lists (#645) uses it for the other
+// direction — a `= ANY($N)` predicate. There `x = ANY(NULL)` is NULL, which a
+// WHERE clause drops, so a nil slice would already refuse every row; that is the
+// answer wanted, but it would be right by accident of three-valued logic. Passing
+// an EMPTY array says the same thing on purpose: a set that contains nothing.
 func nonNilStrings(v []string) []string {
 	if v == nil {
 		return []string{}

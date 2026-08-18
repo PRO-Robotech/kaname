@@ -92,11 +92,55 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 	return &op, nil
 }
 
+// identityTuplesForRemoval — кортежи МОДЕЛИ ПРАВ, чей объект есть объект
+// личности: они заводятся вместе с человеком и обязаны уходить вместе с ним.
+//
+// Зеркалит суженный до объекта личности набор `bootstrapTuples`:
+//
+//	iam_user:<u> # subject @ user:<u>        — «прочитать себя» (flat-model D-4);
+//	iam_user:<u> # account @ account:<A>     — указатель принадлежности, от
+//	                                           которого выводится админ-уровень.
+//
+// Прочие кортежи создания (владение аккаунтом, админ проекта, указатели
+// кластера) объектом личности НЕ являются и здесь не перечисляются: аккаунт и
+// проект переживают человека. Кортеж владения к тому же недостижим по этому
+// пути — `accounts_owner_fk` отвергает снятие владеющего человека немедленно.
+//
+// Пустой аккаунт кортежа НЕ порождает: строка вида `account: # account @ …`
+// адресовала бы аккаунт, которого никто не называл. Строка человека без
+// аккаунта уже существует в этом коде как отдельный случай (см. пробу про
+// пустой account_id в метаданных операции).
+func identityTuplesForRemoval(id domain.UserID, accountID string) []service.RelationTuple {
+	tuples := []service.RelationTuple{
+		{
+			User:     fmt.Sprintf("user:%s", id),
+			Relation: "subject",
+			Object:   fmt.Sprintf("iam_user:%s", id),
+		},
+	}
+	if accountID != "" {
+		tuples = append(tuples, service.RelationTuple{
+			User:     fmt.Sprintf("account:%s", accountID),
+			Relation: "account",
+			Object:   fmt.Sprintf("iam_user:%s", id),
+		})
+	}
+	return tuples
+}
+
 func (uc *DeleteUserUseCase) doDelete(ctx context.Context, id domain.UserID, actor, accountID string) (*anypb.Any, error) {
 	if err := shared.DoWithWriteTxVoid(ctx, uc.repo,
 		func(ctx context.Context, w Writer) error {
 			if derr := w.UsersW().Delete(ctx, id); derr != nil {
 				return derr
+			}
+			// Снятие кортежей — намерением в ТОЙ ЖЕ транзакции, что и снятие
+			// строки (at-least-once дренаж, идемпотентно). Не post-commit
+			// best-effort: процесс, умерший между коммитом и вызовом, оставил бы
+			// в модели прав утверждения о человеке, которого уже нет, и заметить
+			// это было бы нечем.
+			if terr := w.EmitFGARelationDelete(ctx, identityTuplesForRemoval(id, accountID)); terr != nil {
+				return terr
 			}
 			ev := service.AuditEvent{
 				EventType: auditEventUserDeleted,

@@ -70,9 +70,20 @@ type OpenFGAHTTPClient struct {
 	WriteTimeout time.Duration
 }
 
-// ErrNotConfigured — returned by the HTTP methods if Endpoint/StoreID are
-// empty. The composition root (cmd/kacho-iam) fails fast before constructing
-// the client, so this only guards against a programmer wiring error.
+// ErrNotConfigured — returned by the HTTP methods if Endpoint/StoreID are empty.
+//
+// This is a REACHABLE state on a healthy stand, not a programmer-error guard. The
+// store id is provisioned at run time by the openfga-bootstrap Job — a helm
+// `post-install,post-upgrade` hook that runs only after the release is Ready — so
+// on the very first boot iam comes up with it empty by design and every call here
+// fails CLOSED until the pod is re-rolled with the id. The composition root logs a
+// loud WARN and continues; it does NOT refuse to start, because refusing would keep
+// the release from ever becoming Ready and the hook from ever running.
+//
+// The previous edition claimed the composition root "fails fast before constructing
+// the client", which would have made this branch unreachable. Anyone reasoning from
+// that would conclude the state cannot happen and drop the fail-closed handling on
+// the callers' side (#654).
 var ErrNotConfigured = errors.New("openfga: HTTP client not configured")
 
 type openfgaWriteRequest struct {

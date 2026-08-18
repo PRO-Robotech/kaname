@@ -14,7 +14,8 @@ package user
 // аккаунта) устранена (T3.3 D-5): видны только user'ы с per-object viewer/v_list
 // грантом (включая self через self-tuple → viewer-ветку). Инварианты:
 // anonymous → empty (до FGA); FGA-ошибка → Unavailable (fail-closed); cluster-admin/
-// operator/owner покрыты веткой viewer (tier-cascade); system bootstrap → unfiltered.
+// operator/owner покрыты веткой viewer (tier-cascade); не-forwarded principal
+// (system/bootstrap fallback) — тоже anonymous → empty.
 
 import (
 	"context"
@@ -41,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 const (
@@ -291,6 +293,28 @@ func TestListUsers_AnonymousEmpty(t *testing.T) {
 	assert.Zero(t, fga.calls["viewer"], "anonymous short-circuits before FGA")
 }
 
+// Не-переданная личность (край не передал заголовки `x-kacho-principal-*` →
+// PrincipalFromContext отдаёт запасного system/bootstrap) относится
+// authzguard.IsAnonymous к анонимным → пустая страница ДО любого обращения к
+// модели. Паритет с group/service_account.
+//
+// Проба заведена задачей #648 и на момент заведения была ЗЕЛЁНОЙ на неизменённом
+// коде — это и есть доказательство того, что стоявшая ниже по функции ветка
+// «системный бутстрап → несужённая страница» не исполнялась ни при каком входе:
+// замыкание по личности стоит выше и относит бутстрап к анонимным. Ветка снята,
+// проба осталась — она держит инвариант вперёд.
+func TestListUsers_SystemBootstrapFallback_FailClosed(t *testing.T) {
+	repo := &scopeUserRepo{users: seedListUsers()}
+	fga := newUserUnionFGAStub()
+	ctx := operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: domain.PrincipalTypeSystem, ID: domain.PrincipalIDBootstrap})
+	uc := NewListUsersUseCase(repo).WithRelationStore(fga)
+	out, _, err := uc.Execute(ctx, repouser.ListFilter{AccountID: listAcctA})
+	require.NoError(t, err)
+	assert.Empty(t, out, "system/bootstrap fallback → anonymous → empty (fail-closed)")
+	assert.Zero(t, fga.calls["viewer"], "short-circuits before FGA")
+}
+
 // T3.3-AUTHZ-02 — FGA-ошибка на любой relation → Unavailable (fail-closed).
 func TestListUsers_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := &scopeUserRepo{users: seedListUsers()}
@@ -328,4 +352,33 @@ func (s *userUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, r
 		out[i] = allowed
 	}
 	return out, nil
+}
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+// Visibility — структурные факты о вызывающем, объявленные НЕСУЖЁННЫМИ.
+//
+// Это НАМЕРЕННО снисходительнее продукта, и цена названа вслух: строк выдачи у
+// этой фикстуры нет вовсе (её гранты живут только в дублёре стора отношений),
+// поэтому назвать кандидатов она не может — а сузив набор до пустого, вернула бы
+// пустую страницу везде и стёрла бы ровно то, о чём эти пробы спрашивают.
+//
+// Отсюда граница: предмет проб этого пакета — ВЕРДИКТ (каким отношением судится
+// строка страницы, как ведут себя полы, что происходит на отказе стора). ОТБОР
+// кандидатов они не проверяют и проверять не могут; он проверяется на настоящем
+// Postgres и настоящей модели прав —
+// services/iam/internal/apps/kacho/api/listvisibility, где снисходительного
+// дублёра нет ни с одной стороны именно потому, что предмет там — ПОРЯДОК между
+// страницей и сужением.
+func (r *scopeUserReader) Visibility() visibility.ReaderIface { return usrUnrestrictedVisibility{} }
+
+// usrUnrestrictedVisibility — «кандидаты не сужаются»: Candidates(...) вернёт nil,
+// и репозиторий не получит ни одного предиката отбора.
+type usrUnrestrictedVisibility struct{}
+
+func (usrUnrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject) (visibility.Scope, error) {
+	return visibility.Scope{Unrestricted: true, GrantedObjects: map[string][]string{}}, nil
 }

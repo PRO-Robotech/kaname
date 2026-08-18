@@ -6,8 +6,10 @@ package role
 
 import (
 	"context"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 type ReaderIface interface {
@@ -78,7 +80,10 @@ type WriterIface interface {
 }
 
 type ListFilter struct {
-	PageSize  int32
+	PageSize int32
+	// PageToken — токен, КАК ЕГО ПРИСЛАЛ КЛИЕНТ. Его разбирает use-case (форма
+	// токена принадлежит контракту RPC, а не таблице), поэтому на пути к
+	// репозиторию он пуст, а курсор приезжает разобранным в After.
 	PageToken string
 	Filter    string
 	// AccountID — scope the catalog to a single Account: the result is system
@@ -87,10 +92,41 @@ type ListFilter struct {
 	// Account scope.
 	AccountID domain.AccountID
 	IsSystem  *bool // nil = both
-	// NB: there is deliberately NO visible-id push-down here. Per-object read
-	// visibility is applied by the use-case to the rows this filter RETURNS
-	// (internal/authzfilter), not pushed into the SQL: the only way to obtain a
-	// visible-id set up front is OpenFGA's ListObjects, which is capped
-	// server-side at 1000 objects of the type in the store with no continuation
-	// token — narrowing the query by that set silently hid a tenant's own roles.
+
+	// After — курсор keyset В РАЗОБРАННОМ ВИДЕ: страница начинается со строки,
+	// строго следующей за (CreatedAt, ID). nil — с начала.
+	After *Cursor
+
+	// Candidates — сужение НАБОРА КАНДИДАТОВ до надмножества видимого
+	// вызывающему (задача #645).
+	//
+	// # Это НЕ то push-down, который здесь раньше запрещался
+	//
+	// На этом месте стояло «visible-id push-down здесь намеренно НЕТ», и запрет
+	// был верен для того, что он описывал: набор ВИДИМЫХ id, добытый у модели
+	// перечислением (`ListObjects`), режется server-side пределом без
+	// continuation-token, поэтому сужение запроса по нему молча прятало
+	// собственные роли тенанта. Тот запрет остаётся в силе — перечисления у
+	// модели здесь по-прежнему нет.
+	//
+	// Этот набор — другой по ИСТОЧНИКУ и по СМЫСЛУ: он приходит из собственных
+	// таблиц iam (`internal/repo/kacho/visibility`), предела не имеет и является
+	// НАДМНОЖЕСТВОМ видимого — вердикт по каждому кандидату по-прежнему выносит
+	// модель (`security.md` §«Авторизация живёт в МОДЕЛИ»). Без него страница
+	// берётся окном по всей таблице и всякая роль, перед которой лежит больше
+	// `page_size` невидимых предшественников, до сужения не доезжает вовсе.
+	//
+	// Каталог системных ролей — ПОЛ этой поверхности, и он входит в набор
+	// условием (`is_system`), а не постфильтром: пол, применённый к уже взятой
+	// странице, повторяет исходный дефект — строка становится полом, только если
+	// она в страницу попала.
+	//
+	// nil ЗНАЧИТ «не сужать», и это НЕ то же, что пустой набор.
+	Candidates *visibility.PageScope
+}
+
+// Cursor — граница keyset-обхода `(created_at, id) ASC`.
+type Cursor struct {
+	CreatedAt time.Time
+	ID        string
 }

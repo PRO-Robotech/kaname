@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 type ReaderIface interface {
@@ -18,6 +19,12 @@ type ReaderIface interface {
 	// by (created_at, id) ASC. Read VISIBILITY is not a predicate here: the
 	// use-case applies it per-object to the rows this returns
 	// (internal/authzfilter).
+	//
+	// `Candidates` is NOT that visibility and must not be read as it: it selects
+	// which rows are worth reading (a superset of the visible, from iam's own
+	// tables), while the verdict on each stays with the model. Without it the page
+	// is a raw window and everything past it is lost before any verdict — see the
+	// field's own doc.
 	List(ctx context.Context, filter ListFilter) ([]domain.AccessBinding, string, error)
 	ListByScope(ctx context.Context, resourceType domain.ResourceType, resourceID string, filter PageFilter) ([]domain.AccessBinding, string, error)
 	ListBySubject(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, filter PageFilter) ([]domain.AccessBinding, string, error)
@@ -399,6 +406,41 @@ type ListFilter struct {
 	// (a re-grant of the same 5-tuple would otherwise show up twice). true returns
 	// the retained rows too (audit-retention read).
 	IncludeRevoked bool
+	// After — курсор keyset В РАЗОБРАННОМ ВИДЕ: страница начинается со строки,
+	// строго следующей за (CreatedAt, ID). nil — с начала.
+	//
+	// Пара с PageToken взаимоисключающая по построению: одно значение выражается
+	// ровно одним способом, и путь, задающий After, PageToken не задаёт.
+	After *Cursor
+
+	// Candidates — сужение НАБОРА КАНДИДАТОВ до надмножества видимого
+	// вызывающему (задача #645).
+	//
+	// # Почему у привязки сужение шире, чем «колонка аккаунта»
+	//
+	// У access_bindings колонки аккаунта НЕТ: аккаунт привязки выводится из её
+	// области — `resource_type='account'` даёт его прямо, `resource_type='project'`
+	// через проект. Это ровно то выражение, которым уже пользуется ListByAccount,
+	// и репозиторий переиспользует его, а не заводит второе.
+	//
+	// Набор является надмножеством видимого ПО МОДЕЛИ, и это проверяемо по её
+	// тексту (`fga_model.fga`, тип `iam_access_binding`): читать привязку даёт
+	// либо прямой кортеж на неё (ObjectIDs), либо `super_admin`, который выводится
+	// `admin from account` / `super_admin from project` (AccountIDs — оба случая
+	// сводятся к аккаунту области) либо `any_admin from cluster` (администратор
+	// облака — сужения нет вовсе). Четвёртого пути к чтению у типа нет.
+	//
+	// nil ЗНАЧИТ «не сужать», и это НЕ то же, что пустой набор.
+	//
+	// Сужение НЕ решает вопрос о доступе: оно отбирает кандидатов, вердикт по
+	// каждому выносит модель прав (`security.md` §«Авторизация живёт в МОДЕЛИ»).
+	Candidates *visibility.PageScope
+}
+
+// Cursor — граница keyset-обхода `(created_at, id) ASC`.
+type Cursor struct {
+	CreatedAt time.Time
+	ID        string
 }
 
 // ListByRoleFilter — params for ListByRole. IncludeRevoked

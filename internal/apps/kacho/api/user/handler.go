@@ -84,7 +84,9 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*iamv1.Us
 // ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
 // того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListUsersRequest) (*iamv1.ListUsersResponse, error) {
-	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+	// Форма токена этого списка — граница ВИДИМОЙ последовательности (#645), а не
+	// сырой страницы, поэтому и на границе транспорта судится она.
+	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err
 	}
 	filter := repouser.ListFilter{

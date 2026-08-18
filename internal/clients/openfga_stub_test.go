@@ -3,9 +3,11 @@
 
 // openfga_stub_test.go — in-memory OpenFGA stub used ONLY by tests in this
 // package (the file has the `_test` suffix, so the type is never linked into
-// the production binary). Production wiring builds OpenFGAHTTPClient directly
-// and the composition root fails fast when KACHO_IAM_OPENFGA_STORE_ID is
-// empty (запрет #11 — no mock-instead-of-real fallback).
+// the production binary). Production wiring builds OpenFGAHTTPClient directly and
+// NEVER substitutes this stub when KACHO_IAM_OPENFGA_STORE_ID is empty (запрет #11
+// — no mock-instead-of-real fallback): the real client is wired and fails CLOSED
+// (ErrNotConfigured) until the store id is provisioned. The composition root logs
+// a WARN and continues rather than refusing to start (#654).
 package clients
 
 import (

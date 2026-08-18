@@ -36,6 +36,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -53,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
@@ -93,6 +95,45 @@ type UpsertFromIdentityUseCase struct {
 	// reconciler — rbac-contract-a-flat-fallout: post-commit owner-binding
 	// materialization for the bootstrap path (parity with Account.Create). nil-safe.
 	reconciler OwnerBindingReconciler
+	// activations — счётчик исходов активации приглашения. nil-safe.
+	activations ActivationObserver
+}
+
+// Исходы активации приглашения. Набор ЗАКРЫТ и приходит из этих констант,
+// никогда из запроса, поэтому кардинальность метки не растёт с трафиком.
+//
+// Три исхода, а не один: счётчик ОДНИХ ОТКАЗОВ не отличает «отказов не было» от
+// «активаций не было вовсе», и «ноль за всю жизнь» читалось бы как здоровье там,
+// где путь мёртв (security.md §Hardening-инварианты п.8).
+const (
+	// activationOutcomeActivated — приглашение активировано.
+	activationOutcomeActivated = "activated"
+	// activationOutcomeAlreadyActive — строку уже активировал конкурент.
+	// Ожидаемый исход гонки первого входа, а НЕ отказ: считается отдельно
+	// именно затем, чтобы не разбавлять счётчик отказов штатным событием.
+	activationOutcomeAlreadyActive = "already_active"
+	// activationOutcomeFailed — активация не удалась. Вход прерывается.
+	activationOutcomeFailed = "failed"
+)
+
+// ActivationObserver — наблюдатель исходов активации приглашения.
+//
+// Порт объявлен здесь, а реализация живёт в слое наблюдаемости: use-case не
+// знает про prometheus (иначе адаптер протёк бы в бизнес-логику).
+type ActivationObserver interface {
+	IncInviteActivation(outcome string)
+}
+
+// WithActivationObserver wires the invite-activation outcome counter. nil-safe.
+func (uc *UpsertFromIdentityUseCase) WithActivationObserver(obs ActivationObserver) *UpsertFromIdentityUseCase {
+	uc.activations = obs
+	return uc
+}
+
+func (uc *UpsertFromIdentityUseCase) observeActivation(outcome string) {
+	if uc.activations != nil {
+		uc.activations.IncInviteActivation(outcome)
+	}
 }
 
 func NewUpsertFromIdentityUseCase(r Repo, opsRepo operations.Repo) *UpsertFromIdentityUseCase {
@@ -276,8 +317,24 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 			activated, aerr := w.UsersW().ActivateInvite(ctx, p.ID, in.ExternalID, in.DisplayName)
 			if aerr != nil {
 				_ = w.Rollback(ctx)
-				// Если row уже ACTIVE (race) — пропускаем; иначе propagate.
-				continue
+				// Строку уже активировал конкурент (она больше не PENDING) — это
+				// ожидаемый исход гонки первого входа, и он пропускается намеренно.
+				if errors.Is(aerr, iamerr.ErrNotFound) {
+					uc.observeActivation(activationOutcomeAlreadyActive)
+					continue
+				}
+				// Всё остальное — ОТКАЗ, и он не проглатывается. Прежняя редакция
+				// делала `continue` безусловно, обещая в комментарии обратное:
+				// вход завершался успехом, приглашение оставалось неактивированным,
+				// и узнать об этом было неоткуда.
+				uc.observeActivation(activationOutcomeFailed)
+				if uc.logger != nil {
+					// Коррелируем по идентификатору строки: почта end-user'а в лог
+					// не пишется ни на успешном, ни на отказном пути.
+					uc.logger.Error("invite activation failed",
+						"user_id", string(p.ID), "error", aerr.Error())
+				}
+				return nil, shared.MapRepoErr(aerr)
 			}
 			// Activate-invite is the User update branch (mirror-fields email/
 			// display_name applied) — emit iam.user.updated atomically with the
@@ -328,6 +385,7 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 				_ = w.Rollback(ctx)
 				return nil, shared.MapRepoErr(cerr)
 			}
+			uc.observeActivation(activationOutcomeActivated)
 			if firstActivated == nil {
 				ac := activated
 				firstActivated = &ac

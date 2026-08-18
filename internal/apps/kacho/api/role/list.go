@@ -27,16 +27,33 @@ package role
 //     content (v_get) stays gated. The owner sees their own role via the viewer
 //     branch (account-tier cascade).
 //
-// Order is load-bearing: the page is read from the iam database by cursor FIRST,
-// and only the CUSTOM roles it yields are then checked. The reverse order
-// ("enumerate every visible role, then narrow the SQL to that id-set") hit
-// OpenFGA's hard ListObjects bound (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default
-// 1000, no continuation token) and made a tenant's own custom roles vanish once
-// the store held more iam_role objects than the cap — see the
-// internal/authzfilter package doc. Side effect: a page may come back SHORT
-// (some rows filtered out), which is normal for cursor pagination —
-// next_page_token is derived from the last row EXAMINED, so a full walk still
-// skips nothing.
+// # A page of this list is a page of the VISIBLE (task #645)
+//
+// The page used to be a raw window over `roles`, from which the visible was
+// subtracted afterwards — and on THIS surface that defect arrived on day one,
+// with no population at all: the migrations seed a system-role catalog that by
+// itself fills a default page, so a tenant's own custom role sat past the window
+// from the moment it was created.
+//
+// The page is therefore SELECTED narrowed — CANDIDATES from iam's own database,
+// VERDICT from the model, REFILL until the page is full. The shape and the
+// invariants of the loop are stated once, in the project sibling
+// (api/project/list.go). What is peculiar here is the catalog FLOOR: `is_system`
+// is a condition of the candidate SELECT (see the repository's predicate), not a
+// filter applied to rows already taken. A floor applied after the fact is the
+// original defect wearing a floor's name.
+//
+// Still forbidden, and for its original reason: asking the MODEL which roles are
+// visible and narrowing the SQL to that id-set. That enumeration is truncated
+// server-side (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default 1000, no continuation
+// token) and made a tenant's own custom roles vanish past the cap. The candidate
+// set above is a different thing — it comes from iam's own tables, has no cap,
+// and decides nothing. See the internal/authzfilter package doc.
+//
+// Two consequences of the old order are GONE: a page no longer comes back SHORT
+// merely because rows were filtered out of it, and `next_page_token` is no longer
+// derived from the last row EXAMINED — it is the last row RETURNED, which is
+// visible by construction.
 //
 // f.AccountID (set by the handler from req.account_id) scopes the catalog
 // to system + that Account's custom roles at the SQL layer.
@@ -49,6 +66,7 @@ import (
 	"sort"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
@@ -56,7 +74,9 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 type ListRolesUseCase struct {
@@ -80,71 +100,200 @@ func (u *ListRolesUseCase) WithRelationStore(relations clients.RelationQueries) 
 }
 
 func (u *ListRolesUseCase) Execute(ctx context.Context, f reporole.ListFilter) ([]domain.Role, string, error) {
-	// Формат пагинации — ПЕРВЫМ стейтментом, до решения о том, кто спрашивает.
+	// C7 — формат ПЕРВЫМ стейтментом, до решения о том, кто спрашивает. Ниже
+	// стоит замыкание по личности: анонимный вызывающий до репозитория не
+	// доходит, поэтому проверка, живущая только там, для него не исполняется, и
+	// один и тот же мусорный курсор получал бы разный ответ в зависимости от
+	// того, что вызывающему выдано.
 	//
-	// Ниже стоит замыкание по личности: анонимный (в том числе непроброшенный)
-	// вызывающий получает пустую страницу и до репозитория не доходит. Пока
-	// формат курсора проверял только репозиторий, один и тот же мусорный
-	// page_token получал разный ответ в зависимости от того, опознан ли
-	// вызывающий, — то есть проверка ввода зависела от прав. Репозиторий
-	// остаётся авторитетным на служимом пути.
-	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+	// На этой поверхности формат судит use-case, а не хендлер (у остальных шести
+	// — хендлер): хендлер проверяет только СЫРОЙ page_size, потому что сужение
+	// int64→int32 насыщающее. Токен судится здесь, и это по-прежнему первый
+	// стейтмент — порядок «формат до замыкания» держится у всех семи.
+	if err := shared.ValidateVisiblePagination(f.PageToken, f.PageSize); err != nil {
+		return nil, "", err
+	}
+	after, err := shared.DecodeVisiblePageToken("page_token", f.PageToken)
+	if err != nil {
 		return nil, "", err
 	}
 	// Anonymous → empty (default-deny) BEFORE any FGA call so an FGA outage never
 	// turns an anonymous request into Unavailable.
 	if authzguard.IsAnonymous(ctx) {
-		return nil, "", nil
+		return []domain.Role{}, "", nil
 	}
 	principal := operations.PrincipalFromContext(ctx)
 
 	// Unwired FGA port → fail closed BEFORE touching the database: no visibility
 	// is resolvable at all, so the page could only be served unfiltered (a catalog
-	// leak) or discarded. This is NOT the grant-state short-circuit the pagination
-	// convention orders after format validation — both page_size and page_token
-	// are validated by the first statement of this use-case above (the repo
-	// re-validates them on the served path).
-	//
-	// Прежняя редакция этого комментария относила обе проверки к хендлеру. Для
-	// page_size это было верно, для page_token — нет: его не проверял никто до
-	// репозитория, а до репозитория анонимный вызывающий не доходил.
+	// leak) or discarded.
 	if u.relationQueries == nil {
 		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
+	subject := principalSubject(principal)
 
-	// Page FIRST, per-object visibility SECOND (see the file doc for why the
-	// reverse order was unsound).
+	// ВОПРОС О СУБЪЕКТЕ — один на запрос, вне цикла набора страницы. Его отказ —
+	// отказ запроса, а не «этот вызывающий не администратор».
+	//
+	// Нерезолвимый субъект вопроса не задаёт и ошибкой не является: такому
+	// вызывающему причитается пол каталога и ничего сверх него.
+	clusterAdmin, err := authzguard.SubjectIsClusterAdminE(ctx, u.relationQueries, subject)
+	if err != nil {
+		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
 		return nil, "", shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	out, next, err := rd.Roles().List(ctx, f)
-	if err != nil {
-		return nil, "", shared.MapRepoErr(err)
-	}
-
-	// Resolve visibility for the CUSTOM roles on this page. System roles are the
-	// tenant-wide catalog floor and bypass the filter entirely; a page carrying
-	// only system roles costs no FGA call at all.
-	visible, err := resolveVisibleRoleIDs(ctx, u.relationQueries, principal, customRoleIDs(out))
+	scope, err := u.subjectScope(ctx, rd, principal, clusterAdmin)
 	if err != nil {
 		return nil, "", err
 	}
-	filtered := out[:0]
-	for _, r := range out {
-		if r.IsSystem || visible[string(r.ID)] {
-			filtered = append(filtered, r)
+	return u.collectVisiblePage(ctx, rd, principal, scope, f, after)
+}
+
+// subjectScope resolves the structural facts of the caller once per request.
+//
+// A reader that cannot answer them is a REFUSAL, not a licence to list
+// un-narrowed: "I have nothing to narrow with" and "you may see nothing" are
+// different facts, and the second must never be produced by the first.
+func (u *ListRolesUseCase) subjectScope(
+	ctx context.Context, rd kachorepo.Reader, principal operations.Principal, clusterAdmin bool,
+) (visibility.Scope, error) {
+	vr := rd.Visibility()
+	if vr == nil {
+		return visibility.Scope{}, shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	scope, err := vr.ScopeOf(ctx, visibility.Subject{Type: principal.Type, ID: principal.ID})
+	if err != nil {
+		return visibility.Scope{}, shared.MapRepoErr(err)
+	}
+	// A cloud administrator's candidates are not narrowed: he holds no per-object
+	// row anywhere, so any narrowing by iam's tables would be narrower than the
+	// model.
+	if clusterAdmin {
+		scope.Unrestricted = true
+	}
+	return scope, nil
+}
+
+// collectVisiblePage fills one page with visible rows, reading candidates until
+// the page is full or the caller's own candidates are exhausted.
+//
+// The catalog floor travels INSIDE the candidate narrowing (see the repository's
+// predicate), so a caller with no grants at all still selects the whole system
+// catalog rather than whatever fraction of it fell inside a raw window.
+func (u *ListRolesUseCase) collectVisiblePage(
+	ctx context.Context, rd kachorepo.Reader, principal operations.Principal,
+	scope visibility.Scope, f reporole.ListFilter, after *shared.VisibleCursor,
+) ([]domain.Role, string, error) {
+	want := shared.EffectiveListPageSize(f.PageSize)
+	// One row beyond the page: a non-empty token is issued only when a visible row
+	// past this page has ALREADY been read and judged (C2).
+	need := want + 1
+	// Насыщающее сужение, а не голое int32(need): величина здесь заведомо мала
+	// (want ≤ MaxListPageSize), но «заведомо» — рассуждение автора, а не свойство
+	// типа, и проверяющий переполнение анализатор его не знает. Общий helper
+	// делает границу свойством кода.
+	chunk := safeconv.IntToInt32(need)
+	if chunk > shared.MaxListPageSize {
+		chunk = shared.MaxListPageSize
+	}
+	candidates := scope.Candidates(fgaRoleObjectType)
+
+	var cursor *reporole.Cursor
+	if after != nil {
+		cursor = &reporole.Cursor{CreatedAt: after.CreatedAt, ID: after.ID}
+	}
+
+	// Собственный аккумулятор, а не массив репозитория: `rows[:0]` затирает и
+	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
+	visible := make([]domain.Role, 0, need)
+
+	for len(visible) < need {
+		rows, _, err := rd.Roles().List(ctx, reporole.ListFilter{
+			AccountID:  f.AccountID,
+			IsSystem:   f.IsSystem,
+			Filter:     f.Filter,
+			PageSize:   chunk,
+			After:      cursor,
+			Candidates: candidates,
+		})
+		if err != nil {
+			return nil, "", shared.MapRepoErr(err)
 		}
+		if len(rows) == 0 {
+			break
+		}
+		last := rows[len(rows)-1]
+		cursor = &reporole.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
+
+		judged, err := u.judge(ctx, principal, rows)
+		if err != nil {
+			return nil, "", err
+		}
+		visible = append(visible, judged...)
+
+		if len(rows) < int(chunk) {
+			break // кандидаты исчерпаны
+		}
+	}
+
+	// Токен считается от последней ОТДАННОЙ видимой строки В KEYSET-ПОРЯДКЕ, и
+	// только ПОТОМ страница пересортировывается для показа. Обратный порядок дал
+	// бы токеном границу презентационной сортировки — величину, к обходу
+	// отношения не имеющую, и обход поехал бы не оттуда.
+	page, next := visible, ""
+	if len(visible) > want {
+		boundary := visible[want-1]
+		page = visible[:want]
+		next = shared.EncodeVisiblePageToken(shared.VisibleCursor{
+			CreatedAt: boundary.CreatedAt,
+			ID:        string(boundary.ID),
+		})
 	}
 	// redesign-2026 F6: present the canonical system-role catalog first — system
 	// roles ahead of custom, and among system the canonical four in
-	// viewer→editor→admin→owner order (domain.CanonicalRank). Stable, so the repo's
+	// viewer→editor→admin→owner order (domain.CanonicalRank). Stable, so the
 	// (created_at,id) keyset order is preserved within each rank group; this is a
 	// presentation refinement over the authoritative keyset page.
-	sortCatalogFirst(filtered)
-	return filtered, next, nil
+	sortCatalogFirst(page)
+	return page, next, nil
+}
+
+// judge keeps the rows this caller may see, in the order they were read.
+//
+// System roles are the tenant-wide catalog FLOOR and ask the model nothing; a
+// page carrying only system roles costs no relation call at all. Everything else
+// goes through resolveVisibleRoleIDs — the SAME function GetRoleUseCase calls, so
+// the two read surfaces keep drawing from one question and Get can never serve a
+// custom role absent from List. Asking the model here directly would be a second
+// spelling of that question, free to drift from the one Get uses.
+//
+// Fail-closed: a verdict that could not be obtained aborts the request
+// (UNAVAILABLE).
+func (u *ListRolesUseCase) judge(
+	ctx context.Context, principal operations.Principal, rows []domain.Role,
+) ([]domain.Role, error) {
+	ask := customRoleIDs(rows)
+	granted := map[string]bool{}
+	if len(ask) > 0 {
+		var err error
+		granted, err = resolveVisibleRoleIDs(ctx, u.relationQueries, principal, ask)
+		if err != nil {
+			return nil, err
+		}
+	}
+	out := make([]domain.Role, 0, len(rows))
+	for _, r := range rows {
+		if r.IsSystem || granted[string(r.ID)] {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 // customRoleIDs projects a role page to the ids of its CUSTOM roles — the only

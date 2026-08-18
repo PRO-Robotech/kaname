@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
 const pageGroupID = "grp0000000000000page"
@@ -151,3 +152,10 @@ func TestListMembers_UnsetPageSizeBecomesTheDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 50, repo.seen.PageSize, "an unset page size must become the platform default")
 }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *memberPageReader) Visibility() visibility.ReaderIface { return nil }

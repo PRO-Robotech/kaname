@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -86,15 +87,42 @@ func TestDeleteUser_AccountLess_EmptyAccountID(t *testing.T) {
 
 // ── compact fake Repo (Users reader populated for self-delete) ──────────────
 
-type fakeUsrRepo struct{ accID string }
+type fakeUsrRepo struct {
+	accID string
+
+	// Порядок операций внутри writer-tx и снятые кортежи. Дублёр, глотающий
+	// намерения, делает невидимым ровно тот дефект, ради которого его
+	// подставляют, — поэтому он их ЗАПИСЫВАЕТ.
+	mu      sync.Mutex
+	seq     []string
+	deleted []service.RelationTuple
+}
 
 func newFakeUsrRepo(accID string) *fakeUsrRepo { return &fakeUsrRepo{accID: accID} }
+
+func (f *fakeUsrRepo) record(step string) {
+	f.mu.Lock()
+	f.seq = append(f.seq, step)
+	f.mu.Unlock()
+}
+
+func (f *fakeUsrRepo) sequence() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.seq...)
+}
+
+func (f *fakeUsrRepo) deletedTuples() []service.RelationTuple {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]service.RelationTuple(nil), f.deleted...)
+}
 
 func (f *fakeUsrRepo) Reader(context.Context) (kachorepo.Reader, error) {
 	return &fakeUsrReader{accID: f.accID}, nil
 }
 func (f *fakeUsrRepo) Writer(context.Context) (kachorepo.Writer, error) {
-	return &fakeUsrWriter{fakeUsrReader: fakeUsrReader{accID: f.accID}}, nil
+	return &fakeUsrWriter{fakeUsrReader: fakeUsrReader{accID: f.accID}, parent: f}, nil
 }
 func (f *fakeUsrRepo) Close() {}
 
@@ -110,11 +138,23 @@ func (r *fakeUsrReader) AccessBindings() access_binding.ReaderIface   { return n
 func (r *fakeUsrReader) Commit(context.Context) error                 { return nil }
 func (r *fakeUsrReader) Rollback(context.Context) error               { return nil }
 
-type fakeUsrWriter struct{ fakeUsrReader }
+type fakeUsrWriter struct {
+	fakeUsrReader
+	parent *fakeUsrRepo
+}
+
+// Commit переопределяет встроенный: порядок «эмиссия ДО фиксации» и есть то,
+// что отличает намерение в транзакции от post-commit best-effort.
+func (w *fakeUsrWriter) Commit(context.Context) error {
+	if w.parent != nil {
+		w.parent.record("commit")
+	}
+	return nil
+}
 
 func (w *fakeUsrWriter) AccountsW() account.WriterIface                           { return nil }
 func (w *fakeUsrWriter) ProjectsW() repoproject.WriterIface                       { return nil }
-func (w *fakeUsrWriter) UsersW() repouser.WriterIface                             { return &fakeUsrWtr{} }
+func (w *fakeUsrWriter) UsersW() repouser.WriterIface                             { return &fakeUsrWtr{parent: w.parent} }
 func (w *fakeUsrWriter) ServiceAccountsW() service_account.WriterIface            { return nil }
 func (w *fakeUsrWriter) GroupsW() group.WriterIface                               { return nil }
 func (w *fakeUsrWriter) RolesW() role.WriterIface                                 { return nil }
@@ -123,7 +163,13 @@ func (w *fakeUsrWriter) EmitAuditEvent(context.Context, service.AuditEvent) erro
 func (w *fakeUsrWriter) EmitFGARelationWrite(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *fakeUsrWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
+func (w *fakeUsrWriter) EmitFGARelationDelete(_ context.Context, tuples []service.RelationTuple) error {
+	if w.parent != nil {
+		w.parent.record("emit-delete")
+		w.parent.mu.Lock()
+		w.parent.deleted = append(w.parent.deleted, tuples...)
+		w.parent.mu.Unlock()
+	}
 	return nil
 }
 func (w *fakeUsrWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
@@ -164,7 +210,10 @@ func (r *fakeUsrRdr) ListAccountsForUser(context.Context, domain.UserID) ([]doma
 	return nil, nil
 }
 
-type fakeUsrWtr struct{ fakeUsrRdr }
+type fakeUsrWtr struct {
+	fakeUsrRdr
+	parent *fakeUsrRepo
+}
 
 func (w *fakeUsrWtr) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
 	return u, false, nil
@@ -178,7 +227,12 @@ func (w *fakeUsrWtr) ActivateInvite(_ context.Context, id domain.UserID, _ domai
 func (w *fakeUsrWtr) InsertActive(_ context.Context, u domain.User) (domain.User, error) {
 	return u, nil
 }
-func (w *fakeUsrWtr) Delete(context.Context, domain.UserID) error { return nil }
+func (w *fakeUsrWtr) Delete(context.Context, domain.UserID) error {
+	if w.parent != nil {
+		w.parent.record("delete-row")
+	}
+	return nil
+}
 func (w *fakeUsrWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }
@@ -245,3 +299,17 @@ func (w *fakeUsrWriter) EmitReconcileEvent(context.Context, string, string, stri
 func (w *fakeUsrWtr) SetInviteStatus(context.Context, domain.UserID, domain.InviteStatus) (domain.User, error) {
 	return domain.User{}, nil
 }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *fakeUsrReader) Visibility() visibility.ReaderIface { return nil }
+
+// Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
+// живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
+// (services/iam/internal/apps/kacho/api/listvisibility). nil здесь означает
+// «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
+// ненаречённое.
+func (r *fakeUsrWriter) Visibility() visibility.ReaderIface { return nil }
