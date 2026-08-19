@@ -50,6 +50,16 @@ type Registry struct {
 	authzDuration  *prometheus.HistogramVec
 	authzDecisions *prometheus.CounterVec
 
+	// authzStoreAttempts — исход КАЖДОЙ попытки обращения к хранилищу прав.
+	//
+	// Заведён по #720: до него отказ хранилища был снаружи ОДНИМ событием —
+	// вызывающий получал `unavailable`, и «хранилище перезапускали»,
+	// «хранилище молчит» и «оборвалось соединение из пула» выглядели
+	// одинаково. Различить их можно было только чтением журнала построчно,
+	// уже после того как отказ истолкован; на прогоне из 736 запросов с одним
+	// отказом это означает найти одну строку среди тысяч.
+	authzStoreAttempts *prometheus.CounterVec
+
 	grpcHandled  *prometheus.CounterVec
 	grpcDuration *prometheus.HistogramVec
 
@@ -99,6 +109,14 @@ func NewRegistry() *Registry {
 			Name: "kacho_iam_authz_check_decisions_total",
 			Help: "Authz Check decisions by rpc and outcome (allow|deny|error).",
 		}, []string{"rpc", "decision"}),
+		authzStoreAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kacho_iam_authz_store_attempts_total",
+			Help: "Attempts against the authorization store by operation, outcome " +
+				"(ok|store_rejected|store_error|store_unreachable|pooled_conn_dropped|" +
+				"conn_dropped|store_timeout|decode_failed) and whether the connection " +
+				"came from the idle pool. Distinguishes a store outage from a dead " +
+				"pooled connection — indistinguishable from the caller's side.",
+		}, []string{"op", "outcome", "reused"}),
 		grpcHandled: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kacho_iam_grpc_server_handled_total",
 			Help: "Total gRPC requests completed on the server, by service, method and resulting status code.",
@@ -109,7 +127,7 @@ func NewRegistry() *Registry {
 			Buckets: prometheus.DefBuckets,
 		}, []string{"grpc_service", "grpc_method"}),
 	}
-	reg.MustRegister(r.authzDuration, r.authzDecisions, r.grpcHandled, r.grpcDuration)
+	reg.MustRegister(r.authzDuration, r.authzDecisions, r.authzStoreAttempts, r.grpcHandled, r.grpcDuration)
 	return r
 }
 
@@ -141,6 +159,21 @@ func (r *Registry) ObserveAuthz(o AuthzObservation) {
 		decision = "deny"
 	}
 	r.authzDecisions.WithLabelValues(o.RPC, decision).Inc()
+}
+
+// ObserveAuthzStoreAttempt records ONE attempt against the authorization store.
+//
+// Принимает плоские значения, а не тип адаптера хранилища: иначе один адаптер
+// импортировал бы другой ради метки счётчика (dependency-rule). Перевод делает
+// композиционный корень — единственное место, которое знает обоих.
+func (r *Registry) ObserveAuthzStoreAttempt(op, outcome string, reused bool) {
+	if op == "" {
+		op = "unknown"
+	}
+	if outcome == "" {
+		outcome = "unknown"
+	}
+	r.authzStoreAttempts.WithLabelValues(op, outcome, strconv.FormatBool(reused)).Inc()
 }
 
 // UnaryServerInterceptor returns a grpc.UnaryServerInterceptor that records the

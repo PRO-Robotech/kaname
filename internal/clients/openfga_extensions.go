@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
@@ -155,6 +156,28 @@ type retryClient struct {
 	inner   httpDoer
 	maxTry  int
 	backoff time.Duration
+
+	// op/observe — кому и под каким именем объявлять исход КАЖДОЙ попытки.
+	// Политику повтора наблюдатель не меняет: он здесь ради того, чтобы
+	// «хранилище лежало», «хранилище молчит» и «оборвалось соединение из пула»
+	// перестали выглядеть снаружи одинаково (openfga_attempt.go).
+	op      string
+	observe func(FGAAttempt)
+}
+
+// withObserver — назвать операцию и наблюдателя. Возвращает тот же клиент.
+func (r *retryClient) withObserver(op string, observe func(FGAAttempt)) *retryClient {
+	r.op = op
+	r.observe = observe
+	return r
+}
+
+func (r *retryClient) report(a FGAAttempt) {
+	if r.observe == nil {
+		return
+	}
+	a.Op = r.op
+	r.observe(a)
 }
 
 func newRetryClient(c httpDoer, maxTry int, baseBackoff time.Duration) *retryClient {
@@ -190,7 +213,21 @@ func (r *retryClient) Do(req *http.Request) (*http.Response, error) {
 			}
 			req.Body = body
 		}
-		resp, err := r.inner.Do(req)
+		// Трасса соединения — СВОЯ на каждую попытку: иначе исход второй
+		// попытки читался бы по признакам первой.
+		tr := &fgaConnTrace{}
+		areq := req.Clone(httptrace.WithClientTrace(req.Context(), tr.hook()))
+		start := time.Now()
+		resp, err := r.inner.Do(areq)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		_, reused, _ := tr.read()
+		r.report(FGAAttempt{
+			Attempt: attempt + 1, Reused: reused,
+			Outcome: classifyFGAAttempt(tr, status, err), Duration: time.Since(start),
+		})
 		if err != nil {
 			lastErr = err
 			continue
@@ -246,7 +283,8 @@ func (c *OpenFGAHTTPClient) do(ctx context.Context, method, url string, body []b
 			return nil, err
 		}
 	}
-	return newRetryClient(fgaHTTPClient, 3, 20*time.Millisecond).Do(req)
+	return newRetryClient(fgaHTTPClient, 3, 20*time.Millisecond).
+		withObserver(fgaOpFromURL(url), c.Observe).Do(req)
 }
 
 // nopCloser — io.ReadCloser shim for http.Request.GetBody.

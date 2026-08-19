@@ -14,8 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"net/http/httptrace"
 	"time"
 )
 
@@ -68,6 +68,19 @@ type OpenFGAHTTPClient struct {
 	CheckTimeout time.Duration
 	ListTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	// Observe — наблюдатель исхода КАЖДОЙ попытки обращения к хранилищу прав
+	// (openfga_attempt.go). Порт, а не prometheus: адаптер не знает про метрики,
+	// их подключает композиционный корень.
+	//
+	// Он здесь потому, что снаружи все отказы хранилища выглядят одинаково —
+	// вызывающий получает `unavailable` и не может сказать, лежало ли хранилище,
+	// молчало ли оно или оборвалось соединение из пула. Без этого поля разница
+	// восстанавливается только чтением журнала построчно и только после того,
+	// как отказ уже истолкован.
+	//
+	// nil — законное значение (наблюдателя нет, поведение то же).
+	Observe func(FGAAttempt)
 }
 
 // ErrNotConfigured — returned by the HTTP methods if Endpoint/StoreID are empty.
@@ -131,57 +144,46 @@ func (c *OpenFGAHTTPClient) CheckConsistent(ctx context.Context, subject, relati
 
 // check is the shared Check transport; consistency is the OpenFGA `consistency`
 // wire value ("" ⇒ omitted ⇒ default MINIMIZE_LATENCY).
+//
+// Идёт через fgaRead (openfga_attempt.go): у каждой попытки свой срок
+// CheckTimeout, повтор — только по причине отказа, и каждая попытка объявляется
+// наблюдателю. Срок нужен потому, что общий HTTP-клиент НАМЕРЕННО не несёт
+// своего (у операций бюджеты различаются на порядок, см. openfga_transport.go):
+// без него хранилище, принявшее соединение и переставшее отвечать, повесило бы
+// горутину перехватчика навсегда вместо закрытого отказа в пределах бюджета.
 func (c *OpenFGAHTTPClient) check(ctx context.Context, subject, relation, object, consistency string) (bool, error) {
 	if c.Endpoint == "" || c.StoreID == "" {
 		return false, ErrNotConfigured
 	}
-	// Bound the per-RPC authz Check to the configured CheckTimeout (default 200ms):
-	// fgaHTTPClient carries no client-level Timeout BY DESIGN (the per-operation
-	// budgets differ by an order of magnitude — see openfga_transport.go), so an
-	// OpenFGA that accepts the TCP connection but stops responding (GC pause /
-	// overload / half-open TCP after a partition) would otherwise hang the
-	// authz-interceptor goroutine forever instead of failing closed within the FGA
-	// budget (D-47 "FGA outage → Unavailable"). Mirrors the sibling
-	// CheckWithContext / c.do() paths, which are already time-bounded.
-	cctx, cancel := context.WithTimeout(ctx, c.checkTimeout())
-	defer cancel()
 	body, _ := json.Marshal(openfgaCheckRequest{
 		AuthorizationModelID: c.AuthorizationModel,
 		TupleKey:             openfgaTupleKey{User: subject, Relation: relation, Object: object},
 		Consistency:          consistency,
 	})
-	req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
+	var allowed bool
+	rejected, err := c.fgaRead(ctx,
 		fmt.Sprintf("http://%s/stores/%s/check", c.Endpoint, c.StoreID),
-		bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := fgaHTTPClient.Do(req)
+		body, c.checkTimeout(), fgaCheckMaxAttempts,
+		func(resp *http.Response) error {
+			var r openfgaCheckResponse
+			if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+				return err
+			}
+			allowed = r.Allowed
+			return nil
+		})
 	if err != nil {
-		return false, fmt.Errorf("openfga check: %w", err)
+		return false, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusBadRequest {
-		//: a 400 is a client-side validation error (relation absent
-		// on the object type, typed-wildcard object, ...) — such a Check can
-		// never resolve, so it is a clean DENY, not an outage.
-		// Drain (capped) before Close so the keep-alive connection returns to
-		// the idle pool instead of being torn down — mirrors the sibling
-		// writeOrDelete / listUsersOfType drain paths. Critical on the hot
-		// authz path: a degraded OpenFGA emitting a burst of 400s must not also
-		// churn fresh TCP connections (fd + TLS/handshake pressure).
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
+	if rejected {
+		// 400 — ошибка валидации на стороне вызывающего (отношения нет у типа
+		// объекта, объект — типизированный подстановочный знак, …). Такой Check
+		// не разрешится НИКОГДА, то есть по смыслу это ОТКАЗ, а не сбой.
+		// Ошибка здесь всплыла бы как «authz unavailable» и дала бы ложный 503;
+		// чистое «нет» даёт верный PermissionDenied (403).
 		return false, nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		// Same drain-for-reuse rationale as the 400 branch above: a degraded
-		// OpenFGA returning 5xx on every Check must not churn connections.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
-		return false, fmt.Errorf("openfga check: status %d", resp.StatusCode)
-	}
-	var r openfgaCheckResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return false, fmt.Errorf("openfga check decode: %w", err)
-	}
-	return r.Allowed, nil
+	return allowed, nil
 }
 
 // maxTuplesPerWriteRequest mirrors OpenFGA's default maxTuplesPerWrite (100): a
@@ -350,11 +352,28 @@ func (c *OpenFGAHTTPClient) applyBatch(ctx context.Context, tuples []RelationTup
 		// Check / WriteConditionalTuples paths, which are already time-bounded.
 		cctx, cancel := context.WithTimeout(ctx, c.writeTimeout())
 		defer cancel()
-		req, _ := http.NewRequestWithContext(cctx, http.MethodPost,
+		// Трасса соединения — ради ОБЪЯВЛЕНИЯ причины, а не повтора: политика
+		// записи здесь не меняется (её повтор — applyWithConflictRetry выше и
+		// очередь-доставщик снаружи). Но причина отказа обязана называться и
+		// на этом пути, иначе «хранилище лежало» и «оборвалось соединение из
+		// пула» останутся неразличимы ровно для той половины обращений, где
+		// повтор уже есть (openfga_attempt.go).
+		tr := &fgaConnTrace{}
+		start := time.Now()
+		req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(cctx, tr.hook()), http.MethodPost,
 			fmt.Sprintf("http://%s/stores/%s/write", c.Endpoint, c.StoreID),
 			bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := fgaHTTPClient.Do(req)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		_, reused, _ := tr.read()
+		c.observeAttempt(FGAAttempt{
+			Op: "write", Attempt: 1, Reused: reused,
+			Outcome: classifyFGAAttempt(tr, status, err), Duration: time.Since(start),
+		})
 		if err != nil {
 			return fmt.Errorf("openfga write: %w", err)
 		}

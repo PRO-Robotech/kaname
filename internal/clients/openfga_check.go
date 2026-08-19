@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
@@ -89,42 +88,26 @@ func (c *OpenFGAHTTPClient) checkWithContext(
 		}{TupleKeys: keys}
 	}
 	body, _ := json.Marshal(req)
-	cctx, cancel := context.WithTimeout(ctx, c.checkTimeout())
-	defer cancel()
-	resp, err := c.do(cctx, "POST",
-		fmt.Sprintf("http://%s/stores/%s/check", c.Endpoint, c.StoreID), body)
+	var allowed bool
+	rejected, err := c.fgaRead(ctx,
+		fmt.Sprintf("http://%s/stores/%s/check", c.Endpoint, c.StoreID),
+		body, c.checkTimeout(), fgaCheckMaxAttempts,
+		func(resp *http.Response) error {
+			var r fgaWireCheckResponse
+			if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+				return err
+			}
+			allowed = r.Allowed
+			return nil
+		})
 	if err != nil {
-		return false, fmt.Errorf("openfga check: %w", err)
+		return false, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusBadRequest {
-		//: a 400 is a client-side validation error — the relation
-		// does not exist on the object's type, the object id is a typed
-		// wildcard, etc. Such a Check can NEVER resolve to a path, so it is
-		// semantically a DENY, not an outage. Returning an error here would
-		// surface as `authz unavailable` and fail-closed to a misleading
-		// 503; a clean deny (false, nil) yields the correct gRPC
-		// PermissionDenied (403).
-		//
-		// Drain (capped) before Close so the keep-alive connection returns to
-		// the idle pool instead of being torn down — mirrors the sibling
-		// Check / writeOrDelete / listUsersOfType drain paths. Critical on the
-		// hot authz path (CheckWithContext backs both the public authorize and
-		// the internal per-RPC gate): a degraded OpenFGA emitting a burst of
-		// 400s must not also churn fresh TCP connections (fd + handshake
-		// pressure).
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
+	if rejected {
+		// 400 — ошибка валидации вопроса, а не сбой: такой Check не разрешится
+		// никогда, значит по смыслу это ОТКАЗ. Ошибка дала бы ложный 503 вместо
+		// верного PermissionDenied (403). См. тот же разбор в openfga_client.go.
 		return false, nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		// Same drain-for-reuse rationale as the 400 branch above: a degraded
-		// OpenFGA returning non-200 on every Check must not churn connections.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrBodyBytes))
-		return false, fmt.Errorf("openfga check: status %d", resp.StatusCode)
-	}
-	var r fgaWireCheckResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return false, fmt.Errorf("openfga check decode: %w", err)
-	}
-	return r.Allowed, nil
+	return allowed, nil
 }

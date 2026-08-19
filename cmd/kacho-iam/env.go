@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 )
 
 // authzProvider resolves the configured authorization-provider backend from
@@ -147,4 +148,33 @@ func buildOpenFGAClient(logger *slog.Logger) *clients.OpenFGAHTTPClient {
 			"endpoint", endpoint, "store_id", storeID, "model_id", modelID)
 	}
 	return c
+}
+
+// newAuthzStoreObserver — перевод исхода попытки обращения к хранилищу прав в
+// наблюдаемое. Один перевод в одном месте: адаптер хранилища не знает про
+// prometheus, а метрики не знают про адаптер (dependency-rule).
+//
+// ПРЕДМЕТ (#720). Снаружи отказ хранилища прав был ОДНИМ событием — вызывающий
+// получал `unavailable`. «Хранилище перезапускали», «хранилище молчит» и
+// «соединение из пула оказалось мёртвым» выглядели одинаково, и на прогоне с
+// одним отказом из 736 запросов различить их можно было только чтением журнала
+// построчно — уже после того как отказ истолкован.
+//
+// Счётчик несёт ВСЕ исходы: метка причины — то, по чему потом ищут, и «ноль
+// отказов за всю жизнь» обязано быть отличимо от «никто не смотрел».
+//
+// В журнал идёт ОДИН исход — мёртвое соединение из пула. Он редкий, он чинится
+// повтором, и именно он был невидим. Класть туда недоступность и молчание
+// нельзя: под настоящим отказом хранилища это строка на КАЖДЫЙ запрос, то есть
+// журнал, в котором тонет всё остальное.
+func newAuthzStoreObserver(reg *metrics.Registry, logger *slog.Logger) func(clients.FGAAttempt) {
+	return func(a clients.FGAAttempt) {
+		if reg != nil {
+			reg.ObserveAuthzStoreAttempt(a.Op, string(a.Outcome), a.Reused)
+		}
+		if logger != nil && a.Outcome == clients.FGAOutcomePooledConnDropped {
+			logger.Warn("authz store: pooled connection gave no reply — retrying on a fresh one",
+				"op", a.Op, "attempt", a.Attempt, "duration_ms", a.Duration.Milliseconds())
+		}
+	}
 }

@@ -152,6 +152,12 @@ func runServe(cfg config.Config) error {
 	// is imported only here (composition root) + the metrics adapter package.
 	metricsReg := metrics.NewRegistry()
 
+	// Наблюдатель обращений к хранилищу прав. Разбор — у самой функции
+	// (newAuthzStoreObserver); здесь только провязка, и она обязана быть: поле
+	// Observe, объявленное и никем не заполненное, — мёртвый наблюдатель,
+	// снаружи неотличимый от работающего.
+	openfgaClient.Observe = newAuthzStoreObserver(metricsReg, logger)
+
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
 	// поднимаем его dispatcher ДО приема трафика. Без этого default-registry держит
 	// NopRecorder (live terminal-write/inflight метрики мертвы), а operations.Ready()
