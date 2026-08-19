@@ -1002,19 +1002,26 @@ CASES.append(Case(
             path=f"/iam/v1/roles/{ROLE_VIEW}",
             auth="jwtBootstrap",
             test_script=[
-                # The guard lives in the async worker → 200 + Operation. A sync 400/9
-                # (guard firing before the mint) is the same refusal and is tolerated.
-                "pm.test('sync 200 (Operation minted) or sync 400 FAILED_PRECONDITION', () => pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 400]));",
+                # ИСХОД ЗДЕСЬ ОДИН, и он установлен кодом, а не стендом.
+                # `DeleteRoleUseCase.Execute` синхронно делает ровно три вещи —
+                # проверяет аутентификацию, формат id и существование роли, — после
+                # чего ЧЕКАНИТ Operation и уходит в воркер; сам запрет системной роли
+                # живёт в писателе (`roleWriter.Delete`) и доезжает ТОЛЬКО ошибкой
+                # операции. Системная роль существует, id корректен, актор
+                # аутентифицирован — значит синхронная полоса это 200 и конверт
+                # Operation, а прежнее `oneOf([200, 400])` перечисляло синхронный
+                # отказ, которого у этого глагола нет ни при каком входе: 400 здесь
+                # означало бы, что запрет переехал на путь запроса, и утверждение
+                # обязано это ПОКАЗАТЬ, а не проглотить.
+                "pm.test('sync 200: Operation minted', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
                 "const j = pm.response.json();",
-                # Clear FIRST — the sync-reject branch mints no Operation, and a
-                # leftover id would make the poll below confirm a FOREIGN operation.
-                "pm.environment.set('opId', '');",
-                "if (pm.response.code === 400) {",
-                "  pm.test('sync code 9 (FAILED_PRECONDITION — system role)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(9));",
-                "  pm.test('sync message names the system role', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('system role'));",
-                "} else {",
-                "  pm.environment.set('opId', j.id || '');",
-                "}",
+                "pm.test('sync body is an Operation envelope', () => pm.expect(j.id, pm.response.text()).to.be.a('string').and.to.have.length.above(0));",
+                # Захват — общим помощником, а не своей строкой: он СНИМАЕТ имя операции
+                # перед записью, и это не стилистика. Если чеканка почему-то не состоялась,
+                # унесённый id предыдущего кейса заставил бы опрос ниже подтвердить ЧУЖУЮ,
+                # давно завершённую операцию — зелёный пришёл бы быстро и уверенно.
+                # Свойство держит гейт `deploy/scripts/assert-delete-operation-outcome.py`.
+                *save_from_response("j.id", "opId"),
             ],
         ),
         Step(
@@ -1025,16 +1032,19 @@ CASES.append(Case(
             # sees the operation, so this must be the same jwtBootstrap.
             auth="jwtBootstrap",
             pre_script=[
-                "// Legal operation guard: a sync reject minted no Operation, so there",
-                "// is nothing to poll. `opId` is cleared by the step above, so an empty",
-                "// value here can only mean that — never a previous case's id.",
+                "// Предусловие, а не послабление. Шаг выше УТВЕРЖДАЕТ чеканку (200 и",
+                "// непустой id), поэтому пустое значение здесь означает провал этого",
+                "// предусловия — и о нём надо сказать ОДИН раз по имени переменной,",
+                "// а не уходить литералом и хоронить причину под тридцатью опросами.",
                 "if (!pm.environment.get('opId')) {",
+                "  pm.test('предусловие: opId не захвачен — delete-system не вернул Operation', () => {",
+                "    pm.expect.fail('opId пуст: синхронная полоса этого глагола — только 200 + Operation');",
+                "  });",
                 "  pm.execution.skipRequest();",
                 "}",
             ],
             test_script=[
                 "const j = pm.response.json();",
-                "if (pm.environment.get('opId')) {",
                 # Ограниченный поллинг, а не однократное чтение. Гарантия здесь живёт в
                 # АСИНХРОННОМ воркере (шаг выше это и говорит: «200 + Operation»), поэтому
                 # утверждение `done === true` на ПЕРВОМ же чтении — гонка по построению:
@@ -1045,19 +1055,18 @@ CASES.append(Case(
                 # исчерпании `done` остаётся false — кейс краснеет ровно как прежде.
                 # Идиома — та же, что у соседних поллеров этого файла; задержка настоящая
                 # (busy-wait), потому что newman вызывает setNextRequest до setTimeout.
-                "  if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                "  const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                "  if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                "  pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
-                "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                "  pm.test('error code 9 (FAILED_PRECONDITION — system role)', () => {",
-                "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9);",
-                "  });",
-                "  pm.test('error message contains system role', () => {",
-                "    pm.expect((j.error && j.error.message || '').toLowerCase()).to.satisfy(",
-                "      m => m.includes('system') || m.includes('cannot'), 'message: ' + (j.error && j.error.message));",
-                "  });",
-                "}",
+                "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                "if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
+                "pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
+                "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                "pm.test('error code 9 (FAILED_PRECONDITION — system role)', () => {",
+                "  pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9);",
+                "});",
+                "pm.test('error message contains system role', () => {",
+                "  pm.expect((j.error && j.error.message || '').toLowerCase()).to.satisfy(",
+                "    m => m.includes('system') || m.includes('cannot'), 'message: ' + (j.error && j.error.message));",
+                "});",
             ],
         ),
     ],

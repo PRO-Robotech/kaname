@@ -53,6 +53,12 @@ SUBJECTS = [
     ("INV",  "invitee",    "jwtInvitee"),
 ]
 
+# Субъект по коду — чтобы КОНТРОЛЬ ФОРМЫ (ниже) называл своего предъявителя один раз.
+# Контроль формы адресован тому, у кого право ЕСТЬ: только тогда `400` доказывает
+# проверку ТЕЛА, а не отказ в правах. Выписывать тройку второй раз нельзя — она
+# разошлась бы с SUBJECTS молча.
+SUBJECT_BY_CODE = {code: (code, label, auth) for code, label, auth in SUBJECTS}
+
 EXPECT = {
     "account-A":              {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"ALLOW","AAB":"DENY","INV":"DENY"},
     "account-B":              {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"ALLOW","INV":"ALLOW"},
@@ -430,6 +436,11 @@ GARBAGE_AB   = "acbnonexistent000001"
 GARBAGE_USER = "usrnonexistent000001"
 GARBAGE_ROLE = "rolnonexistent000001"
 
+# Значение, которым строка матрицы обновляет аккаунт. Постоянное намеренно: повтор
+# прогона не меняет ничего, поэтому `changed` пуст, аудит молчит, а ответ остаётся
+# конвертом Operation — идемпотентность здесь свойство значения, а не удача.
+ACCT_UP_DESCRIPTION = "authz matrix update probe"
+
 
 # ---------------------------------------------------------------------------
 # Account (CRUD) — own A vs cross B
@@ -444,27 +455,31 @@ for subj in SUBJECTS:
          "GET", "/iam/v1/accounts/{{accountAId}}", None, subj)
     emit("ACCT-GT-CROSS", "Get account-B", "account-B",
          "GET", "/iam/v1/accounts/{{accountBId}}", None, subj)
-    # ALLOW-полоса этих двух строк — СИНХРОННЫЙ ОТКАЗ ТЕЛА, и это НАХОДКА, а не выбор.
+    # Тело обновления аккаунта — МИНИМАЛЬНО ЗАКОННОЕ, и это предмет задачи #710.
     #
-    # Имя `"x"` контракту не удовлетворяет: `AccountName.Validate` требует
-    # `^[a-z][-a-z0-9]{2,62}$` (минимум три символа,
-    # `services/iam/internal/domain/types.go`), а `Account.Validate` вызывается
-    # СИНХРОННО — `UpdateAccountUseCase.Execute` зовёт `target.Validate()` до
-    # `operations.NewFromContext`. Значит субъект с правом получает `400` +
-    # `INVALID_ARGUMENT` и Operation не появляется ВООБЩЕ: путь обновления аккаунта
-    # эта строка не проходила ни разу за свою жизнь, а прежнее «код не 403» этого
-    # не показывало.
+    # Строка спрашивает «вправе ли субъект обновить аккаунт», поэтому запрос обязан
+    # доходить до обновления. Прежнее тело `{"name": "x"}` до него не доходило ни
+    # разу: `Account.Validate` (и в нём `AccountName.Validate`,
+    # `services/iam/internal/domain/types.go`) исполняется СИНХРОННО, раньше
+    # `operations.NewFromContext`, — значит субъект С ПРАВОМ получал `400`
+    # `INVALID_ARGUMENT`, а Operation не появлялась вовсе. Полоса разрешения не
+    # проверяла разрешение.
     #
-    # Полоса объявлена по ФАКТУ, а тело НЕ чинится здесь намеренно: годное имя
-    # переименовало бы общий посевной аккаунт на каждом прогоне — правка фикстуры
-    # с последствиями для соседних наборов, и она принимается отдельным решением, а
-    # не побочно. Пока полоса названа, «строка не обновляет аккаунт» стало видно.
+    # Меняется поле, а НЕ проверка домена: `description` — такое же изменяемое поле
+    # маски (`accountMutableFields`), проходит тот же гейт прав
+    # (`authzguard.RequireScopeRelation` на `account:<id>`) и ту же
+    # `target.Validate()`. Имя при этом остаётся нетронутым — а именно оно
+    # `UNIQUE` на весь кластер и служит идентичностью посевного аккаунта, поэтому
+    # переименовывать общую фикстуру ради пробы нельзя (разбор — в #710).
+    #
+    # Повторный прогон безопасен by construction: значение то же, `changed` пуст,
+    # строки аудита нет, ответ остаётся конвертом Operation.
     emit("ACCT-UP-OWN", "Update account-A", "account-A",
-         "PATCH", "/iam/v1/accounts/{{accountAId}}", {"name": "x", "updateMask": "name"}, subj,
-         allow_lane="sync-reject", allow_message_token="Illegal argument name")
+         "PATCH", "/iam/v1/accounts/{{accountAId}}",
+         {"description": ACCT_UP_DESCRIPTION, "updateMask": "description"}, subj)
     emit("ACCT-UP-CROSS", "Update account-B", "account-B",
-         "PATCH", "/iam/v1/accounts/{{accountBId}}", {"name": "x", "updateMask": "name"}, subj,
-         allow_lane="sync-reject", allow_message_token="Illegal argument name")
+         "PATCH", "/iam/v1/accounts/{{accountBId}}",
+         {"description": ACCT_UP_DESCRIPTION, "updateMask": "description"}, subj)
     # garbage-id Delete is per-resource-gated on a non-existent
     # `account:<garbage>` object → `no path` → 403 for every subject (never
     # reaches the repo). See garbage-perresource note in define_account_scoped.
@@ -472,6 +487,19 @@ for subj in SUBJECTS:
          "DELETE", f"/iam/v1/accounts/{GARBAGE_ACCT}", None, subj)
     emit("ACCT-LS", "List accounts (scope-filter)", "account-list",
          "GET", "/iam/v1/accounts", None, subj)
+
+
+# КОНТРОЛЬ ФОРМЫ к ACCT-UP (#710). Строки выше теперь доходят до обновления, и без
+# этой пары починка предмета сняла бы заодно проверку самого тела: «имя вне контракта
+# отвергается синхронно» больше не утверждал бы никто.
+#
+# Предъявитель — тот, у кого право на account-A ЕСТЬ (`SUBJECT_BY_CODE["AAA"]`).
+# Только на нём `400` доказывает проверку ТЕЛА: у субъекта без права тот же `400`
+# был бы неотличим от отказа края.
+emit("ACCT-UPFORM-OWN", "Update account-A с именем вне контракта", "account-A",
+     "PATCH", "/iam/v1/accounts/{{accountAId}}", {"name": "x", "updateMask": "name"},
+     SUBJECT_BY_CODE["AAA"],
+     allow_lane="sync-reject", allow_message_token="Illegal argument name")
 
 
 # ---------------------------------------------------------------------------
@@ -838,33 +866,47 @@ for subj in SUBJECTS:
 # ---------------------------------------------------------------------------
 
 for subj in SUBJECTS:
-    # ALLOW-полоса приглашения — тоже СИНХРОННЫЙ ОТКАЗ ТЕЛА, и тоже находка.
+    # Тело приглашения — МИНИМАЛЬНО ЗАКОННОЕ, и это второй предмет задачи #710.
     #
-    # Тело несёт `roleId` БЕЗ `projectId`, а `InviteUserUseCase.Execute` объявляет
-    # эти два поля парными: `project_id == "" && role_id != ""` → синхронный
-    # `INVALID_ARGUMENT "Illegal argument project_id: required when role_id is set"`
-    # (`services/iam/internal/apps/kacho/api/user/invite.go`, шаг 1 «Sync validation»).
-    # Проверка `canInviteUsers` идёт ШАГОМ ПОЗЖЕ — значит ALLOW-строки до неё не
-    # доходили никогда, и заявленный предмет кейса (`CanInviteUsers`) ими не
-    # проверялся. Прежнее «код не 403» это скрывало.
+    # Строка спрашивает `CanInviteUsers` — право приглашать В АККАУНТ. Прежнее тело
+    # несло `roleId` без `projectId`, а `InviteUserUseCase.Execute` объявляет эти
+    # поля парными и отвергает такую пару СИНХРОННО, шагом 1, — то есть раньше
+    # `canInviteUsers` (шаг 2, `services/iam/internal/apps/kacho/api/user/invite.go`).
+    # Значит ALLOW-строки до заявленного предмета не доходили ни разу.
     #
-    # DENY-строки предмет сохраняют: `UserService/Invite` гейтится краем (`editor`
-    # на `account` из `account_id`, запись каталога прав), поэтому субъект без
-    # права получает `403` ДО тела. Отличие ALLOW от DENY остаётся строгим.
+    # Снят `roleId`, а не добавлен `projectId`, и выбор здесь содержательный:
+    # приглашение БЕЗ выдачи остаётся приглашением в аккаунт — ровно тем, что
+    # объявлено областью (`invite-to-account-A`/`-B`) и что гейтит `canInviteUsers`.
+    # Добавление `projectId` сделало бы строку приглашением в ПРОЕКТ: другой
+    # предмет, другая область, другая клетка матрицы.
     #
-    # Тело здесь НЕ чинится: добавить `projectId` значит сменить предмет строки
-    # (приглашение в проект — другой сценарий со своей матрицей), а снять `roleId` —
-    # сменить его же. Выбор между ними продуктовый и принимается отдельно.
+    # DENY-строки предмет сохраняют и от правки не зависят: `UserService/Invite`
+    # гейтится краем (`editor` на `account` из `account_id`), поэтому субъект без
+    # права получает `403` ещё до тела.
+    #
+    # Повтор прогона безопасен: адрес почты постоянный, и повторное приглашение
+    # того же адреса в тот же аккаунт идемпотентно (`GetByAccountEmail` → строка
+    # существует → вставки нет). С `projectId` этого свойства не было бы: выдача
+    # вставляется СТРОГО, повторная сталкивается на частичной уникальности активного
+    # гранта, и откатывается всё приглашение целиком — то есть второй прогон подряд
+    # красил бы строку.
     emit("INV-A", "Invite user в account-A", "invite-to-account-A",
          "POST", "/iam/v1/users:invite",
-         {"accountId":"{{accountAId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com","roleId":ROLE_VIEW}, subj,
-         allow_lane="sync-reject",
-         allow_message_token="Illegal argument project_id: required when role_id is set")
+         {"accountId":"{{accountAId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com"}, subj)
     emit("INV-B", "Invite user в account-B", "invite-to-account-B",
          "POST", "/iam/v1/users:invite",
-         {"accountId":"{{accountBId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com","roleId":ROLE_VIEW}, subj,
-         allow_lane="sync-reject",
-         allow_message_token="Illegal argument project_id: required when role_id is set")
+         {"accountId":"{{accountBId}}","email": f"authz-invtarget-{subj[0].lower()}@example.com"}, subj)
+
+# КОНТРОЛЬ ФОРМЫ к INV (#710) — парный к ACCT-UPFORM выше и по той же причине:
+# без него правка тела сняла бы заодно утверждение «`roleId` без `projectId`
+# отвергается синхронно». Предъявитель — тот, у кого право приглашать в account-A
+# ЕСТЬ, иначе `400` был бы неотличим от отказа края.
+emit("INV-FORMA", "Invite user в account-A с roleId без projectId", "invite-to-account-A",
+     "POST", "/iam/v1/users:invite",
+     {"accountId":"{{accountAId}}","email":"authz-invform@example.com","roleId":ROLE_VIEW},
+     SUBJECT_BY_CODE["AAA"],
+     allow_lane="sync-reject",
+     allow_message_token="Illegal argument project_id: required when role_id is set")
 
 
 # ---------------------------------------------------------------------------

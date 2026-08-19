@@ -1309,7 +1309,16 @@ def description_validation_block(prefix, create_path, body_extra=None, wrap=None
 
 
 def filter_block(prefix, list_path):
-    """Filter syntax: name="X" → 200; garbage → 200|400; unknown field → 200|400."""
+    """Filter syntax: name="X" → 200; мусор и неизвестное поле → 400 InvalidArgument.
+
+    Исход у обоих отрицаний УСТАНОВЛЕН разборщиком `pkg/filter`.`Parse`, а не
+    «как получится»: имя поля берётся из белого списка вызывающего, и `this` из
+    «this is not valid syntax» ровно так же не в списке, как и `nonexistent_field`.
+    Оба дают `ParseError` → `InvalidArgument` с текстом «Bad expression at column N.».
+    Прежнее `oneOf([200, 400])` перечисляло исход, которого на этих входах нет, и
+    тем же утверждением приняло бы регрессию: разборщик, ПРОГЛОТИВШИЙ неизвестное
+    поле, зеленел бы наравне с исправным.
+    """
     sep = "&"
     return [
         Case(id=f"{prefix}-LST-FILTER-NAME-OK",
@@ -1319,17 +1328,17 @@ def filter_block(prefix, list_path):
                          path=f"{list_path}?projectId={{{{_suiteProjectId}}}}{sep}filter=name%3D%22foo%22",
                          test_script=[*assert_status(200)])]),
         Case(id=f"{prefix}-LST-FILTER-GARBAGE",
-             title="List с garbage filter syntax → 200 или 400",
+             title="List с garbage filter syntax → 400 InvalidArgument",
              classes=["FILTER", "VAL"], priority="P2",
              steps=[Step(name="flt-bad", method="GET",
                          path=f"{list_path}?projectId={{{{_suiteProjectId}}}}{sep}filter=this%20is%20not%20valid%20syntax",
-                         test_script=["pm.test('200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"])]),
+                         test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])]),
         Case(id=f"{prefix}-LST-FILTER-UNKNOWN-FIELD",
-             title="List с filter на unsupported field → 200 или 400",
+             title="List с filter на unsupported field → 400 InvalidArgument",
              classes=["FILTER", "VAL"], priority="P2",
              steps=[Step(name="flt-unk", method="GET",
                          path=f"{list_path}?projectId={{{{_suiteProjectId}}}}{sep}filter=nonexistent_field%3D%22x%22",
-                         test_script=["pm.test('200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"])]),
+                         test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])]),
     ]
 
 
@@ -1363,7 +1372,13 @@ def security_injection_block(prefix, create_path, list_path, body_extra=None):
         steps=[Step(name="lst-sqli", method="GET",
                     path=f"{list_path}?projectId={{{{_suiteProjectId}}}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
                     test_script=["pm.test('not 500', () => pm.expect(pm.response.code).to.not.eql(500));",
-                                 "pm.test('handled', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"])]))
+                                 "pm.test('status 200', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                                 "pm.test('страница пуста: такого имени нет ни у кого', () => {",
+                                 "  const j = pm.response.json();",
+                                 "  const keys = Object.keys(j).filter(k => Array.isArray(j[k]));",
+                                 "  pm.expect(keys, JSON.stringify(j)).to.have.lengthOf(1);",
+                                 "  pm.expect(j[keys[0]], JSON.stringify(j)).to.have.lengthOf(0);",
+                                 "});"])]))
     return out
 
 

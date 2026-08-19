@@ -2795,15 +2795,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('sync 200 (Operation minted) or sync 400 FAILED_PRECONDITION', () => pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 400]));",
+                  "pm.test('sync 200: Operation minted', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.environment.set('opId', '');",
-                  "if (pm.response.code === 400) {",
-                  "  pm.test('sync code 9 (FAILED_PRECONDITION — system role)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(9));",
-                  "  pm.test('sync message names the system role', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('system role'));",
-                  "} else {",
-                  "  pm.environment.set('opId', j.id || '');",
-                  "}"
+                  "pm.test('sync body is an Operation envelope', () => pm.expect(j.id, pm.response.text()).to.be.a('string').and.to.have.length.above(0));",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
                 ]
               }
             }
@@ -2846,10 +2846,14 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "// Legal operation guard: a sync reject minted no Operation, so there",
-                  "// is nothing to poll. `opId` is cleared by the step above, so an empty",
-                  "// value here can only mean that — never a previous case's id.",
+                  "// Предусловие, а не послабление. Шаг выше УТВЕРЖДАЕТ чеканку (200 и",
+                  "// непустой id), поэтому пустое значение здесь означает провал этого",
+                  "// предусловия — и о нём надо сказать ОДИН раз по имени переменной,",
+                  "// а не уходить литералом и хоронить причину под тридцатью опросами.",
                   "if (!pm.environment.get('opId')) {",
+                  "  pm.test('предусловие: opId не захвачен — delete-system не вернул Operation', () => {",
+                  "    pm.expect.fail('opId пуст: синхронная полоса этого глагола — только 200 + Operation');",
+                  "  });",
                   "  pm.execution.skipRequest();",
                   "}",
                   "(function () {",
@@ -2880,20 +2884,18 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "if (pm.environment.get('opId')) {",
-                  "  if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
-                  "  const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "  if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
-                  "  pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
-                  "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "  pm.test('error code 9 (FAILED_PRECONDITION — system role)', () => {",
-                  "    pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9);",
-                  "  });",
-                  "  pm.test('error message contains system role', () => {",
-                  "    pm.expect((j.error && j.error.message || '').toLowerCase()).to.satisfy(",
-                  "      m => m.includes('system') || m.includes('cannot'), 'message: ' + (j.error && j.error.message));",
-                  "  });",
-                  "}"
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 30) { pm.environment.set('_pollCount', String(pc + 1)); const _ipd = Date.now(); while (Date.now() - _ipd < 500) void 0; /* real inter-poll delay: cap 30 x 500ms ~= 15s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
+                  "pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('error code 9 (FAILED_PRECONDITION — system role)', () => {",
+                  "  pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9);",
+                  "});",
+                  "pm.test('error message contains system role', () => {",
+                  "  pm.expect((j.error && j.error.message || '').toLowerCase()).to.satisfy(",
+                  "    m => m.includes('system') || m.includes('cannot'), 'message: ' + (j.error && j.error.message));",
+                  "});"
                 ]
               }
             }
