@@ -193,6 +193,7 @@ type fakeProjRepo struct {
 	insertCount  int
 	currentAccID domain.AccountID
 	fgaEmitted   []service.RelationTuple
+	fgaDeleted   []service.RelationTuple
 }
 
 func newFakeProjRepo() *fakeProjRepo { return &fakeProjRepo{} }
@@ -209,6 +210,15 @@ func (f *fakeProjRepo) fgaTuples() []service.RelationTuple {
 	defer f.mu.Unlock()
 	cp := make([]service.RelationTuple, len(f.fgaEmitted))
 	copy(cp, f.fgaEmitted)
+	return cp
+}
+
+// fgaDeletes — snapshot of the tuple-DELETE intents emitted in-tx.
+func (f *fakeProjRepo) fgaDeletes() []service.RelationTuple {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := make([]service.RelationTuple, len(f.fgaDeleted))
+	copy(cp, f.fgaDeleted)
 	return cp
 }
 
@@ -265,7 +275,14 @@ func (w *fakeProjWriter) EmitFGARelationWrite(_ context.Context, tuples []servic
 	w.parent.mu.Unlock()
 	return nil
 }
-func (w *fakeProjWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
+
+// EmitFGARelationDelete ЗАПИСЫВАЕТ, а не глотает. Дублёр, молча принимающий
+// снятие, делает невидимым ровно тот дефект, ради которого его подставляют:
+// проба «снятие эмитировано» зеленела бы и на пути, который не эмитирует ничего.
+func (w *fakeProjWriter) EmitFGARelationDelete(_ context.Context, tuples []service.RelationTuple) error {
+	w.parent.mu.Lock()
+	w.parent.fgaDeleted = append(w.parent.fgaDeleted, tuples...)
+	w.parent.mu.Unlock()
 	return nil
 }
 func (w *fakeProjWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {

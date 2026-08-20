@@ -375,6 +375,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	for _, s := range b.Subjects {
 		if err := w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
 			SubjectID:    string(s.ID),
+			SubjectType:  string(s.Type),
 			EventType:    "binding_grant",
 			Op:           "binding_upsert",
 			ResourceType: string(created.ResourceType),

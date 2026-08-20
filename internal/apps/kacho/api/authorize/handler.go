@@ -42,10 +42,31 @@ const (
 	msgAuthzInternal    = "internal error"
 )
 
+// Authorizer — порт решателя, которым пользуется ЭТОТ транспорт.
+//
+// Интерфейс, а не конкретный use-case, ровно по одной причине: между транспортом
+// и решателем встаёт наблюдатель полос
+// (`observability/metrics.InstrumentedSubjectAuthorizer`), и без порта его
+// некуда поставить, не втащив сбор величин в use-case. Пока порта не было,
+// полоса КРАЯ не наблюдалась вовсе: счётчик владельца прав видел только
+// пообъектное звено модулей, и всякое «проверок в секунду», снятое с него, было
+// занижено — на пути чтения по идентификатору ровно вдвое.
+//
+// Набор методов — тот, который зовёт транспорт, и ни одним больше: порт шире
+// употребления обязывал бы всякого будущего дублёра реализовывать то, чего у
+// него не спрашивают.
+type Authorizer interface {
+	Check(ctx context.Context, req service.CheckRequest) (*service.CheckResult, error)
+	BatchCheck(ctx context.Context, reqs []service.CheckRequest) ([]*service.CheckResult, error)
+	ListObjects(ctx context.Context, req service.ListObjectsRequest) (*service.ListObjectsResult, error)
+	ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error)
+	ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error)
+}
+
 // Handler — gRPC server.
 type Handler struct {
 	iamv1.UnimplementedAuthorizeServiceServer
-	svc    *service.AuthorizeService
+	svc    Authorizer
 	whoAmI *WhoAmIUseCase
 	// authority — FGA relation checker for the inner caller-authority gate
 	// (caller_authority.go). Optional / nil-safe: when unset the gate can still
@@ -72,7 +93,7 @@ type Handler struct {
 
 // NewHandler — builder. Both svc and whoAmI are required (composition root
 // wires both unconditionally; nil at construction time means a wiring bug).
-func NewHandler(svc *service.AuthorizeService, whoAmI *WhoAmIUseCase) *Handler {
+func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase) *Handler {
 	return &Handler{svc: svc, whoAmI: whoAmI}
 }
 

@@ -1,0 +1,281 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+package scalegrid
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// ПОСЕВЩИК ПРИБОРА ПОРЯДКОВ — КОНВЕЙЕРИЗОВАННАЯ ПОДАЧА ТЕХ ЖЕ СТЕЙТМЕНТОВ
+//
+// # Почему не через производителя, и чем за это плачено
+//
+// Производитель (`resource_mirror.UpsertTx`) идёт по объекту за раз, обменом с
+// БД на стейтмент. Замер приёмки (0.2а/З5): 0.443 мс на объект, то есть ≈ 443 с
+// на 10⁶; те же стейтменты пачками по 2000 — 0.105 мс, ≈ 105 с, ускорение 4.2×.
+// Сокращать сетку до 10⁵ решением не является: критерий владельца назван
+// МИЛЛИОНОМ, и это был бы отказ от критерия, поданный как инженерный выбор.
+//
+// # СТЕЙТМЕНТОВ НА ОБЪЕКТ — 3 + ДЛИНА ЕГО ЦЕПИ, А НЕ ЧЕТЫРЕ
+//
+// Четыре — это частный случай цепи из ОДНОГО предка: условный `UPDATE`, вставка
+// зеркала, снятие рёбер и одна вставка ребра. Цепь длиннее даёт по вставке на
+// звено, и объект измеряемой сетки (репозиторий реестра, d = 3) стоит ШЕСТЬ
+// стейтментов. Число названо здесь потому, что от него зависит и предел обменов
+// в сценарии R7-1-01, и пересчёт оценки времени: замер приёмки снят на четырёх
+// стейтментах, поэтому на шести он не применим подстановкой.
+//
+// Собственный замер этого посевщика на шести стейтментах: 10⁶ объектов за
+// 2 мин 28 с, то есть 0.148 мс на объект. Оценка приёмки (0.105 мс) на четырёх
+// стейтментах ей не противоречит и не подтверждается ею: величины сняты на
+// разной форме данных, и складывать их нельзя.
+//
+// # ЧТО ЗА ПРЕДЕЛ ВРЕМЕНИ ДЕЙСТВУЕТ, И НА ЧТО ИМЕННО
+//
+// `INTEGRATION_TIMEOUT = 25m` — предел НА ПАКЕТ в цели `test-integration`, а не
+// общий на замер. Полная сетка идёт своей целью (`make scale-grid-full`) с
+// собственным пределом 120 минут и в конвейере не исполняется вовсе. Прежняя
+// редакция этой шапки называла 25 минут «пределом на все точки» — то есть
+// требовала от прогона того, чего он не обязан, и заодно занижала запас.
+//
+// # ЦЕНА НАЗВАНА, А НЕ СПРЯТАНА
+//
+// Посевщик перестаёт быть «тем же путём, что производитель», и потому обязан
+// сам удовлетворять инвариантам, которые производитель держал за него. Три
+// обязанности, и все три исполнены рядом:
+//
+//  1. подаются ДОСЛОВНО те же стейтменты, что выпускает производитель, — не их
+//     редакция. Текст ниже сверен с `resource_mirror/emitter.go`;
+//  2. ПОСТРОЧНАЯ СВЕРКА с производителем на малой точке: N посажено обоими
+//     путями, содержимое обеих таблиц сверено по всем колонкам. Без неё быстрый
+//     посевщик вправе посадить форму, которой производитель не производит, и
+//     ВСЯ сетка мерила бы её;
+//  3. ПЕРЕПИСЬ по каждой таблице (census.go) — единственное свидетельство того,
+//     что условие замера создано.
+//
+// # ГЕЙТ ДЕРЕВА ЭТОТ КОД НЕ ВИДИТ, И ЭТО СКАЗАНО ВСЛУХ
+//
+// `internal/repohygiene` `TestCensusFixturesSeedThroughTheProducer` обходит
+// `services/iam/**_test.go`, а это не тестовый файл. Значит его МОЛЧАНИЕ здесь
+// доказательством эквивалентности НЕ ЯВЛЯЕТСЯ — эквивалентность доказывает
+// только сверка (2). Записано затем, чтобы следующий читатель не принял зелёный
+// гейт за подтверждение.
+//
+// # ЕДИНСТВЕННОЕ РАСХОЖДЕНИЕ С ПРОИЗВОДИТЕЛЕМ — В ПОТОКЕ УПРАВЛЕНИЯ, НЕ В РЕЗУЛЬТАТЕ
+//
+// Производитель трогает рёбра ТОЛЬКО когда зеркало реально применилось: он
+// читает `RowsAffected` и ветвится. Пачка ветвиться не может — ответы приходят
+// после подачи всей пачки. Поэтому посевщик подаёт все стейтменты безусловно.
+// На посеве СВЕЖИХ объектов результат тождественен (вставка применяется всегда),
+// и это доказывает сверка (2); на повторной подаче устаревшей версии пути
+// разошлись бы — поэтому посевщик и не годится ни для чего, кроме посева.
+
+// BatchObjects — сколько объектов уходит в БД одним обменом.
+//
+// 2000 — не круглое число ради красоты: при нём стоимость на объект уже вышла
+// на полку (0.105 мс), а размер пачки ещё не заставляет драйвер держать в
+// памяти ответы на десятки тысяч стейтментов. Величина названа здесь, потому
+// что от неё зависит утверждение сценария R7-1-01 о числе обменов.
+const BatchObjects = 2000
+
+// MirrorRow — объект зеркала вместе с его цепью предков.
+//
+// Форма повторяет `resource_mirror.Row` намеренно: посевщик обязан принимать
+// ровно то, что принимает производитель, иначе сверка сравнивала бы разные
+// входы и её зелёное ничего не значило бы.
+type MirrorRow struct {
+	// ObjectType — тип в словаре КАТАЛОГА (`registry.repositories`): им назван
+	// `resource_mirror.object_type`.
+	ObjectType string
+	ObjectID   string
+	// ParentProjectID/ParentAccountID — две колонки зеркала.
+	ParentProjectID string
+	ParentAccountID string
+	Labels          map[string]string
+	// ParentChain — цепь предков формой `"<type>:<id>"`, ближайший первым.
+	// Типы приезжают уже словарём МОДЕЛИ, как их шлёт владелец ресурса.
+	ParentChain []string
+	// SourceVersion — версия состояния у владельца. Нулевая означает
+	// «производитель без версии» и уезжает как `-infinity`, ровно как у
+	// производителя.
+	SourceVersion time.Time
+}
+
+// Seeder — конвейеризованная посадка. Считает СВОЮ работу: обмены и стейтменты.
+//
+// Считает затем, что сценарий R7-1-01 утверждает ОБМЕН, а не время: «посадка
+// миллиона за 15 минут» — свойство машины и на другой машине ложно, а «посадка
+// миллиона не делает миллион обменов» — свойство кода и верно везде.
+type Seeder struct {
+	tx        pgx.Tx
+	batch     *pgx.Batch
+	batchSize int
+
+	// exchanges — обменов с БД (отправок пачки), statements — стейтментов в них.
+	exchanges  int64
+	statements int64
+	// objects — объектов зеркала, поданных этим посевщиком.
+	objects int64
+	// pendingObjects — объектов, накопленных в НЕотправленной пачке.
+	//
+	// Считаются ОБЪЕКТЫ, а не стейтменты, и это не педантизм: у объектов цепи
+	// разной длины (лист несёт три предка, его дед — одного), поэтому порог,
+	// выраженный в стейтментах, срабатывает на РАЗНОМ числе объектов и на
+	// коротких цепях не срабатывает вовсе. Первая редакция считала стейтменты и
+	// отправила миллион одним обменом — то есть накопила бы в памяти драйвера
+	// ответы на шесть миллионов стейтментов.
+	pendingObjects int
+}
+
+// NewSeeder — посевщик поверх открытой транзакции.
+func NewSeeder(tx pgx.Tx) *Seeder {
+	return &Seeder{tx: tx, batch: &pgx.Batch{}, batchSize: BatchObjects}
+}
+
+// Exchanges — обменов с БД. Свойство КОДА, ради которого сценарий и написан.
+func (s *Seeder) Exchanges() int64 { return s.exchanges }
+
+// Statements — стейтментов подано.
+func (s *Seeder) Statements() int64 { return s.statements }
+
+// Objects — объектов зеркала подано.
+func (s *Seeder) Objects() int64 { return s.objects }
+
+// Queue — поставить объект зеркала в очередь.
+//
+// Стейтменты — ДОСЛОВНО из `resource_mirror/emitter.go`. Расхождение текста
+// означало бы, что сетка мерит запрос, которого продукт не выпускает; поэтому
+// текст здесь не «по мотивам», а копия, и её тождество доказывается сверкой (2).
+func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
+	labels := row.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	payload, err := json.Marshal(labels)
+	if err != nil {
+		return fmt.Errorf("scalegrid: сериализация меток: %w", err)
+	}
+	version := versionOr(row.SourceVersion)
+
+	// (1) VERSION-ONLY BUMP — условный UPDATE производителя.
+	s.batch.Queue(
+		`UPDATE kacho_iam.resource_mirror
+		    SET source_version = $6, updated_at = now()
+		  WHERE object_type       = $1
+		    AND object_id         = $2
+		    AND parent_project_id = $3
+		    AND parent_account_id = $4
+		    AND labels            = $5::jsonb
+		    AND source_version    < $6`,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
+
+	// (2) INSERT-OR-SUPERSEDE — вставка зеркала.
+	s.batch.Queue(
+		`INSERT INTO kacho_iam.resource_mirror
+		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
+		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+		 ON CONFLICT (object_type, object_id) DO UPDATE
+		    SET parent_project_id = EXCLUDED.parent_project_id,
+		        parent_account_id = EXCLUDED.parent_account_id,
+		        labels            = EXCLUDED.labels,
+		        source_version    = EXCLUDED.source_version,
+		        updated_at        = now()
+		  WHERE resource_mirror.source_version < EXCLUDED.source_version`,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
+
+	edgeType := edgeObjectType(row.ObjectType)
+
+	// (3) Полная замена цепи: сначала снять.
+	s.batch.Queue(
+		`DELETE FROM kacho_iam.resource_parent_edge
+		  WHERE object_type = $1 AND object_id = $2`,
+		edgeType, row.ObjectID)
+
+	// (4) …затем положить, по ребру на предка.
+	for i, ancestor := range row.ParentChain {
+		typ, id, ok := splitObjectRef(ancestor)
+		if !ok {
+			return fmt.Errorf("scalegrid: непонятая форма предка %q (ожидается \"<type>:<id>\")", ancestor)
+		}
+		s.batch.Queue(
+			`INSERT INTO kacho_iam.resource_parent_edge
+			   (object_type, object_id, parent_type, parent_id, depth, source_version, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, now())`,
+			edgeType, row.ObjectID, edgeParentType(typ), id, i+1, version)
+	}
+
+	s.objects++
+	s.pendingObjects++
+	if s.pendingObjects >= s.batchSize {
+		return s.Flush(ctx)
+	}
+	return nil
+}
+
+// QueueRaw — произвольный стейтмент в ту же пачку.
+//
+// Нужен для того, что производителя зеркала не касается вовсе: выдачи, роли,
+// членства, факты. Для НИХ форму задаёт схема, а не производитель, поэтому
+// сверка (2) на них не распространяется — и это сказано здесь, а не
+// подразумевается.
+func (s *Seeder) QueueRaw(ctx context.Context, sql string, args ...any) error {
+	s.batch.Queue(sql, args...)
+	if s.batch.Len() >= s.batchSize {
+		return s.Flush(ctx)
+	}
+	return nil
+}
+
+// Flush — отправить накопленное ОДНИМ обменом.
+func (s *Seeder) Flush(ctx context.Context) error {
+	n := s.batch.Len()
+	if n == 0 {
+		return nil
+	}
+	br := s.tx.SendBatch(ctx, s.batch)
+	s.exchanges++
+	s.statements += int64(n)
+	var firstErr error
+	for i := 0; i < n; i++ {
+		if _, err := br.Exec(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("scalegrid: стейтмент %d из пачки: %w", i+1, err)
+		}
+	}
+	if err := br.Close(); err != nil && firstErr == nil {
+		firstErr = fmt.Errorf("scalegrid: закрытие пачки: %w", err)
+	}
+	s.batch = &pgx.Batch{}
+	s.pendingObjects = 0
+	return firstErr
+}
+
+// versionOr — нулевое время означает «производитель без версии».
+//
+// Копия `resource_mirror.versionOr`: значение неэкспортировано, а расхождение
+// здесь дало бы РАЗНЫЕ строки при одинаковом входе — то есть ровно то, что
+// сверка (2) обязана поймать. Она его и ловит.
+func versionOr(t time.Time) any {
+	if t.IsZero() {
+		return "-infinity"
+	}
+	return t.UTC()
+}
+
+// splitObjectRef — разбор `"<type>:<id>"` по ПЕРВОМУ двоеточию.
+func splitObjectRef(ref string) (typ, id string, ok bool) {
+	for i := 0; i < len(ref); i++ {
+		if ref[i] == ':' {
+			if i == 0 || i == len(ref)-1 {
+				return "", "", false
+			}
+			return ref[:i], ref[i+1:], true
+		}
+	}
+	return "", "", false
+}

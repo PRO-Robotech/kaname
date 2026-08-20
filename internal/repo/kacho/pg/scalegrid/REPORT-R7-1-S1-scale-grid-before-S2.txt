@@ -1,0 +1,355 @@
+R7-1 · S1 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ (базовый замер, ДО правок S2)
+=============================================================================
+
+ПРОВЕНАНС
+  снято               2026-08-19 13:11:44 MSK
+  ревизия дерева      3acddcfdf9216440aaa77db505a63a456d7aed98
+  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
+                      исполнявшееся дерево целиком
+  машина              AMD Ryzen 5 5600X 6-Core Processor, ядер 12
+  Postgres            16.15
+
+ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
+  отпечаток состава     adbd4d44d1781cb2
+  отпечаток содержимого 1e48188c2285c8cf
+  файлов под отпечатком 87, таблиц выведено 14 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.group_members, kacho_iam.groups, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
+  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kacho/pg/relverdict и services/iam/internal/repo/kacho/pg/scalegrid; все .sql каталога services/iam/internal/migrations, называющие хотя бы одну таблицу, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kacho_iam.", а не выписаны)
+  ФАЙЛЫ ПОД ОТПЕЧАТКОМ (пофайлово, чтобы гейт назвал ВИНОВНИКА, а не только факт)
+    c758aac510e28d60  services/iam/internal/migrations/0001_initial.sql
+    62348872b893054b  services/iam/internal/migrations/0002_users_unique_email_dedup.sql
+    aa49cd3b9492f8e0  services/iam/internal/migrations/0003_access_bindings_unique_active_grant.sql
+    a02ddefc083e2a59  services/iam/internal/migrations/0004_backfill_cluster_admin_grants_into_access_bindings.sql
+    19aa55de138caee6  services/iam/internal/migrations/0005_rbac_v2_grammar_and_scope.sql
+    7ff2cec19fb0d262  services/iam/internal/migrations/0008_drop_organizations.sql
+    16cc6c3652691a9d  services/iam/internal/migrations/0009_sec_c_module_sa_least_priv.sql
+    4e1ea0a477c34747  services/iam/internal/migrations/0011_users_drop_global_email_uniqueness.sql
+    e5a730c8556b8b95  services/iam/internal/migrations/0012_user_token_revocations.sql
+    c159c6cd035cab2e  services/iam/internal/migrations/0017_backfill_operations_account_id.sql
+    201f8d39e020c29c  services/iam/internal/migrations/0018_access_binding_targets.sql
+    2fce1aac32b50a98  services/iam/internal/migrations/0019_resource_mirror.sql
+    8bad6f9ec06a83ec  services/iam/internal/migrations/0020_access_binding_target_members.sql
+    80d81b3ed7ea3468  services/iam/internal/migrations/0021_resource_reconcile_outbox.sql
+    af839023a123d464  services/iam/internal/migrations/0022_access_binding_selector.sql
+    6369414729b76f69  services/iam/internal/migrations/0023_iam_direct_labels_gin.sql
+    04f67f3eab99342e  services/iam/internal/migrations/0024_access_binding_emitted_tuples.sql
+    3ccd1d8a68f61dc9  services/iam/internal/migrations/0025_role_rules_and_cap_raise.sql
+    26a84afa11bee91f  services/iam/internal/migrations/0026_role_rule_selectors.sql
+    69204abb1165d499  services/iam/internal/migrations/0027_target_members_rule_rekey.sql
+    2e943a7fc30f0fcc  services/iam/internal/migrations/0028_access_binding_subjects.sql
+    1ca217b5906a7f07  services/iam/internal/migrations/0029_backfill_group_member_fga_tuples.sql
+    9729c6a02af8d998  services/iam/internal/migrations/0030_drop_legacy_target_selector.sql
+    499f1c24288515a0  services/iam/internal/migrations/0031_reseed_system_roles_rules.sql
+    e6435f1e969e6291  services/iam/internal/migrations/0033_rule_module_scalar.sql
+    3a53f608200a821f  services/iam/internal/migrations/0034_role_rule_selectors_all_arms.sql
+    8089219a6d23ea80  services/iam/internal/migrations/0035_access_binding_deletion_protection_and_owner_role.sql
+    bf6957b3dcc05fd8  services/iam/internal/migrations/0036_backfill_owner_bindings_existing_accounts.sql
+    22687e008aac4b4e  services/iam/internal/migrations/0038_owner_role_rule_selectors.sql
+    823c3feb9cd29e22  services/iam/internal/migrations/0039_owner_role_rule_selectors_iam_content.sql
+    8045642ff82ae174  services/iam/internal/migrations/0040_edit_roles_include_read_verbs.sql
+    4bac90d6c83787b8  services/iam/internal/migrations/0041_iam_content_labels.sql
+    4fc20953646741c1  services/iam/internal/migrations/0043_registry_owner_role_selector.sql
+    aa029a769c3f510a  services/iam/internal/migrations/0044_registry_sa_least_priv.sql
+    426cf9e4b4614819  services/iam/internal/migrations/0045_registry_sa_rules.sql
+    66e71326c11bac5a  services/iam/internal/migrations/0046_user_oauth_clients.sql
+    ea01a86bd3069b4d  services/iam/internal/migrations/0049_access_binding_subject_exists.sql
+    4f46a28591ad9432  services/iam/internal/migrations/0050_principal_subject_ref_before_delete.sql
+    2f63eb3d2bbb243a  services/iam/internal/migrations/0053_system_role_rule_selectors.sql
+    bf698e90d4421558  services/iam/internal/migrations/0054_resource_mirror_parent_scope_idx.sql
+    60dc89e1cac86b85  services/iam/internal/migrations/0055_access_binding_target.sql
+    078e1ecd19a2cc49  services/iam/internal/migrations/0056_role_definition_tier.sql
+    a9cc87f9e6333295  services/iam/internal/migrations/0057_storage_sa_least_priv.sql
+    1a294f569b44bbdc  services/iam/internal/migrations/0058_bootstrap_service_account.sql
+    06cd85ed7d5c773c  services/iam/internal/migrations/0059_nlb_operator_drop_start_stop.sql
+    ea8842aacd3f0ea8  services/iam/internal/migrations/0060_storage_system_role_selectors.sql
+    c307d457f4b68ed5  services/iam/internal/migrations/0062_access_binding_target_cardinality.sql
+    6233dacb45a71fa0  services/iam/internal/migrations/0071_service_accounts_drop_project_id.sql
+    4ad3eb7ae1527170  services/iam/internal/migrations/0072_access_binding_role_assignable.sql
+    44ec42f0e21f719b  services/iam/internal/migrations/0073_list_cursor_indexes.sql
+    009515ae9d1bae7b  services/iam/internal/migrations/0074_retire_compute_block_storage.sql
+    cc8240774aa47f17  services/iam/internal/migrations/0075_retire_tenant_condition_surface.sql
+    3786c90cf62359b1  services/iam/internal/migrations/0076_retire_operator_dead_fanout.sql
+    2e70b7fb2b003e45  services/iam/internal/migrations/0077_retire_module_sa_dead_roles.sql
+    23f8607dd8cc5415  services/iam/internal/migrations/0081_retire_operator_service_account.sql
+    ece41b99d4543a28  services/iam/internal/migrations/0082_resource_parent_edge.sql
+    1216565fa592475e  services/iam/internal/migrations/0083_relation_fact.sql
+    6c7213049f74120a  services/iam/internal/migrations/0084_backfill_parent_edges_from_mirror.sql
+    c958e71cd01d63c7  services/iam/internal/migrations/0085_role_verb_projection.sql
+    3f7426f21b0d3332  services/iam/internal/migrations/0086_relation_fact_condition.sql
+    497fdc94f72a5499  services/iam/internal/migrations/0087_guest_access_key_system_role_selectors.sql
+    be3827602e0a8248  services/iam/internal/migrations/0088_placement_group_system_role_selectors.sql
+    a88eab6c89fecf40  services/iam/internal/migrations/0089_role_verb_type_form_comment.sql
+    79ea18afd6c77da5  services/iam/internal/migrations/0090_vpc_cidr_group_role_selectors.sql
+    10f43160376a80c8  services/iam/internal/migrations/0091_type_dictionary_of_the_scope_chain.sql
+    6c72633aaecd4d18  services/iam/internal/migrations/0092_resource_count_limits.sql
+    a00f0b2fb745944b  services/iam/internal/migrations/0093_quota_reader_group.sql
+    9f46fdbc986bdb72  services/iam/internal/migrations/0096_quota_reader_all_owners.sql
+    05ba9a89d5db8181  services/iam/internal/migrations/0098_relation_fact_follows_the_journal.sql
+    bfeea9bf807a4d02  services/iam/internal/migrations/0100_relation_fact_reads_the_whole_grant.sql
+    3b077c2ffcd40a1b  services/iam/internal/migrations/470001_memberships_expand.sql
+    02dbbf5091d79374  services/iam/internal/migrations/472002_membership_carries_rights.sql
+    d246bbd4221b87e0  services/iam/internal/migrations/484002_account_quota_identity_carrier.sql
+    3045af2563bed533  services/iam/internal/migrations/513001_system_role_rules_speak_the_catalog_dictionary.sql
+    f93ac4b84fafdbba  services/iam/internal/repo/kacho/pg/relverdict/asker.go
+    7690dd1ed78f4b14  services/iam/internal/repo/kacho/pg/relverdict/condition.go
+    8adc8f732c5ade23  services/iam/internal/repo/kacho/pg/relverdict/expand.go
+    34e69e5b51a980e6  services/iam/internal/repo/kacho/pg/relverdict/labelaxis.go
+    7b9f791bb0d248e4  services/iam/internal/repo/kacho/pg/relverdict/list.go
+    7fcf387435ec63d8  services/iam/internal/repo/kacho/pg/relverdict/query.go
+    da788dc127f527f1  services/iam/internal/repo/kacho/pg/relverdict/subjects.go
+    809f5718cffa1732  services/iam/internal/repo/kacho/pg/scalegrid/census.go
+    813a7da914ee5057  services/iam/internal/repo/kacho/pg/scalegrid/dictionary.go
+    c5ebe0d99af940ef  services/iam/internal/repo/kacho/pg/scalegrid/fingerprint.go
+    1a70f7937e6aec49  services/iam/internal/repo/kacho/pg/scalegrid/grid.go
+    5a11a41e5d368582  services/iam/internal/repo/kacho/pg/scalegrid/report.go
+    cdc06d17418bff07  services/iam/internal/repo/kacho/pg/scalegrid/seed.go
+
+СЕТКА (константа в коде, ниоткуда не переопределяется)
+  ось N: 100, 1000, 10000, 100000, 1000000  — неподвижны: B=1000 R=9 F=1
+  ось B: 100, 1000, 1000000  — неподвижны: N=1000 R=9 F=1
+  ось R: 1, 9, 100, 100 (через группы), 227, 227 (через группы), 1000, 1000 (через группы)  — неподвижны: N=1000 B=1000 F=1
+  ось F: 0 (фактом лично), 1 (фактом лично), 10 (фактом лично), 10 (фактом через группу), 10 (фактом подстановкой user:*), 100 (фактом лично), 100 (фактом через группу), 100 (фактом подстановкой user:*)  — неподвижны: N=1000 B=1000 R=9
+  отпечаток сетки: 80419d3e6ef2e7ea
+
+ВОСПРОИЗВЕДЕНИЕ (дословно)
+  KACHO_SCALEGRID_FULL=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ -run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m
+
+ЧЕМ СНЯТА КАЖДАЯ КОЛОНКА (единицы не складываются между собой)
+  строк(несущая)  — Actual Rows × Actual Loops листовых узлов плана
+                    (EXPLAIN ANALYZE BUFFERS VERBOSE FORMAT JSON, pg/planrows)
+  отброшено       — Rows Removed by Filter/Index Recheck/Join Filter, тем же прибором
+  тронуто         — несущая + отброшено; вердикт о стоимости выносится по НЕЙ
+  сверочная       — pg_stat_xact_all_tables (seq_tup_read + idx_tup_fetch), считает Postgres
+  обращений       — круговых обращений к БД на один вердикт, трассировщиком pgx
+  p50/p95/p99     — часы; нулевой повтор прогревочный и в выборку не входит
+  S_набл          — мощность CTE scope в СТРОКАХ (не число различных областей)
+
+РАСХОЖДЕНИЕ ДВУХ ПРИБОРОВ ЗАКОННО И ОЖИДАЕМО: счётчик считает строки, ТРОНУТЫЕ
+сканом, план — ОТДАННЫЕ узлом после фильтра. Молчание о нём — нет: несказанное
+расхождение неотличимо от прибора, меряющего не ту величину. Отношение читается
+ТОЛЬКО внутри одного плана — между точками с разными планами оно описывает смену
+плана, а не погрешность.
+
+
+ОСЬ N
+------------------------------------------------------------------------------
+значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
+100        прямыми выдачами           2271        15     2286       2298      2   3.398ms   5.015ms      7
+1000       прямыми выдачами           1066        13     1079       1106      2   3.279ms   3.624ms      7
+10000      прямыми выдачами           1066        13     1079       1106      2   3.641ms   6.586ms      7
+100000     прямыми выдачами           1066        13     1079       1106      2   3.309ms    3.36ms      7
+1000000    прямыми выдачами           1066        13     1079       1106      2   3.438ms   4.706ms      7
+
+  отношение к нижней точке (несущая): 100→1.00  1000→0.47  10000→0.47  100000→0.47  1000000→0.47  
+  отношение сверочная/несущая по точкам: 100→1.01  1000→1.04  10000→1.04  100000→1.04  1000000→1.04  
+  вердикт в каждой точке: 100→allow  1000→allow  10000→allow  100000→allow  1000000→allow  
+  план по точкам:
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact Seq Scan→resource_mirror Seq Scan→resource_parent_edge]
+    1000       [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    10000      [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    100000     [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    1000000    [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+
+  ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой таблице порознь, счётом по факту):
+    объектов зеркала                       1000002
+    рёбер родителя                         3000003  (по глубине: 1→1000002 2→1000001 3→1000000)
+    выдач всего                            1010
+    выдач, называющих спрашиваемого        9
+    членств в группах                      6
+    ролей / проекций глаголов / правил     61 / 11 / 15
+    прямых фактов всего                    1
+    фактов, называющих спрашиваемого       1
+    вердиктов задано                       22
+
+
+ОСЬ B
+------------------------------------------------------------------------------
+значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
+100        прямыми выдачами            183        13      196        208      2     597µs   2.256ms      7
+1000       прямыми выдачами           1066        13     1079       3106      2     3.5ms   4.573ms      7
+1000000    прямыми выдачами        1001049        13  1001062    1001091      2 3.796004s 3.861104s      7
+
+  отношение к нижней точке (несущая): 100→1.00  1000→5.83  1000000→5470.21  
+  отношение сверочная/несущая по точкам: 100→1.14  1000→2.91  1000000→1.00  
+  вердикт в каждой точке: 100→allow  1000→allow  1000000→allow  
+  план по точкам:
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    1000       [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    1000000    [Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb]
+
+  ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой таблице порознь, счётом по факту):
+    объектов зеркала                       1002
+    рёбер родителя                         3003  (по глубине: 1→1002 2→1001 3→1000)
+    выдач всего                            1000010
+    выдач, называющих спрашиваемого        9
+    членств в группах                      6
+    ролей / проекций глаголов / правил     1060 / 1010 / 1014
+    прямых фактов всего                    1
+    фактов, называющих спрашиваемого       1
+    вердиктов задано                       22
+
+
+ОСЬ R
+------------------------------------------------------------------------------
+значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
+1          прямыми выдачами           1018        13     1031       1047      2     582µs   3.065ms      7
+9          прямыми выдачами           1066        13     1079       3106      2   3.312ms   4.553ms      7
+100        прямыми выдачами           1612        13     1625       3743      2   4.217ms   5.204ms      7
+100        через группы               1612        13     1625       3743      2   4.284ms   5.195ms      7
+227        прямыми выдачами           2374        13     2387       4633      2   6.739ms   7.968ms      7
+227        через группы               2374        13     2387       4633      2   6.627ms   7.584ms      7
+1000       прямыми выдачами           7012        13     7025       9037      2  11.346ms  12.231ms      7
+1000       через группы               7012        13     7025       9037      2  12.107ms  13.956ms      7
+
+  отношение к нижней точке (несущая): 1→1.00  9→1.05  100→1.58  100→1.58  227→2.33  227→2.33  1000→6.89  1000→6.89  
+  отношение сверочная/несущая по точкам: 1→1.03  9→2.91  100→2.32  100→2.32  227→1.95  227→1.95  1000→1.29  1000→1.29  
+  вердикт в каждой точке: 1→allow  9→allow  100→allow  100→allow  227→allow  227→allow  1000→allow  1000→allow  
+  план по точкам:
+    1          [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    9          [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    227        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    227        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    1000       [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    1000       [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+
+  ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой таблице порознь, счётом по факту):
+    объектов зеркала                       1002
+    рёбер родителя                         3003  (по глубине: 1→1002 2→1001 3→1000)
+    выдач всего                            2001
+    выдач, называющих спрашиваемого        1000
+    членств в группах                      6
+    ролей / проекций глаголов / правил     1052 / 1002 / 1006
+    прямых фактов всего                    1
+    фактов, называющих спрашиваемого       1
+    вердиктов задано                       22
+
+
+ОСЬ F
+------------------------------------------------------------------------------
+значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
+0          фактом лично               1065        10     1075       1090      2   3.289ms   4.993ms      7
+1          фактом лично               1066        13     1079       3106      2    3.32ms   3.857ms      7
+10         фактом лично               1075        19     1094       3115      2   3.323ms   4.115ms      7
+10         фактом через группу        1075        19     1094       3100      2   3.248ms   4.121ms      7
+10         фактом подстановкой user:*     1075        19     1094       3100      2   3.321ms   4.005ms      7
+100        фактом лично               1165        19     1184       3205      2   3.454ms    4.28ms      7
+100        фактом через группу        1165        19     1184       3205      2   3.441ms   3.738ms      7
+100        фактом подстановкой user:*     1165        19     1184       3205      2   3.321ms   4.006ms      7
+
+  отношение к нижней точке (несущая): 0→1.00  1→1.00  10→1.01  10→1.01  10→1.01  100→1.09  100→1.09  100→1.09  
+  отношение сверочная/несущая по точкам: 0→1.02  1→2.91  10→2.90  10→2.88  10→2.88  100→2.75  100→2.75  100→2.75  
+  вердикт в каждой точке: 0→allow  1→allow  10→allow  10→allow  10→allow  100→allow  100→allow  100→allow  
+  план по точкам:
+    0          [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    1          [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    10         [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    10         [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    10         [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+    100        [Index Only Scan→role_verb Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→group_members Seq Scan→relation_fact]
+
+  ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой таблице порознь, счётом по факту):
+    объектов зеркала                       1002
+    рёбер родителя                         3003  (по глубине: 1→1002 2→1001 3→1000)
+    выдач всего                            1010
+    выдач, называющих спрашиваемого        9
+    членств в группах                      6
+    ролей / проекций глаголов / правил     61 / 11 / 15
+    прямых фактов всего                    100
+    фактов, называющих спрашиваемого       100
+    вердиктов задано                       22
+
+
+ОБЪЁМ ОСМОТРЕННОГО
+  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 10m21s
+
+ПЕРЕПИСЬ ПРИБОРА В ВЕРХНЕЙ ТОЧКЕ ОСИ N (доля неотнесённого печатается всегда)
+ПРАВИЛО ОТНЕСЕНИЯ (объявлено до прогона; перепись печатает его дословно из кода)
+
+1. ЕДИНИЦА. Строки, ОТДАННЫЕ узлом, помноженные на число циклов:
+   Actual Rows × max(Actual Loops, 1). "Actual Rows" в JSON плана — среднее НА
+   ОДИН ЦИКЛ, а не итог узла. Множитель обязателен: рекурсивный обход идёт с
+   loops = 2 на каждой точке, вложенный цикл — по числу строк внешней стороны,
+   параллельный план — по числу работников. Без множителя величина занижается
+   тем сильнее, чем дороже запрос.
+
+2. ОТНЕСЕНИЕ УЗЛА К ОТНОШЕНИЮ — ДВА КЛЮЧА, В ЭТОМ ПОРЯДКЕ:
+   ключ 1 — "Relation Name";
+   ключ 2 — при пустом "Relation Name" берётся "Index Name" и разрешается
+            в отношение: сперва по справочнику "индекс → отношение", СОБРАННОМУ
+            ИЗ ЭТОГО ЖЕ ПЛАНА (узлы, несущие оба ключа), затем по ближайшему
+            предку "Bitmap Heap Scan". Справочник выводится из плана, а не
+            выписывается в коде: выписанный не двигается от нового отношения в
+            запросе и продолжает печатать нули по своим.
+
+3. УСТРАНЕНИЕ ДВОЙНОГО СЧЁТА — ПО РОДСТВУ, НИКОГДА ПО ИМЕНИ.
+   "Bitmap Index Scan", у которого есть предок "Bitmap Heap Scan", даёт вход
+   этого предка, а не отдельную работу: узел остаётся ОТНЕСЁННЫМ и видимым, но
+   его ОТДАННЫЕ строки в сумму не входят. Схлопывание по ИМЕНИ отношения
+   запрещено: два "Index Scan" по одному отношению бывают двумя ветвями UNION,
+   и такое схлопывание потеряло бы половину настоящего доступа.
+   ОТБРОШЕННОЕ схлопыванию НЕ подлежит: отброшенное предком и отброшенное
+   ребёнком — РАЗНЫЕ строки, а не одни и те же, посчитанные дважды. Снимать их
+   заодно значило бы прятать работу, ради видимости которой пункт 4 и написан.
+
+4. ОТБРОШЕННОЕ ПЕЧАТАЕТСЯ РЯДОМ С ОТДАННЫМ, А НЕ ВМЕСТО.
+   "Rows Removed by Filter" и "Rows Removed by Index Recheck" — по отношениям;
+   "Rows Removed by Join Filter" — ПО УЗЛАМ, потому что у соединения
+   "Relation Name" нет вовсе и относить его не к чему. Фильтр применяется ВНУТРИ
+   узла, поэтому скан, прочитавший пол-таблицы ради пятидесяти строк, честно
+   отчитывается пятьюдесятью; его настоящая цена лежит в отброшенном.
+   Все три — величины НА ЦИКЛ и умножаются на число циклов.
+   "Heap Fetches" и "Workers Launched" — величины итоговые и НЕ умножаются.
+
+5. НЕОТНЕСЁННОЕ И НЕЗНАКОМОЕ НЕ ИСЧЕЗАЮТ.
+   Узел, не отнесённый ни одним ключом, попадает в корзину "не отнесено" — с
+   числом узлов, их долей и их строками. Узел, чей тип прибору неизвестен,
+   попадает СВЕРХ ТОГО в отдельную корзину с числом. Из счёта ни тот, ни другой
+   не выпадают: "отнесено всё" читалось бы из молчания, а молчание здесь
+   означает три четверти узлов.
+
+ОБЪЁМ ОСМОТРЕННОГО
+  узлов разобрано 41, отнесено 9, не отнесено 32 (78.0 %), отношений 8
+  предпосылка (ожидаемые отношения): relation_fact, access_bindings, access_binding_subjects, role_verb, role_rule_selectors, group_members, resource_parent_edge, resource_mirror
+
+ВЕЛИЧИНЫ
+  отдано узлами (несущая, с множителем циклов)   1066
+  отброшено всего                                13
+    из них фильтром                              10
+    из них перепроверкой потерявшего точность bitmap 0
+    из них соединением (по узлам)                3
+  тронуто (отдано + отброшено)                   1079
+  по всем узлам плана, включая неотнесённые      1310
+  строк на неотнесённых узлах                    244
+  Heap Fetches                                   18
+  Workers Launched                               0
+
+РАЗЛОЖЕНИЕ ПО ОТНОШЕНИЯМ (взято из плана, не выписано в коде)
+  access_binding_subjects  доступов 1, отдано 1010, отброшено 0
+  access_bindings          доступов 1, отдано 9, отброшено 0
+  group_members            доступов 2, отдано 2, отброшено 10
+  relation_fact            доступов 1, отдано 1, отброшено 0
+  resource_mirror          доступов 1, отдано 1, отброшено 0
+  resource_parent_edge     доступов 1, отдано 7, отброшено 0
+  role_rule_selectors      доступов 1, отдано 18, отброшено 0
+  role_verb                доступов 1, отдано 18, отброшено 0
+
+ДОСТУПЫ ПООБЪЕКТНО (ключ отнесения назван, чтобы его можно было оспорить)
+  resource_parent_edge     Index Scan           циклов 7, отдано 7, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+  group_members            Seq Scan             циклов 1, отдано 1, отброшено 5 (фильтр 5, перепроверка 0), ключ: Relation Name
+  group_members            Seq Scan             циклов 1, отдано 1, отброшено 5 (фильтр 5, перепроверка 0), ключ: Relation Name
+  relation_fact            Seq Scan             циклов 1, отдано 1, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+  access_binding_subjects  Seq Scan             циклов 1, отдано 1010, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+  access_bindings          Index Scan           циклов 9, отдано 9, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+  role_rule_selectors      Index Scan           циклов 18, отдано 18, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+  role_verb                Index Only Scan      циклов 18, отдано 18, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+  resource_mirror          Index Scan           циклов 1, отдано 1, отброшено 0 (фильтр 0, перепроверка 0), ключ: Relation Name
+
+ОТБРОШЕНО СОЕДИНЕНИЕМ — ПО УЗЛАМ (относить к отношению не к чему)
+  Nested Loop          отброшено 3
+
+УЗЛЫ НЕИЗВЕСТНОГО ПРИБОРУ ТИПА
+  нет (все 41 узлов — знакомых типов)
+

@@ -54,9 +54,15 @@ type fakeMemberWriter struct {
 	kachorepo.Writer
 	gw *fakeGroupWriter
 
+	abw *fakeABWriter
+
 	committed    bool
 	writeEmitted [][]service.RelationTuple
 	delEmitted   [][]service.RelationTuple
+
+	// seq records the ORDER of writer calls, so a probe can prove an emit
+	// happened INSIDE the writer-tx (before Commit) rather than after it.
+	seq []string
 }
 
 func (w *fakeMemberWriter) GroupsW() group.WriterIface { return w.gw }
@@ -68,7 +74,11 @@ func (w *fakeMemberWriter) EmitFGARelationDelete(_ context.Context, tuples []ser
 	w.delEmitted = append(w.delEmitted, tuples)
 	return nil
 }
-func (w *fakeMemberWriter) Commit(context.Context) error   { w.committed = true; return nil }
+func (w *fakeMemberWriter) Commit(context.Context) error {
+	w.committed = true
+	w.seq = append(w.seq, "commit")
+	return nil
+}
 func (w *fakeMemberWriter) Rollback(context.Context) error { return nil }
 
 // fakeGroupWriter records the group_members DML; satisfies group.WriterIface.
@@ -107,6 +117,7 @@ func assertNotCalled(name string) error { panic("unexpected call to " + name) }
 
 func newFakeMemberRepo() (*fakeMemberRepo, *fakeMemberWriter) {
 	w := &fakeMemberWriter{gw: &fakeGroupWriter{}}
+	w.abw = &fakeABWriter{w: w}
 	return &fakeMemberRepo{w: w}, w
 }
 

@@ -12,7 +12,7 @@ package pg_test
 //   T-I3 — invite-activation co-commits the member hierarchy tuple
 //          (account:<A>#account@iam_user:<id>) IN THE SAME Step-1 writer-tx as the
 //          iam.user.updated audit-event + the ActivateInvite UPDATE (ban #10 atomic
-//          co-commit through w.EmitFGARelationWrite, NOT post-commit relationhook).
+//          co-commit through w.EmitFGARelationWrite, НЕ записью после коммита — она снята).
 //   T-I5 — an invitee that owns ZERO accounts gets a personal default Account +
 //          "default" Project bootstrapped (RC-5 gate), WITHOUT a 2nd InsertActive
 //          (the invitee user-row already exists → a re-INSERT would 23505 on

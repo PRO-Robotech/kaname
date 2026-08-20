@@ -1035,12 +1035,14 @@ func (w *abWriter) EmitSubjectChangeEvent(ctx context.Context, evt access_bindin
 
 	payload, err := json.Marshal(struct {
 		SubjectID    string `json:"subject_id"`
+		SubjectType  string `json:"subject_type,omitempty"`
 		Op           string `json:"op"`
 		EventType    string `json:"event_type"`
 		ResourceType string `json:"resource_type"`
 		ResourceID   string `json:"resource_id"`
 	}{
 		SubjectID:    evt.SubjectID,
+		SubjectType:  evt.SubjectType,
 		Op:           evt.Op,
 		EventType:    evt.EventType,
 		ResourceType: evt.ResourceType,

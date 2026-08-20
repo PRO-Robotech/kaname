@@ -246,6 +246,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// of this TX will not leave an orphan outbox row (atomicity guarantee).
 	if err := w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
 		SubjectID:    string(deletedBinding.SubjectID),
+		SubjectType:  string(deletedBinding.SubjectType),
 		EventType:    "binding_revoke",
 		Op:           "binding_delete",
 		ResourceType: string(deletedBinding.ResourceType),

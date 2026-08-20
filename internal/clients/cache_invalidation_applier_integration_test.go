@@ -21,6 +21,7 @@ package clients_test
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	apigatewayv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/apigateway/v1"
+	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -387,8 +389,8 @@ func TestIntegration_AtomicRollback_NoLeak(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, event_type, payload)
-		VALUES ('usr_w1_2_22_rollback', 'jit_revoke', 'jit_revoke',
-		        '{"subject_id":"usr_w1_2_22_rollback","op":"jit_revoke","event_type":"jit_revoke","resource_type":"","resource_id":""}'::jsonb)`)
+		VALUES ('usr_w1_2_22_rollback', 'group_member_change', 'group_member_change',
+		        '{"subject_id":"usr_w1_2_22_rollback","op":"group_member_change","event_type":"group_member_change","resource_type":"","resource_id":""}'::jsonb)`)
 	require.NoError(t, err)
 	require.NoError(t, tx.Rollback(ctx), "force rollback must succeed")
 
@@ -431,4 +433,103 @@ func TestIntegration_AtomicRollback_NoLeak(t *testing.T) {
 		`SELECT count(*) FROM kacho_iam.subject_change_outbox
 		  WHERE subject_id='usr_w1_2_22_rollback'`).Scan(&cnt))
 	assert.Equal(t, 0, cnt, "row absent from table after rollback")
+}
+
+// TestIntegration_GroupMemberChangeReachesTheEdgeNamed — сквозная половина #754
+// и #755-смежного дефекта именования: строка вида `group_member_change`, какую
+// теперь пишет смена членства, обязана (а) пройти CHECK базы и (б) доехать до
+// края НАЗВАННОЙ так, как край ключует свой кеш вердиктов.
+//
+// Оба утверждения делаются на идентификаторах, которые продукт РЕАЛЬНО чеканит
+// (`ids.NewID` → три символа префикса + крокфорд-base32, без разделителя).
+// Прежние фикстуры этого пакета пишут субъектов вручную (`usr_alice`), и именно
+// на такой форме отображение, не совпадавшее с реальными идентификаторами,
+// выглядело исправным.
+//
+// Полезная нагрузка собирается маршалингом clients.SubjectChangeEvent — того же
+// типа, которым строку ЧИТАЕТ декодер, — чтобы у ключей JSON в пробе не завелось
+// второго написания рядом с настоящим.
+func TestIntegration_GroupMemberChangeReachesTheEdgeNamed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	pool := setupTestPGDrainer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fakeSrv := &recordingAuthzCacheServer{}
+	cli, stop := startBufconnServer(t, fakeSrv)
+	defer stop()
+
+	d, err := drainer.New[clients.SubjectChangeEvent](
+		pool,
+		drainer.Config{
+			Table:        "kacho_iam.subject_change_outbox",
+			Channel:      "kacho_iam_subject_outbox_added",
+			BatchSize:    16,
+			PollFallback: 250 * time.Millisecond,
+			MaxAttempts:  5,
+			BackoffMin:   100 * time.Millisecond,
+			BackoffMax:   500 * time.Millisecond,
+			ApplyTimeout: 2 * time.Second,
+		},
+		clients.DecodeSubjectChange,
+		clients.NewSubjectChangeApplier(cli),
+		nil,
+	)
+	require.NoError(t, err)
+
+	drainerCtx, drainerCancel := context.WithCancel(ctx)
+	defer drainerCancel()
+	go func() { _ = d.Run(drainerCtx) }()
+
+	// Строка с ЯВНЫМ типом субъекта — то, что пишет смена членства сегодня.
+	memberID := ids.NewID("usr")
+	// Строка БЕЗ типа — форма, закоммиченная до появления поля; тип называется по
+	// префиксу идентификатора. Парная половина: если позеленеет только первая,
+	// легаси-строки молча перестали доезжать.
+	legacyID := ids.NewID("sva")
+
+	for _, row := range []struct {
+		id, subjectType, op, eventType string
+	}{
+		{memberID, "user", "group_member_change", "group_member_change"},
+		{legacyID, "", "binding_delete", "binding_revoke"},
+	} {
+		payload, err := json.Marshal(clients.SubjectChangeEvent{
+			SubjectID:   row.id,
+			SubjectType: row.subjectType,
+			Op:          row.op,
+			EventType:   row.eventType,
+		})
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `
+			INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, event_type, payload)
+			VALUES ($1, $2, $3, $4::jsonb)`, row.id, row.op, row.eventType, payload)
+		require.NoError(t, err,
+			"op %q обязан проходить subject_change_op_check — иначе смена членства "+
+				"не может записать своё событие вовсе", row.op)
+	}
+
+	require.Eventually(t, func() bool {
+		return len(fakeSrv.snapshotSubjects()) >= 2
+	}, 15*time.Second, 100*time.Millisecond,
+		"обе строки обязаны дренироваться: край получает вызов на каждую")
+
+	subs := fakeSrv.snapshotSubjects()
+	assert.Contains(t, subs, "user:"+memberID,
+		"край ключует кеш вердиктов по `<тип>:<id>` и сопоставляет по этому префиксу; "+
+			"любая другая строка снимает ноль записей, а отказ в снятии неотличим от успеха")
+	assert.Contains(t, subs, "service_account:"+legacyID,
+		"строка без типа субъекта называется по префиксу идентификатора — легаси-путь "+
+			"обязан продолжать доезжать")
+
+	for _, id := range []string{memberID, legacyID} {
+		var sentAt *time.Time
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT sent_at FROM kacho_iam.subject_change_outbox WHERE subject_id=$1`, id).
+			Scan(&sentAt))
+		assert.NotNil(t, sentAt, "доставленная строка помечается отправленной (%s)", id)
+	}
 }

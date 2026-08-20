@@ -360,7 +360,7 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 			// Tuple-форма byte-идентична bootstrapTuples hierarchy-блоку
 			// (account:<A>#account@iam_user:<id>). It is the SAME in-tx outbox
 			// mechanism the bootstrap path uses — NOT post-commit best-effort
-			// relationhook.WriteHierarchyTuple (which would lose the tuple on a FGA
+			// записью ПОСЛЕ коммита (снята; она теряла кортеж при недоступности FGA
 			// outage and is not co-commit-able, violating ban #10). Idempotent:
 			// re-activation re-emits the same intent → at-least-once + idempotent
 			// drain → exactly one FGA edge.
@@ -785,7 +785,7 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 
 // bootstrapTuples строит ВСЕ FGA-tuples bootstrap-графа identity для co-commit
 // intent'ами в kacho_iam.fga_outbox (SEC-D). Раньше эти
-// tuples писались best-effort post-commit (`WriteTuples` + relationhook
+// tuples писались best-effort post-commit (`WriteTuples` + снятый с тех пор писатель
 // «Non-fatal») — теперь это чистый builder, а emit делает writer-tx:
 //
 //	user:<usr>#owner            @account:<acc> — owner grant (зеркалит CreateAccount;
@@ -822,7 +822,7 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 //     binding OBJECT hierarchy parent-pointer (parity with account/create.go
 //     ownerBindingHierarchyTuples; lineage edge, access is per-object via reconcile).
 //
-// Tuple-формат (User/Relation/Object) совпадает с relationhook.WriteHierarchyTuple
+// Tuple-формат (User/Relation/Object) совпадает с путём приглашения
 // и CreateAccount/CreateProject/CreateAccessBinding — единый owner-tuple контракт.
 func bootstrapTuples(
 	userID domain.UserID, accID domain.AccountID, prjID domain.ProjectID,
@@ -836,7 +836,7 @@ func bootstrapTuples(
 		{User: fmt.Sprintf("user:%s", userID), Relation: "admin", Object: fmt.Sprintf("project:%s", prjID)},
 		// Self-tuple (flat-model get-self, D-4): iam_user.v_get включает `subject`.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "subject", Object: fmt.Sprintf("iam_user:%s", userID)},
-		// Hierarchy parent-pointer tuples (зеркалит relationhook helper).
+		// Hierarchy parent-pointer tuples (та же форма, что на пути приглашения).
 		{User: fmt.Sprintf("account:%s", accID), Relation: "account", Object: fmt.Sprintf("iam_user:%s", userID)},
 		{User: fmt.Sprintf("account:%s", accID), Relation: "account", Object: fmt.Sprintf("project:%s", prjID)},
 		// Owner-binding OBJECT hierarchy parent-pointer (parity with account/create.go).

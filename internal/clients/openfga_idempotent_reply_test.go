@@ -19,7 +19,7 @@ package clients_test
 // FAILURE (RED): the client's idempotency check looked for the token
 // "already_exists" (UNDERSCORE) — which this body does NOT contain anywhere. So
 // every idempotent replay surfaced as a hard error to every direct caller
-// (relationhook hierarchy-tuple write, RelationProjector, the InternalAuthorize
+// (запись указателя на предка — снята, RelationProjector, the InternalAuthorize
 // admin WriteTuples RPC) and forced the reconciler's sync writer off its packed
 // fast path onto the read-delta round-trip on EVERY re-register.
 //

@@ -47,6 +47,10 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("repository.postgres.url", "postgres://iam@localhost:5432/kacho_iam")
 	v.SetDefault("repository.postgres.slave-url", "")
 	v.SetDefault("repository.postgres.max-conns", 0)
+	// Одна реплика — минимальная посадка, которая вообще работает. Ноль здесь
+	// означал бы «не проверять»: произведение обратилось бы в ноль и прошло бы
+	// любую проверку.
+	v.SetDefault("repository.postgres.replica-budget", 1)
 	v.SetDefault("repository.postgres.ssl-mode", "disable")
 	v.SetDefault("repository.postgres.password-from-env", "KACHO_IAM_DB_PASSWORD")
 

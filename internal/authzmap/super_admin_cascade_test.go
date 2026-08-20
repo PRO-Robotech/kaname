@@ -117,7 +117,7 @@ func seedSuperAdminWorld(t *testing.T, h *fgatest.Harness) {
 	h.Write(t, saProjectA, "project", saLbA)       // nlb fga_intent
 	h.Write(t, saProjectA, "project", saRegistryA) // registry fga_intent
 	h.Write(t, saRegistryA, "parent", saRepoA)     // repo is a child of its registry
-	h.Write(t, saAccountA, "account", saUserA)     // iam relationhook
+	h.Write(t, saAccountA, "account", saUserA)     // iam: указатель на предка
 	h.Write(t, saAccountA, "account", saGroupA)    //
 
 	// Level 1 + 2 — cloud administrator and the bootstrap identity share one

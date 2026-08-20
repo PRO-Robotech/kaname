@@ -104,6 +104,14 @@ var askingSites = map[string]lane{
 	// сравнению и зовёт ядро. Разделение существует затем, чтобы внутренний
 	// доспрос обёртки не считался вторым решением; полоса у ядра та же, что была
 	// у двери.
+	// Наблюдатель полос: сквозной декоратор публичного решателя. Вопроса он не
+	// задаёт — он считает чужие (задача #772: счётчик владельца прав видел одну
+	// полосу из трёх). Записан, а не отфильтрован по имени: фильтр по имени снял
+	// бы вместе с ним и настоящий асking-site, названный так же.
+	"internal/observability/metrics/authz_lanes.go:Check":        laneWrapper,
+	"internal/observability/metrics/authz_lanes.go:ListObjects":  laneWrapper,
+	"internal/observability/metrics/authz_lanes.go:ListSubjects": laneWrapper,
+
 	"internal/authzcascade/own_gates.go:checkCore":            laneWrapper,
 	"internal/authzcascade/own_gates.go:checkWithContextCore": laneWrapper,
 	"internal/authzcascade/own_gates.go:secondChance":         laneWrapper,

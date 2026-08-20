@@ -53,6 +53,13 @@ func TestServeWiresMetricsInterceptorAndListener(t *testing.T) {
 		// `TestSurfaceReleasesItsPortBeforeReturning` (pkg/servicehost). Обе
 		// проверяют исход на проводе, а не наличие строки.
 		"servicehost.ServeSurface(",
+		// Состояние пулов соединений. Без этих двух строк коллектор существует,
+		// собран и не зарегистрирован ни у кого — то есть на /metrics его нет, а
+		// в дереве он выглядит сделанной работой. Пулов у kacho-iam два, и оба
+		// обязаны быть провязаны: одна строка означала бы, что второй пул
+		// ненаблюдаем при полностью исправном коллекторе.
+		`metricsReg.RegisterPoolStats("primary", pool)`,
+		`metricsReg.RegisterPoolStats("replica", slavePool)`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("serve.go: missing metrics wiring %q", want)

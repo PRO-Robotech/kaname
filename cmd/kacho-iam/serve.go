@@ -97,6 +97,14 @@ func runServe(cfg config.Config) error {
 	}
 	defer pool.Close()
 
+	// Загрузочный страж: посадка не вправе обещать базе больше соединений, чем
+	// та принимает. Стоит СРАЗУ за созданием пула — до того, как процесс начнёт
+	// открывать соединения по работе: проверка, отложенная дальше, узнаёт о
+	// расхождении тогда же, когда о нём узнаёт арендатор.
+	if err := assertConnBudgetFits(ctx, pool, cfg.Repository.Postgres.ReplicaBudget); err != nil {
+		return err
+	}
+
 	// slave-pool wiring (read-replica). Если slave-url
 	// настроен и отличается от master URL — отдельный pgxpool для read-TX'ов;
 	// иначе slavePool = nil и kachopg.New() сделает fallback на master.
@@ -151,6 +159,20 @@ func runServe(cfg config.Config) error {
 	// listeners) and the authz-Check decorator. Clean Architecture: prometheus
 	// is imported only here (composition root) + the metrics adapter package.
 	metricsReg := metrics.NewRegistry()
+
+	// Состояние пулов соединений. До этой строки насыщение пула не наблюдалось
+	// ничем: снаружи «запрос ждал свободного соединения» и «запрос сам по себе
+	// медленный» выглядят одинаково — растянутой задержкой RPC, — а лечатся
+	// противоположным (потолок пула против правки запроса). Разбор величин — у
+	// коллектора в pkg/db.
+	//
+	// Пулов два, и метка `pool` их различает: без неё занятость реплики читалась
+	// бы как занятость ведущего. Реплика регистрируется БЕЗУСЛОВНО, даже когда
+	// slave-url не настроен и slavePool == nil: решение «пула нет — серий нет»
+	// принимает коллектор, поэтому ветки здесь не нужно, а отсутствие серий
+	// pool="replica" и есть честный ответ на «есть ли отдельный пул чтений».
+	metricsReg.RegisterPoolStats("primary", pool)
+	metricsReg.RegisterPoolStats("replica", slavePool)
 
 	// Наблюдатель обращений к хранилищу прав. Разбор — у самой функции
 	// (newAuthzStoreObserver); здесь только провязка, и она обязана быть: поле
@@ -496,8 +518,37 @@ func runServe(cfg config.Config) error {
 		"hooks_mtls", mtlsCfg.HooksServerMTLS.Enable,
 		"metrics_mtls", mtlsCfg.MetricsServerMTLS.Enable,
 		"jwks_proxy_mtls", mtlsCfg.JWKSProxyServerMTLS.Enable)
-	registerPublicServices(grpcSrv, svcs, opsRepo)
-	registerInternalServices(internalSrv, svcs, pool, cfg.MigrateDSN(), logger)
+	// Потолок темпа и одновременности НА ВЫЗЫВАЮЩЕГО. Регистрация идёт ЧЕРЕЗ
+	// обёртку ограничителя: он получает дескриптор службы целиком и подставляет
+	// допуск МЕЖДУ цепочкой звеньев и обработчиком — то есть ПОСЛЕ того, как
+	// личность вызывающего установлена. Забыть метод здесь не на чем: перечня
+	// методов у вызывающего нет.
+	//
+	// Служебные поверхности (здоровье, отражение) регистрирует конструктор
+	// сервера ДО обёртки и под предел не попадают намеренно: отказ проверке
+	// готовности означал бы перезапуск пода из-за нагрузки на API.
+	publicAdmissionLimits, internalAdmissionLimits, err := admissionLimits(cfg)
+	if err != nil {
+		return err
+	}
+	// Ключи у слушателей РАЗНЫЕ, и это не деталь: публичный ключуется личностью
+	// конечного пользователя (за краем сидит арендатор, и предел объявлен на
+	// него), внутренний — личностью СЕРТИФИКАТА вызывающего модуля, потому что
+	// запрос модуля несёт личности разных арендаторов и ключ по арендатору
+	// дробил бы бюджет соседа на тысячу вёдер.
+	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits, grpcsrv.PrincipalSubject)
+	if err != nil {
+		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
+	}
+	internalAdmission, err := grpcsrv.NewAdmission("internal", internalAdmissionLimits, grpcsrv.CertIdentitySubject)
+	if err != nil {
+		return fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err)
+	}
+	admission := listenerAdmission{public: publicAdmission, internal: internalAdmission}
+	admission.arm(logger, cfg)
+
+	registerPublicServices(publicAdmission.Registrar(grpcSrv), svcs, opsRepo)
+	registerInternalServices(internalAdmission.Registrar(internalSrv), svcs, pool, cfg.MigrateDSN(), logger)
 
 	publicAddr := cfg.APIServer.ListenAddress()
 	internalAddr := cfg.APIServer.InternalListenAddress()
@@ -709,9 +760,16 @@ func runServe(cfg config.Config) error {
 	// graceful-stop ОБОИХ серверов. sync.Once гарантирует, что параллельные
 	// триггеры (SIGTERM пришел одновременно с crash internal'а) не сделают
 	// двойной GracefulStop.
+	// Собственная отмена счётчика допуска: он обязан вернуть управление и тогда,
+	// когда гашение начал крах слушателя, а не сигнал. Общего контекста для
+	// этого мало — он сигнальный.
+	admissionCtx, stopAdmission := context.WithCancel(context.Background())
+	defer stopAdmission()
+
 	var shutdownOnce sync.Once
 	triggerShutdown := func() {
 		shutdownOnce.Do(func() {
+			stopAdmission()
 			stopGRPCBounded(internalSrv, gracefulTimeout)
 			stopGRPCBounded(grpcSrv, gracefulTimeout)
 			// Четыре не-gRPC поверхности гасятся ОДНОЙ отменой их общего контекста.
@@ -723,6 +781,13 @@ func runServe(cfg config.Config) error {
 	}
 
 	tasks := []func() error{
+		// Счёт допущенных и отвергнутых по каждому слушателю. Печатается ВСЕГДА,
+		// включая нули: «ноль отказов за всю жизнь контроля» обязано быть
+		// заметно, иначе мёртвый ограничитель невидим.
+		func() error {
+			admission.report(admissionCtx, logger)
+			return nil
+		},
 		// public gRPC server
 		func() error {
 			err := grpcSrv.Serve(listener)

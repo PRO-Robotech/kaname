@@ -1,22 +1,23 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// fga_tuple_writer.go — AccessBinding lifecycle → FGA tuple writes.
+// fga_tuple_writer.go — доступ к хранилищу кортежей движка для
+// InternalAuthorizeService: WriteTuples / ReadTuples / GetFGAStoreInfo.
 //
-// Writer is invoked by:
-//   - AccessBindingService.Create (sync wired in main.go via the
-//     `WithRelationStore` helper). Writes a single tuple
-//     `<subject>#<role-permission>@<resource-type>:<resource-id>` with
-//     optional Conditional attachment when `condition_id` is set.
-//   - AccessBindingService.Delete — remove the matching tuple.
-//   - AccessBindingService.Update — diff conditions; treat as
-//     Delete-old + Write-new.
+// ЧТО ЗДЕСЬ БЫЛО И ПОЧЕМУ СНЯТО. Тип нёс тройку OnAccessBindingCreated /
+// Deleted / Updated — проекцию жизненного цикла AccessBinding прямо в движок.
+// Прод-вызывающих у неё не было НИ ОДНОГО (выдача давно идёт реконсайлером через
+// строку журнала), а вход в движок она открывала настоящий: три места записи,
+// каждое мимо `kacho_iam.fga_outbox`. Мёртвый обход опаснее живого — он не
+// проявляется ничем, поэтому и не чинится, — и снят вместе со своими пробами.
 //
-// Idempotency: WriteConditionalTuples accepts already-exists silently
-// (clients.OpenFGAHTTPClient).
-//
-// InternalAuthorizeService.WriteTuples / ReadTuples / GetFGAStoreInfo also
-// rely on RelationProjector's underlying client.
+// ОСТАВШЕЕСЯ МЕСТО ЗАПИСИ — ОДНО, И ОНО ОБЪЯВЛЕНО ОБХОДОМ. `WriteRaw` обслуживает
+// административный `InternalAuthorizeService.WriteTuples`: кортеж уходит в движок
+// НАПРЯМУЮ, минуя журнал, поэтому проекция `relation_fact` (миграция 0098) его не
+// увидит никогда. Вызывающих в дереве ноль; терминальный исход — снять RPC, что
+// ломает контракт proto и идёт своим изменением. До тех пор место стоит в
+// ведомости гейта `tools/authzenginecensus/engineplaces/journaldoor_test.go`
+// как объявленное исключение с предикатом снятия.
 package service
 
 import (
@@ -42,77 +43,6 @@ type RelationProjector struct {
 // NewRelationProjector — builder.
 func NewRelationProjector(relations RelationWriter) *RelationProjector {
 	return &RelationProjector{relations: relations}
-}
-
-// AccessBindingTuple — denormalised AccessBinding view used by the writer.
-type AccessBindingTuple struct {
-	Subject      string // "user:usr_xxx" / "service_account:sva_xxx" / "group:grp_xxx#member"
-	Relation     string // resolved from role permissions
-	ResourceType string
-	ResourceID   string
-	Condition    *authztypes.TupleConditionRef // optional
-}
-
-// OnAccessBindingCreated — write tuple for a freshly-created binding.
-func (w *RelationProjector) OnAccessBindingCreated(ctx context.Context, b AccessBindingTuple) error {
-	if w.relations == nil {
-		return fmt.Errorf("fga: writer not configured")
-	}
-	tup := authztypes.ConditionalTuple{
-		User:      b.Subject,
-		Relation:  b.Relation,
-		Object:    fmt.Sprintf("%s:%s", b.ResourceType, b.ResourceID),
-		Condition: b.Condition,
-	}
-	if err := w.relations.WriteConditionalTuples(ctx, []authztypes.ConditionalTuple{tup}, nil); err != nil {
-		return fmt.Errorf("fga write tuple: %w", err)
-	}
-	return nil
-}
-
-// OnAccessBindingDeleted — remove tuple. Condition mismatch on the FGA
-// side is also OK (idempotent).
-func (w *RelationProjector) OnAccessBindingDeleted(ctx context.Context, b AccessBindingTuple) error {
-	if w.relations == nil {
-		return fmt.Errorf("fga: writer not configured")
-	}
-	// Deletes do not carry a Condition (FGA semantics: delete by triple).
-	tup := authztypes.ConditionalTuple{
-		User:     b.Subject,
-		Relation: b.Relation,
-		Object:   fmt.Sprintf("%s:%s", b.ResourceType, b.ResourceID),
-	}
-	if err := w.relations.WriteConditionalTuples(ctx, nil, []authztypes.ConditionalTuple{tup}); err != nil {
-		return fmt.Errorf("fga delete tuple: %w", err)
-	}
-	return nil
-}
-
-// OnAccessBindingUpdated — diff old vs new conditions; if condition changed,
-// re-write tuple (delete then add). For pure relation/subject changes also
-// supported (they end up as delete-old + add-new pairs).
-func (w *RelationProjector) OnAccessBindingUpdated(ctx context.Context, oldB, newB AccessBindingTuple) error {
-	if w.relations == nil {
-		return fmt.Errorf("fga: writer not configured")
-	}
-	if equalTupleCore(oldB, newB) && equalCondition(oldB.Condition, newB.Condition) {
-		return nil // no-op
-	}
-	delTup := authztypes.ConditionalTuple{
-		User:     oldB.Subject,
-		Relation: oldB.Relation,
-		Object:   fmt.Sprintf("%s:%s", oldB.ResourceType, oldB.ResourceID),
-	}
-	addTup := authztypes.ConditionalTuple{
-		User:      newB.Subject,
-		Relation:  newB.Relation,
-		Object:    fmt.Sprintf("%s:%s", newB.ResourceType, newB.ResourceID),
-		Condition: newB.Condition,
-	}
-	if err := w.relations.WriteConditionalTuples(ctx, []authztypes.ConditionalTuple{addTup}, []authztypes.ConditionalTuple{delTup}); err != nil {
-		return fmt.Errorf("fga update tuple: %w", err)
-	}
-	return nil
 }
 
 // WriteRaw — pass-through used by InternalAuthorizeService.WriteTuples
@@ -144,30 +74,4 @@ func (w *RelationProjector) StoreInfo(ctx context.Context) (authztypes.StoreInfo
 		return authztypes.StoreInfo{}, fmt.Errorf("fga: writer not configured")
 	}
 	return w.relations.GetStoreInfo(ctx)
-}
-
-func equalTupleCore(a, b AccessBindingTuple) bool {
-	return a.Subject == b.Subject && a.Relation == b.Relation &&
-		a.ResourceType == b.ResourceType && a.ResourceID == b.ResourceID
-}
-
-func equalCondition(a, b *authztypes.TupleConditionRef) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	if a.Name != b.Name {
-		return false
-	}
-	if len(a.Context) != len(b.Context) {
-		return false
-	}
-	for k, v := range a.Context {
-		if b.Context[k] != v {
-			return false
-		}
-	}
-	return true
 }

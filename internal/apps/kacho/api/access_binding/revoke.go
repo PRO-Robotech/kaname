@@ -217,6 +217,7 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	// Subject-change outbox (authz-cache invalidation — access removed).
 	if err := w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
 		SubjectID:    string(binding.SubjectID),
+		SubjectType:  string(binding.SubjectType),
 		EventType:    "binding_revoke",
 		Op:           "binding_delete",
 		ResourceType: string(binding.ResourceType),

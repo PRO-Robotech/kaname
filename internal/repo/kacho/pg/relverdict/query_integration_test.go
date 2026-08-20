@@ -75,6 +75,15 @@ func seedTenant(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	exec(t, ctx, tx,
 		`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ('prj-1', 'acc-1', 'test-project')
 		 ON CONFLICT DO NOTHING`)
+	// Указатель на аккаунт — В ЖУРНАЛ, потому что его туда кладёт САМ ПРОДУКТ:
+	// `Project.Create` со-коммитит иерархический кортеж в той же транзакции, что
+	// строку `projects` (проба `project must co-commit project→account hierarchy`).
+	//
+	// Фикстура, писавшая ОДНУ строку состояния, строила проект, о котором движок
+	// отношений не знает вовсе, — состояние, которого продукт не производит. Пока
+	// цепь брала предка из `projects`, это было незаметно; с #781 предок берётся
+	// оттуда же, откуда его берёт движок, и умолчание фикстуры стало видно.
+	pointerThroughJournal(t, ctx, tx, "project", "prj-1", "account", "account:acc-1")
 }
 
 // seedRole кладёт роль и её проекцию глаголов.

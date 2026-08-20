@@ -537,7 +537,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, fgaTransport, relationStore,
-		structuralFacts, shadow, cfg.AuthN.Mode.IsProduction(), logger)
+		structuralFacts, shadow, metricsReg, cfg.AuthN.Mode.IsProduction(), logger)
 	// Читатель счётчиков теневого сравнения. Бандл выносит сравнитель наружу
 	// именно ради этого: сравнение намеренно ни на что не влияет, и отсюда его
 	// слепое пятно — сравнитель, которого не спросили ни разу, снаружи неотличим
@@ -1047,7 +1047,7 @@ type authzServiceBundle struct {
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	kachoRepo kachorepo.Repository, fgaTransport *clients.OpenFGAHTTPClient,
 	ownGates *authzcascade.Client, structuralFacts *authzcascade.Resolver,
-	shadow *shadowverdict.Comparator,
+	shadow *shadowverdict.Comparator, metricsReg *metrics.Registry,
 	prodMode bool, logger *slog.Logger) authzServiceBundle {
 	modelID := fgaTransport.AuthorizationModel
 	logger.Info("openfga extended client wired for AuthZ",
@@ -1111,7 +1111,19 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 	// WithInsecureAnonymousPeer is the EXCEPTION for a stand without mTLS, where
 	// the public and internal listeners cannot be told apart. Fail-closed is the
 	// default; only a non-production AuthN mode opts out.
-	authzH := authorizeapp.NewHandler(authSvc, whoAmIUC).
+	// Полоса КРАЯ наблюдается ЗДЕСЬ, на границе адаптера: между транспортом
+	// публичной службы и решателем встаёт декоратор, считающий вопросы края и
+	// вопросы сужателя списочной выдачи. До него счётчик владельца прав видел
+	// одну полосу из трёх, и всякое «проверок в секунду», снятое с него, было
+	// занижено — на пути чтения по идентификатору ровно вдвое (задача #772).
+	//
+	// nil-реестр даёт неинструментированный решатель — ровно как у соседней
+	// полосы `CheckRelation` выше по файлу.
+	var edgeAuthz authorizeapp.Authorizer = authSvc
+	if metricsReg != nil {
+		edgeAuthz = metrics.NewInstrumentedSubjectAuthorizer(authSvc, metricsReg)
+	}
+	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC).
 		WithCallerAuthority(ownGates).
 		WithInsecureAnonymousPeer(!prodMode)
 

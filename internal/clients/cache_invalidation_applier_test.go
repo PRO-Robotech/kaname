@@ -10,7 +10,15 @@
 //	gateway NotFound (no cache entries) → ErrAlreadyApplied
 //	gateway Unavailable → transient (propagated raw, drainer retries)
 //	gateway InvalidArgument → ErrPermanent
-//	FGA prefix mapping (usr_/sva_/grp_)
+//	FGA subject naming (subject_type, or the id prefix on legacy rows)
+//
+// Test_FGAPrefixUnknownFallback stood here and asserted the OPPOSITE of the
+// contract: that a subject the applier cannot name is passed through as-is, the
+// edge answers NotFound, and the row is stamped sent — its comment called that
+// "Safe default". It is the silent-loss path, not a default: naming failure and
+// successful invalidation became the same observable. Removed together with the
+// behaviour it pinned; the inverted property lives in
+// subject_naming_reaches_the_edge_test.go.
 //
 // Decoder scenarios:
 //
@@ -102,12 +110,12 @@ func Test_DecoderLegacyPayload(t *testing.T) {
 // op and event_type. Decoder returns the explicit event_type as-is.
 func Test_DecoderModernPayload(t *testing.T) {
 	payload := []byte(
-		`{"subject_id":"usr_x","op":"jit_revoke","event_type":"jit_revoke",` +
+		`{"subject_id":"usr_x","op":"group_member_change","event_type":"group_member_change",` +
 			`"resource_type":"project","resource_id":"prj_a"}`)
 	e, err := clients.DecodeSubjectChange(payload)
 	require.NoError(t, err)
 	assert.Equal(t, "usr_x", e.SubjectID)
-	assert.Equal(t, "jit_revoke", e.EventType)
+	assert.Equal(t, "group_member_change", e.EventType)
 	assert.Equal(t, "project", e.ResourceType)
 	assert.Equal(t, "prj_a", e.ResourceID)
 }
@@ -272,24 +280,6 @@ func Test_FGAPrefixMapping(t *testing.T) {
 		assert.Equal(t, tc.wantFGA, calls[i].Subject,
 			"subject %q must FGA-prefix to %q", tc.subjectID, tc.wantFGA)
 	}
-}
-
-// Test_FGAPrefixUnknownFallback — unrecognised prefix (e.g.
-// future subject-type) falls through as-is. Documented contract:
-// applier doesn't grow new prefixes; canonical mapping owned by
-// fgaPrefixSwitch.
-func Test_FGAPrefixUnknownFallback(t *testing.T) {
-	mock := &recordingAuthzCacheClient{}
-	apply := clients.NewSubjectChangeApplier(mock)
-
-	err := apply(context.Background(), "binding_revoke",
-		clients.SubjectChangeEvent{SubjectID: "xyz_unknown", EventType: "binding_revoke"})
-	require.NoError(t, err)
-	calls := mock.snapshot()
-	require.Len(t, calls, 1)
-	// Unknown prefix passed as-is — gateway will report NotFound (no cache
-	// entries) → ErrAlreadyApplied → row marked sent_at. Safe default.
-	assert.Equal(t, "xyz_unknown", calls[0].Subject)
 }
 
 // Test_ApplierUsesDrainerEventTypeOverPayload — drainer signature

@@ -78,11 +78,45 @@ func (u *DeleteProjectUseCase) Execute(ctx context.Context, id domain.ProjectID)
 	return &op, nil
 }
 
+// doDelete снимает проект ЦЕЛИКОМ — строку и обе половины его присутствия в
+// графе прав, — одной транзакцией.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ СНЯТИЕ КОРТЕЖЕЙ ЖИВЁТ ЗДЕСЬ, А НЕ «ДОДЕЛАЕТСЯ САМО»
+//
+// Создание проекта СО-КОММИТИТ два структурных кортежа (`create.go`,
+// `projectStructuralTuples`): указатель на аккаунт и указатель на кластер. Ни
+// один из них не выводится из строки `projects` и ни один не снимается ничем
+// внешним: реконсайлер выводит ГЛАГОЛЫ из выдач, а указатели — прямой факт,
+// который кладут и снимают явно. Значит либо снимает этот код, либо не снимает
+// никто.
+//
+// Не снимал никто. Следствие ровно то, ради чего указатель и заведён, только
+// наоборот: цепь областей берёт предка проекта из проекции журнала
+// (миграция 781001), поэтому выдача, сделанная на аккаунт, продолжает доходить
+// до объектов под проектом, которого больше нет, а администратор облака
+// продолжает видеть его через указатель на кластер. Права переживают свой
+// предмет — тот же класс, что уцелевшая цепь рёбер после снятия регистрации
+// (`resource_mirror.DeleteTx`) и уцелевший `owner`
+// (`internal_iam/unregister_resource_residual_owner_test.go`).
+//
+// Снятие СИММЕТРИЧНО постановке дословно — тот же `projectStructuralTuples` от
+// той же строки, а не свой перечень: второй перечень разошёлся бы с первым при
+// заведении следующего звена, и разошёлся бы молча.
+//
+// В ТОЙ ЖЕ транзакции, что и `DELETE` (запрет #10): откатившееся удаление не
+// вправе оставить снятыми права живого проекта, а удавшееся — оставить права
+// снятого.
 func (u *DeleteProjectUseCase) doDelete(ctx context.Context, id domain.ProjectID, actor, accountID string) (*anypb.Any, error) {
 	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
 		func(ctx context.Context, w Writer) error {
 			if derr := w.ProjectsW().Delete(ctx, id); derr != nil {
 				return derr
+			}
+			if ferr := w.EmitFGARelationDelete(ctx, projectStructuralTuples(domain.Project{
+				ID: id, AccountID: domain.AccountID(accountID),
+			})); ferr != nil {
+				return ferr
 			}
 			return w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventProjectDeleted,

@@ -66,10 +66,22 @@ func (d dictionary) String() string {
 // с именем типа была здесь названа: колонка, заведённая позже и сюда не
 // внесённая, роняет гейт, а не проходит мимо него.
 var dictionaryOfColumn = map[string]dictionary{
-	"relation_fact.object_type":        dictModel,
-	"access_bindings.resource_type":    dictModel,
-	"resource_parent_edge.object_type": dictModel,
-	"resource_parent_edge.parent_type": dictModel,
+	"relation_fact.object_type":     dictModel,
+	"access_bindings.resource_type": dictModel,
+	// Перенесённая копия области выдачи (миграция 732001). Словарь тот же,
+	// что у родительской колонки, и это не совпадение: значение приходит
+	// оттуда — составной внешний ключ не даёт ему разойтись, а каскад правки
+	// переносит изменение сам.
+	"access_binding_subjects.resource_type": dictModel,
+	"resource_parent_edge.object_type":      dictModel,
+	"resource_parent_edge.parent_type":      dictModel,
+	// Представление цепи областей (миграция 740001): те же две колонки, тот же
+	// словарь. Одна из сторон объединения — сама таблица рёбер, две другие
+	// названы литералами модели (`project`, `account`, `cluster`); третьего
+	// словаря здесь не заводится, поэтому запись повторяет родительскую, а не
+	// вводит новую семантику.
+	"resource_scope_edge.object_type": dictModel,
+	"resource_scope_edge.parent_type": dictModel,
 
 	"resource_mirror.object_type":      dictCatalog,
 	"role_verb.object_type":            dictCatalog,

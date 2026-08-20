@@ -38,12 +38,12 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/relationhook"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // InviteUserInput — параметры use-case'а (resolved из gRPC request).
@@ -101,11 +101,12 @@ type InviteUserUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
 	authz   AuthzChecker
-	// Optional FGA tuple writer. The invite-flow creates a project-scoped
-	// AccessBinding directly (bypassing AccessBindingService), so without
-	// this hook the project role-grant tuple and the iam_access_binding
-	// hierarchy tuple are not written → the invitee's authz cascade has no
-	// path. When wired, doInvite emits both tuples after the AB INSERT commits.
+	// relations — клиент движка прав. Кортежи им БОЛЬШЕ НЕ ПИШУТСЯ: указатели
+	// на предков со-коммичены строкой журнала в самой транзакции приглашения
+	// (см. doInvite), а членство выдачи материализует реконсайлер. Поле
+	// остаётся ради второй своей роли — проверки права приглашать: тот же
+	// клиент удовлетворяет узкому AuthzChecker, и WithRelationStore
+	// перенаправляет на него `uc.authz`.
 	relations  clients.RelationStore
 	reconciler ObjectReconciler // optional, nil-safe
 	logger     *slog.Logger
@@ -415,6 +416,25 @@ func (uc *InviteUserUseCase) doInvite(
 				if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.accessBinding", string(ins.ID)); err != nil {
 					return inviteTxResult{}, err
 				}
+				// Указатель на предка для объекта привязки
+				// (`iam_access_binding:<id>#project@project:<id>`), без которого
+				// iam_access_binding-scoped Get/Delete не резолвится.
+				//
+				// СО-КОММИТ, а не запись после коммита. Прежде тут стоял
+				// post-commit best-effort прямо в движок: он терял кортеж на
+				// недоступности движка И — что тише и потому хуже — клал в движок
+				// строку, которой НЕТ в журнале `kacho_iam.fga_outbox`. Состояние
+				// движка обязано быть свёрткой журнала (миграция 0098): кортеж мимо
+				// журнала проекция `relation_fact` не увидит никогда, и форма E
+				// ответит «нет» там, где движок отвечает «да», — молча, потому что
+				// пустая проекция неотличима от честного отказа.
+				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+					User:     fmt.Sprintf("project:%s", ins.ResourceID),
+					Relation: "project",
+					Object:   fmt.Sprintf("iam_access_binding:%s", ins.ID),
+				}}); ferr != nil {
+					return inviteTxResult{}, ferr
+				}
 			}
 			// A freshly-inserted invitee user
 			// row must forward-materialize under the owner `*.*` binding (the flat model
@@ -423,6 +443,18 @@ func (uc *InviteUserUseCase) doInvite(
 			if out.userIsNew {
 				if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(out.user.ID)); err != nil {
 					return inviteTxResult{}, err
+				}
+				// Указатель `iam_user:<id>#account@account:<acc>`: без него
+				// per-resource UserService.Get на приглашённом — FGA `no path`.
+				// Со-коммит по той же причине, что и у привязки выше; форма
+				// кортежа байт-идентична пути активации приглашения
+				// (internal_upsert.go), который ушёл с post-commit-записи раньше.
+				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+					User:     fmt.Sprintf("account:%s", out.user.AccountID),
+					Relation: "account",
+					Object:   fmt.Sprintf("iam_user:%s", out.user.ID),
+				}}); ferr != nil {
+					return inviteTxResult{}, ferr
 				}
 			}
 			return out, nil
@@ -435,25 +467,10 @@ func (uc *InviteUserUseCase) doInvite(
 	createdAB := res.createdAB
 	haveAB := res.haveAB
 
-	// Emit the iam_access_binding hierarchy tuple for the invite-flow AccessBinding
-	// (so an iam_access_binding-scoped Get/Delete on it resolves). The binding's
-	// GRANT membership (the project-scoped v_* + tier tuples) is NOT hand-written
-	// here — it is materialized through the unified reconciler below
-	// (ReconcileBinding), so the invite grant carries the verb-bearing v_* the
-	// Design-B enforcement requires (parity with AccessBindingService.Create).
-	// Non-fatal — the AB row is already committed.
-	if haveAB && uc.relations != nil {
-		uc.writeInviteBindingHierarchyTuple(ctx, createdAB)
-	}
-	// Emit the iam_user→account hierarchy tuple for a freshly inserted
-	// invitee row. Without it a per-resource UserService.Get on the invitee
-	// is FGA `no path`. Idempotent re-invite of an existing user already
-	// has the tuple (skipped). Non-fatal.
-	if userIsNew && uc.relations != nil {
-		relationhook.WriteHierarchyTuple(ctx, uc.relations, uc.logger,
-			"account", string(user.AccountID), "account",
-			"iam_user", string(user.ID))
-	}
+	// Указатели на предков (привязка→проект, пользователь→аккаунт) СО-КОММИЧЕНЫ
+	// строкой журнала в транзакции выше — здесь их больше не пишут. Членство
+	// выдачи (project-scoped v_* + tier) по-прежнему материализует общий
+	// реконсайлер ниже, а не рука.
 
 	// SYNCHRONOUSLY materialize the
 	// per-object access on the just-committed invite-flow objects so the owner /
@@ -517,18 +534,6 @@ func (uc *InviteUserUseCase) reconcileBinding(ctx context.Context, bindingID dom
 		uc.logger.Error("invite user: binding grant reconcile failed (sweep will retry)",
 			"binding_id", string(bindingID), "err", rerr)
 	}
-}
-
-// writeInviteBindingHierarchyTuple writes the iam_access_binding hierarchy tuple
-// `iam_access_binding:<ab_id>#project@project:<id>` so an iam_access_binding-scoped
-// Get/Delete on the invite-flow binding resolves. The binding's GRANT membership (the
-// project-scoped v_* + tier tuples) is materialized by the unified reconciler
-// (reconcileBinding) — NOT hand-written tier-only here — so the invitee holds the
-// verb-bearing v_* the Design-B enforcement requires. Best-effort; logged, never fatal.
-func (uc *InviteUserUseCase) writeInviteBindingHierarchyTuple(ctx context.Context, ab domain.AccessBinding) {
-	relationhook.WriteHierarchyTuple(ctx, uc.relations, uc.logger,
-		"project", string(ab.ResourceID), "project",
-		"iam_access_binding", string(ab.ID))
 }
 
 // resolveCanonicalSubjectID returns the user-row id the api-gateway resolves

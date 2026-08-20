@@ -130,6 +130,11 @@ type invPrincRepo struct {
 	mu           sync.Mutex
 	inserted     bool
 	gotInvitedBy domain.UserID
+	// emitted — строки журнала, со-коммиченные транзакцией приглашения.
+	// Дублёр ОБЯЗАН их запоминать, а не глотать: подставной писатель,
+	// принимающий больше настоящего, делает невидимым ровно тот дефект, ради
+	// которого его подставляют — путь мог не эмитить ничего.
+	emitted []service.RelationTuple
 }
 
 func (f *invPrincRepo) Reader(context.Context) (kachorepo.Reader, error) {
@@ -197,7 +202,10 @@ func (w *invPrincWriter) GroupsW() group.WriterIface                            
 func (w *invPrincWriter) RolesW() role.WriterIface                                 { return nil }
 func (w *invPrincWriter) AccessBindingsW() access_binding.WriterIface              { return nil }
 func (w *invPrincWriter) EmitAuditEvent(context.Context, service.AuditEvent) error { return nil }
-func (w *invPrincWriter) EmitFGARelationWrite(context.Context, []service.RelationTuple) error {
+func (w *invPrincWriter) EmitFGARelationWrite(_ context.Context, tuples []service.RelationTuple) error {
+	w.parent.mu.Lock()
+	w.parent.emitted = append(w.parent.emitted, tuples...)
+	w.parent.mu.Unlock()
 	return nil
 }
 func (w *invPrincWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {

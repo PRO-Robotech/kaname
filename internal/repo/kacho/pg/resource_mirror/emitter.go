@@ -271,7 +271,38 @@ func splitObjectRef(ref string) (typ, id string, ok bool) {
 	return ref[:i], ref[i+1:], true
 }
 
-// DeleteTx conditionally removes the mirror row for (objectType, objectID). The
+// DeleteTx conditionally removes BOTH halves of a registration for
+// (objectType, objectID): the mirror row and the object's chain of parent edges.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ЦЕПЬ СНИМАЕТСЯ ЗДЕСЬ, А НЕ ОСТАВЛЯЕТСЯ БАЗЕ
+//
+// Регистрация пишет обе половины одной транзакцией (`UpsertTx` →
+// `upsertParentEdges`), а снятие убирало только первую. Досняться цепи неоткуда:
+// внешнего ключа с зеркала на ребро НЕТ и быть не может — стороны названы
+// РАЗНЫМИ словарями (зеркало — словарём каталога, `vpc.securityGroup`; ребро —
+// словарём модели прав, `vpc_security_group`), поэтому каскад тут невыразим by
+// construction. Значит либо снимает этот код, либо не снимает никто.
+//
+// Не снимал никто, и следствие ровно обратно тому, ради чего цепь заведена:
+// обход ВНИЗ («что лежит под этой областью») продолжает числить снятый объект
+// под областью выдачи. Право переживает свой предмет — тот же класс, что
+// уцелевший `owner` после снятия регистрации (см. пробу
+// `unregister_resource_residual_owner_test.go`). Замер стенда 2026-08-20: рёбер
+// 14 707, из них 14 527 без строки зеркала — 98.8 % таблицы.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ОДИН ПРЕДИКАТ НА ОБЕ ПОЛОВИНЫ — ИНАЧЕ ОНИ РАЗОЙДУТСЯ ИМЕННО НА ПЕРЕСТАНОВКЕ
+//
+// Цепь снимается ПОД ТЕМ ЖЕ условием `source_version <= $tombstone`, что и строка
+// зеркала, а не безусловно. Безусловное снятие выглядело бы исправным на всяком
+// прямом порядке доставки и теряло бы объект ровно на переупорядоченной паре
+// «правка → снятие»: надгробие, опоздавшее к свежей регистрации, ноль строк
+// зеркала не трогает — и не вправе трогать цепь. Держит это парная проба
+// `TestParentEdges_StaleUnregisterKeepsTheChain`.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// The mirror half: the
 // DELETE is gated `WHERE source_version <= $tombstone` so a STALE unregister
 // tombstone (older than the stored register — a Delete-after-Update reorder)
 // updates 0 rows and is a no-op, leaving the fresher row intact.
@@ -294,6 +325,18 @@ func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombs
 		objectType, objectID, versionOr(tombstone),
 	); err != nil {
 		return fmt.Errorf("resource_mirror: delete: %w", err)
+	}
+	// Цепь предков — вторая половина той же регистрации. Перевод словаря берётся
+	// ЕДИНСТВЕННЫЙ и тот же, которым цепь писалась (`authzmap.ModelTypeName` в
+	// `upsertParentEdges`): назови её здесь словарём каталога — снятие не совпало
+	// бы ни с одним ребром и промолчало бы, то есть выглядело бы исполненным.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM kacho_iam.resource_parent_edge
+		  WHERE object_type = $1 AND object_id = $2
+		    AND source_version <= $3`,
+		authzmap.ModelTypeName(objectType), objectID, versionOr(tombstone),
+	); err != nil {
+		return fmt.Errorf("resource_parent_edge: delete: %w", err)
 	}
 	return nil
 }

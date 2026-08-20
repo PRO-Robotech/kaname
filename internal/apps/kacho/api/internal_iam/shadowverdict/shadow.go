@@ -17,18 +17,33 @@
 // ответа, происходит ровно там, где ответ пришёл, — и молчит там, где движок
 // ответил из кэша или не ответил вовсе, то есть на самом частом пути.
 //
-// НЕ делает: не влияет на ответ вызывающему. Ни один исход теневого вызова — ни
-// разрешение, ни отказ, ни ошибка, ни истёкший срок — не меняет того, что
-// вернёт Check. Это и есть смысл фазы: ошибка формы E сегодня стоит записи в
-// журнале, а не чужого доступа.
+// НЕ делает: не влияет на ответ вызывающему — ни ЗНАЧЕНИЕМ, ни ЗАДЕРЖКОЙ. Ни
+// один исход теневого вызова — ни разрешение, ни отказ, ни ошибка, ни истёкший
+// срок — не меняет ни того, что вернёт Check, ни того, КОГДА он это вернёт. Это
+// и есть смысл фазы: ошибка формы E сегодня стоит записи в журнале, а не чужого
+// доступа.
+//
+// > [!warning] Вторая половина этого утверждения появилась ПОЗЖЕ первой, и до
+// > неё абзац был наполовину ложным
+// >
+// > Прежняя редакция говорила «не влияет на ответ» и имела в виду ЗНАЧЕНИЕ.
+// > Про значение это было верно всегда. Про задержку — неверно: сведение исхода
+// > делало безусловное блокирующее чтение ответа формы E, и вызывающий ждал его
+// > столько, сколько отпущено теневому вызову. Замер пропускной способности
+// > нашёл это как медиану, севшую ровно на срок сверки.
+// >
+// > Так и работает этот класс: утверждение о безопасности, верное в одном
+// > измерении, читается как верное во всех. Комментарий, не назвавший, ЧЕГО
+// > именно он не касается, следующий читатель принимает за общий.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ СОБСТВЕННЫЙ СРОК, А НЕ СРОК ЗАПРОСА
 //
-// Теневой вызов идёт на пути ЖИВОГО запроса. Отдать ему срок вызывающего значит
-// разрешить сравнению задержать ответ, который от него не зависит: медленный
-// теневой запрос превратился бы в медленный Check, то есть наблюдение изменило
-// бы наблюдаемое. Срок здесь короткий и свой; его исчерпание — исход
+// Теневой вызов идёт РЯДОМ с живым запросом. Отдать ему срок вызывающего значит
+// связать сравнение с жизнью запроса, который от него не зависит; отдать ему
+// ожидание на стороне ответа — сделать срок сверки верхней границей задержки
+// вызывающего. Ни того, ни другого здесь нет: срок свой, отмена своя, а сведение
+// исхода живого пути не держит (см. offPath). Исчерпание срока — исход
 // «не выполнилось», а не расхождение.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,8 +72,47 @@ import (
 // Величина выбрана из назначения, а не из вкуса: сравнение обязано быть дешевле
 // самого решения, иначе оно меняет то, что измеряет. Ответ формы E на прямом
 // вопросе — единичные миллисекунды (индексы по всем четырём источникам), и срок
-// на порядок больше даёт запас, оставаясь незаметным для вызывающего.
-const DefaultTimeout = 50 * time.Millisecond
+// втрое-впятеро больше даёт запас, оставаясь малой долей бюджета.
+//
+// Прежде здесь стояло 50 мс — БОЛЬШЕ всего бюджета чтения (см. ReadBudget).
+// Обоснование было верным по форме («на порядок больше единичных миллисекунд»)
+// и неверным по опоре: запас отсчитывался от ответа формы E, а не от бюджета
+// операции, в который этот запас обязан поместиться. Пока форма укладывалась,
+// расхождение было незаметно; на сорванной ступени замера медиана села ровно на
+// срок сверки.
+//
+// Сегодня срок ограничивает не задержку вызывающего (сведение исхода его больше
+// не ждёт), а то, СКОЛЬКО теневой вопрос держит соединение к базе. Обе величины —
+// срок и потолок одновременных вопросов — вместе задают верхнюю границу
+// теневого следа в пуле, и она перестала зависеть от нагрузки.
+const DefaultTimeout = 10 * time.Millisecond
+
+// ReadBudget — бюджет чтения, названный владельцем: столько отпущено ВСЕЙ
+// операции, ради которой теневая сверка существует.
+//
+// Стоит здесь потому, что здесь единственное место, где эту величину с чем-то
+// сравнивают: срок сверки обязан быть строго меньше — механизм, который решений
+// НЕ ПРИНИМАЕТ, не вправе задержать ответ дольше, чем весь бюджет решения.
+const ReadBudget = 30 * time.Millisecond
+
+// DefaultMaxInFlight — потолок теневых вопросов, идущих одновременно.
+//
+// Потолок появился вместе со снятием ожидания и является его ЦЕНОЙ. Пока сведение
+// исхода ждало форму E, число теневых вопросов в полёте ограничивал сам живой
+// путь: запрос не уходил, пока его сверка не закончилась. Без ожидания этой
+// границы нет, и теневая работа растёт вместе с нагрузкой — то есть обрыв по
+// задержке сменился бы обрывом по соединениям, а лекарство сохранило бы свой
+// отказ.
+//
+// Величина выбрана из назначения: теневой путь делит пул с живым и обязан
+// оставаться его малой долей, а не соперником. Восьми хватает, чтобы сверка шла
+// непрерывно (при сроке в единицы миллисекунд это сотни сравнений в секунду —
+// доля сравнённого измеряется, а не обнуляется), и мало настолько, что даже
+// целиком занятый теневой путь не отбирает у живого заметной части пула.
+//
+// Отброшенный вопрос идёт в корзину «не выполнилось» СВОЕЙ причиной: сброс,
+// невидимый снаружи, сделал бы долю сравнённого лучше, ничего не улучшив.
+const DefaultMaxInFlight = 8
 
 // CompareSetLimit — потолок множества, которое сравнение берётся сверить ЦЕЛИКОМ.
 //
@@ -114,7 +168,12 @@ type Asker interface {
 // них означает не согласие, а то, что ось не спрашивали. Одно число на обе оси
 // эту разницу скрыло бы — потому их два.
 type LabelArmObserver interface {
-	LabelArmGrounds() (mirror, iamDirect int64)
+	// Третье число — вердиктов, ответивших ДО того, как набор источников
+	// дочитан (ранний выход на первом безусловном основании). Без него ноль
+	// оснований меточной ветви одинаково читается и как «ветвь молчала», и как
+	// «до неё не дочитали»; печатать первые два и умолчать о третьем значило бы
+	// выдать неопределённость за наблюдение.
+	LabelArmGrounds() (mirror, iamDirect, earlyStops int64)
 }
 
 // Counters — то, что сравнение обязано уметь предъявить.
@@ -179,6 +238,18 @@ type Comparator struct {
 	logger  *slog.Logger
 	counts  Counters
 
+	// sem — потолок теневых вопросов в полёте (см. DefaultMaxInFlight). Занятый
+	// слот держится ровно столько, сколько живёт теневой вопрос; свободного нет —
+	// вопрос ОТБРАСЫВАЕТСЯ со своей причиной, а не встаёт в очередь. Очередь
+	// вернула бы ту же беду с другой стороны: неограниченный рост работы,
+	// которая ни на что не влияет.
+	sem chan struct{}
+
+	// wg — учёт незавершённых сравнений. Нужен тому, кто обязан знать, что
+	// теневая работа кончилась: пробам — чтобы читать счётчики после сведения,
+	// а не до него, и остановке процесса — чтобы не рвать вопросы на полуслове.
+	wg sync.WaitGroup
+
 	// now — часы. Параметром ради проб: сводка привязана ко времени, и проба,
 	// ждущая настоящих секунд, проверяла бы планировщик, а не свойство.
 	now          func() time.Time
@@ -214,15 +285,145 @@ func New(form Asker, logger *slog.Logger) *Comparator {
 		now:          time.Now,
 		summaryEvery: DefaultSummaryEvery,
 		classes:      make(map[string]int64),
+		sem:          make(chan struct{}, DefaultMaxInFlight),
 	}
 }
 
 // WithTimeout меняет срок теневого вызова (для проб).
+//
+// Величина С БЮДЖЕТОМ ЧТЕНИЯ ИЛИ ВЫШЕ не принимается: ограничение обязано
+// держаться механизмом, а не комментарием рядом с константой. Отвергнутая
+// величина оставляет срок прежним — тихо расширить его отсюда нельзя.
 func (c *Comparator) WithTimeout(d time.Duration) *Comparator {
-	if d > 0 {
+	if d > 0 && d < ReadBudget {
 		c.timeout = d
 	}
 	return c
+}
+
+// Wait ждёт, пока сведутся все начатые сравнения.
+//
+// Сведение исхода ушло с пути живого запроса, поэтому «вопрос задан» и
+// «сравнение состоялось» перестали быть одним мгновением. Тому, кто читает
+// счётчики (проба) или гасит процесс, нужна точка, после которой теневой работы
+// не осталось.
+func (c *Comparator) Wait() {
+	if c == nil {
+		return
+	}
+	c.wg.Wait()
+}
+
+// acquire занимает слот в потолке; false — свободного нет.
+func (c *Comparator) acquire() bool {
+	select {
+	case c.sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Comparator) release() { <-c.sem }
+
+// reasonSaturated / reasonNotSettled — причины в корзине «не выполнилось».
+//
+// Названы отдельно от ошибок формы E намеренно: «сравнения не было, потому что
+// теневой путь занят» и «форма E не ответила» требуют разных действий, а одна
+// причина на оба случая сделала бы их неотличимыми.
+const (
+	reasonSaturated  = "теневой путь занят — вопрос отброшен"
+	reasonNotSettled = "исход не сведён вызывающим"
+)
+
+// settleGrace — сколько теневой вопрос ждёт исхода движка, если вызывающий его
+// так и не свёл.
+//
+// Штатно исход приходит `defer`-ом, то есть раньше, чем контекст вызывающего
+// будет отменён, и ожидание кончается на первом же признаке. Запас существует
+// ради вызывающего с неотменяемым контекстом: без него слот потолка не
+// освободился бы никогда, и теневой путь встал бы целиком.
+const settleGrace = 5 * time.Second
+
+// offPath задаёт вопрос форме E РЯДОМ с живым запросом и сводит исход ВНЕ его пути.
+//
+// # Почему сведение не ждёт форму E
+//
+// Сравнение решений НЕ ПРИНИМАЕТ. Ожидание его ответа делает верхнюю границу
+// задержки вызывающего равной сроку сверки — и эта граница приходит СКАЧКОМ:
+// пока форма укладывается, ожидание незаметно, а как только перестаёт, полный
+// срок платит каждый запрос. Наблюдение, меняющее наблюдаемое ровно в тот момент,
+// когда наблюдаемое становится интересным, не измеряет ничего.
+//
+// # Почему у теневого вопроса СВОЯ отмена, а не только свой срок
+//
+// gRPC отменяет контекст обработчика ровно тогда, когда обработчик вернулся, —
+// то есть сразу после сведения. Теневой вопрос, унаследовавший эту отмену, стал
+// бы «не выполнилось» на КАЖДОМ решении: живой путь перестал бы ждать, но и
+// сравнения не осталось бы. Поэтому вопрос идёт по контексту БЕЗ отмены (значения
+// сохраняются — они называют вызывающего), а исходный контекст остаётся ровно
+// одним: признаком того, что вызывающий ушёл.
+func offPath[A any, E any](c *Comparator, ctx context.Context,
+	ask func(context.Context) A,
+	unfinished func(reason string),
+	reconcile func(A, E),
+) func(E) {
+	if !c.acquire() {
+		unfinished(reasonSaturated)
+		return func(E) {}
+	}
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeout)
+	// Буфер на единицу: сведение исхода не блокируется НИКОГДА, даже если
+	// теневой вопрос к этому мгновению уже сдался по сроку.
+	engine := make(chan E, 1)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		defer c.release()
+		defer cancel()
+		a := ask(sctx)
+		e, ok := awaitEngine(ctx, engine)
+		if !ok {
+			unfinished(reasonNotSettled)
+			return
+		}
+		reconcile(a, e)
+	}()
+	return func(e E) {
+		select {
+		case engine <- e:
+		default:
+		}
+	}
+}
+
+// awaitEngine забирает исход движка, не завися от того, кто пришёл первым.
+func awaitEngine[E any](ctx context.Context, engine <-chan E) (E, bool) {
+	// Сначала — БЕЗ ожидания: штатно исход уже лежит в буфере (сведение идёт
+	// `defer`-ом, до отмены контекста). `select` из двух готовых веток выбрал бы
+	// случайно, и сравнение терялось бы на ровном месте примерно в половине
+	// случаев.
+	select {
+	case e := <-engine:
+		return e, true
+	default:
+	}
+	timer := time.NewTimer(settleGrace)
+	defer timer.Stop()
+	select {
+	case e := <-engine:
+		return e, true
+	case <-ctx.Done():
+		// Та же гонка на выходе: исход мог лечь в буфер ровно в это мгновение.
+		select {
+		case e := <-engine:
+			return e, true
+		default:
+		}
+	case <-timer.C:
+	}
+	var zero E
+	return zero, false
 }
 
 // WithClock подменяет часы сводки (для проб).
@@ -260,6 +461,15 @@ func (c *Comparator) Summarise() {
 	if c == nil || c.form == nil {
 		return
 	}
+	c.mu.Lock()
+	now := c.now()
+	c.lastSummary = now
+	c.mu.Unlock()
+	c.summarise(now)
+}
+
+// summarise печатает сводку, считая слот УЖЕ занятым вызывающим.
+func (c *Comparator) summarise(at time.Time) {
 	s := c.counts.Read()
 	c.mu.Lock()
 	classes := make([]string, 0, len(c.classes))
@@ -267,7 +477,7 @@ func (c *Comparator) Summarise() {
 		classes = append(classes, fmt.Sprintf("%s×%d", k, n))
 	}
 	c.summaries++
-	c.lastSummary = c.now()
+	c.lastSummary = at
 	c.mu.Unlock()
 	sort.Strings(classes)
 
@@ -283,13 +493,29 @@ func (c *Comparator) Summarise() {
 // Первая печатается на первом же сведённом исходе: присутствие строки отвечает
 // «сравнение живо», а её числа — «до чего оно дошло». Отсутствие отвечало бы на
 // оба вопроса сразу и не отвечало бы ни на один.
+// Слот СВОДКИ ЗАНИМАЕТСЯ ТЕМ ЖЕ ЗАМКОМ, КОТОРЫЙ РЕШИЛ, ЧТО ОНА НУЖНА.
+//
+// Прежде решение и занятие стояли по разные стороны замка: «пора» вычислялось
+// под ним, а отметка времени ставилась уже внутри Summarise, после его снятия.
+// Пока сведение исходов шло на пути живого запроса, вызывающих было по одному на
+// запрос и промежуток между двумя действиями ничем не заполнялся. Как только
+// сведение ушло РЯДОМ с запросом, вызывающих стало несколько сразу — и оба
+// проходили проверку до того, как первый успевал отметиться, то есть период
+// переставал ограничивать что-либо.
+//
+// Это тот же вид ошибки, что «прочитал → проверил → записал» в базе, только в
+// памяти: между решением и действием состояние успевает измениться. Лечится так
+// же — решением и занятием под ОДНИМ замком.
 func (c *Comparator) maybeSummarise() {
 	c.mu.Lock()
-	due := c.lastSummary.IsZero() || c.now().Sub(c.lastSummary) >= c.summaryEvery
-	c.mu.Unlock()
-	if due {
-		c.Summarise()
+	now := c.now()
+	if !c.lastSummary.IsZero() && now.Sub(c.lastSummary) < c.summaryEvery {
+		c.mu.Unlock()
+		return
 	}
+	c.lastSummary = now
+	c.mu.Unlock()
+	c.summarise(now)
 }
 
 // Counters отдаёт счётчики.
@@ -343,51 +569,54 @@ func (c *Comparator) Ask(ctx context.Context, subject, objectType, objectID, rel
 		return func(bool, bool) {}
 	}
 	c.counts.decisions.Add(1)
-	// Срок СВОЙ: контекст вызывающего берётся только ради его отмены, но время
-	// теневому вызову отпускается отдельное.
-	sctx, cancel := context.WithTimeout(ctx, c.timeout)
-	type answer struct {
+
+	const question = "прямой вердикт"
+	unfinished := func(reason string) { c.unfinishedAt(question, reason, objectType, relation) }
+	type formAnswer struct {
 		allowed bool
 		err     error
 	}
-	// Буфер на единицу: горутина никогда не блокируется на записи, даже если
-	// вызывающий по какой-то причине не сведёт исход.
-	ch := make(chan answer, 1)
-	go func() {
-		allowed, err := c.form.Allowed(sctx, subject, objectType, objectID, relation, condCtx)
-		ch <- answer{allowed, err}
-	}()
-	return func(engineAllowed, engineAnswered bool) {
-		defer cancel()
-		a := <-ch
-		if !engineAnswered {
-			c.unfinishedAt("прямой вердикт", "движок вердикта не дал", objectType, relation)
-			return
-		}
-		if a.err != nil {
-			c.unfinishedAt("прямой вердикт", a.err.Error(), objectType, relation)
-			return
-		}
-		c.counts.compared.Add(1)
-		if a.allowed == engineAllowed {
+	type engineVerdict struct{ allowed, answered bool }
+
+	deposit := offPath(c, ctx,
+		func(sctx context.Context) formAnswer {
+			allowed, err := c.form.Allowed(sctx, subject, objectType, objectID, relation, condCtx)
+			return formAnswer{allowed, err}
+		},
+		unfinished,
+		func(a formAnswer, e engineVerdict) {
+			engineAllowed := e.allowed
+			if !e.answered {
+				unfinished("движок вердикта не дал")
+				return
+			}
+			if a.err != nil {
+				unfinished(a.err.Error())
+				return
+			}
+			c.counts.compared.Add(1)
+			if a.allowed == engineAllowed {
+				c.maybeSummarise()
+				return
+			}
+			c.counts.diverged.Add(1)
+			// Расхождение называется ПОИМЁННО: счётчик говорит «сколько», а разобрать
+			// можно только зная, на каком вопросе. Доля едет рядом (см. coverage).
+			//
+			// Поимённо — ОДИН РАЗ НА КЛАСС. Повторы копятся счётчиком класса и выходят
+			// сводкой; разбирают их всё равно по классу, а не по случаю (см. mu).
+			class := fmt.Sprintf("%s|%s|%s|движок=%v", question, objectType, relation, engineAllowed)
+			if first, seen := c.firstOfClass(class); first {
+				c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append([]any{
+					"question", question, "engine", engineAllowed, "form_e", a.allowed,
+					"subject", subject, "object_type", objectType, "object_id", objectID, "relation", relation,
+					"class", class, "class_seen", seen,
+				}, c.coverage()...)...)
+			}
 			c.maybeSummarise()
-			return
-		}
-		c.counts.diverged.Add(1)
-		// Расхождение называется ПОИМЁННО: счётчик говорит «сколько», а разобрать
-		// можно только зная, на каком вопросе. Доля едет рядом (см. coverage).
-		//
-		// Поимённо — ОДИН РАЗ НА КЛАСС. Повторы копятся счётчиком класса и выходят
-		// сводкой; разбирают их всё равно по классу, а не по случаю (см. mu).
-		class := fmt.Sprintf("прямой вердикт|%s|%s|движок=%v", objectType, relation, engineAllowed)
-		if first, seen := c.firstOfClass(class); first {
-			c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append([]any{
-				"question", "прямой вердикт", "engine", engineAllowed, "form_e", a.allowed,
-				"subject", subject, "object_type", objectType, "object_id", objectID, "relation", relation,
-				"class", class, "class_seen", seen,
-			}, c.coverage()...)...)
-		}
-		c.maybeSummarise()
+		})
+	return func(engineAllowed, engineAnswered bool) {
+		deposit(engineVerdict{allowed: engineAllowed, answered: engineAnswered})
 	}
 }
 
@@ -469,55 +698,64 @@ func (c *Comparator) askSet(ctx context.Context, question string, fields logFiel
 		return func([]string, bool, bool) {}
 	}
 	c.counts.decisions.Add(1)
-	sctx, cancel := context.WithTimeout(ctx, c.timeout)
-	type answer struct {
+
+	unfinished := func(reason string) { c.unfinishedSet(question, reason, fields) }
+	type formAnswer struct {
 		set      []string
 		complete bool
 		err      error
 	}
-	ch := make(chan answer, 1)
-	go func() {
-		set, complete, err := ask(sctx)
-		ch <- answer{set, complete, err}
-	}()
-	return func(engineSet []string, engineComplete, engineAnswered bool) {
-		defer cancel()
-		a := <-ch
-		switch {
-		case !engineAnswered:
-			c.unfinishedSet(question, "движок ответа не дал", fields)
-			return
-		case a.err != nil:
-			c.unfinishedSet(question, a.err.Error(), fields)
-			return
-		case len(a.set) > CompareSetLimit || !a.complete || !engineComplete:
-			// Неполный ответ хотя бы одной стороны: сравнивать нечего. Засчитать
-			// согласием значило бы объявить сравнение состоявшимся там, где сверялись
-			// два разных подмножества.
-			c.unfinishedSet(question, "ответ не помещается целиком", fields)
-			return
-		}
-		c.counts.compared.Add(1)
-		missing, extra := setDiff(engineSet, a.set)
-		if oneWay {
-			extra = nil
-		}
-		if len(missing) == 0 && len(extra) == 0 {
-			c.maybeSummarise()
-			return
-		}
-		c.counts.diverged.Add(1)
-		class := question + "|" + fields.class()
-		if first, seen := c.firstOfClass(class); first {
-			args := []any{"question", question,
-				"engine_only", strings.Join(missing, ","), "form_e_only", strings.Join(extra, ","),
-				"class", class, "class_seen", seen}
-			for k, v := range fields {
-				args = append(args, k, v)
+	type engineAnswer struct {
+		set      []string
+		complete bool
+		answered bool
+	}
+
+	deposit := offPath(c, ctx,
+		func(sctx context.Context) formAnswer {
+			set, complete, err := ask(sctx)
+			return formAnswer{set, complete, err}
+		},
+		unfinished,
+		func(a formAnswer, e engineAnswer) {
+			switch {
+			case !e.answered:
+				unfinished("движок ответа не дал")
+				return
+			case a.err != nil:
+				unfinished(a.err.Error())
+				return
+			case len(a.set) > CompareSetLimit || !a.complete || !e.complete:
+				// Неполный ответ хотя бы одной стороны: сравнивать нечего. Засчитать
+				// согласием значило бы объявить сравнение состоявшимся там, где сверялись
+				// два разных подмножества.
+				unfinished("ответ не помещается целиком")
+				return
 			}
-			c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append(args, c.coverage()...)...)
-		}
-		c.maybeSummarise()
+			c.counts.compared.Add(1)
+			missing, extra := setDiff(e.set, a.set)
+			if oneWay {
+				extra = nil
+			}
+			if len(missing) == 0 && len(extra) == 0 {
+				c.maybeSummarise()
+				return
+			}
+			c.counts.diverged.Add(1)
+			class := question + "|" + fields.class()
+			if first, seen := c.firstOfClass(class); first {
+				args := []any{"question", question,
+					"engine_only", strings.Join(missing, ","), "form_e_only", strings.Join(extra, ","),
+					"class", class, "class_seen", seen}
+				for k, v := range fields {
+					args = append(args, k, v)
+				}
+				c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append(args, c.coverage()...)...)
+			}
+			c.maybeSummarise()
+		})
+	return func(engineSet []string, engineComplete, engineAnswered bool) {
+		deposit(engineAnswer{set: engineSet, complete: engineComplete, answered: engineAnswered})
 	}
 }
 
@@ -571,8 +809,10 @@ func (c *Comparator) coverage() []any {
 	// конъюнкт однажды оказался тождественно ложным: ноль там читался бы как
 	// согласие форм.
 	if o, ok := c.form.(LabelArmObserver); ok {
-		mirror, iamDirect := o.LabelArmGrounds()
-		out = append(out, "label_grounds_mirror", mirror, "label_grounds_iam_direct", iamDirect)
+		mirror, iamDirect, earlyStops := o.LabelArmGrounds()
+		out = append(out, "label_grounds_mirror", mirror,
+			"label_grounds_iam_direct", iamDirect,
+			"verdicts_short_circuited", earlyStops)
 	}
 	return out
 }

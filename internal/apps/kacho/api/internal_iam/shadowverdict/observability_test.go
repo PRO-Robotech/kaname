@@ -58,7 +58,7 @@ func TestEngineThatDidNotAnswerIsNeverRecordedAsDivergence(t *testing.T) {
 
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(false, false)
 
-	got := c.Counters()
+	got := settled(c).Counters()
 	if got.Diverged != 0 {
 		t.Errorf("неответ движка засчитан расхождением: %+v — тогда перебой в модели прав "+
 			"неотличим от настоящего расхождения форм", got)
@@ -66,16 +66,16 @@ func TestEngineThatDidNotAnswerIsNeverRecordedAsDivergence(t *testing.T) {
 	if got.Unfinished != 1 || got.Compared != 0 {
 		t.Errorf("счётчики = %+v, ожидалось невыполненных 1 и сравнений 0", got)
 	}
-	if strings.Contains(buf.String(), "РАСХОЖДЕНИЕ формы E") {
-		t.Errorf("запись о расхождении на неответе движка: %s", buf.String())
+	if strings.Contains(logOf(c, buf), "РАСХОЖДЕНИЕ формы E") {
+		t.Errorf("запись о расхождении на неответе движка: %s", logOf(c, buf))
 	}
 
 	// Положительный контроль: тот же вход, но движок ОТВЕТИЛ — расхождение
 	// записывается. Без него проба зеленела бы на сравнителе, который не пишет
 	// расхождений вовсе.
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(false, true)
-	if c.Counters().Diverged != 1 {
-		t.Errorf("ответивший движок не дал расхождения: %+v", c.Counters())
+	if settled(c).Counters().Diverged != 1 {
+		t.Errorf("ответивший движок не дал расхождения: %+v", settled(c).Counters())
 	}
 }
 
@@ -88,17 +88,17 @@ func TestDivergence_NamedOncePerClassCountedEveryTime(t *testing.T) {
 		c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
 	}
 
-	if got := c.Counters().Diverged; got != 3 {
+	if got := settled(c).Counters().Diverged; got != 3 {
 		t.Fatalf("расхождений сосчитано %d, ожидалось 3 — дедупликация записи не вправе "+
 			"уменьшать счётчик", got)
 	}
-	if n := strings.Count(buf.String(), "РАСХОЖДЕНИЕ формы E"); n != 1 {
+	if n := strings.Count(logOf(c, buf), "РАСХОЖДЕНИЕ формы E"); n != 1 {
 		t.Errorf("записей о расхождении %d, ожидалась 1 на класс: три тысячи одинаковых "+
 			"строк делают уровень ERROR бесполезным", n)
 	}
 	// Координаты первого случая обязаны остаться: без них разбирать нечего.
-	if !strings.Contains(buf.String(), "vpc_network") || !strings.Contains(buf.String(), "v_get") {
-		t.Errorf("запись не назвала вопрос: %s", buf.String())
+	if !strings.Contains(logOf(c, buf), "vpc_network") || !strings.Contains(logOf(c, buf), "v_get") {
+		t.Errorf("запись не назвала вопрос: %s", logOf(c, buf))
 	}
 }
 
@@ -113,7 +113,7 @@ func TestDivergence_AnotherClassGetsItsOwnRecord(t *testing.T) {
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
 	c.Ask(context.Background(), "user:usr-1", "vpc_subnet", "sub-1", "v_delete", nil)(true, true)
 
-	if n := strings.Count(buf.String(), "РАСХОЖДЕНИЕ формы E"); n != 2 {
+	if n := strings.Count(logOf(c, buf), "РАСХОЖДЕНИЕ формы E"); n != 2 {
 		t.Errorf("записей %d, ожидалось 2 — разные вопросы суть разные классы", n)
 	}
 }
@@ -127,7 +127,7 @@ func TestDivergence_ObjectIdDoesNotSplitTheClass(t *testing.T) {
 	for _, id := range []string{"net-1", "net-2", "net-3"} {
 		c.Ask(context.Background(), "user:usr-1", "vpc_network", id, "v_get", nil)(true, true)
 	}
-	if n := strings.Count(buf.String(), "РАСХОЖДЕНИЕ формы E"); n != 1 {
+	if n := strings.Count(logOf(c, buf), "РАСХОЖДЕНИЕ формы E"); n != 1 {
 		t.Errorf("записей %d, ожидалась 1: класс — вопрос, а не ресурс", n)
 	}
 }
@@ -140,7 +140,7 @@ func TestSummary_PrintedEvenWhenNothingDiverges(t *testing.T) {
 
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
 
-	out := buf.String()
+	out := logOf(c, buf)
 	if !strings.Contains(out, "shadow verdict: сводка") {
 		t.Fatalf("сводки нет: %s", out)
 	}
@@ -162,7 +162,7 @@ func TestSummary_RateLimitedByItsOwnPeriod(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
 	}
-	if n := strings.Count(buf.String(), "shadow verdict: сводка"); n != 1 {
+	if n := strings.Count(logOf(c, buf), "shadow verdict: сводка"); n != 1 {
 		t.Fatalf("сводок %d, ожидалась 1 в пределах периода", n)
 	}
 
@@ -171,7 +171,7 @@ func TestSummary_RateLimitedByItsOwnPeriod(t *testing.T) {
 	// процесса, — а тогда числа прогона остались бы на его первой секунде.
 	now = now.Add(2 * time.Minute)
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
-	if n := strings.Count(buf.String(), "shadow verdict: сводка"); n != 2 {
+	if n := strings.Count(logOf(c, buf), "shadow verdict: сводка"); n != 2 {
 		t.Errorf("сводок %d, ожидалось 2 после истечения периода", n)
 	}
 }
@@ -187,7 +187,7 @@ func TestSummary_NamesEachClassWithItsCount(t *testing.T) {
 	}
 	c.Summarise()
 
-	out := buf.String()
+	out := logOf(c, buf)
 	if !strings.Contains(out, "diverged=4") {
 		t.Errorf("сводка не назвала число расхождений: %s", out)
 	}

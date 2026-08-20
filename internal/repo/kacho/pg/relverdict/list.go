@@ -122,25 +122,48 @@ const DefaultPageSize = 500
 // переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
 // быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
 const listSQL = `
-WITH RECURSIVE speaker(subject) AS (
+WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
+    -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой.
+    --
+    -- Склейка subject_type || ':' || subject_id выводит колонки из-под любого
+    -- индекса: сравнивать приходится вычисленное значение, а вычисленное
+    -- значение отбирает строки только ПОСЛЕ того, как они прочитаны. Пара
+    -- колонок сужает набор ДО чтения. Паритет, а не новое устройство: соседнее
+    -- соединение того же запроса читает членство парой колонок и обслуживается
+    -- индексом (member_type, member_id) с самого начала.
+    --
+    -- Колонка via называет, ОТКУДА взялась пара, и существует ради текстовой
+    -- формы ниже: хвост #member раскрывает ЧЛЕНСТВО, и приписать его группе,
+    -- которая сама является вызывающим, значило бы расширить ответ на факты,
+    -- которых вызывающему не выдавали.
+    SELECT split_part($1::text, ':', 1),
+           substr($1::text, length(split_part($1::text, ':', 1)) + 2),
+           'self'
+  UNION ALL
+    SELECT 'group', gm.group_id, 'member'
+      FROM kacho_iam.group_members gm
+     WHERE gm.member_type = split_part($1::text, ':', 1)
+       AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
+  UNION ALL
+    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
+    -- аутентифицированный) и потому перечислена явно, а не выведена из формы
+    -- имени.
+    SELECT 'user', '*', 'wildcard'
+),
+speaker(subject) AS (
+    -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
+    -- не разбирается на пару нигде в дереве. Обе формы имени группы, и это не
+    -- перестраховка: канонический производитель кортежей пишет
+    -- group:<id>#member (хвост раскрывает членство на стороне модели), а голой
+    -- формой group:<id> адресуется сама группа как субъект. Признать одну и
+    -- промолчать о другой значит НЕДОотвечать ровно на права, выданные
+    -- каноническим путём, — тихо, потому что неполный ответ выглядит как
+    -- честное «ничего нет».
     SELECT $1::text
   UNION
-    -- Форма имени группы — ОБЕ, и это не перестраховка.
-    -- Канонический производитель кортежей (domain.FGASubjectRef) пишет
-    -- group:<id>#member: хвост отношения раскрывает членство на стороне
-    -- модели. Голая форма group:<id> тоже встречается — ею адресуется сама
-    -- группа как субъект выдачи. Признать одну и промолчать о другой значит
-    -- НЕДОотвечать ровно на права, выданные каноническим путём, — тихо, потому
-    -- что неполный ответ выглядит как честное «ничего нет».
-    SELECT 'group:' || gm.group_id
-      FROM kacho_iam.group_members gm
-     WHERE gm.member_type = split_part($1::text, ':', 1)
-			   AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
+    SELECT 'group:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'group:' || gm.group_id || '#member'
-      FROM kacho_iam.group_members gm
-     WHERE gm.member_type = split_part($1::text, ':', 1)
-			   AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
+    SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
     SELECT 'user:*'
 ),
@@ -191,15 +214,18 @@ scope(object_id, s_type, s_id, depth) AS (
     -- Предел внутри — НЕ усечение и не может им стать: у объекта не бывает
     -- больше рёбер, чем глубин, потому что первичный ключ таблицы уникален по
     -- глубине, а сама глубина ограничена проверкой схемы тем же числом
-    -- (миграция 0082). То есть предел равен собственной границе
-    -- строки объекта, а порядок по глубине делает выборку определённой на случай,
-    -- если границы когда-нибудь разойдутся: ближние предки останутся, дальние —
-    -- те, до которых обход всё равно не доходит.
+    -- (миграция 0082). Выведенное схемой звено этого равенства не нарушает:
+    -- представление выводит предка ТОЛЬКО там, где владелец объекта своей цепи
+    -- не назвал (миграция 740001), поэтому строки не складываются. То есть предел
+    -- равен собственной границе строки объекта, а порядок по глубине делает
+    -- выборку определённой на случай, если границы когда-нибудь разойдутся:
+    -- ближние предки останутся, дальние — те, до которых обход всё равно не
+    -- доходит.
     SELECT s.object_id, e.parent_type, e.parent_id, s.depth + 1
       FROM scope s
       CROSS JOIN LATERAL (
              SELECT pe.parent_type, pe.parent_id
-               FROM kacho_iam.resource_parent_edge pe
+               FROM kacho_iam.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
               LIMIT $5::int
@@ -232,17 +258,20 @@ SELECT c.object_id,
         -- из плана: спрошенное имя не всегда равно глаголу, который обязана
         -- давать роль.
         SELECT 1
-          FROM kacho_iam.access_bindings b
-          JOIN kacho_iam.access_binding_subjects bs ON bs.binding_id = b.id
-          JOIN speaker sp ON sp.subject = bs.subject_type || ':' || bs.subject_id
+          -- Заход с пары «субъект + область»: оба предиката сужают набор ДО
+          -- чтения строк, и оба стоят теперь на ОДНОМ отношении (миграция
+          -- 732001). Склейка субъекта выводила колонки из-под индекса.
+          FROM speaker_pair sp
+          JOIN scope sc ON sc.object_id = c.object_id
+          JOIN kacho_iam.access_binding_subjects bs
+            ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
+           AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
+          JOIN kacho_iam.access_bindings b ON b.id = bs.binding_id
           JOIN kacho_iam.role_verb rv
             ON rv.role_id = b.role_id AND rv.object_type = $9::text
            AND rv.verb = ANY ($8::text[])
           JOIN kacho_iam.role_rule_selectors rs
             ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
-          JOIN scope sc
-            ON sc.object_id = c.object_id
-           AND sc.s_type = b.resource_type AND sc.s_id = b.resource_id
          WHERE b.status = 'ACTIVE'
            AND (b.expires_at IS NULL OR b.expires_at > now())
            AND b.revoked_at IS NULL

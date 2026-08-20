@@ -79,13 +79,36 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 | `kacho_iam_grpc_server_handled_total`           | counter   | grpc_service, grpc_method, grpc_code | Завершенные gRPC-запросы на сервере (оба listener'а).          |
 | `kacho_iam_grpc_server_handling_seconds`        | histogram | grpc_service, grpc_method           | Latency обработки gRPC-запросов.                               |
 | `kacho_iam_authz_check_duration_seconds`        | histogram | rpc, allowed                        | Latency authz Check hot-path (FGA Check + транспорт). SLO ≤30ms p95. |
-| `kacho_iam_authz_check_decisions_total`         | counter   | rpc, decision                       | Решения Check по исходу (`allow`/`deny`/`error`).             |
+| `kacho_iam_authz_check_decisions_total`         | counter   | rpc, decision                       | Решения Check по полосе и исходу (`allow`/`deny`/`error`).    |
 | `kacho_iam_lro_inflight`                         | gauge     | —                                   | Операции, выданные пулу воркеров прямо сейчас.                 |
 | `kacho_iam_lro_terminal_write_retries_total`    | counter   | op_type                             | Retry durable terminal-write (`MarkDone`/`MarkError`).        |
 | `kacho_iam_lro_terminal_write_failures_total`   | counter   | op_type                             | Terminal-write, исчерпавший retry-бюджет (зависшая операция). |
 | `kacho_iam_lro_orphans_recovered_total`         | counter   | outcome                             | Осиротевшие операции, поднятые reconciler'ом.                 |
 | `kacho_iam_lro_reconcile_runs_total`            | counter   | —                                   | Проходы reconciler-sweep.                                     |
 | `kacho_iam_lro_reconcile_errors_total`          | counter   | —                                   | Проходы reconciler-sweep, завершившиеся ошибкой.             |
+
+### Метка `rpc` — ЗАКРЫТЫЙ словарь из трёх полос
+
+Полосы принадлежат РАЗНЫМ вызывающим, и складывать их без разбора нельзя:
+
+| `rpc` | кто спрашивает | единица счёта |
+|---|---|---|
+| `Check` | **край** (`AuthorizeService/Check`, :9090) | один вопрос на входящий запрос арендатора |
+| `BatchCheck` | сужатель списочной выдачи модулей (`AuthorizeService/BatchCheck`) | вопрос на КАЖДЫЙ объект страницы (страница контрактно бывает до 1000) |
+| `CheckRelation` | пообъектное звено решения модулей (`InternalIAMService/Check`, :9091) | вопрос на RPC |
+
+Единица счёта у полос разная намеренно. На полосе пачки метка `allowed` у
+**гистограммы** отвечает «вызов состоялся», а не «вопрос разрешён»: ответов в
+пачке много, и один ярлык на всех был бы ложью о каждом; на «чем кончился
+вопрос» отвечает счётчик решений, по вопросу на каждый.
+
+> До #772 производитель был у ОДНОЙ полосы из трёх (`CheckRelation`), а
+> `Check` был назван в комментарии типа наблюдения и не эмитировался ничем.
+> Следствие: всякое «проверок в секунду», снятое с iam, было занижено — на пути
+> чтения по идентификатору ровно вдвое, потому что проверок там две. Полоса без
+> производителя присутствует нулём и выглядит исправным наблюдением, поэтому
+> словарь теперь сверяется с производителями пробой
+> `TestEveryDeclaredLaneHasAProducer`.
 
 Дополнительно registry несет стандартные runtime-коллекторы Go (`go_*`) и процесса
 (`process_*`).

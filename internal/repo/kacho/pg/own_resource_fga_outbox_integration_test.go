@@ -38,7 +38,7 @@ import (
 )
 
 // hierarchyTuple builds the parent-pointer tuple shape the create use-cases
-// co-commit (mirrors relationhook.WriteHierarchyTuple → fga_outbox payload).
+// co-commit (форма payload fga_outbox — та же, что у снятого post-commit писателя).
 func hierarchyTuple(parentType, parentID, relation, childType, childID string) service.RelationTuple {
 	return service.RelationTuple{
 		User:     parentType + ":" + parentID,

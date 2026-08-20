@@ -72,6 +72,36 @@ type APIServerConfig struct {
 	// the issuer/signer. Served ONLY on the cluster-internal `kacho-iam-internal`
 	// Service (never external, ban #6) over one-way server-TLS. Empty disables it.
 	JWKSProxy JWKSProxyConfig `mapstructure:"jwks-proxy"`
+
+	// RateLimit — ПОТОЛОК ТЕМПА и ОДНОВРЕМЕННОСТИ на вызывающего, по одному
+	// набору на слушатель.
+	//
+	// У iam он значит больше, чем у соседей: iam стоит на пути запроса ВСЕХ
+	// остальных доменов (решение о доступе спрашивают у него на каждом RPC),
+	// поэтому неограниченный поток одного вызывающего сюда бьёт не по одному
+	// сервису, а по всей платформе.
+	//
+	// Молчание посадки означает ПОЛ ПЛАТФОРМЫ
+	// (`grpcsrv.PlatformPublicAdmission` / `PlatformInternalAdmission`), а не
+	// ноль: ноль механизм читает как «не ограничиваем», и слушатель выглядел бы
+	// защищённым, ни разу не отказав. Посадка вправе назвать свои величины, но
+	// только ВЕСЬ набор из четырёх осей — частичное объявление отвергается
+	// стартом с именем слушателя.
+	RateLimit RateLimitConfig `mapstructure:"rate-limit"`
+}
+
+// RateLimitConfig — величины допуска обоих слушателей в том виде, в каком их
+// объявляет файл настроек.
+//
+// Структура ручек — общая с фундаментом (`grpcsrv.AdmissionKnobs`): те же
+// четыре оси читают три семейства настроек платформы, и три копии тегов
+// разъехались бы на первой же новой оси — молча, потому что незнакомый ключ
+// viper игнорирует.
+type RateLimitConfig struct {
+	// Public — величины публичного слушателя, на ПРИНЦИПАЛА.
+	Public grpcsrv.AdmissionKnobs `mapstructure:"public"`
+	// Internal — величины внутреннего слушателя, на ЛИЧНОСТЬ СЕРТИФИКАТА.
+	Internal grpcsrv.AdmissionKnobs `mapstructure:"internal"`
 }
 
 // RepositoryConfig — repository section. Postgres-only (the repository type
@@ -85,13 +115,27 @@ type RepositoryConfig struct {
 //	URL              — standard DSN postgres://user:pass@host:port/db (master).
 //	SlaveURL         — DSN of the read-replica (optional).
 //	MaxConns         — pgxpool max conns (0 = pgx default).
+//	ReplicaBudget    — под сколько реплик рассчитана посадка (см. PostgresConfig).
 //	SSLMode          — disable|require|verify-ca|verify-full (validated in Validate).
 //	PasswordFromEnv  — name of the ENV var the password is read from and
 //	                   substituted into URL and SlaveURL. Default — KACHO_IAM_DB_PASSWORD.
 type PostgresConfig struct {
-	URL             string `mapstructure:"url"`
-	SlaveURL        string `mapstructure:"slave-url"`
-	MaxConns        int    `mapstructure:"max-conns"`
+	URL      string `mapstructure:"url"`
+	SlaveURL string `mapstructure:"slave-url"`
+	MaxConns int    `mapstructure:"max-conns"`
+
+	// ReplicaBudget — сколько реплик этой посадки могут работать ОДНОВРЕМЕННО.
+	//
+	// Служба не знает этого о себе и знать не обязана: под сколько реплик её
+	// раскладывают — свойство раскладки, а не процесса. Поэтому величину
+	// СООБЩАЮТ, и сообщает её тот же шаблон, который рендерит число реплик, —
+	// одно значение, два места применения, разойтись им негде.
+	//
+	// Нужна затем, что предел соединений у базы ОБЩИЙ на все реплики, а пул
+	// объявлен на ОДНУ. Произведение не записано нигде, и потому расхождение
+	// между обещанным и принимаемым не видно ни в одном файле по отдельности
+	// (загрузочный страж — `assertConnBudgetFits` в composition root).
+	ReplicaBudget   int    `mapstructure:"replica-budget"`
 	SSLMode         string `mapstructure:"ssl-mode"`
 	PasswordFromEnv string `mapstructure:"password-from-env"`
 }

@@ -27,7 +27,7 @@ import (
 //	        return w.AccountsW().Insert(ctx, a)
 //	    })
 //	if err != nil { return nil, err }
-//	// post-commit hooks here (e.g. relationhook)
+//	// post-commit hooks here
 //	return marshalAccount(created)
 //
 // Generic T — domain-тип, возвращаемый action'ом. Go infer'ит его из closure.

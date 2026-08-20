@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -115,7 +116,24 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 			// idempotently; rollback of this tx discards both the membership row and
 			// the tuple intent (no orphan). Object type is `group` (the userset type
 			// the binding points at), NOT iam_group (group's object-scope type).
-			return w.EmitFGARelationWrite(ctx, []service.RelationTuple{memberFGATuple(m)})
+			if err := w.EmitFGARelationWrite(ctx, []service.RelationTuple{memberFGATuple(m)}); err != nil {
+				return err
+			}
+			// Drop the member's cached verdicts. The tuple intent above travels to
+			// the relation store; it reaches NO verdict cache, and verdict caches are
+			// dropped by exactly one path — a subject_change_outbox row drained to the
+			// edge's InvalidateSubject. Same writer-tx as the membership DML (ban #10):
+			// a rolled-back change must not announce an invalidation that had no cause.
+			//
+			// The subject is the MEMBER: the edge keys cached verdicts by whoever
+			// presented the token, and the member is who gains or loses access through
+			// the `group:<gid>#member` userset.
+			return w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
+				SubjectID:   string(in.MemberID),
+				SubjectType: string(in.MemberType),
+				EventType:   "group_member_change",
+				Op:          "group_member_change",
+			})
 		}); err != nil {
 		return nil, err
 	}

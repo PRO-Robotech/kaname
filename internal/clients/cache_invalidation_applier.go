@@ -25,7 +25,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	apigatewayv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/apigateway/v1"
+	"github.com/PRO-Robotech/kacho/pkg/authz"
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // SubjectChangeEvent — decoded payload of one subject_change_outbox row.
@@ -42,10 +45,15 @@ type SubjectChangeEvent struct {
 	// (fgaPrefixSwitch) before sending to gateway.
 	SubjectID string `json:"subject_id"`
 
+	// SubjectType — FGA object type of the subject: user | service_account |
+	// group. Written by every emit site (which knows it); absent only on rows
+	// committed before the field existed, and those fall back to naming the
+	// type from the id prefix — see subjectTypeOf.
+	SubjectType string `json:"subject_type,omitempty"`
+
 	// EventType — canonical event tag (binding_revoke / binding_grant /
-	// jit_revoke / bg_revoke / group_member_change). When empty, decoder
-	// derives from Op alias (binding_delete→binding_revoke,
-	// binding_upsert→binding_grant).
+	// group_member_change). When empty, decoder derives from Op alias
+	// (binding_delete→binding_revoke, binding_upsert→binding_grant).
 	EventType string `json:"event_type"`
 
 	// Op — legacy alias (informational; backward compat with the still-served
@@ -119,8 +127,24 @@ func DecodeSubjectChange(payload []byte) (SubjectChangeEvent, error) {
 // payload.EventType in case of drift.
 func NewSubjectChangeApplier(cli apigatewayv1.InternalAuthzCacheServiceClient) drainer.Applier[SubjectChangeEvent] {
 	return func(ctx context.Context, eventType string, e SubjectChangeEvent) error {
-		// FGA-prefix the raw subject id (inline mapping; see fgaPrefixSwitch).
-		fga := fgaPrefixSwitch(e.SubjectID)
+		// Name the subject the way the EDGE keys its verdict cache. Failing to
+		// name it is NOT an invalidation we performed: sending an unnameable
+		// string drops zero entries, the edge answers NotFound, and NotFound is
+		// idempotent success below — which would stamp the row sent and lose the
+		// revoke with no error anywhere. So this fails before the call.
+		//
+		// This queue is wired PermanentPolicy: drainer.RetryPermanent, so the row
+		// is NOT poisoned — it stays unsent and keeps retrying. That is the
+		// intended trade for a revoke: the queue is commutative (no head-of-
+		// partition claim), so a stuck row wedges nothing, and it stays visible in
+		// the backlog depth and oldest-pending-age metrics. Loud and undelivered
+		// beats silently delivered-and-lost. The path is defensive anyway — every
+		// producer now writes subject_type, and rows written before it carry ids
+		// whose minted prefix names the type.
+		fga, err := fgaSubject(e)
+		if err != nil {
+			return errors.Join(drainer.ErrPermanent, err)
+		}
 
 		// Prefer drainer's column-scanned eventType (canonical source of truth).
 		// Fall back to payload's EventType only if drainer somehow passes empty
@@ -130,7 +154,7 @@ func NewSubjectChangeApplier(cli apigatewayv1.InternalAuthzCacheServiceClient) d
 			et = e.EventType
 		}
 
-		_, err := cli.InvalidateSubject(ctx, &apigatewayv1.InvalidateSubjectRequest{
+		_, err = cli.InvalidateSubject(ctx, &apigatewayv1.InvalidateSubjectRequest{
 			Subject:      fga,
 			ResourceType: e.ResourceType,
 			ResourceId:   e.ResourceID,
@@ -157,23 +181,63 @@ func NewSubjectChangeApplier(cli apigatewayv1.InternalAuthzCacheServiceClient) d
 	}
 }
 
-// fgaPrefixSwitch — raw subject id → FGA-prefixed form.
+// fgaSubject — subject id + type → the FGA-shaped string the edge keys by.
 //
-// Tiny in-package mapper (3 prefixes — usr/sva/grp). Kept inline rather
-// than in a corelib helper; will move once a second consumer emerges.
-// Unknown prefix falls through as-is — the gateway will report NotFound
-// (no cache entries) → ErrAlreadyApplied → row marked sent_at. Safe
-// default for forward-compat with future subject types.
-func fgaPrefixSwitch(subjectID string) string {
-	switch {
-	case strings.HasPrefix(subjectID, "usr_"):
-		return "user:" + subjectID
-	case strings.HasPrefix(subjectID, "sva_"):
-		return "service_account:" + subjectID
-	case strings.HasPrefix(subjectID, "grp_"):
-		return "group:" + subjectID
+// Composition is delegated to authz.FormatObject: one canonical `<type>:<id>`
+// writer for the whole product, which also rejects ids carrying FGA separators
+// (':' shifts the type/id boundary, '#' forms a userset reference). A second
+// hand-written spelling of the same value is what this function replaces.
+//
+// The type comes from the event. It is derived from the id ONLY for rows
+// committed before the field existed, and a type that cannot be established is
+// a terminal error — never a subject sent on a guess.
+func fgaSubject(e SubjectChangeEvent) (string, error) {
+	t := e.SubjectType
+	if t == "" {
+		var ok bool
+		if t, ok = subjectTypeOf(e.SubjectID); !ok {
+			return "", fmt.Errorf(
+				"subject_change: cannot name subject %q — no subject_type on the row and "+
+					"the id carries no known subject prefix; invalidation would drop nothing",
+				e.SubjectID)
+		}
+	}
+	if !knownSubjectType(t) {
+		return "", fmt.Errorf("subject_change: unknown subject_type %q for subject %q", t, e.SubjectID)
+	}
+	return authz.FormatObject(t, e.SubjectID)
+}
+
+// knownSubjectType — CLOSED vocabulary. No "everything else" bucket: an
+// unrecognised type must not be concatenated into a subject string, because the
+// resulting string names nothing and fails silently (the edge simply has no such
+// key).
+func knownSubjectType(t string) bool {
+	switch domain.SubjectType(t) {
+	case domain.SubjectTypeUser, domain.SubjectTypeServiceAccount, domain.SubjectTypeGroup:
+		return true
 	default:
-		return subjectID
+		return false
+	}
+}
+
+// subjectTypeOf — legacy path: name the type from the id prefix.
+//
+// Prefixes are the ones ids.NewID actually mints — exactly three characters,
+// immediately followed by crockford-base32 with NO separator ("svatt493t8mxrgjzjh8n").
+// The mapping that stood here matched "usr_"/"sva_"/"grp_" and therefore matched
+// nothing the product produces; every fixture that made it look correct spelled
+// subjects by hand.
+func subjectTypeOf(subjectID string) (string, bool) {
+	switch {
+	case strings.HasPrefix(subjectID, domain.PrefixUser):
+		return string(domain.SubjectTypeUser), true
+	case strings.HasPrefix(subjectID, domain.PrefixServiceAccount):
+		return string(domain.SubjectTypeServiceAccount), true
+	case strings.HasPrefix(subjectID, domain.PrefixGroup):
+		return string(domain.SubjectTypeGroup), true
+	default:
+		return "", false
 	}
 }
 

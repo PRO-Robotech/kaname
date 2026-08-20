@@ -360,15 +360,30 @@ type SubjectChangeEvent struct {
 	// form before calling gateway InvalidateSubject.
 	SubjectID string `json:"subject_id"`
 
+	// SubjectType — FGA object type of the subject: user | service_account |
+	// group (domain.SubjectType, which IS the FGA vocabulary verbatim).
+	//
+	// Carried EXPLICITLY because the applier has to name the subject the way the
+	// edge keys its verdict cache (`<type>:<id>`), and the producer is the only
+	// place that KNOWS the type — every emit site holds it already. Deriving it
+	// back out of the id is a guess, and the guess that stood here read a
+	// separator that minted ids do not contain.
+	SubjectType string `json:"subject_type,omitempty"`
+
 	// EventType — canonical event tag, preferred over Op for new readers.
-	// Values: binding_revoke / binding_grant / jit_revoke / bg_revoke /
-	// group_member_change.
+	// Values: binding_revoke / binding_grant / group_member_change.
 	EventType string `json:"event_type"`
 
 	// Op — legacy alias (informational; backward compat with the still-served
-	// PollSubjectChanges RPC). Values: binding_upsert / binding_delete /
-	// group_member_change / binding_grant / binding_revoke / jit_revoke /
-	// bg_revoke. When empty, the writer derives it from EventType.
+	// PollSubjectChanges RPC). When empty, the writer derives it from EventType.
+	//
+	// Must satisfy the DB CHECK subject_change_op_check, whose dictionary is the
+	// union of BOTH spellings — binding_upsert / binding_delete (the op aliases
+	// this field normally carries) and binding_grant / binding_revoke /
+	// group_member_change (canonical event_type values, admitted because
+	// deriveOpFromEventType passes an unmapped event type through to Op as-is).
+	// Every value in it has a producer; jit_revoke and bg_revoke had none and
+	// were retired by migration 754001.
 	Op string `json:"op"`
 
 	// ResourceType / ResourceID — optional scope hint for future

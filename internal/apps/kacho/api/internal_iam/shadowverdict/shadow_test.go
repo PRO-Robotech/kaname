@@ -69,12 +69,30 @@ func quiet() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
+// settled / logOf — наблюдение ПОСЛЕ того, как теневая работа кончилась.
+//
+// Сведение исхода ушло с пути живого запроса (см. offpath_test.go), поэтому
+// «вопрос задан» и «сравнение состоялось» перестали быть одним мгновением.
+// Утверждения проб от этого НЕ изменились ни одним значением — сместилась только
+// точка наблюдения: раньше сравнение успевало произойти внутри `settle`, теперь
+// его надо дождаться. Читать счётчики без ожидания значило бы мерить скорость
+// планировщика.
+func settled(c *Comparator) *Comparator {
+	c.Wait()
+	return c
+}
+
+func logOf(c *Comparator, buf *bytes.Buffer) string {
+	c.Wait()
+	return buf.String()
+}
+
 // Согласие: счётчик сравнений растёт, расхождений — нет.
 func TestCompare_AgreementCountsAsComparedOnly(t *testing.T) {
 	c := New(&stubAsker{allow: true}, quiet())
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "get", nil)(true, true)
 
-	got := c.Counters()
+	got := settled(c).Counters()
 	if got.Compared != 1 || got.Diverged != 0 || got.Unfinished != 0 {
 		t.Fatalf("счётчики = %+v, ожидалось сравнений 1, расхождений 0, невыполненных 0", got)
 	}
@@ -87,7 +105,7 @@ func TestCompare_InjectedDivergenceIsCounted(t *testing.T) {
 	c := New(&stubAsker{allow: false}, quiet())
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "get", nil)(true, true)
 
-	got := c.Counters()
+	got := settled(c).Counters()
 	if got.Diverged != 1 {
 		t.Fatalf("подложное расхождение не посчитано: %+v — сравнитель, который всегда "+
 			"молчит, неотличим от сравнителя без расхождений", got)
@@ -103,7 +121,7 @@ func TestCompare_ErrorIsItsOwnBucket(t *testing.T) {
 	c := New(&stubAsker{err: errors.New("БД недоступна")}, quiet())
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "get", nil)(true, true)
 
-	got := c.Counters()
+	got := settled(c).Counters()
 	if got.Unfinished != 1 {
 		t.Fatalf("ошибка не попала в свою корзину: %+v", got)
 	}
@@ -114,22 +132,28 @@ func TestCompare_ErrorIsItsOwnBucket(t *testing.T) {
 	}
 }
 
-// Срок СВОЙ: медленная форма не задерживает вызывающего дольше срока сравнения.
-func TestCompare_OwnDeadlineDoesNotHoldTheCaller(t *testing.T) {
+// Исчерпание СВОЕГО срока — исход «не выполнилось», а не расхождение и не согласие.
+//
+// Здесь прежде стояла проба `TestCompare_OwnDeadlineDoesNotHoldTheCaller`, и её
+// заголовок был шире тела: при сроке сверки 20 мс она утверждала «вызывающего
+// держали не дольше 150 мс», то есть оставалась зелёной при ЛЮБОМ сроке ниже
+// порога — включая боевые 50 мс, ровно на том дефекте, ради которого писалась.
+// Утверждение о МЕСТЕ сравнения перенесено в offpath_test.go, где оно
+// логическое, а не по часам; здесь остаётся то, что проба действительно
+// проверяла, — корзина исхода.
+func TestCompare_ExpiredOwnDeadlineGoesToTheUnfinishedBucket(t *testing.T) {
 	form := &stubAsker{allow: true, delay: 200 * time.Millisecond}
-	c := New(form, quiet()).WithTimeout(20 * time.Millisecond)
+	c := New(form, quiet()).WithTimeout(5 * time.Millisecond)
 
-	start := time.Now()
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "get", nil)(true, true)
-	elapsed := time.Since(start)
 
-	if elapsed > 150*time.Millisecond {
-		t.Fatalf("сравнение держало вызывающего %v — теневой вызов обязан иметь СВОЙ срок, "+
-			"иначе наблюдение меняет наблюдаемое: медленный теневой запрос превращается в "+
-			"медленный Check", elapsed)
-	}
-	if got := c.Counters(); got.Unfinished != 1 {
+	got := settled(c).Counters()
+	if got.Unfinished != 1 {
 		t.Errorf("исчерпание срока не попало в корзину «не выполнилось»: %+v", got)
+	}
+	if got.Compared != 0 || got.Diverged != 0 {
+		t.Errorf("неполученный ответ формы E засчитан сравнением: %+v — «ноль расхождений» "+
+			"тогда означало бы «сравнения не было»", got)
 	}
 }
 
@@ -137,7 +161,7 @@ func TestCompare_OwnDeadlineDoesNotHoldTheCaller(t *testing.T) {
 func TestCompare_DisabledIsANoOp(t *testing.T) {
 	c := New(nil, quiet())
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "get", nil)(true, true)
-	if got := c.Counters(); got != (Snapshot{}) {
+	if got := settled(c).Counters(); got != (Snapshot{}) {
 		t.Fatalf("выключенное сравнение что-то посчитало: %+v — «ноль расхождений» тогда "+
 			"означало бы «сравнение не работает»", got)
 	}
@@ -163,7 +187,7 @@ func TestCounters_ShareIsCountedFromEveryDecisionNotOnlyTheSucceededOnes(t *test
 	c.Unaskable("объект не разобран", "", "v_get")
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-3", "v_get", nil)(false, false)
 
-	got := c.Counters()
+	got := settled(c).Counters()
 	if got.Decisions != 4 {
 		t.Fatalf("решений посчитано %d, ожидалось 4 (%+v) — решение без вопроса, не попавшее "+
 			"в знаменатель, делает долю лучше, ничего не улучшив", got.Decisions, got)
@@ -191,7 +215,7 @@ func TestAskObjects_SameSetInAnotherOrderIsAgreement(t *testing.T) {
 	c.AskObjects(context.Background(), "user:usr-1", "vpc_network", []string{"viewer"})(
 		[]string{"a", "b"}, true, true)
 
-	if got := c.Counters(); got.Compared != 1 || got.Diverged != 0 {
+	if got := settled(c).Counters(); got.Compared != 1 || got.Diverged != 0 {
 		t.Fatalf("счётчики = %+v — разный порядок обхода объявлен расхождением", got)
 	}
 }
@@ -202,7 +226,7 @@ func TestAskObjects_InjectedDivergenceIsCounted(t *testing.T) {
 	c.AskObjects(context.Background(), "user:usr-1", "vpc_network", []string{"viewer"})(
 		[]string{"a", "b"}, true, true)
 
-	if got := c.Counters(); got.Diverged != 1 || got.Compared != 1 {
+	if got := settled(c).Counters(); got.Diverged != 1 || got.Compared != 1 {
 		t.Fatalf("подложное расхождение множеств не посчитано: %+v", got)
 	}
 }
@@ -214,7 +238,7 @@ func TestAskSubjects_IncompleteAnswerIsNotAgreement(t *testing.T) {
 	c.AskSubjects(context.Background(), "vpc_network", "net-1", "v_get")(
 		[]string{"user:a"}, true, true)
 
-	got := c.Counters()
+	got := settled(c).Counters()
 	if got.Unfinished != 1 || got.Compared != 0 {
 		t.Fatalf("неполный ответ засчитан сравнением: %+v — согласие двух усечённых "+
 			"ответов не является согласием", got)
@@ -232,7 +256,7 @@ func TestAskSources_WiderFormAnswerIsNotADivergence(t *testing.T) {
 	c.AskSources(context.Background(), "vpc_network", "net-1", "v_get")(
 		[]string{"group:g"}, true, true)
 
-	if got := c.Counters(); got.Compared != 1 || got.Diverged != 0 {
+	if got := settled(c).Counters(); got.Compared != 1 || got.Diverged != 0 {
 		t.Fatalf("счётчики = %+v — членство группы объявлено расхождением", got)
 	}
 }
@@ -244,7 +268,7 @@ func TestAskSources_GroundKnownOnlyToTheEngineIsADivergence(t *testing.T) {
 	c.AskSources(context.Background(), "vpc_network", "net-1", "v_get")(
 		[]string{"user:a", "user:z"}, true, true)
 
-	if got := c.Counters(); got.Diverged != 1 {
+	if got := settled(c).Counters(); got.Diverged != 1 {
 		t.Fatalf("основание, известное только движку, не объявлено расхождением: %+v — "+
 			"односторонняя сверка обязана оставаться способной покраснеть", got)
 	}
@@ -263,8 +287,14 @@ func TestEveryOutputRecordCarriesTheComparedShare(t *testing.T) {
 
 	// Одно сравнение расходится, одно решение вообще не задано форме E.
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
+	// Ждём ЗДЕСЬ, а не только перед чтением: сравнение сводится рядом с запросом,
+	// и числа в записи — снимок на момент ЕЁ написания. Без ожидания вторая
+	// запись честно назвала бы долю, которой на тот миг ещё не было, и проба
+	// мерила бы порядок планировщика, а не то, несёт ли запись долю вообще.
+	c.Wait()
 	c.Unaskable("объект не разобран", "", "v_get")
 
+	c.Wait()
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("записей в выводе %d, ожидалось 2:\n%s", len(lines), buf.String())
@@ -290,10 +320,12 @@ func TestEveryOutputRecordCarriesTheComparedShare(t *testing.T) {
 // входом. Один дублёр на оба случая скрыл бы именно это различие.
 type countingAsker struct {
 	stubAsker
-	mirror, iamDirect int64
+	mirror, iamDirect, earlyStops int64
 }
 
-func (c *countingAsker) LabelArmGrounds() (int64, int64) { return c.mirror, c.iamDirect }
+func (c *countingAsker) LabelArmGrounds() (int64, int64, int64) {
+	return c.mirror, c.iamDirect, c.earlyStops
+}
 
 // TestCoverageCarriesLabelArmGroundsPerAxis — числа меточной ветви едут В КАЖДОЙ
 // записи теневого пути, по осям раздельно.
@@ -311,6 +343,7 @@ func TestCoverageCarriesLabelArmGroundsPerAxis(t *testing.T) {
 	// Расхождение — чтобы запись состоялась: у согласия своей строки нет.
 	c.Ask(context.Background(), "user:usr-1", "iam_group", "grp-1", "v_get", nil)(true, true)
 
+	c.Wait()
 	out := buf.String()
 	if !strings.Contains(out, "label_grounds_mirror=3") {
 		t.Errorf("запись не назвала оснований меточной ветви на оси зеркала: %s", out)
@@ -332,6 +365,7 @@ func TestCoverageWithoutObserverStaysUsable(t *testing.T) {
 
 	c.Ask(context.Background(), "user:usr-1", "vpc_network", "net-1", "v_get", nil)(true, true)
 
+	c.Wait()
 	out := buf.String()
 	if !strings.Contains(out, "РАСХОЖДЕНИЕ") {
 		t.Fatalf("расхождение не записано вовсе: %s", out)

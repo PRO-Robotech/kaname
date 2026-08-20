@@ -21,7 +21,7 @@ import (
 )
 
 // registerPublicServices — публичные RPC + OperationService на внешний listener.
-func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations.Repo) {
+func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo operations.Repo) {
 	operationpb.RegisterOperationServiceServer(srv, handler.NewOperationHandler(opsRepo))
 	if svcs != nil && svcs.accountHandler != nil {
 		iamv1.RegisterAccountServiceServer(srv, svcs.accountHandler)
@@ -75,7 +75,7 @@ func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations
 }
 
 // registerInternalServices — kacho-only/admin RPC на internal listener.
-func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Pool, dsn string, logger *slog.Logger) {
+func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *pgxpool.Pool, dsn string, logger *slog.Logger) {
 	_ = pool
 	_ = dsn
 	_ = logger

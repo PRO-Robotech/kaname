@@ -103,7 +103,7 @@ type Writer interface {
 	// AND a committed create always leaves the owner-tuple intent that the live
 	// fga_outbox drainer (cmd/kacho-iam/serve.go) delivers to OpenFGA at-least-once
 	// + idempotently (409 → success). This replaces the former best-effort
-	// post-commit relationhook.WriteHierarchyTuple ("Non-fatal") path, which lost
+	// прежний путь записи ПОСЛЕ коммита ("Non-fatal", снят), который терял
 	// the tuple on any FGA outage → owner locked out of their own resource.
 	//
 	// Used by the own-resource Create use-cases (Account/Project/Group/

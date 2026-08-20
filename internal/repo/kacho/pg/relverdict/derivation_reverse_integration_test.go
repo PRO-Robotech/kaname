@@ -64,6 +64,10 @@ func seedTwoAccountsChain(t *testing.T, ctx context.Context, tx pgx.Tx, nets []s
 		 VALUES ('usr-admin',    'ext-admin', 'admin@kacho.local', 'acc-1'),
 		        ('usr-outsider', 'ext-out',   'out@kacho.local',   'acc-2')
 		 ON CONFLICT DO NOTHING`)
+	// ПО ОДНОМУ РЕБРУ НА ЗВЕНО — форма, которую производят производители дерева.
+	// Цепь до корня собирается ОБХОДОМ, и фикстура обязана оставлять его
+	// наблюдаемым: положи она замыкание, различить обход и одно чтение стало бы
+	// нечем.
 	exec(t, ctx, tx,
 		`INSERT INTO kacho_iam.resource_parent_edge
 		   (object_type, object_id, parent_type, parent_id, depth)
