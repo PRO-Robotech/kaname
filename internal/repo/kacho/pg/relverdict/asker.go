@@ -181,6 +181,68 @@ func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, rela
 	}
 }
 
+// AllowedMany отвечает на прямой вопрос о СТРАНИЦЕ объектов одного типа —
+// ОДНОЙ читающей транзакцией.
+//
+// # Почему одна транзакция, а не цикл по `Allowed`
+//
+// Стоимость страницы принадлежит ЗАПРОСУ, а не набору. Страница по контракту
+// доходит до тысячи объектов; цикл по `Allowed` открыл бы тысячу читающих
+// транзакций на один живой запрос — тот самый класс, который на этом дереве уже
+// ловится замером стоимости страницы, и ловится он именно на контрактном
+// размере, то есть там, где раньше всего и больно.
+//
+// # Почему это ещё и вернее
+//
+// Все объекты страницы видят ОДИН снимок базы. Страница, собранная из тысячи
+// снимков, не существовала целиком ни в один момент: между первым и последним
+// вопросом выдача могла быть отозвана, и ответ описывал бы состояние, которого
+// не было.
+//
+// Ответ — той же длины и в порядке заданных идентификаторов: верный, но
+// переставленный вердикт отфильтровал бы страницу чужим ответом. Первая же
+// неудача прекращает разбор и возвращается ОШИБКОЙ — частичный ответ означал бы
+// вердикт, которого никто не выносил.
+func (a *Asker) AllowedMany(
+	ctx context.Context, subject, objectType string, objectIDs []string, relation string,
+	condCtx map[string]any,
+) ([]bool, error) {
+	if a == nil || a.pool == nil {
+		return nil, fmt.Errorf("relverdict: источник не собран")
+	}
+	if len(objectIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("relverdict: транзакция чтения: %w", err)
+	}
+	defer func() { _ = rollback(ctx, tx) }()
+
+	out := make([]bool, len(objectIDs))
+	for i, objectID := range objectIDs {
+		v, grounds, aerr := Ask(ctx, tx, Query{
+			Subject: subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
+			Context: condCtx,
+		})
+		a.observe(grounds)
+		if aerr != nil {
+			return nil, aerr
+		}
+		switch v {
+		case Allow:
+			out[i] = true
+		case Deny:
+			out[i] = false
+		default:
+			// Unknown — не «нет». Ошибка, чтобы исход лёг в свою корзину, а не
+			// стал отказом, неотличимым от честного.
+			return nil, fmt.Errorf("relverdict: вердикт не определён (%s) на объекте %q", v, objectID)
+		}
+	}
+	return out, nil
+}
+
 // Objects — какие объекты этого типа доступны субъекту.
 //
 // relations — НАБОР: движок отвечает на читающее действие объединением двух

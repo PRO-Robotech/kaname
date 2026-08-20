@@ -67,7 +67,7 @@ func (f *storeInfoFake) GetStoreInfo(_ context.Context) (clients.StoreInfo, erro
 func TestReloadModel_ReportsPinnedID_RequestedIDNotAdopted(t *testing.T) {
 	// Given a handler pinned to "model-old".
 	w := service.NewRelationProjector(&storeInfoFake{})
-	h := NewHandler(w, nil, "model-old")
+	h := NewHandler(w, "model-old")
 
 	// When ReloadModel is called with a different requested id.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{
@@ -83,7 +83,7 @@ func TestReloadModel_ReportsPinnedID_RequestedIDNotAdopted(t *testing.T) {
 
 func TestReloadModel_SetsReloadedAt(t *testing.T) {
 	w := service.NewRelationProjector(&storeInfoFake{})
-	h := NewHandler(w, nil, "model-old")
+	h := NewHandler(w, "model-old")
 
 	before := time.Now().Add(-time.Second)
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{
@@ -97,7 +97,7 @@ func TestReloadModel_SetsReloadedAt(t *testing.T) {
 
 func TestReloadModel_EmptyID_KeepsCurrentWhenNoEnvFallback(t *testing.T) {
 	w := service.NewRelationProjector(&storeInfoFake{})
-	h := NewHandler(w, nil, "model-current")
+	h := NewHandler(w, "model-current")
 
 	// When ReloadModel is called with an empty id, the injected default
 	// (== the initial live id here) is (re-)applied.
@@ -114,7 +114,7 @@ func TestReloadModel_EmptyID_FallsBackToInjectedDefault(t *testing.T) {
 	// os.Getenv. Setting the env here proves it is ignored (no config drift).
 	t.Setenv("KACHO_IAM_OPENFGA_MODEL_ID", "model-from-env")
 	w := service.NewRelationProjector(&storeInfoFake{})
-	h := NewHandler(w, nil, "model-configured")
+	h := NewHandler(w, "model-configured")
 
 	// When ReloadModel is called with an empty request id.
 	resp, err := h.ReloadModel(context.Background(), &iamv1.ReloadModelRequest{})
@@ -135,7 +135,7 @@ func TestGetFGAStoreInfo_ReturnsStoreMetadata(t *testing.T) {
 		ModelBuildSHA:        "deadbeef",
 		EngineVersion:        "1.2.3",
 	}})
-	h := NewHandler(w, nil, "model-xyz")
+	h := NewHandler(w, "model-xyz")
 
 	// When GetFGAStoreInfo is called.
 	resp, err := h.GetFGAStoreInfo(context.Background(), &iamv1.GetFGAStoreInfoRequest{})
@@ -152,7 +152,7 @@ func TestGetFGAStoreInfo_ReturnsStoreMetadata(t *testing.T) {
 func TestGetFGAStoreInfo_BackendUnavailable_Unavailable(t *testing.T) {
 	// Given a writer whose GetStoreInfo fails (OpenFGA unreachable).
 	w := service.NewRelationProjector(&storeInfoFake{infoErr: errors.New("dial fga: connection refused")})
-	h := NewHandler(w, nil, "model-xyz")
+	h := NewHandler(w, "model-xyz")
 
 	// When GetFGAStoreInfo is called.
 	resp, err := h.GetFGAStoreInfo(context.Background(), &iamv1.GetFGAStoreInfoRequest{})
@@ -169,7 +169,7 @@ func TestGetFGAStoreInfo_BackendUnavailable_Unavailable(t *testing.T) {
 func TestGetFGAStoreInfo_BackendUnavailable_OpaqueMessage(t *testing.T) {
 	rawErr := "openfga storeinfo: dial tcp fga-host.internal:8080: connect: connection refused"
 	w := service.NewRelationProjector(&storeInfoFake{infoErr: errors.New(rawErr)})
-	h := NewHandler(w, nil, "model-xyz")
+	h := NewHandler(w, "model-xyz")
 
 	_, err := h.GetFGAStoreInfo(context.Background(), &iamv1.GetFGAStoreInfoRequest{})
 
@@ -187,7 +187,7 @@ func TestReadTuples_BackendUnavailable_OpaqueMessage(t *testing.T) {
 	// carries the FGA endpoint host:port — it must be scrubbed.
 	rawErr := "openfga read: dial tcp fga-host.internal:8080: connect: connection refused"
 	w := service.NewRelationProjector(&storeInfoFake{readErr: errors.New(rawErr)})
-	h := NewHandler(w, nil, "model-xyz")
+	h := NewHandler(w, "model-xyz")
 
 	resp, err := h.ReadTuples(context.Background(), &iamv1.ReadTuplesRequest{})
 

@@ -54,6 +54,15 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("repository.postgres.ssl-mode", "disable")
 	v.SetDefault("repository.postgres.password-from-env", "KACHO_IAM_DB_PASSWORD")
 
+	// authz — кто принимает решение о доступе.
+	//
+	// Умолчания названы ЯВНО, а не оставлены нулевым значением структуры:
+	// «источник вердикта — как получится» не является состоянием, в котором
+	// служба прав вправе подняться. Пусто = решает движок по каждому типу;
+	// сверка включена = «расхождений ноль» отличимо от «сравнений ноль».
+	v.SetDefault("authz.verdict-form-types", []string{})
+	v.SetDefault("authz.shadow-compare", true)
+
 	// authn
 	// Safe-by-default (prod-readiness F14): an un-configured binary fails CLOSED
 	// (production = anonymous → PermissionDenied), never dev (anonymous → full

@@ -78,8 +78,28 @@ func (u *DeleteProjectUseCase) Execute(ctx context.Context, id domain.ProjectID)
 	return &op, nil
 }
 
-// doDelete снимает проект ЦЕЛИКОМ — строку и обе половины его присутствия в
-// графе прав, — одной транзакцией.
+// doDelete снимает проект ЦЕЛИКОМ — строку, СДЕЛАННЫЕ НА НЕГО ВЫДАЧИ и обе
+// половины его присутствия в графе прав, — одной транзакцией.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ВЫДАЧИ СНИМАЮТСЯ ЗДЕСЬ, А НЕ «УЙДУТ КАСКАДОМ»
+//
+// У `access_bindings` нет внешнего ключа на `projects` (ссылка мягкая,
+// межресурсная — это оговорено и в `account/delete.go`), поэтому база за нас
+// ничего не доделывает: строка выдачи переживает удаление проекта в состоянии
+// ACTIVE, её кортежи остаются в движке, а периодический реконсайлер продолжает
+// их материализовать. Доступ живёт на объект, которого нет, и снять его штатным
+// путём нельзя — область, через которую привязку нашли бы, удалена.
+//
+// Замер на стенде в день заведения (#792): из 193 выдач, сделанных на проекты,
+// 145 висели на удалённых, все ACTIVE, все на людей; под этими проектами лежало
+// 80 живых объектов зеркала. Парный контроль на соседнем пути — 0 из 239 у
+// аккаунта, потому что `Account.Delete` свои выдачи дренирует.
+//
+// Тело дренажа — ОБЩЕЕ с аккаунтом (`shared.RevokeBindingsInScope`): страницами
+// до опустошения, симметрично по ведомости выпущенных кортежей, с громким
+// отказом вместо тихой частичной работы. Второй экземпляр того же перечня
+// разошёлся бы с первым молча.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ СНЯТИЕ КОРТЕЖЕЙ ЖИВЁТ ЗДЕСЬ, А НЕ «ДОДЕЛАЕТСЯ САМО»
@@ -110,12 +130,25 @@ func (u *DeleteProjectUseCase) Execute(ctx context.Context, id domain.ProjectID)
 func (u *DeleteProjectUseCase) doDelete(ctx context.Context, id domain.ProjectID, actor, accountID string) (*anypb.Any, error) {
 	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
 		func(ctx context.Context, w Writer) error {
+			// Снятие ВЫДАЧ идёт ПЕРЕД удалением строки: ведомость выпущенных
+			// кортежей читается, пока строки выдач ещё на месте. Отказ дренажа
+			// (область сверх потолка) роняет всю транзакцию — проект остаётся
+			// целым вместе со своими выдачами, а не наполовину снятым.
+			bindingDeletes, rerr := shared.RevokeBindingsInScope(
+				ctx, w, domain.ResourceType("project"), string(id), "Project")
+			if rerr != nil {
+				return rerr
+			}
 			if derr := w.ProjectsW().Delete(ctx, id); derr != nil {
 				return derr
 			}
-			if ferr := w.EmitFGARelationDelete(ctx, projectStructuralTuples(domain.Project{
+			// Структурные указатели проекта в ведомости выдач по построению не
+			// значатся — они кладутся создателем напрямую, поэтому снимаются
+			// здесь, а не приходят из дренажа.
+			fgaDeletes := append(bindingDeletes, projectStructuralTuples(domain.Project{
 				ID: id, AccountID: domain.AccountID(accountID),
-			})); ferr != nil {
+			})...)
+			if ferr := w.EmitFGARelationDelete(ctx, fgaDeletes); ferr != nil {
 				return ferr
 			}
 			return w.EmitAuditEvent(ctx, service.AuditEvent{

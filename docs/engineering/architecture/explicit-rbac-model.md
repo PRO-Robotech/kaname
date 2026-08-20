@@ -287,7 +287,12 @@ false)`, затем `Delete`.
 
 ## Канонические объекты модели (FGA)
 
-- **subject-типы**: `user`, `service_account`, `group#member`, `federated_subject`.
+- **subject-типы**: `user`, `service_account`, `group#member`. Внешнего принципала
+  отдельным типом модель **не несёт**: производителя у него не было ни одного, и он
+  снят с контракта вместе с вложенностью групп — решение и оба исхода в
+  [group-membership-is-one-level.md](group-membership-is-one-level.md) (`kacho#734`).
+  Само `group#member` остаётся: это userset-написание группы КАК СУБЪЕКТА выдачи,
+  а не членство группы в группе.
 - **leaf-объекты**: прямые `v_*` relation-tuple (+ tier для write-authz-якоря).
 - **`account` / `project`**: verb-bearing + tier (admin/editor/viewer) как
   write-authz-якорь.

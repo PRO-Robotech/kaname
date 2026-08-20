@@ -28,6 +28,34 @@ const (
 	ShadowVerdictOutcomeDiverged = "diverged"
 	// ShadowVerdictOutcomeUnfinished — ответа не получено: ни согласие, ни расхождение.
 	ShadowVerdictOutcomeUnfinished = "unfinished"
+	// ShadowVerdictOutcomeUnaskable — решение, которое форме задать НЕЛЬЗЯ.
+	//
+	// Своя клетка, а не доля «не выполнилось»: «спросить нечем» — свойство
+	// вопроса, «не успели» — свойство прогона, и действия они требуют разного.
+	// Условие переключения типа названо долей «спросить нельзя» ПО ЭТОМУ ТИПУ;
+	// доля, размазанная по общей корзине, не считается ни для одного.
+	ShadowVerdictOutcomeUnaskable = "unaskable"
+	// ShadowVerdictOutcomeDivergedFormWider — форма разрешает там, где движок
+	// отказывал: РАСШИРЕНИЕ ДОСТУПА. Подмножество `diverged`.
+	//
+	// На переключённом типе это уже случившееся событие безопасности и повод
+	// откатить тип рубильником, а не наблюдение.
+	ShadowVerdictOutcomeDivergedFormWider = "diverged_form_wider"
+	// ShadowVerdictOutcomeDivergedFormNarrower — форма отказывает там, где движок
+	// разрешал: отказ в обслуживании. Подмножество `diverged`.
+	ShadowVerdictOutcomeDivergedFormNarrower = "diverged_form_narrower"
+	// ShadowVerdictOutcomeVerdictsForm — решений, ПРИНЯТЫХ формой.
+	//
+	// Считается в точке, где источник выбирается, а не выводится из настройки.
+	// Без этого ряда «переключено» и «объявлено переключённым» неразличимы:
+	// настройка может не доехать до процесса, и ответы при этом останутся
+	// правильными — только их выносит прежний источник.
+	ShadowVerdictOutcomeVerdictsForm = "verdicts_form"
+	// ShadowVerdictOutcomeVerdictsEngine — решений, принятых движком.
+	//
+	// Сумма с предыдущим обязана сходиться с `decisions`: у решения ровно один
+	// источник, и решение, не попавшее ни в один ряд, не видно ниоткуда.
+	ShadowVerdictOutcomeVerdictsEngine = "verdicts_engine"
 )
 
 // ShadowVerdictOutcomes — закрытый набор клеток семейства.
@@ -42,6 +70,11 @@ var ShadowVerdictOutcomes = []string{
 	ShadowVerdictOutcomeCompared,
 	ShadowVerdictOutcomeDiverged,
 	ShadowVerdictOutcomeUnfinished,
+	ShadowVerdictOutcomeUnaskable,
+	ShadowVerdictOutcomeDivergedFormWider,
+	ShadowVerdictOutcomeDivergedFormNarrower,
+	ShadowVerdictOutcomeVerdictsForm,
+	ShadowVerdictOutcomeVerdictsEngine,
 }
 
 // ShadowVerdictCounts — четыре числа теневого сравнения, прочитанные У САМОГО
@@ -63,6 +96,16 @@ type ShadowVerdictCounts struct {
 	Diverged int64
 	// Unfinished — ответа не получено (срок исчерпан, источник недоступен).
 	Unfinished int64
+	// Unaskable — решение, которое форме задать нельзя (объект не разобран,
+	// область не названа). Отдельно от Unfinished: см. клетку.
+	Unaskable int64
+	// DivergedFormWider / DivergedFormNarrower — направление расхождения,
+	// подмножества Diverged.
+	DivergedFormWider    int64
+	DivergedFormNarrower int64
+	// VerdictsForm / VerdictsEngine — источник решения. Сумма == Decisions.
+	VerdictsForm   int64
+	VerdictsEngine int64
 }
 
 // shadowVerdictCollector отдаёт четыре числа сравнителя на КАЖДОМ сборе, читая их
@@ -129,10 +172,15 @@ func (c *shadowVerdictCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.
 func (c *shadowVerdictCollector) Collect(ch chan<- prometheus.Metric) {
 	counts := c.read()
 	for outcome, value := range map[string]int64{
-		ShadowVerdictOutcomeDecisions:  counts.Decisions,
-		ShadowVerdictOutcomeCompared:   counts.Compared,
-		ShadowVerdictOutcomeDiverged:   counts.Diverged,
-		ShadowVerdictOutcomeUnfinished: counts.Unfinished,
+		ShadowVerdictOutcomeDecisions:            counts.Decisions,
+		ShadowVerdictOutcomeCompared:             counts.Compared,
+		ShadowVerdictOutcomeDiverged:             counts.Diverged,
+		ShadowVerdictOutcomeUnfinished:           counts.Unfinished,
+		ShadowVerdictOutcomeUnaskable:            counts.Unaskable,
+		ShadowVerdictOutcomeDivergedFormWider:    counts.DivergedFormWider,
+		ShadowVerdictOutcomeDivergedFormNarrower: counts.DivergedFormNarrower,
+		ShadowVerdictOutcomeVerdictsForm:         counts.VerdictsForm,
+		ShadowVerdictOutcomeVerdictsEngine:       counts.VerdictsEngine,
 	} {
 		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(value), outcome)
 	}

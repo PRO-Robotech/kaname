@@ -42,7 +42,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 ### Authorization
 - [`19-authorize.md`](19-authorize.md) — Public AuthorizeService.Check (sync; high-throughput; cache-friendly).
 - [`20-internal-authorize.md`](20-internal-authorize.md) — InternalAuthorizeService (Cascade Check; ClusterAdminGrant fast-path).
-- [`21-internal-iam.md`](21-internal-iam.md) — InternalIAMService (UpsertFromIdentity / PollSubjectChanges / WriteCreatorTuple).
+- [`21-internal-iam.md`](21-internal-iam.md) — InternalIAMService (UpsertFromIdentity / PollSubjectChanges / RegisterResource).
 
 ### Cross-cutting / infrastructure
 - [`28-relationhook.md`](28-relationhook.md) — `relationhook.WriteHierarchyTuple`: родительский указатель для СВОИХ ресурсов iam.

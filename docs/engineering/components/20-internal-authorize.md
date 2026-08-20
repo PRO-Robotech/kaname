@@ -5,8 +5,6 @@
 **InternalAuthorizeService** — internal-only (порт 9091) RPC для admin- и
 inter-service operation'ов на OpenFGA store / model:
 
-- `WriteTuples` — explicit batch write + delete tuples (одна транзакционная
-  FGA `Write`).
 - `ReadTuples` — debug/admin: list tuples по фильтру.
 - `ReloadModel` — hot-reload Authorization Model + condition-каталог после
   `WriteAuthorizationModel`.
@@ -14,10 +12,14 @@ inter-service operation'ов на OpenFGA store / model:
 
 Использование:
 
-- kacho-iam outbox-worker применяет `WriteTuples` на AccessBinding-lifecycle
-  событиях (worker — единственный легитимный `tuple_writer`).
 - Admin-UI / oncall tooling через port-forward (`ReadTuples` / `GetFGAStoreInfo`).
 - `openfga-bootstrap-job` после `WriteAuthorizationModel` вызывает `ReloadModel`.
+
+**Сервис ЧИТАЮЩИЙ — писать кортёж им нельзя.** Здесь стоял `WriteTuples`
+(батч-запись прямо в движок) и строка «outbox-worker — единственный легитимный
+`tuple_writer`». Вторая была неверна о первой: worker пишет в движок СВОИМ
+дренажом, а этот RPC не звал никто. RPC снят (#788) — запись кортежа выражается
+строкой журнала `kacho_iam.fga_outbox` и ничем другим.
 
 Cluster-admin grant дает **short-circuit** в `InternalIAMService.Check`: если
 subject имеет ACTIVE `cluster_admin` grant — allowed без обращения к FGA.
@@ -32,32 +34,19 @@ subject имеет ACTIVE `cluster_admin` grant — allowed без обраще�
 
 | RPC                | Sync/Async       | Описание                                          |
 |--------------------|------------------|---------------------------------------------------|
-| `WriteTuples`      | async (LRO)      | Batch write + delete tuples в OpenFGA.            |
 | `ReadTuples`       | sync             | List tuples по фильтру.                           |
 | `ReloadModel`      | sync             | Hot-reload model + condition-каталог; pin new model_id. |
 | `GetFGAStoreInfo`  | sync             | store_id, model_id, tuple_count, model age.       |
 
 **Нет REST mapping** — internal-only.
 
-## Sequence diagram — WriteTuples (outbox-worker / admin-tooling)
+## Диаграммы записи здесь больше нет
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Admin as Admin tool / kacho-iam (LRO Worker)
-    participant IAM as InternalAuthorizeService :9091
-    participant FGA as OpenFGA
-    participant DB
-
-    Admin->>IAM: WriteTuples {writes:[(user, relation, object), ...], deletes:[...]}
-    IAM->>FGA: HTTP POST /stores/$store/write {writes, deletes}
-    alt 400 already-exists / cannot-delete
-        FGA-->>IAM: 400 (idempotent — GREEN)
-    end
-    FGA-->>IAM: 200
-    IAM->>DB: INSERT operations done=true response=WriteTuplesResult
-    IAM-->>Admin: Operation
-```
+Тут стояла последовательность `WriteTuples`: администратор → сервис → движок →
+строка операции. Она описывала путь, снятый вместе с RPC (#788). Живой путь записи
+кортежа — журнал `kacho_iam.fga_outbox` и его дренаж; он описан у
+[`28-relationhook.md`](28-relationhook.md) и держится гейтом
+`tools/authzenginecensus/engineplaces/journaldoor_test.go`.
 
 ## Sequence diagram — cluster-admin short-circuit (InternalIAMService.Check)
 
@@ -88,11 +77,6 @@ sequenceDiagram
 
 ```bash
 kubectl -n kacho port-forward svc/kacho-iam 9091:9091 &
-
-# WriteTuples (admin).
-grpcurl -plaintext -d '{
-  "writes":[{"subject":"user:usr_alice","relation":"viewer","object":"project:prj_yyy"}]
-}' localhost:9091 kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples
 
 # ReadTuples by filter.
 grpcurl -plaintext -d '{"object":"project:prj_yyy"}' localhost:9091 \

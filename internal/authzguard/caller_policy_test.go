@@ -247,7 +247,6 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
 		"/kacho.cloud.iam.v1.InternalClusterService/ListAdmins",
 		"/kacho.cloud.iam.v1.InternalClusterService/Get",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReloadModel",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
@@ -271,7 +270,9 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
 		"/kacho.cloud.iam.v1.InternalIAMService/RegisterResource",
 		"/kacho.cloud.iam.v1.InternalIAMService/UnregisterResource",
-		"/kacho.cloud.iam.v1.InternalIAMService/WriteCreatorTuple",
+		// Здесь стояла WriteCreatorTuple. Запись снята вместе с RPC (#788):
+		// имени, которого нет в контракте, отрицание не о чем утверждать —
+		// оно проходило бы всегда и ничего не проверяло.
 		// IsRevoked is the api-gateway hot-path lookup (chicken-and-egg: runs
 		// before authz can possibly run) → floor-only, NOT gateway-restricted.
 		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",

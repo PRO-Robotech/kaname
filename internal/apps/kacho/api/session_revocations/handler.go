@@ -14,13 +14,24 @@
 //
 // Methods:
 //   - Revoke    — async (Operation): write a session_revocations row, NOTIFY.
-//   - IsRevoked — sync hot-path lookup (api-gateway cache-miss / refresh-hook).
+//   - IsRevoked — sync lookup. ВЫЗЫВАЮЩЕГО НА ПУТИ ЗАПРОСА У НЕЁ СЕГОДНЯ НЕТ
+//     (#797): ни край, ни refresh-хук её не зовут. Прежняя редакция называла её
+//     «hot-path (api-gateway cache-miss / refresh-hook)» — это описывало
+//     НАМЕРЕНИЕ, а не дерево, и читалось как действующая защита.
 //   - ListByUser— sync admin/audit enumeration.
 //
 // Why this exists: before this handler the api-gateway logout called Revoke but
 // kacho-iam never registered the service → codes.Unimplemented → token
-// revocation was INERT (the refresh-hook IsRevoked gate had nothing written to
-// it). This handler closes that loop.
+// revocation was INERT. Регистрацию это закрыло; ЭНФОРСМЕНТ — нет.
+//
+// ЧТО ИЗ ЭТОГО СЛЕДУЕТ, И ЭТО ИЗМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО. Второе действие
+// выхода — снятие сессии входа у провайдера — уже выданный токен НЕ гасит:
+// проба `services/iam/scripts/provider-revocation-equivalence-probe.sh` на той
+// же версии провайдера, что на стенде, с контролями в обе стороны (запись 15 в
+// `docs/engineering/architecture/known-divergences.md`). Значит выход с
+// `revoke_all=false` не обеспечен ничем: строка пишется, читателя нет, а
+// провайдер токен не отзывает. `revoke_all=true` — обеспечен, но другим
+// механизмом (user-level cutoff, его энфорсит refresh-хук).
 package session_revocations
 
 import (
@@ -113,8 +124,14 @@ func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeRequest) (*operat
 	})
 }
 
-// IsRevoked — sync hot-path lookup. Called by api-gateway on cache-miss and by
-// the Hydra refresh-hook. fail-closed Unavailable when the read stack is unwired.
+// IsRevoked — sync lookup. ВЫЗЫВАЮЩЕГО НЕТ (#797): предикат
+// `git grep -n '\.IsRevoked(' -- '*.go' | grep -v _test | grep -v 'pkg/api/'`
+// даёт две строки, обе внутренние (хендлер → читатель, адаптер → репозиторий).
+// Ни край, ни refresh-хук сюда не приходят: у края нет метода чтения в клиенте
+// (`gateway/internal/clients/session_revocations_client.go` экспонирует один
+// `Revoke`), а refresh-хук пер-jti гейта не несёт и прямо это оговаривает —
+// в его теле нет claims предъявленного токена.
+// fail-closed Unavailable when the read stack is unwired.
 func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*iamv1.IsRevokedResponse, error) {
 	jti := strings.TrimSpace(req.GetTokenJti())
 	if jti == "" {

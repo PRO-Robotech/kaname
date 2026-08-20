@@ -45,7 +45,7 @@ func TestGetFGAStoreInfo_TruncatesModelCreatedAtToSeconds(t *testing.T) {
 		TupleCount:           5,
 		ModelCreatedAt:       created,
 	}})
-	h := NewHandler(w, nil, "model-1")
+	h := NewHandler(w, "model-1")
 
 	resp, err := h.GetFGAStoreInfo(context.Background(), &iamv1.GetFGAStoreInfoRequest{})
 	require.NoError(t, err)

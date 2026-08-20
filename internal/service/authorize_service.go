@@ -405,6 +405,16 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	// server-derived (forged client values stripped); see buildCondContext.
 	condCtx := buildCondContext(ctx, req.Context, now)
 
+	// ПЕРЕКЛЮЧЁННЫЙ ТИП: решает форма, движок спрашивается рядом.
+	//
+	// Прежняя композиция при этом не исполняется НИ ОДНИМ слагаемым: оставить
+	// движку хотя бы одно значило бы, что «источник вердикта для этого типа —
+	// форма» неправда, и неправда молчаливая. Исключение ровно одно и названо
+	// внутри — плоский надзор администратора облака.
+	if s.decidesByForm(req.Resource.Type) {
+		return s.checkByForm(ctx, req, caMemo, relation, object, condCtx, result)
+	}
+
 	// Теневой вопрос уходит ЗДЕСЬ — до любого обращения к движку и до любого
 	// короткого замыкания ниже. Сведение отложено на выход: вердикт окончателен
 	// только там, а сравнивать половину ответа значило бы записывать расхождение
@@ -412,36 +422,107 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	settleShadow := s.askShadow(ctx, req.Subject, req.Resource.Type, req.Resource.ID, relation, condCtx)
 	defer func() { settleShadow(result.Allowed, err == nil) }()
 
-	// FGA Check.
-	if s.relations == nil {
-		return result, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
-	}
-	allowed, err := s.relations.CheckWithContext(ctx, req.Subject, relation, object, condCtx)
+	allowed, err := s.engineVerdict(ctx, req.Subject, caMemo, relation, object, condCtx)
 	if err != nil {
-		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
+		return result, err
+	}
+	result.Allowed = allowed
+	if !allowed {
+		result.DenyReasons = []string{s.formatDenyReason(ctx, req.Subject, relation, object, req.Action)}
+	}
+	return result, nil
+}
+
+// engineVerdict — ОКОНЧАТЕЛЬНЫЙ вердикт движковой композиции края.
+//
+// Три слагаемых, и все три принадлежат одному решению: ответ движка, плоский
+// надзор администратора облака, структурный запасной путь. Выделены в одну
+// функцию затем, что у неё теперь два вызывающих — обычный путь и теневой
+// вопрос переключённого типа, — и оба обязаны спрашивать движок ОДИНАКОВО.
+// Иначе сверялись бы два разных вопроса, и расхождение писалось бы между
+// способами спросить.
+func (s *AuthorizeService) engineVerdict(
+	ctx context.Context, subject string, caMemo *clusterAdminMemo,
+	relation, object string, condCtx map[string]any,
+) (bool, error) {
+	if s.relations == nil {
+		return false, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
+	}
+	allowed, err := s.relations.CheckWithContext(ctx, subject, relation, object, condCtx)
+	if err != nil {
+		return false, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
 	}
 	if allowed {
-		result.Allowed = true
-		return result, nil
+		return true, nil
 	}
 	// Per-object resolve DENIED. Cluster-admin fallback: the flat super-gate
 	// (cluster:…#system_admin) is the first second-chance — a cluster-admin holds
 	// authority on everything even without a per-object tuple. The common
 	// allow case above already returned, so only a denied request pays this extra
 	// round-trip; fail-closed preserved (a non-cluster-admin stays denied).
-	if s.isClusterAdmin(ctx, caMemo, req.Subject) {
-		result.Allowed = true
-		return result, nil
+	if s.isClusterAdmin(ctx, caMemo, subject) {
+		return true, nil
 	}
 	// Structural fallback: the cascade's parent pointers read from iam's committed
 	// rows instead of from whatever the outbox has delivered. This is what makes the
 	// account administrator and the account owner resolve at request time, as the
 	// cloud administrator already did above.
-	structuralAllowed, serr := s.structuralFallback(ctx, req.Subject, relation, object, condCtx)
+	structuralAllowed, serr := s.structuralFallback(ctx, subject, relation, object, condCtx)
 	if serr != nil {
-		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
+		return false, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
 	}
-	if structuralAllowed {
+	return structuralAllowed, nil
+}
+
+// checkByForm — вердикт края по ПЕРЕКЛЮЧЁННОМУ типу.
+//
+// # Что здесь заменено, а что осталось
+//
+// Заменена ВСЯ движковая композиция: ни ответ движка, ни структурный запасной
+// путь на пути запроса не исполняются. Форма читает те же закоммиченные строки,
+// из которых структурный путь собирал контекстные кортежи, и доходит по цепи
+// областей до вершины сама, поэтому второе слагаемое ей не нужно.
+//
+// # Почему плоский надзор администратора облака ОСТАЛСЯ
+//
+// Это не запасной путь на движок и не послабление, а вопрос о ДРУГОМ объекте:
+// `cluster:<синглтон>#system_admin`. Он объект-независим by construction —
+// именно поэтому три верхних уровня супер-доступа сделаны каскадом, а не
+// материализацией: человек, обязанный всё починить, не должен зависеть от
+// состояния доставки. Перенести этот вопрос на форму значило бы для чужого типа
+// разменять одну зависимость от доставки на другую — форма дошла бы до вершины
+// только обходом цепи областей вверх от объекта, а её верхнее звено у 26 типов
+// из 33 пишется регистрацией у владельца.
+//
+// Позиция этого вопроса управляется СВОИМ типом: он спрашивается об объекте
+// `cluster`, и когда переключён `cluster`, на него отвечает форма — тем же
+// рубильником, без исключения в коде. До тех пор он остаётся у движка, и это
+// названо здесь, а не умолчано: на стадии снятия движка он обязан переехать
+// вместе с ним, и переезд — предмет той стадии, а не этой.
+func (s *AuthorizeService) checkByForm(
+	ctx context.Context, req CheckRequest, caMemo *clusterAdminMemo,
+	relation, object string, condCtx map[string]any, result *CheckResult,
+) (*CheckResult, error) {
+	allowed, err := s.shadow.Verdict(ctx, req.Subject, req.Resource.Type, req.Resource.ID, relation, condCtx,
+		func(sctx context.Context) (bool, bool) {
+			// Памятка администратора облака НЕ передаётся: она принадлежит
+			// живому запросу, а этот вопрос уходит вне его пути и в другой
+			// горутине. Общая память между ними была бы гонкой, а цена — один
+			// плоский вопрос, который и так платится только на отказе.
+			a, e := s.engineVerdict(sctx, req.Subject, nil, relation, object, condCtx)
+			return a, e == nil
+		})
+	if err != nil {
+		// Форма не ответила. Это недоступность, а не отказ в доступе: «не смог
+		// спросить» и «доступа нет» — разные миры, и слить их значило бы читать
+		// отказ зависимости как решение.
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
+	}
+	if allowed {
+		result.Allowed = true
+		return result, nil
+	}
+	if s.isClusterAdmin(ctx, caMemo, req.Subject) {
 		result.Allowed = true
 		return result, nil
 	}
@@ -655,23 +736,63 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	// ответила бы «нет» о несуществующем объекте, и сравнение записало бы
 	// расхождение, которого нет, — но решение всё равно называется, иначе оно
 	// выпадает из знаменателя молча.
-	if objType, objID, ok := splitFGAObject(req.Object); ok {
+	objType, objID, parsed := splitFGAObject(req.Object)
+
+	// ПЕРЕКЛЮЧЁННЫЙ ТИП: решает форма, движок спрашивается рядом.
+	//
+	// Эта дверь — та, через которую идёт КАЖДЫЙ запрос платформы: интерсептор
+	// каждого сервиса спрашивает `InternalIAMService.Check`, а он делегирует
+	// сюда, не в публичный `Check`. Маршрутизация, поставленная только у
+	// публичной двери, оставила бы весь живой поток на движке — и оставила бы
+	// молча: ответы правильные, счётчик источника показывает движок, а
+	// самоотчёт при старте называет тип переключённым.
+	if parsed && s.decidesByForm(objType) {
+		return s.checkRelationByForm(ctx, req, objType, objID, condCtx, result)
+	}
+
+	// Теневой вопрос — до движка и до всех замыканий ниже (см. check). Форма
+	// объекта, которую разобрать не удалось, форме E НЕ отдаётся: она честно
+	// ответила бы «нет» о несуществующем объекте, и сравнение записало бы
+	// расхождение, которого нет, — но решение всё равно называется, иначе оно
+	// выпадает из знаменателя молча.
+	if parsed {
 		settleShadow := s.askShadow(ctx, req.Subject, objType, objID, req.Relation, condCtx)
 		defer func() { settleShadow(result.Allowed, err == nil) }()
 	} else {
 		s.shadowUnaskable("объект вопроса не разобран", "", req.Relation)
 	}
 
+	allowed, err := s.engineVerdictForRelation(ctx, req, condCtx)
+	if err != nil {
+		return result, err
+	}
+	result.Allowed = allowed
+	if !allowed {
+		// CheckRelation is the gateway/internal path — same rich-deny format as the
+		// public Check (no `action` available here, so the action segment is omitted).
+		result.DenyReasons = []string{s.formatDenyReason(ctx, req.Subject, req.Relation, req.Object, "")}
+	}
+	return result, nil
+}
+
+// engineVerdictForRelation — ОКОНЧАТЕЛЬНЫЙ вердикт движковой композиции
+// внутренней двери.
+//
+// Те же три слагаемых, что у публичной, и выделены по той же причине: у вопроса
+// появился второй вызывающий — теневой вопрос переключённого типа, — и оба
+// обязаны спрашивать движок ОДИНАКОВО. Иначе сверялись бы два разных вопроса.
+func (s *AuthorizeService) engineVerdictForRelation(
+	ctx context.Context, req CheckRelationRequest, condCtx map[string]any,
+) (bool, error) {
 	if s.relations == nil {
-		return result, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
+		return false, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
 	allowed, err := s.checkRelationWire(ctx, req, condCtx)
 	if err != nil {
-		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
+		return false, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
 	}
 	if allowed {
-		result.Allowed = true
-		return result, nil
+		return true, nil
 	}
 	// Per-object resolve DENIED. Cluster-admin fallback: the internal
 	// per-RPC authz gate (InternalIAMService.Check) honors the same flat super-gate
@@ -679,8 +800,7 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	// after the cascade is contracted. Checked AFTER the per-object resolve so the
 	// common allow case costs a single round-trip; nil-safe.
 	if authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, req.Subject) {
-		result.Allowed = true
-		return result, nil
+		return true, nil
 	}
 	// Structural fallback — same reason and same ordering as in check(): the
 	// cascade's parent pointers come from iam's committed rows, so levels below the
@@ -688,14 +808,38 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	// is the path the api-gateway per-RPC gate takes.
 	structuralAllowed, serr := s.structuralFallback(ctx, req.Subject, req.Relation, req.Object, condCtx)
 	if serr != nil {
-		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
+		return false, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, serr)
 	}
-	if structuralAllowed {
+	return structuralAllowed, nil
+}
+
+// checkRelationByForm — вердикт внутренней двери по ПЕРЕКЛЮЧЁННОМУ типу.
+//
+// Композиция заменена целиком; плоский надзор администратора облака остаётся по
+// той же причине и с той же границей, что у публичной двери (см. checkByForm):
+// он спрашивает о ДРУГОМ объекте — `cluster` — и объект-независим by
+// construction, а его позиция управляется собственным типом.
+func (s *AuthorizeService) checkRelationByForm(
+	ctx context.Context, req CheckRelationRequest, objType, objID string,
+	condCtx map[string]any, result *CheckResult,
+) (*CheckResult, error) {
+	allowed, err := s.shadow.Verdict(ctx, req.Subject, objType, objID, req.Relation, condCtx,
+		func(sctx context.Context) (bool, bool) {
+			a, e := s.engineVerdictForRelation(sctx, req, condCtx)
+			return a, e == nil
+		})
+	if err != nil {
+		// Форма не ответила — недоступность, а не отказ в доступе.
+		return result, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
+	}
+	if allowed {
 		result.Allowed = true
 		return result, nil
 	}
-	// CheckRelation is the gateway/internal path — same rich-deny format as the
-	// public Check (no `action` available here, so the action segment is omitted).
+	if authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, req.Subject) {
+		result.Allowed = true
+		return result, nil
+	}
 	result.DenyReasons = []string{s.formatDenyReason(ctx, req.Subject, req.Relation, req.Object, "")}
 	return result, nil
 }

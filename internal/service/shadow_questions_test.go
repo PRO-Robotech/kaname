@@ -144,6 +144,21 @@ func (s *tracingShadow) AskSources(_ context.Context, _, _, _ string) func([]str
 	return func(grounds []string, complete, answered bool) { done(grounds, complete, answered) }
 }
 
+// Decides / Verdict — рубильник в позиции «движок» по КАЖДОМУ типу.
+//
+// Положительный контроль по умолчанию: пробы этого файла утверждают ПРЕЖНИЙ
+// путь, и он обязан остаться прежним, пока тип не назван переключённым.
+// `Verdict` здесь — ошибка сборки пробы, а не тихий ответ: вызов, которого
+// проба не ожидала, обязан назвать себя.
+func (s *tracingShadow) Decides(string) bool { return false }
+
+func (s *tracingShadow) Verdict(
+	context.Context, string, string, string, string,
+	map[string]any, func(context.Context) (bool, bool),
+) (bool, error) {
+	panic("tracingShadow: вердикт формы спрошен там, где рубильник стоит в позиции «движок»")
+}
+
 func (s *tracingShadow) Unaskable(reason, _, _ string) {
 	s.mu.Lock()
 	s.unaskable = append(s.unaskable, reason)

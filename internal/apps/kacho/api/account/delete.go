@@ -12,8 +12,6 @@ import (
 	"context"
 	"fmt"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -24,7 +22,6 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -140,74 +137,33 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 // re-run (at-least-once drain) is safe. Reads run BEFORE the account DELETE and the
 // binding DELETE so the ledger rows are still present.
 //
-// Step 1 reads PAGES until the scope is empty; see the loop for why it re-reads the
-// first page instead of following a cursor.
+// Step 1 reads PAGES until the scope is empty. Тело дренажа живёт в
+// `shared.RevokeBindingsInScope` — там же разобрано, почему каждый проход
+// перечитывает ПЕРВУЮ страницу вместо следования за курсором и почему потолок
+// проходов даёт отказ, а не частичную работу. Здесь эта механика намеренно не
+// пересказывается: два места об одном предмете разошлись бы молча.
 
-// accountBindingRevokePageSize / accountBindingRevokeMaxPasses — the drain bounds.
-// The page size is the platform maximum for a list; the pass ceiling turns a
-// pathological account into a REFUSAL naming the situation, never into a silent
-// partial delete.
-const (
-	accountBindingRevokePageSize  = 1000
-	accountBindingRevokeMaxPasses = 50
-)
+// accountBindingRevokePageSize — размер страницы дренажа. Оставлен здесь
+// ИМЕНЕМ, а не значением: на него ссылается проба
+// `delete_reconcile_test.go`, воспроизводящая область больше одной страницы.
+// Значение — общее с проектом, из `shared`, чтобы два носителя области не
+// разъехались границами дренажа молча.
+const accountBindingRevokePageSize = shared.ScopeBindingRevokePageSize
 
 func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID) error {
-	var fgaDeletes []service.RelationTuple
-	// Drain, do not sample. The read used to take ONE page and drop the continuation
-	// token, then delete exactly what it had read — so on an account carrying more
-	// bindings than a page, everything past the page kept its row AND its emitted
-	// tuples while the operation reported complete success: no error, no counter, no
-	// line. Nothing repairs that afterwards. access_bindings carry no foreign key to
-	// accounts, so no cascade reaches them; the periodic reconcile keeps
-	// re-materializing the survivors precisely because their rows are still active;
-	// and a surviving binding pins the subject it names, which then cannot be deleted
-	// either.
-	//
-	// The page was also not the "handful" the dropped token was taken to mean: the
-	// query filters by scope alone, so every revoked and expired binding ever
-	// recorded on the account occupies it, oldest first — and the page size is the
-	// platform maximum, so raising it is not an option.
-	//
-	// Re-reading the FIRST page each pass rather than following the token is
-	// deliberate: this runs inside the writer-tx, so rows deleted by the previous
-	// pass are already invisible to the next read, and a cursor would have to be
-	// carried across deletions of the very rows it points at.
-	for pass := 0; ; pass++ {
-		if pass >= accountBindingRevokeMaxPasses {
-			// Refuse loudly rather than report success on partial work — the whole
-			// defect being fixed here is a truncation nobody could see.
-			return status.Errorf(codes.FailedPrecondition,
-				"Account %s carries more than %d access bindings; delete them before deleting the account",
-				id, accountBindingRevokeMaxPasses*accountBindingRevokePageSize)
-		}
-		bindings, _, err := w.AccessBindings().ListByScope(
-			ctx, domain.ResourceType("account"), string(id),
-			abrepo.PageFilter{PageSize: accountBindingRevokePageSize},
-		)
-		if err != nil {
-			return shared.MapRepoErr(err)
-		}
-		if len(bindings) == 0 {
-			break
-		}
-		for _, b := range bindings {
-			stored, serr := w.AccessBindings().SelectEmittedTuples(ctx, b.ID)
-			if serr != nil {
-				return shared.MapRepoErr(serr)
-			}
-			for _, tp := range stored {
-				fgaDeletes = append(fgaDeletes, service.RelationTuple{
-					User: tp.User, Relation: tp.Relation, Object: tp.Object,
-				})
-			}
-			// DELETE the binding row (its emitted-tuple ledger cascade-drops on the FK).
-			if derr := w.AccessBindingsW().Delete(ctx, b.ID); derr != nil {
-				return shared.MapRepoErr(derr)
-			}
-		}
+	// Дренаж выдач области — ОБЩИЙ с проектом (`shared.RevokeBindingsInScope`):
+	// страницами до опустошения, симметрично по ведомости, с громким отказом
+	// вместо тихой частичной работы. Тело параметрично ровно по паре (вид
+	// области, id), и второй его экземпляр разошёлся бы с первым молча.
+	fgaDeletes, err := shared.RevokeBindingsInScope(
+		ctx, w, domain.ResourceType("account"), string(id), "Account")
+	if err != nil {
+		return err
 	}
-	// Cluster pointer — account-lifecycle, not in any binding ledger.
+	// Указатель на кластер — кортеж жизненного цикла АККАУНТА: он намеренно не
+	// значится в ведомости ни одной выдачи (обязан пережить снятие
+	// owner-выдачи), но обязан уйти вместе с самим аккаунтом. Поэтому он
+	// добавляется здесь, а не приходит из общего дренажа.
 	fgaDeletes = append(fgaDeletes, service.RelationTuple{
 		User:     "cluster:cluster_kacho_root",
 		Relation: "cluster",

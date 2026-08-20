@@ -28,7 +28,6 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
@@ -186,14 +185,8 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 	}
 }
 
-// ── WriteCreatorTuple in-handler gate (C2) ──
-//
-// WriteCreatorTuple is NOT in the gateway-only set of the internal caller policy
-// (its caller is a vpc/compute/nlb MODULE SA, not the api-gateway). Its authZ is
-// enforced HERE by the same cert-bound RelationWriteGate as RegisterResource
-// (fga_writer@iam_fgaproxy:system), gated FIRST before any field is read.
-
-// fakeGate implements the relationWriteGate port (RelationWriteGate).
+// fakeGate — заглушка порта relationWriteGate (RelationWriteGate). Осталась
+// после снятия WriteCreatorTuple (#788): её читают пробы RegisterResource.
 type fakeGate struct {
 	domain  string
 	err     error
@@ -201,113 +194,3 @@ type fakeGate struct {
 }
 
 func (g *fakeGate) Authorize(_ context.Context) (string, error) { g.callCnt++; return g.domain, g.err }
-
-// fakeRelationWriter implements the relationWriter port.
-type fakeRelationWriter struct {
-	gotTuples []clients.RelationTuple
-	err       error
-}
-
-func (w *fakeRelationWriter) WriteTuples(_ context.Context, tuples []clients.RelationTuple) error {
-	w.gotTuples = append(w.gotTuples, tuples...)
-	return w.err
-}
-
-func newWriteCreatorHandler(w relationWriter, gate relationWriteGate) *Handler {
-	return NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithRelationWriter(w).
-		WithResourceRegistrar(nil, gate)
-}
-
-// TestInternalIAM_WriteCreatorTuple_GateDenied — C2: a denying gate → PermissionDenied
-// and the tuple is NOT written (gate runs before the writer).
-func TestInternalIAM_WriteCreatorTuple_GateDenied(t *testing.T) {
-	gate := &fakeGate{err: status.Error(codes.PermissionDenied, "permission denied")}
-	writer := &fakeRelationWriter{}
-	h := newWriteCreatorHandler(writer, gate)
-
-	_, err := h.WriteCreatorTuple(context.Background(), &iamv1.WriteCreatorTupleRequest{
-		SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
-	})
-	require.Error(t, err)
-	assert.Equal(t, codes.PermissionDenied, status.Code(err))
-	assert.Equal(t, 1, gate.callCnt)
-	assert.Empty(t, writer.gotTuples, "tuple must NOT be written when the gate denies")
-}
-
-// TestInternalIAM_WriteCreatorTuple_GateAllowed — an allowing gate → the tuple is written.
-func TestInternalIAM_WriteCreatorTuple_GateAllowed(t *testing.T) {
-	gate := &fakeGate{}
-	writer := &fakeRelationWriter{}
-	h := newWriteCreatorHandler(writer, gate)
-
-	_, err := h.WriteCreatorTuple(context.Background(), &iamv1.WriteCreatorTupleRequest{
-		SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
-	})
-	require.NoError(t, err)
-	require.Len(t, writer.gotTuples, 1)
-	assert.Equal(t, "user:usr_x", writer.gotTuples[0].User)
-}
-
-// TestInternalIAM_WriteCreatorTuple_PrivilegeTupleDenied — least-privilege guard:
-// модульная SA (домен vpc) не может выписать creator-tuple с privilege-relation
-// или на cluster/foreign-объект, даже когда WHO-gate пропускает. Tuple не пишется.
-func TestInternalIAM_WriteCreatorTuple_PrivilegeTupleDenied(t *testing.T) {
-	cases := []struct{ name, relation, object string }{
-		{"cluster system_admin", "system_admin", "cluster:cluster_kacho_root"},
-		{"editor on own object", "editor", "vpc_network:net1"},
-		{"foreign iam object", "owner", "iam_account:acc1"},
-		{"cluster object with hierarchy relation", "project", "cluster:cluster_kacho_root"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gate := &fakeGate{domain: "vpc"}
-			writer := &fakeRelationWriter{}
-			h := newWriteCreatorHandler(writer, gate)
-
-			_, err := h.WriteCreatorTuple(context.Background(), &iamv1.WriteCreatorTupleRequest{
-				SubjectId: "service_account:sva1", Relation: tc.relation, Object: tc.object,
-			})
-			require.Error(t, err)
-			assert.Equal(t, codes.PermissionDenied, status.Code(err))
-			assert.Empty(t, writer.gotTuples, "privilege/foreign tuple must NOT be written")
-		})
-	}
-}
-
-// TestInternalIAM_WriteCreatorTuple_WriterError_OpaqueMessage — leak-lock (audit r11):
-// the raw OpenFGA transport error must never reach the gRPC status message — it
-// carries the cluster-internal FGA endpoint host:port + store id. The message must
-// be the fixed opaque text, not err.Error() (%v). Mirrors internal_authorize's
-// ReadTuples/GetFGAStoreInfo scrub. security.md hardening-invariant #1 (:9091 not exempt).
-func TestInternalIAM_WriteCreatorTuple_WriterError_OpaqueMessage(t *testing.T) {
-	rawErr := `openfga write: Post "http://fga-host.internal:8080/stores/01STOREID/write": dial tcp 10.1.2.3:8080: connect: connection refused`
-	gate := &fakeGate{}
-	writer := &fakeRelationWriter{err: errors.New(rawErr)}
-	h := newWriteCreatorHandler(writer, gate)
-
-	_, err := h.WriteCreatorTuple(context.Background(), &iamv1.WriteCreatorTupleRequest{
-		SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
-	})
-	require.Error(t, err)
-	assert.Equal(t, codes.Unavailable, status.Code(err))
-	msg := status.Convert(err).Message()
-	assert.Equal(t, "authz backend unavailable", msg,
-		"UNAVAILABLE must be opaque fixed text — never echo raw FGA transport err (endpoint/store-id leak)")
-	assert.NotContains(t, msg, "fga-host.internal", "FGA endpoint host:port leaked into status message")
-	assert.NotContains(t, msg, "01STOREID", "FGA store id leaked into status message")
-}
-
-// TestInternalIAM_WriteCreatorTuple_NilGateFailsClosed — an unwired gate → deny
-// (never silently allow an unconfigured gate).
-func TestInternalIAM_WriteCreatorTuple_NilGateFailsClosed(t *testing.T) {
-	writer := &fakeRelationWriter{}
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil).WithRelationWriter(writer)
-
-	_, err := h.WriteCreatorTuple(context.Background(), &iamv1.WriteCreatorTupleRequest{
-		SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
-	})
-	require.Error(t, err)
-	assert.Equal(t, codes.PermissionDenied, status.Code(err))
-	assert.Empty(t, writer.gotTuples)
-}

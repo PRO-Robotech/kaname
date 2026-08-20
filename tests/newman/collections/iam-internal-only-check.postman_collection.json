@@ -630,7 +630,7 @@
           ]
         },
         {
-          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: ext-writetuples-on-external",
+          "name": "IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS :: ext-readtuples-on-external",
           "request": {
             "method": "POST",
             "header": [
@@ -640,18 +640,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
+              "raw": "{{baseUrl}}/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "kacho.cloud.iam.v1.InternalAuthorizeService",
-                "WriteTuples"
+                "ReadTuples"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"writes\": [{\"subject\": \"user:usr00000000000000abc\", \"relation\": \"viewer\", \"object\": \"account:acc00000000000abc\"}]}",
+              "raw": "{\"subjectFilter\": \"user:usr00000000000000abc\", \"relationFilter\": \"viewer\", \"objectFilter\": \"account:acc00000000000abc\", \"pageSize\": 10}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -682,7 +682,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples');",
                   "} else {",
                   "  pm.test('harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -716,15 +716,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"EXT-WRITETUPLES: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "pm.test(\"EXT-READTUPLES: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
                   "});",
-                  "pm.test('EXT-WRITETUPLES: InternalAuthorizeService.WriteTuples NEVER succeeds on the external listener', () => {",
+                  "pm.test('EXT-READTUPLES: InternalAuthorizeService.ReadTuples NEVER succeeds on the external listener', () => {",
                   "  pm.expect(pm.response.code, pm.response.text()).to.not.be.oneOf([200, 201, 202, 204]);",
                   "});",
-                  "pm.test('EXT-WRITETUPLES: indistinguishable from an absent path (this probe does NOT prove route isolation — see the family-B note)', () => {",
+                  "pm.test('EXT-READTUPLES: indistinguishable from an absent path (this probe does NOT prove route isolation — see the family-B note)', () => {",
                   "  const baseline = pm.environment.get('_extAbsentCode');",
                   "  pm.expect(String(pm.response.code), 'diverged from the absent-path baseline: the edge changed behaviour and this probe needs re-deriving').to.eql(baseline);",
                   "});"

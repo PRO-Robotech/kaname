@@ -50,6 +50,25 @@ func (s *stubAsker) Allowed(ctx context.Context, _, _, _, _ string, _ map[string
 	return s.allow, s.err
 }
 
+// AllowedMany — тот же ответ, что и `Allowed`, по каждому объекту страницы.
+//
+// Дублёр обязан выполнять контракт настоящего: страничный вопрос, отвечающий
+// снисходительнее точечного, скрыл бы ровно тот дефект, ради которого его
+// подставляют.
+func (s *stubAsker) AllowedMany(ctx context.Context, subject, objectType string,
+	objectIDs []string, relation string, condCtx map[string]any,
+) ([]bool, error) {
+	out := make([]bool, len(objectIDs))
+	for i, id := range objectIDs {
+		allowed, err := s.Allowed(ctx, subject, objectType, id, relation, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
+}
+
 // Перечислительные вопросы формы E. Отвечают ЗАДАННЫМ множеством: проба о
 // прямом вердикте про них ничего не утверждает, но подставить форму, которая их
 // не умеет, нельзя — порт один.
@@ -192,8 +211,18 @@ func TestCounters_ShareIsCountedFromEveryDecisionNotOnlyTheSucceededOnes(t *test
 		t.Fatalf("решений посчитано %d, ожидалось 4 (%+v) — решение без вопроса, не попавшее "+
 			"в знаменатель, делает долю лучше, ничего не улучшив", got.Decisions, got)
 	}
-	if got.Compared != 2 || got.Unfinished != 2 {
-		t.Fatalf("счётчики = %+v, ожидалось сравнений 2 и невыполненных 2", got)
+	// «Спросить нельзя» и «не успели» — РАЗНЫЕ клетки, а не одна.
+	//
+	// Прежде обе лежали в «не выполнилось», и проба утверждала «невыполненных 2».
+	// Утверждение было верным и слишком грубым: условие переключения типа
+	// названо долей «спросить нельзя» ПО ЭТОМУ ТИПУ, а доля, размазанная по общей
+	// корзине, не считается ни для одного. Сумма двух клеток осталась прежней —
+	// изменилась только различимость, и это то, ради чего клетку и расщепили.
+	if got.Compared != 2 || got.Unfinished != 1 || got.Unaskable != 1 {
+		t.Fatalf("счётчики = %+v, ожидалось сравнений 2, невыполненных 1, «спросить нельзя» 1", got)
+	}
+	if got.Unfinished+got.Unaskable+got.Compared != got.Decisions {
+		t.Fatalf("исходы не покрывают знаменатель: %+v", got)
 	}
 	if share := got.ComparedShare(); share != 0.5 {
 		t.Fatalf("доля сравнённых = %v, ожидалось 0.5 (%+v)", share, got)

@@ -58,6 +58,27 @@ type ShadowComparator interface {
 		relation string) func(engineSubjects []string, engineComplete, engineAnswered bool)
 	AskSources(ctx context.Context, objectType, objectID,
 		relation string) func(engineGrounds []string, engineComplete, engineAnswered bool)
+	// Decides — принимает ли решение по этому типу ФОРМА.
+	//
+	// Рубильник живёт в сравнителе — единственном значении, которое держат ОБЕ
+	// поверхности решения (край и обёртка собственных стражей). Край через
+	// обёртку не проходит: композиционный корень выдаёт ему голый транспорт, и
+	// это записанное решение. Рубильник у каждой поверхности разошёлся бы, и
+	// один вопрос об одном объекте получил бы два действующих источника.
+	Decides(objectType string) bool
+	// Verdict — вердикт ФОРМЫ по переключённому типу; движок спрашивается РЯДОМ.
+	//
+	// `askEngine` обязана отдавать ОКОНЧАТЕЛЬНЫЙ вердикт движковой композиции
+	// этой поверхности — у края это ответ движка плюс плоский надзор
+	// администратора облака плюс структурный запасной путь. Сравнивать половину
+	// значило бы записывать расхождение между стадиями одного решения, а не
+	// между формами.
+	//
+	// Ошибка — «форма не ответила»: недоступность вызывающему, никогда не отказ
+	// в доступе и никогда не ответ движка.
+	Verdict(ctx context.Context, subject, objectType, objectID, relation string,
+		condCtx map[string]any,
+		askEngine func(context.Context) (engineAllowed, engineAnswered bool)) (bool, error)
 	// Unaskable отмечает решение, которое форме E задать нельзя (объект не
 	// разобран, область не названа). Существует ради знаменателя: пропуск, не
 	// попавший в число решений, делает долю сравнённого лучше, ничего не улучшив.
@@ -146,4 +167,12 @@ func expandTreeSubjects(t *authztypes.ExpandTree) (subjects []string, complete b
 	}
 	walk(t)
 	return subjects, complete
+}
+
+// decidesByForm — переключён ли источник вердикта для этого типа.
+//
+// Непровязанное сравнение отвечает «нет»: источник, которого нет, решать не
+// может, и это тождество, а не осторожность.
+func (s *AuthorizeService) decidesByForm(objectType string) bool {
+	return s.shadow != nil && s.shadow.Decides(objectType)
 }

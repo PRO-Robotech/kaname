@@ -35,7 +35,6 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -56,12 +55,6 @@ type Authorizer interface {
 // *service.SubjectChangeService.
 type subjectChanger interface {
 	PollSubjectChanges(ctx context.Context, sinceID int64, limit int32) ([]service.SubjectChange, int64, error)
-}
-
-// relationWriter — narrow port-iface для WriteCreatorTuple. Implemented by
-// *clients.OpenFGAHTTPClient.
-type relationWriter interface {
-	WriteTuples(ctx context.Context, tuples []clients.RelationTuple) error
 }
 
 // relationWriteGate — narrow authz port for the resource-registration RPCs.
@@ -99,7 +92,6 @@ type Handler struct {
 	lookup        *LookupSubjectUseCase
 	authz         Authorizer
 	subjectChange subjectChanger
-	relations     relationWriter
 	roleCompiled  roleCompiledReader
 
 	// Resource-registration gate. Both nil when the registration
@@ -142,13 +134,6 @@ func NewHandler(l *LookupSubjectUseCase, authz Authorizer) *Handler {
 // Called from the composition root (cmd/kacho-iam/main.go).
 func (h *Handler) WithSubjectChange(sc subjectChanger) *Handler {
 	h.subjectChange = sc
-	return h
-}
-
-// WithRelationWriter — attaches the relation tuple-writer for WriteCreatorTuple
-// implementation.
-func (h *Handler) WithRelationWriter(w relationWriter) *Handler {
-	h.relations = w
 	return h
 }
 
@@ -237,55 +222,12 @@ func (h *Handler) authorizeRegistration(ctx context.Context) (string, error) {
 	return h.regGate.Authorize(ctx)
 }
 
-// WriteCreatorTuple — sync write own-creator FGA tuple.
-// Called by resource-service Create-handlers (vpc / compute / nlb) — после
-// успешной row INSERT'и они записывают `<subject> <relation> <object>` tuple
-// в FGA-store через kacho-iam, чтобы creator получил per-resource access
-// сразу же после Create (без необходимости отдельного AccessBinding.Create).
-//
-// Idempotent: re-write одного и того же tuple — success (FGA returns 400
-// для duplicate, мы trap'аем как nil — clients.WriteTuples обрабатывает).
-func (h *Handler) WriteCreatorTuple(ctx context.Context, req *iamv1.WriteCreatorTupleRequest) (*iamv1.WriteCreatorTupleResponse, error) {
-	// authz: same cert-bound ReBAC gate as RegisterResource —
-	// fga_writer@iam_fgaproxy:system resolved from the caller's verified mTLS SAN
-	// (dev no-op, prod fail-closed). Closes the gap where WriteCreatorTuple wrote
-	// an arbitrary caller-supplied tuple with NO authorization gate.
-	domain, err := h.authorizeRegistration(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if req.GetSubjectId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Illegal argument subject_id: required")
-	}
-	if req.GetRelation() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Illegal argument relation: required")
-	}
-	if req.GetObject() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Illegal argument object: required")
-	}
-	// Least-privilege guard: creator-tuple must be an owner-hierarchy relation on
-	// an object of the caller's own domain — never a privilege relation or a
-	// cluster/iam object (otherwise a module SA could mint cluster-admin).
-	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
-		return nil, err
-	}
-	if h.relations == nil {
-		return nil, status.Error(codes.Unavailable, "openfga writer not configured")
-	}
-	err = h.relations.WriteTuples(ctx, []clients.RelationTuple{{
-		User:     req.GetSubjectId(),
-		Relation: req.GetRelation(),
-		Object:   req.GetObject(),
-	}})
-	if err != nil {
-		// Opaque UNAVAILABLE — never echo err.Error(): the raw OpenFGA transport
-		// error carries the cluster-internal FGA endpoint host:port + store id
-		// (leak, applies on :9091 too; hardening-invariant #1). Fixed text mirrors
-		// internal_authorize.ReadTuples / GetFGAStoreInfo.
-		return nil, status.Error(codes.Unavailable, "authz backend unavailable")
-	}
-	return &iamv1.WriteCreatorTupleResponse{}, nil
-}
+// TOMBSTONE. `WriteCreatorTuple` стоял здесь и снят (#788): он писал кортёж
+// создателя в движок НАПРЯМУЮ, мимо `kacho_iam.fga_outbox`, поэтому проекция
+// `relation_fact` (миграция 0098) его не увидела бы никогда. Вызывающих не
+// осталось ни одного — все пять соседей ушли на RegisterResource. Порт записи
+// (`relationWriter`) снят вместе с методом НАМЕРЕННО: тип без него нельзя
+// переоткрыть одной строкой вызова.
 
 func (h *Handler) LookupSubject(ctx context.Context, req *iamv1.LookupSubjectRequest) (*iamv1.LookupSubjectResponse, error) {
 	return h.lookup.Execute(ctx, req)

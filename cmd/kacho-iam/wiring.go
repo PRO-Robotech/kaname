@@ -51,6 +51,7 @@ import (
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/verdictsource"
 )
 
 // services — собранный набор бизнес-сервисов (один composition-point вместо
@@ -170,7 +171,10 @@ type services struct {
 // The message names the knob and the consequence deliberately: it is what an operator sees
 // when the stand will not come up, and a refusal that does not say what to fix cannot be
 // acted on.
-func ownGateWiringComplaint(store *authzcascade.Client, facts *authzcascade.Resolver) string {
+func ownGateWiringComplaint(
+	store *authzcascade.Client, facts *authzcascade.Resolver,
+	verdictSwitch verdictsource.Switchboard, shadowCompare bool,
+) string {
 	// The second chance is a CORRECTNESS condition: without it iam's own gates answer from
 	// delivered relations only, and disagree with the gate the api-gateway asks about the
 	// same subject and the same object.
@@ -202,6 +206,16 @@ func ownGateWiringComplaint(store *authzcascade.Client, facts *authzcascade.Reso
 			"сравнению форм (сравнитель не провязан в значение, которое стражам выдаёт " +
 			"композиционный корень): расхождение двух форм осталось бы несчитанным, и " +
 			"переключать источник вердикта потипово в этом состоянии нельзя"
+	}
+	// Четвёртое условие — ПОЗИЦИЯ РУБИЛЬНИКА, и оно расширяет ЭТОТ страж, а не
+	// заводит второй.
+	//
+	// Второй страж об одном предмете разошёлся бы с первым: они поднимались бы
+	// в разном порядке, читали бы разные значения и однажды дали бы разные
+	// ответы на один вопрос. Здесь предмет один — «можно ли этой сборке
+	// принимать решения о доступе», — и отказ на него один.
+	if complaint := verdictSwitchComplaint(verdictSwitch, shadowCompare); complaint != "" {
+		return complaint
 	}
 	return ""
 }
@@ -244,7 +258,32 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// принимают собственные стражи iam. Один экземпляр на обоих — иначе счётчики
 	// разъедутся на два перечня об одном предмете, и доля сравнённого будет
 	// считаться от разных знаменателей у края и у стражей.
-	shadow := shadowverdict.New(relverdict.NewAsker(pool), logger)
+	//
+	// ФОРМА провязывается, ПОКА ИДЁТ СВЕРКА. Выключенная сверка (#763) — это
+	// сравнитель БЕЗ формы: значение живо, вызовы дёшевы, `Decides` честно
+	// отвечает «нет», и ни одного вопроса к базе теневой путь не делает.
+	// Собирать в этом случае вовсе ничего было бы нельзя: страж провязки
+	// отказал бы в старте, а он проверяет ДРУГОЙ предмет — что значение,
+	// выданное стражам, вообще способно предъявить решение сравнению.
+	//
+	// РУБИЛЬНИК читается ОТСЮДА и больше ниоткуда: тот же объект уезжает в
+	// сравнитель, в отказ старта и в самоотчёт. Тогда «страж прошёл» ⟺
+	// «источник действительно переключён» по построению.
+	verdictSwitch := cfg.AuthZ.VerdictSwitchboard()
+	var form shadowverdict.Asker
+	if cfg.AuthZ.ShadowCompare {
+		form = relverdict.NewAsker(pool)
+	}
+	// Собирается и провязывается ДВУМЯ утверждениями, а не цепочкой строителя.
+	//
+	// Причина внешняя и названа гейтом дерева: он считает носителя счётчиков
+	// «построенным прямо в аргументе», когда результат конструктора не
+	// присвоен ИМЕНИ, — а у цепочки имени присваивается результат последнего
+	// звена. Счётчики сравнителя читает коллектор наблюдаемости, поэтому запись
+	// в две строки честнее спора с гейтом: она делает связь конструктора с
+	// именем видимой разбору, ничего не меняя в поведении.
+	shadow := shadowverdict.New(form, logger)
+	shadow = shadow.WithSwitchboard(verdictSwitch)
 	relationStore := authzcascade.Wrap(fgaTransport, structuralFacts).WithComparator(shadow)
 	// Refuse to run gates that have silently gone back to waiting for a queue. Losing
 	// either half of this in a refactor would put iam's own answers back out of step with
@@ -253,9 +292,23 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// NOT conditioned on the authentication mode: every deployed stand runs production
 	// posture, and a guard absent from the stands where anyone would notice it firing is
 	// not a guard.
-	if complaint := ownGateWiringComplaint(relationStore, structuralFacts); complaint != "" {
+	if complaint := ownGateWiringComplaint(relationStore, structuralFacts,
+		verdictSwitch, cfg.AuthZ.ShadowCompare); complaint != "" {
 		logger.Error("refusing to start: " + complaint)
 		os.Exit(1)
+	}
+
+	// САМООТЧЁТ ПОЗИЦИИ при старте.
+	//
+	// Читается рубильник, который держит СРАВНИТЕЛЬ, а не разобранная
+	// конфигурация: спрашивают «что действует», а не «что объявлено». Разница
+	// не теоретическая — именно она отличает «переключено» от «объявлено
+	// переключённым», и именно её теряет всякий самоотчёт, собранный из
+	// конфигурации второй раз.
+	if census, cerr := surveyVerdictSwitch(shadow.Switchboard()); cerr == nil {
+		logger.Info(census.String())
+	} else {
+		logger.Error("перепись рубильника источника вердикта не выполнена", "err", cerr)
 	}
 
 	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
@@ -561,10 +614,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		metricsReg.NewShadowVerdictCollector(func() metrics.ShadowVerdictCounts {
 			counts := authzServices.shadow.Counters()
 			return metrics.ShadowVerdictCounts{
-				Decisions:  counts.Decisions,
-				Compared:   counts.Compared,
-				Diverged:   counts.Diverged,
-				Unfinished: counts.Unfinished,
+				Decisions:            counts.Decisions,
+				Compared:             counts.Compared,
+				Diverged:             counts.Diverged,
+				Unfinished:           counts.Unfinished,
+				Unaskable:            counts.Unaskable,
+				DivergedFormWider:    counts.DivergedFormWider,
+				DivergedFormNarrower: counts.DivergedFormNarrower,
+				VerdictsForm:         counts.VerdictsForm,
+				VerdictsEngine:       counts.VerdictsEngine,
 			}
 		})
 	}
@@ -654,10 +712,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// PollSubjectChanges drains subject_change_outbox for api-gateway
 		// authz-cache invalidation. Internal-only (port 9091).
 		WithSubjectChange(service.NewSubjectChangeService(kachopg.NewSubjectChangeRepo(pool))).
-		// WriteCreatorTuple — sync FGA write для
-		// per-resource creator-tuple (vpc/compute/nlb после Create).
-		// Local relationStore (line ~522) is in scope here within buildServices.
-		WithRelationWriter(relationStore).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// ForceLogout records a session revocation.
@@ -1127,9 +1181,11 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 		WithCallerAuthority(ownGates).
 		WithInsecureAnonymousPeer(!prodMode)
 
-	// RelationProjector — used by InternalAuthorizeService.
-	tupleWriter := service.NewRelationProjector(fgaTransport)
-	internalAuthH := internalauthorizeapp.NewHandler(tupleWriter, opsRepo, modelID)
+	// RelationProjector — used by InternalAuthorizeService. Read-only: the
+	// service has no Operation-producing RPC since WriteTuples was retired (#788),
+	// so no operations repo is handed to it.
+	tupleReader := service.NewRelationProjector(fgaTransport)
+	internalAuthH := internalauthorizeapp.NewHandler(tupleReader, modelID)
 
 	return authzServiceBundle{
 		authorize:         authzH,

@@ -41,12 +41,14 @@
 //     HMAC/secret-authed; Kratos is not a kacho-seeded SA → relation-Check
 //     inapplicable. (Hydra token/refresh hooks live on the separate :9092 HTTP
 //     listener, not this gRPC chain — N/A by construction.)
-//   - InternalSessionRevocationsService.IsRevoked — refresh-hook hot-path
-//     chicken-and-egg (runs before per-user authz can run); a per-call FGA
-//     round-trip here would add latency + an outage would mass-fail token
-//     refresh. Stays on the mTLS-module floor.
-//   - all mutations (Register/Unregister/WriteCreatorTuple stay fga_writer-
-//     gated; ForceLogout/GrantAdmin/… stay system_admin / gateway-only) — this
+//   - InternalSessionRevocationsService.IsRevoked — курица и яйцо (шло бы до
+//     того, как может пойти пер-пользовательская проверка); пер-вызовный поход
+//     в движок добавил бы задержку, а его недоступность массово роняла бы
+//     обновление токенов. Остаётся на полу mTLS-модуля. ВНИМАНИЕ: refresh-хук
+//     эту проверку НЕ зовёт и пер-jti гейта не несёт вовсе — он прямо это
+//     оговаривает (в его теле нет claims предъявленного токена). Вызывающего у
+//     метода в дереве нет ни одного (#797).
+//   - все мутации (Register/Unregister) остаются за fga_writer-//     gated; ForceLogout/GrantAdmin/… stay system_admin / gateway-only) — this
 //     is a READ floor; the mutation surface is unchanged.
 package authzguard
 
@@ -79,8 +81,9 @@ const (
 // NOT in this set (exempt — see the package doc-comment for the rationale):
 //   - InternalIAMService/Check — PDP, never floor-gated.
 //   - InternalUserService/OnRecoveryCompleted — Kratos secret-authed hook.
-//   - InternalSessionRevocationsService/IsRevoked — hot-path chicken-and-egg.
-//   - InternalIAMService/{RegisterResource,UnregisterResource,WriteCreatorTuple}
+//   - InternalSessionRevocationsService/IsRevoked — курица и яйцо; вызывающего
+//     в дереве нет (#797).
+//   - InternalIAMService/{RegisterResource,UnregisterResource}
 //     — fga_writer-gated mutations.
 //   - ForceLogout / Cluster GrantAdmin/RevokeAdmin / Authorize
 //     WriteTuples/ReloadModel / SessionRevocations Revoke /

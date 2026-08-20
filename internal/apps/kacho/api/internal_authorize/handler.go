@@ -7,9 +7,13 @@
 // Internal-only (ban #6: Internal.* not published on the external TLS endpoint) —
 // NOT registered on the external TLS listener. Used by:
 //
-//   - kacho-iam outbox-worker (WriteTuples on AccessBinding lifecycle).
 //   - admin-UI / oncall (ReadTuples, GetFGAStoreInfo).
 //   - openfga-bootstrap-job (ReloadModel after model write).
+//
+// The handler is READ-ONLY with respect to the relation store. The former
+// WriteTuples RPC — batch write straight into the engine, past
+// `kacho_iam.fga_outbox` — was retired with zero callers (#788); writing a tuple
+// is expressed as a journal row and nothing else.
 //
 // The former RunRegoTest RPC was retired from the proto: in-process Rego
 // was out of scope; oncall runs `opa eval`
@@ -23,18 +27,10 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/structpb"
-
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
-	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
@@ -42,7 +38,6 @@ import (
 type Handler struct {
 	iamv1.UnimplementedInternalAuthorizeServiceServer
 	writer *service.RelationProjector
-	ops    operations.Repo
 	// modelID — the env-configured authorization_model_id the process is pinned
 	// to. Immutable for the process lifetime: the OpenFGA client captures this id
 	// at construction (composition root) and every Check/Write/ListObjects sends
@@ -53,45 +48,11 @@ type Handler struct {
 
 // NewHandler — builder. modelID is the composition-root-configured
 // authorization_model_id (the single source of truth) the process is pinned to.
-func NewHandler(writer *service.RelationProjector, ops operations.Repo, modelID string) *Handler {
-	return &Handler{writer: writer, ops: ops, modelID: modelID}
-}
-
-// WriteTuples — see iamv1.InternalAuthorizeServiceServer.
-func (h *Handler) WriteTuples(ctx context.Context, req *iamv1.WriteTuplesRequest) (*operationpb.Operation, error) {
-	writes := protoTuplesToInternal(req.GetWrites())
-	deletes := protoTuplesToInternal(req.GetDeletes())
-	// OpenFGA's maxTuplesPerWrite (100) caps writes+deletes COMBINED per /write
-	// request, and this admin path (writer.WriteRaw → WriteConditionalTuples) does
-	// NOT chunk — so the guard must count both directions together, not each ≤100
-	// independently (60+60 would pass a per-direction guard yet be rejected wholesale
-	// by OpenFGA as a single 121-tuple request).
-	if len(writes)+len(deletes) > 100 {
-		return nil, status.Error(codes.InvalidArgument, "Illegal argument writes/deletes: ≤100 combined per batch")
-	}
-	op, err := operations.NewFromContext(ctx,
-		domain.PrefixOperationIAM,
-		"InternalAuthorize.WriteTuples",
-		&iamv1.WriteTuplesMetadata{IdempotencyKey: req.GetIdempotencyKey()},
-	)
-	if err != nil {
-		// Opaque INTERNAL — never echo err.Error() (leak of pgx/DB driver text).
-		return nil, status.Error(codes.Internal, "create operation failed")
-	}
-	if err := h.ops.Create(ctx, op); err != nil {
-		return nil, status.Error(codes.Internal, "create operation failed")
-	}
-	operations.Run(ctx, h.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		ins, del, werr := h.writer.WriteRaw(ctx, writes, deletes)
-		if werr != nil {
-			return nil, werr
-		}
-		return anypb.New(&iamv1.WriteTuplesResult{
-			Inserted: safeconv.IntToInt32(ins),
-			Deleted:  safeconv.IntToInt32(del),
-		})
-	})
-	return shared.OperationToProto(&op), nil
+//
+// No operations repo is taken: every RPC of this service is a synchronous read,
+// and the only Operation-producing method it ever had was the retired WriteTuples.
+func NewHandler(writer *service.RelationProjector, modelID string) *Handler {
+	return &Handler{writer: writer, modelID: modelID}
 }
 
 // ReadTuples — see iamv1.InternalAuthorizeServiceServer.
@@ -164,36 +125,4 @@ func (h *Handler) GetFGAStoreInfo(ctx context.Context, _ *iamv1.GetFGAStoreInfoR
 		resp.ModelCreatedAt = shared.TimestampProto(info.ModelCreatedAt)
 	}
 	return resp, nil
-}
-
-// ── helpers ──
-
-func protoTuplesToInternal(tuples []*iamv1.Tuple) []authztypes.ConditionalTuple {
-	out := make([]authztypes.ConditionalTuple, 0, len(tuples))
-	for _, t := range tuples {
-		tup := authztypes.ConditionalTuple{
-			User:     t.GetSubject(),
-			Relation: t.GetRelation(),
-			Object:   t.GetObject(),
-		}
-		if cnd := t.GetCondition(); cnd != nil {
-			name := cnd.GetConditionId()
-			if name == "" {
-				name = cnd.GetBuiltin().String()
-			}
-			tup.Condition = &authztypes.TupleConditionRef{
-				Name:    name,
-				Context: structToMap(cnd.GetContext()),
-			}
-		}
-		out = append(out, tup)
-	}
-	return out
-}
-
-func structToMap(s *structpb.Struct) map[string]any {
-	if s == nil {
-		return nil
-	}
-	return s.AsMap()
 }

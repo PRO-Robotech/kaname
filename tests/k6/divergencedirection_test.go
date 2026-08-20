@@ -45,6 +45,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/internal/gitenv"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 )
 
 const shadowProbeRel = "deploy/load-tests/iam-shadow-divergence-probe.sh"
@@ -136,11 +137,19 @@ func repoRootForK6(t *testing.T) string {
 func TestR7_4_12_DivergenceIsSplitByDirectionAndByType(t *testing.T) {
 	// Форма ключа взята у сравнителя дословно:
 	// `<вопрос>|<тип объекта>|<отношение>|движок=<да|нет>`.
+	// Разделитель берётся У САМОГО СРАВНИТЕЛЯ, а не выписывается здесь.
+	//
+	// Выписанный был бы третьим местом об одном предмете — после сравнителя и
+	// прибора — и разошёлся бы молча: фикстура продолжала бы собираться прежним
+	// разделителем, разбор видел бы в ней ОДИН класс вместо трёх, и проба
+	// упала бы, называя виновником прибор. Так и случилось при смене
+	// разделителя с пробела: ключ класса содержит пробелы, и поле было
+	// неразбираемо by construction.
 	breakdown := strings.Join([]string{
 		"Check|iam_role|v_get|движок=false×7",
 		"Check|iam_group|v_get|движок=true×3",
 		"Check|iam_access_binding|v_delete|движок=true×1",
-	}, " ")
+	}, shadowverdict.ClassBreakdownSeparator)
 
 	out, code := splitClassesUnderTest(t, breakdown)
 	if code != 0 {

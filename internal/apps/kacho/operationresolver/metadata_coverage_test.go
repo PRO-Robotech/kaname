@@ -99,7 +99,11 @@ var unresolvedMetadata = []string{
 	"RevokeSAKeyMetadata",
 	"RevokeUserTokenMetadata",
 	"UpsertFromIdentityMetadata",
-	"WriteTuplesMetadata",
+	// Здесь стояла `WriteTuplesMetadata`. Запись снята вместе со своим предметом
+	// (#788): RPC `InternalAuthorizeService.WriteTuples` удалён с контракта, тип
+	// метаданных перестал существовать — и перепись назвала запись истёкшей сама,
+	// ровно как обещает её шапка. Это и есть самоистечение: разрешение не пережило
+	// того, что им прощалось.
 }
 
 // TestEveryOperationMetadataIsResolvedOrPinned — объявленный тип метаданных либо

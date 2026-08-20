@@ -15,13 +15,14 @@ kacho-loadbalancer) общаются с kacho-iam:
 - `ListPermissions` — catalog-mode listing (все permissions из IAM-domain).
 - `PollSubjectChanges(since_id, limit)` — для api-gateway authz-cache
   invalidation poll (см. [`29-openfga-check.md`](29-openfga-check.md)).
-- `WriteCreatorTuple(user, resource_type, resource_id)` — post-creation
-  FGA-tuple emit для vpc/compute/nlb.
+- `RegisterResource` / `UnregisterResource` — постановка и снятие иерархического
+  указателя для ресурса чужого сервиса; намерение ложится в журнал
+  `kacho_iam.fga_outbox`, дренаж применяет.
 
 **Use-cases:**
 - api-gateway: validate JWT → LookupSubject → resolve principal → propagate to backend.
 - kacho-vpc: per-RPC authz gate через Check.
-- kacho-compute: after-Create → WriteCreatorTuple для нового instance.
+- kacho-compute: after-Create → RegisterResource для нового instance.
 
 **Ограничения:**
 - Internal-only (запрет #6).
@@ -38,7 +39,15 @@ kacho-loadbalancer) общаются с kacho-iam:
 | `Check`                 | sync             | per-RPC authz gate (Cascade + FGA + OPA).       |
 | `ListPermissions`       | sync             | Catalog all permissions (debug).                |
 | `PollSubjectChanges`    | sync             | Drain subject_change_outbox (since_id ledger).  |
-| `WriteCreatorTuple`     | async (sync-LRO) | Post-create hierarchy tuple emit (kacho-vpc/compute peer-call). |
+| `RegisterResource`      | sync             | Постановка иерархического указателя через журнал. |
+| `UnregisterResource`    | sync             | Снятие того же указателя.                        |
+
+> [!note] Здесь стоял `WriteCreatorTuple` — RPC снят (#788)
+> Он писал кортёж создателя в движок НАПРЯМУЮ, мимо журнала `kacho_iam.fga_outbox`,
+> поэтому проекция `relation_fact` (инвариант миграции 0098) его не увидела бы никогда.
+> Вызывающих не осталось ни одного: все пять соседей ушли на `RegisterResource`, у
+> которого намерение сперва ложится в журнал. Имя держит надгробие `retiredRPCSurface`
+> в `internal/repohygiene` — вернуть его молча нельзя.
 
 ## Sequence diagram — LookupSubject (api-gateway flow)
 
@@ -94,7 +103,7 @@ sequenceDiagram
     VPC->>VPC: proceed with mutation
 ```
 
-## Sequence diagram — WriteCreatorTuple (kacho-vpc post-create)
+## Sequence diagram — RegisterResource (kacho-vpc post-create)
 
 ```mermaid
 sequenceDiagram
@@ -102,14 +111,15 @@ sequenceDiagram
     participant VPC as kacho-vpc Network.Create
     participant DB_VPC
     participant IAM as InternalIAMService :9091
-    participant FGA as OpenFGA via fga_outbox
+    participant OB as kacho_iam.fga_outbox
+    participant FGA as OpenFGA
 
     VPC->>DB_VPC: INSERT vpc_networks → vpn_xxx
-    VPC->>IAM: WriteCreatorTuple {user:usr_alice, resource_type:vpc_network, resource_id:vpn_xxx}
-    IAM->>FGA: WriteTuples [(user:usr_alice, creator, vpc_network:vpn_xxx)]
-    FGA-->>IAM: OK
-    IAM-->>VPC: Operation done=true
-    Note over VPC: Теперь Alice — creator → имеет admin relation through FGA model
+    VPC->>IAM: RegisterResource {subject:user:usr_alice, object:vpc_network:vpn_xxx, ...}
+    IAM->>OB: INSERT намерение (writer-tx)
+    IAM-->>VPC: OK
+    OB->>FGA: дренаж применяет кортёж
+    Note over VPC: доступ материализуется в ограниченном окне;<br/>Operation.done его НЕ ждёт (ban #9)
 ```
 
 ## Конфигурация
@@ -136,11 +146,6 @@ grpcurl -plaintext -d '{
   "external_id":"ory-sub-xyz","email":"alice@example.com","display_name":"Alice"
 }' localhost:9091 kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 
-# WriteCreatorTuple (peer-call от vpc).
-grpcurl -plaintext -d '{
-  "user_id":"usr_alice","resource_type":"vpc_network","resource_id":"vpn_xxx"
-}' localhost:9091 kacho.cloud.iam.v1.InternalIAMService/WriteCreatorTuple
-
 # PollSubjectChanges (api-gateway cache invalidation poll).
 grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
   kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges
@@ -155,9 +160,10 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
   обработчика нет; имя не воспроизводится как координата.
 - **Check delegation:** narrow port `authorizer` over `*service.AuthorizeService`.
 - **PollSubjectChanges:** narrow port `subjectChanger` over `*service.SubjectChangeService`.
-- **WriteCreatorTuple:** narrow port `relationWriter` over `*clients.OpenFGAHTTPClient`
-  (соседние порты того же обработчика — `Authorizer`, `subjectChanger`, `relationWriteGate`,
-  `resourceRegistrar`, `roleCompiledReader`).
+- **Порты обработчика:** `Authorizer`, `subjectChanger`, `relationWriteGate`,
+  `resourceRegistrar`, `roleCompiledReader`. Порта ЗАПИСИ в движок среди них нет:
+  `relationWriter` снят вместе с `WriteCreatorTuple` (#788) намеренно — тип без него
+  нельзя переоткрыть одной строкой вызова.
 - **Auth-interceptor:** реализован на стороне api-gateway (валидация JWT +
   propagation principal в backend).
 
@@ -165,9 +171,10 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 
 - **gRPC-direct, не restmux** — иначе loop через api-gateway.
 - **LookupSubject — hot-path** — рекомендуется api-gateway cache на ~30s.
-- **WriteCreatorTuple — best-effort** — failure НЕ rollback'ит Create в
-  vpc/compute (peer-call после COMMIT); потеря tuple восстанавливается
-  через прямой `WriteTuples` по внутреннему слушателю (см. [`28-relationhook.md`](28-relationhook.md)).
+- **Указатель материализуется eventually** — `RegisterResource` кладёт намерение в
+  журнал, применяет дренаж; `Operation.done` видимости кортежа НЕ ждёт (ban #9).
+  Не доехавший указатель восстанавливает реконсайлер, а не ручная запись в движок:
+  прямой путь снят вместе с `WriteTuples` (#788) — см. [`28-relationhook.md`](28-relationhook.md).
 - **Check без principal context** — caller обязан передать subject параметром.
 
 ## Связанные компоненты

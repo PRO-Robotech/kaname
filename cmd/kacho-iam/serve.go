@@ -322,7 +322,7 @@ func runServe(cfg config.Config) error {
 	//     it is also unreachable via the api-gateway, which carries no REST route
 	//     for it). Config.Validate additionally refuses to boot a production binary
 	//     whose mint is enabled with an empty list.
-	// The fga-proxy writes (Register/Unregister/WriteCreatorTuple) are NOT in the
+	// The fga-proxy writes (Register/Unregister) are NOT in the
 	// gateway-only set and stay gated in-handler by RelationWriteGate (fga_writer)
 	// — their callers are vpc/compute/nlb module SAs, not the gateway.
 	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
@@ -958,6 +958,16 @@ func runServe(cfg config.Config) error {
 	})
 	tasks = append(tasks, func() error {
 		runSubjectChangeOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		return nil
+	})
+	// Журнал аудита. Дренажа у него НЕТ и в этой фазе не будет — приёмника не
+	// существует, — поэтому скан здесь делает не «наблюдение за доставкой», а
+	// единственную вещь, которую вообще можно сделать честно: делает молчание
+	// слышимым. Без него «ноль доставленных за всю жизнь очереди» не производит
+	// ни одна величина. Решение и предикат пересмотра — в реестре отступлений
+	// iam, audit-outbox-has-no-receiver.md.
+	tasks = append(tasks, func() error {
+		runAuditOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
 	// Возврат отравленных строк очереди tuple'ов в работу. Дренаж травит отказ

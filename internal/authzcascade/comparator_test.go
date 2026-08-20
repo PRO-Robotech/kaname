@@ -108,6 +108,28 @@ func (s *stubComparator) Ask(_ context.Context, subject, objectType, objectID, r
 	}
 }
 
+// Decides / Verdict — рубильник, стоящий в позиции «движок» по КАЖДОМУ типу.
+//
+// Это положительный контроль по умолчанию: пробы этого файла утверждают прежний
+// путь, и он обязан остаться прежним, пока тип не назван переключённым. `Verdict`
+// на таком дублёре — ошибка сборки пробы, а не тихий ответ: вызов, которого
+// проба не ожидала, обязан назвать себя, а не вернуть ноль.
+func (s *stubComparator) Decides(string) bool { return false }
+
+func (s *stubComparator) VerdictMany(
+	context.Context, string, string, []string, string,
+	map[string]any, func(context.Context) ([]bool, bool),
+) ([]bool, error) {
+	panic("stubComparator: вердикт формы о странице спрошен там, где рубильник стоит в позиции «движок»")
+}
+
+func (s *stubComparator) Verdict(
+	context.Context, string, string, string, string,
+	map[string]any, func(context.Context) (bool, bool),
+) (bool, error) {
+	panic("stubComparator: вердикт формы спрошен там, где рубильник стоит в позиции «движок»")
+}
+
 func (s *stubComparator) Unaskable(reason, objectType, relation string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

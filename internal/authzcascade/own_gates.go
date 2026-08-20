@@ -163,6 +163,19 @@ func (c *Client) SecondChanceReachable() bool {
 // исходом. Почему это стоит здесь, а не у пятнадцати стражей поимённо, —
 // comparator.go.
 func (c *Client) Check(ctx context.Context, subject, relation, object string) (allowed bool, err error) {
+	// ПЕРЕКЛЮЧЁННЫЙ ТИП: решает форма, движок спрашивается рядом.
+	//
+	// Прежний путь при этом не исполняется вовсе — ни одним слагаемым. Оставить
+	// движку хотя бы одно значило бы, что «источник вердикта для этого типа —
+	// форма» неправда, и неправда молчаливая: ответ вызывающему выглядел бы
+	// исправным.
+	if ref, decided := c.decidesByForm(object); decided && subject != "" {
+		return c.verdictByForm(ctx, subject, ref, relation, nil,
+			func(sctx context.Context) (bool, bool) {
+				a, e := c.checkCore(sctx, subject, relation, object)
+				return a, e == nil
+			})
+	}
 	settle := c.present(ctx, subject, relation, object, nil)
 	defer func() { settle(allowed, err == nil) }()
 	return c.checkCore(ctx, subject, relation, object)
@@ -196,6 +209,14 @@ func (c *Client) checkCore(ctx context.Context, subject, relation, object string
 func (c *Client) CheckWithContext(
 	ctx context.Context, subject, relation, object string, condCtx map[string]any,
 ) (allowed bool, err error) {
+	// ПЕРЕКЛЮЧЁННЫЙ ТИП — см. Check выше.
+	if ref, decided := c.decidesByForm(object); decided && subject != "" {
+		return c.verdictByForm(ctx, subject, ref, relation, condCtx,
+			func(sctx context.Context) (bool, bool) {
+				a, e := c.checkWithContextCore(sctx, subject, relation, object, condCtx)
+				return a, e == nil
+			})
+	}
 	settle := c.present(ctx, subject, relation, object, condCtx)
 	defer func() { settle(allowed, err == nil) }()
 	return c.checkWithContextCore(ctx, subject, relation, object, condCtx)

@@ -70,8 +70,50 @@ func (c *Client) BatchCheckWithContext(
 		return out, nil
 	}
 
+	// ПЕРЕКЛЮЧЁННЫЕ ТИПЫ СТРАНИЦЫ уходят форме, остальные — прежним путём.
+	//
+	// Страница разбирается ПО ТИПУ, а не по типу первого элемента: смешанная
+	// страница законна, и молчаливое взятие одного типа за все отдало бы половину
+	// её объектов источнику, который для них не выбран. Ответ собирается по
+	// позициям вызывающего.
+	engineObjects, engineIdx, err := c.decideSwitchedPart(ctx, subject, relation, objects, condCtx, out)
+	if err != nil {
+		return nil, err
+	}
+	if len(engineObjects) == 0 {
+		return out, nil
+	}
+	if len(engineObjects) < len(objects) {
+		// Часть страницы уже решена формой. Дальше движку предъявляется ТОЛЬКО
+		// его часть, и сравнению — тоже: предъявить всю страницу значило бы
+		// посчитать решения формы вторично, движковыми.
+		return c.batchThroughEngine(ctx, subject, relation, engineObjects, engineIdx, condCtx, out)
+	}
+
 	settle := c.presentPage(ctx, subject, relation, objects, condCtx)
 	defer func() { settle(out, err == nil) }()
+
+	out, err = c.batchThroughEngineRaw(ctx, subject, relation, objects, condCtx)
+	return out, err
+}
+
+// batchThroughEngineRaw — прежний путь страницы БЕЗ предъявления сравнению.
+//
+// Выделен затем, что теперь у него два вызывающих: обычная батчевая дверь и
+// теневой вопрос движку на переключённом типе. Оба обязаны спрашивать движок
+// ОДИНАКОВО — иначе сверялись бы два разных вопроса, и расхождение писалось бы
+// между способами спросить, а не между формами.
+//
+// Предъявление сравнению стоит у ВЫЗЫВАЮЩЕГО: у обычной двери решения движковые
+// и предъявляются как движковые, у теневого вопроса — сведение уже идёт через
+// вердикт формы, и второе предъявление посчитало бы те же решения дважды.
+func (c *Client) batchThroughEngineRaw(
+	ctx context.Context, subject, relation string, objects []string, condCtx map[string]any,
+) ([]bool, error) {
+	out := make([]bool, len(objects))
+	if len(objects) == 0 {
+		return out, nil
+	}
 
 	// Split by what this request already knows. Positions are kept so the answer
 	// can be reassembled in the caller's order — a batched answer that is right
@@ -109,7 +151,8 @@ func (c *Client) BatchCheckWithContext(
 
 	for _, pos := range missIdx {
 		// Ядро, а НЕ публичная дверь: страница уже предъявлена сравнению целиком
-		// выше, и повторный проход через дверь посчитал бы те же решения вторично.
+		// вызывающим, и повторный проход через дверь посчитал бы те же решения
+		// вторично.
 		allowed, cerr := c.checkWithContextCore(ctx, subject, relation, objects[pos], condCtx)
 		if cerr != nil {
 			return nil, cerr
@@ -169,4 +212,97 @@ type batchContextualChecker interface {
 // identically.
 func errMisalignedBatch(got, want int) error {
 	return fmt.Errorf("authzcascade: relation store answered %d of %d batched checks", got, want)
+}
+
+// decideSwitchedPart отвечает формой ту часть страницы, чьи типы переключены, и
+// возвращает остаток — объекты, решение по которым принимает движок.
+//
+// Группировка по типу, а не «тип первого элемента»: страница законно бывает
+// смешанной, и один источник за оба типа сделал бы заявление о переключении
+// ложным для половины её объектов, не подав ни одного признака.
+func (c *Client) decideSwitchedPart(
+	ctx context.Context, subject, relation string, objects []string, condCtx map[string]any,
+	out []bool,
+) (engineObjects []string, engineIdx []int, err error) {
+	if c == nil || c.compare == nil || subject == "" {
+		return objects, allIndexes(len(objects)), nil
+	}
+	// byType сохраняет позиции вызывающего: ответ формы приходит в порядке
+	// заданных идентификаторов, и разложить его обратно можно только по ним.
+	type group struct {
+		ids []string
+		at  []int
+	}
+	var order []string
+	byType := map[string]*group{}
+	for i, object := range objects {
+		ref, decided := c.decidesByForm(object)
+		if !decided {
+			engineObjects = append(engineObjects, object)
+			engineIdx = append(engineIdx, i)
+			continue
+		}
+		g, ok := byType[ref.Type]
+		if !ok {
+			g = &group{}
+			byType[ref.Type] = g
+			order = append(order, ref.Type)
+		}
+		g.ids = append(g.ids, ref.ID)
+		g.at = append(g.at, i)
+	}
+	for _, objectType := range order {
+		g := byType[objectType]
+		verdicts, verr := c.compare.VerdictMany(ctx, subject, objectType, g.ids, relation, condCtx,
+			func(sctx context.Context) ([]bool, bool) {
+				items := make([]string, len(g.ids))
+				for i, id := range g.ids {
+					items[i] = objectType + ":" + id
+				}
+				a, e := c.batchThroughEngineRaw(sctx, subject, relation, items, condCtx)
+				return a, e == nil
+			})
+		if verr != nil {
+			// Форма не ответила — это недоступность, а не пустая страница.
+			// Отдать частичный ответ значило бы отфильтровать список вердиктом,
+			// которого никто не выносил.
+			return nil, nil, verr
+		}
+		if len(verdicts) != len(g.ids) {
+			return nil, nil, errMisalignedBatch(len(verdicts), len(g.ids))
+		}
+		for j, pos := range g.at {
+			out[pos] = verdicts[j]
+		}
+	}
+	return engineObjects, engineIdx, nil
+}
+
+// allIndexes — позиции всей страницы, когда переключённых типов на ней нет.
+func allIndexes(n int) []int {
+	idx := make([]int, n)
+	for i := range idx {
+		idx[i] = i
+	}
+	return idx
+}
+
+// batchThroughEngine отвечает ОСТАТОК страницы прежним путём и раскладывает
+// ответ по позициям вызывающего.
+func (c *Client) batchThroughEngine(
+	ctx context.Context, subject, relation string, objects []string, at []int,
+	condCtx map[string]any, out []bool,
+) (result []bool, err error) {
+	settle := c.presentPage(ctx, subject, relation, objects, condCtx)
+	part := make([]bool, len(objects))
+	defer func() { settle(part, err == nil) }()
+
+	part, err = c.batchThroughEngineRaw(ctx, subject, relation, objects, condCtx)
+	if err != nil {
+		return nil, err
+	}
+	for j, pos := range at {
+		out[pos] = part[j]
+	}
+	return out, nil
 }

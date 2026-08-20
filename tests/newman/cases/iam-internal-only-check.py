@@ -23,7 +23,7 @@ Coverage:
   IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT    — InternalIAMService.LookupSubject → 404 mux-miss на external
   IAM-INT-NEG-EXT-IAM-CHECK            — InternalIAMService.Check → 404 mux-miss на external
   IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS
-                                       — WriteTuples / SessionRevocations.{Revoke,IsRevoked} /
+                                       — ReadTuples / SessionRevocations.{Revoke,IsRevoked} /
                                          ForceLogout / InternalUserService.Get: НИКОГДА не 2xx на
                                          external + пин к absent-path контролю. НЕ доказывает
                                          route-изоляцию (см. «TWO FAMILIES» ниже) и прямо это заявляет
@@ -143,7 +143,7 @@ external TLS :8443):
   is therefore the MESSAGE now, not the content type; a mux miss here is
   byte-identical to the nonsense-path control fired at the same listener.
 
-  UNBOUND fully-qualified paths — InternalAuthorizeService/WriteTuples,
+  UNBOUND fully-qualified paths — InternalAuthorizeService/ReadTuples,
   InternalSessionRevocationsService/{Revoke,IsRevoked},
   InternalIAMService/ForceLogout, and GET /iam/v1/internal/users/{id}:
       403 on ALL THREE listeners, byte-identical to `/zzz`.
@@ -184,7 +184,14 @@ CASES = []
 # Unbound REST paths for Internal* RPCs that carry NO `google.api.http` binding.
 #
 # Only two InternalIAMService RPCs are annotated (`:lookupSubject`, `:check`);
-# WriteTuples / SessionRevocations.Revoke / .IsRevoked / ForceLogout are not.
+# ReadTuples / SessionRevocations.Revoke / .IsRevoked / ForceLogout are not.
+#
+# The first of the four used to be InternalAuthorizeService/WriteTuples. That RPC
+# was retired from the contract (#788, zero callers), and a probe aimed at a
+# method that no longer exists asserts nothing: it would pass because there is no
+# such method, not because ban #6 holds — the exact defect this block's own note
+# below describes as "the form of an isolation check and none of its substance".
+# ReadTuples is its live sibling on the same service, equally unbound.
 # grpc-gateway is generated with `generate_unbound_methods=true`, so the route
 # these four actually answer on is the fully-qualified default form below — and
 # it is served ONLY by the cluster-internal sub-mux (ban #6).
@@ -196,7 +203,7 @@ CASES = []
 # cases, which target this default form for exactly this reason.
 # ---------------------------------------------------------------------------
 
-_UNBOUND_WRITE_TUPLES = "/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples"
+_UNBOUND_READ_TUPLES = "/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples"
 _UNBOUND_SR_REVOKE = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke"
 _UNBOUND_SR_ISREVOKED = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
 _UNBOUND_FORCE_LOGOUT = "/kacho.cloud.iam.v1.InternalIAMService/ForceLogout"
@@ -392,9 +399,9 @@ CASES.append(Case(
 # ===========================================================================
 
 _UNBOUND_PROBES = [
-    ("EXT-WRITETUPLES", "InternalAuthorizeService.WriteTuples", _UNBOUND_WRITE_TUPLES,
-     {"writes": [{"subject": "user:usr00000000000000abc", "relation": "viewer",
-                  "object": "account:acc00000000000abc"}]}),
+    ("EXT-READTUPLES", "InternalAuthorizeService.ReadTuples", _UNBOUND_READ_TUPLES,
+     {"subjectFilter": "user:usr00000000000000abc", "relationFilter": "viewer",
+      "objectFilter": "account:acc00000000000abc", "pageSize": 10}),
     ("EXT-SR-REVOKE", "InternalSessionRevocationsService.Revoke", _UNBOUND_SR_REVOKE,
      {"userId": "usr00000000000000abc", "tokenJti": "leak-jti", "reason": "x"}),
     ("EXT-SR-ISREVOKED", "InternalSessionRevocationsService.IsRevoked", _UNBOUND_SR_ISREVOKED,

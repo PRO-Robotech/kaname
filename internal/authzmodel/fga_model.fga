@@ -145,13 +145,21 @@ type user
 
 type service_account
 
-type federated_subject
-
 # group — subject-grouping type. `group#member` usersets are accepted as
 # direct subjects on hierarchy + resource relations.
+#
+# MEMBERSHIP IS ONE LEVEL DEEP, and the model says so because the schema does:
+# `group_members_type_check` (0001_initial.sql) admits `user` and
+# `service_account` only. A group is never a member of a group, and no external
+# principal type exists — there is no producer for one anywhere in the tree.
+# Listing either here would promise a capability that no input can reach: the
+# insert rejects it before any row is written. Decision and both outcomes:
+# services/iam/docs/engineering/architecture/group-membership-is-one-level.md
+# (kacho#734). The two declarations are held together by the gate
+# TestGroupMemberKindsAgreeBetweenModelAndSchema.
 type group
   relations
-    define member: [user, service_account, federated_subject, group#member]
+    define member: [user, service_account]
 
 # ---------------------------------------------------------------------------
 # Cluster — singleton "cluster_kacho_root". Write-side enforcement rejects

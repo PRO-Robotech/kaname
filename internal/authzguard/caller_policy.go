@@ -34,10 +34,10 @@
 // would couple iam to the gateway's relation map. So iam does NO ReBAC and trusts
 // NO metadata here — it only verifies the caller IS the gateway for admin RPCs.
 //
-// The fga-proxy write RPCs (RegisterResource / UnregisterResource /
-// WriteCreatorTuple) are NOT gateway-only — their callers are vpc/compute/nlb
-// MODULE SAs — and stay gated IN-HANDLER by RelationWriteGate (fga_writer),
-// unchanged. They satisfy the floor like any other module RPC.
+// The fga-proxy write RPCs (RegisterResource / UnregisterResource) are NOT
+// gateway-only — their callers are vpc/compute/nlb MODULE SAs — and stay gated
+// IN-HANDLER by RelationWriteGate (fga_writer), unchanged. They satisfy the
+// floor like any other module RPC.
 package authzguard
 
 import (
@@ -64,16 +64,21 @@ const gatewayServiceName = "api-gateway"
 // NOT in this set (any verified module — floor only):
 //   - InternalIAMService/{Check,LookupSubject,PollSubjectChanges} — hot-path
 //     service→service RPCs.
-//   - InternalSessionRevocationsService/IsRevoked — the gateway's own hot-path
-//     lookup, runs before per-user authz can possibly run (chicken-and-egg).
+//   - InternalSessionRevocationsService/IsRevoked — заведено под собственный
+//     запрос края, идущий до того, как может пойти пер-пользовательская
+//     проверка (курица и яйцо). ВНИМАНИЕ: этого вызывающего в дереве СЕГОДНЯ
+//     НЕТ (#797) — у края нет метода чтения в клиенте. То есть послаблению
+//     нечего исключать; оно оставлено до решения по #797, а не потому, что
+//     предмет есть. Исчезнет метод — снимать и эту строку.
 //   - InternalUserService/Get — service→service lookup.
 //   - Hydra hook callbacks are not in this set and cannot be: they are served
 //     over HTTP by internal/handler/iamhooks, not as gRPC methods. The gRPC
 //     declaration that once mirrored them (InternalIamHooksService) had no
 //     implementation and was retired — see retiredRPCSurface in
 //     internal/repohygiene.
-//   - the fga-proxy writes InternalIAMService/{RegisterResource,UnregisterResource,
-//     WriteCreatorTuple} — gated in-handler by RelationWriteGate (module SAs).
+//   - the fga-proxy writes InternalIAMService/{RegisterResource,
+//     UnregisterResource} — gated in-handler by RelationWriteGate (module SAs).
+//     The third one, WriteCreatorTuple, was retired with zero callers (#788).
 func GatewayFrontedInternalRPCs() []string {
 	return []string{
 		// InternalClusterService — cluster admin RBAC (admin UI).
@@ -109,7 +114,8 @@ func GatewayFrontedInternalRPCs() []string {
 		"/kacho.cloud.iam.v1.InternalLimitService/Update",
 		"/kacho.cloud.iam.v1.InternalLimitService/Delete",
 		// InternalAuthorizeService — tuple/model administration (admin tooling).
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
+		// WriteTuples stood here and is gone: the RPC was retired (#788) — the
+		// service is read-only with respect to the relation store now.
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReloadModel",
 		"/kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",

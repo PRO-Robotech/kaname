@@ -163,17 +163,27 @@ var askingSites = map[string]lane{
 	"internal/apps/kacho/api/internal_iam/force_logout.go:requireSystemAdmin":  laneClusterOnly,
 	"internal/apps/kacho/api/cluster/admin_authz.go:requireClusterSystemAdmin": laneClusterOnly,
 	"internal/apps/kacho/api/authorize/whoami.go:Execute":                      laneClusterOnly,
-	"internal/service/authorize_service.go:check":                              laneEdge,
-	"internal/service/authorize_service.go:checkRelationWire":                  laneEdge,
-	"internal/service/authorize_service.go:structuralFallback":                 laneEdge,
-	"internal/apps/kacho/api/authorize/handler.go:Check":                       laneEdge,
-	"internal/apps/kacho/seed/verify_gate.go:VerifyRelationSatisfiesAction":    laneDelivery,
-	"internal/service/authorize_service.go:ListObjects":                        laneEnumeration,
-	"internal/service/authorize_service.go:ListSubjects":                       laneEnumeration,
-	"internal/service/authorize_service.go:ExpandRelations":                    laneEnumeration,
-	"internal/apps/kacho/api/access_binding/expand_access.go:Execute":          laneEnumeration,
-	"internal/apps/kacho/api/authorize/handler.go:ListObjects":                 laneEnumeration,
-	"internal/apps/kacho/api/authorize/handler.go:ListSubjects":                laneEnumeration,
+	// engineVerdict — ОКОНЧАТЕЛЬНЫЙ вердикт движковой композиции края.
+	//
+	// Заменил здесь `check`, из которого выделен, когда у вопроса появился
+	// второй вызывающий: теневой вопрос движку на переключённом типе. Полоса та
+	// же — край: тот же вопрос тому же движку, заданный из двух мест. Разные
+	// полосы у одного вопроса означали бы, что сверяются два разных вопроса.
+	//
+	// Запись `check` снята не «заодно»: перепись сама её и потребовала снять —
+	// место, которое больше ничего не спрашивает, начинает ручаться за код,
+	// которого нет.
+	"internal/service/authorize_service.go:engineVerdict":                   laneEdge,
+	"internal/service/authorize_service.go:checkRelationWire":               laneEdge,
+	"internal/service/authorize_service.go:structuralFallback":              laneEdge,
+	"internal/apps/kacho/api/authorize/handler.go:Check":                    laneEdge,
+	"internal/apps/kacho/seed/verify_gate.go:VerifyRelationSatisfiesAction": laneDelivery,
+	"internal/service/authorize_service.go:ListObjects":                     laneEnumeration,
+	"internal/service/authorize_service.go:ListSubjects":                    laneEnumeration,
+	"internal/service/authorize_service.go:ExpandRelations":                 laneEnumeration,
+	"internal/apps/kacho/api/access_binding/expand_access.go:Execute":       laneEnumeration,
+	"internal/apps/kacho/api/authorize/handler.go:ListObjects":              laneEnumeration,
+	"internal/apps/kacho/api/authorize/handler.go:ListSubjects":             laneEnumeration,
 	// The read half of the reconciler's read-modify-write: what is already delivered on the
 	// object, so the next round writes only what is missing. The subject of the question IS
 	// delivery, and it reads at HIGHER_CONSISTENCY for exactly that reason — a replica-lagged

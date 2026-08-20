@@ -56,6 +56,21 @@ func (g *gatedAsker) Allowed(ctx context.Context, _, _, _, _ string, _ map[strin
 	return g.allow, nil
 }
 
+// AllowedMany — тот же затвор и тот же ответ по каждому объекту: дублёр,
+// отвечающий на страничный вопрос легче, чем на точечный, обходил бы затвор.
+func (g *gatedAsker) AllowedMany(ctx context.Context, _, _ string, objectIDs []string, _ string,
+	_ map[string]any,
+) ([]bool, error) {
+	if err := g.wait(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]bool, len(objectIDs))
+	for i := range out {
+		out[i] = g.allow
+	}
+	return out, nil
+}
+
 func (g *gatedAsker) Objects(ctx context.Context, _, _ string, _ []string, _ int) ([]string, bool, error) {
 	if err := g.wait(ctx); err != nil {
 		return nil, false, err

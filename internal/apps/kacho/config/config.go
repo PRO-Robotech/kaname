@@ -31,6 +31,8 @@ type Config struct {
 	APIServer  APIServerConfig  `mapstructure:"api-server"`
 	Repository RepositoryConfig `mapstructure:"repository"`
 	AuthN      AuthNConfig      `mapstructure:"authn"`
+	// AuthZ — кто принимает решение о доступе (см. verdict_source.go).
+	AuthZ AuthZConfig `mapstructure:"authz"`
 	// OpenFGA is configured from KACHO_IAM_OPENFGA_* env vars in the composition
 	// root (cmd/kacho-iam), not from this YAML. The Prometheus /metrics listener
 	// is real — see APIServer.MetricsEndpoint.

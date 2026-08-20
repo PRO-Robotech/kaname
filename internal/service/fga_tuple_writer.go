@@ -11,13 +11,17 @@
 // каждое мимо `kacho_iam.fga_outbox`. Мёртвый обход опаснее живого — он не
 // проявляется ничем, поэтому и не чинится, — и снят вместе со своими пробами.
 //
-// ОСТАВШЕЕСЯ МЕСТО ЗАПИСИ — ОДНО, И ОНО ОБЪЯВЛЕНО ОБХОДОМ. `WriteRaw` обслуживает
-// административный `InternalAuthorizeService.WriteTuples`: кортеж уходит в движок
-// НАПРЯМУЮ, минуя журнал, поэтому проекция `relation_fact` (миграция 0098) его не
-// увидит никогда. Вызывающих в дереве ноль; терминальный исход — снять RPC, что
-// ломает контракт proto и идёт своим изменением. До тех пор место стоит в
-// ведомости гейта `tools/authzenginecensus/engineplaces/journaldoor_test.go`
-// как объявленное исключение с предикатом снятия.
+// МЕСТ ЗАПИСИ ЗДЕСЬ БОЛЬШЕ НЕТ — ТИП ЧИТАЮЩИЙ. `WriteRaw` обслуживал
+// административный `InternalAuthorizeService.WriteTuples` и уводил кортеж в движок
+// НАПРЯМУЮ, мимо журнала, поэтому проекция `relation_fact` (миграция 0098) его не
+// увидела бы никогда. RPC снят целиком (#788) — вызывающих у него не было ни
+// одного, — и вместе с ним снята дверь: ведомость гейта
+// `tools/authzenginecensus/engineplaces/journaldoor_test.go` больше не несёт
+// объявленного исключения на этот файл, а сам гейт покраснел бы, если бы несла.
+//
+// Порт сужен до чтения НАМЕРЕННО. Запись кортежа выражается строкой
+// `kacho_iam.fga_outbox`, и другого способа у сервиса быть не должно: тип, у
+// которого нет метода записи, нельзя переоткрыть одной строкой вызова.
 package service
 
 import (
@@ -28,33 +32,21 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
-// RelationWriter — port-iface narrowed to writer-needs.
-type RelationWriter interface {
-	WriteConditionalTuples(ctx context.Context, writes, deletes []authztypes.ConditionalTuple) error
+// RelationReader — port-iface narrowed to the read-only needs of
+// InternalAuthorizeService. Запись в движок этим портом невыразима.
+type RelationReader interface {
 	ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error)
 	GetStoreInfo(ctx context.Context) (authztypes.StoreInfo, error)
 }
 
 // RelationProjector — service.
 type RelationProjector struct {
-	relations RelationWriter
+	relations RelationReader
 }
 
 // NewRelationProjector — builder.
-func NewRelationProjector(relations RelationWriter) *RelationProjector {
+func NewRelationProjector(relations RelationReader) *RelationProjector {
 	return &RelationProjector{relations: relations}
-}
-
-// WriteRaw — pass-through used by InternalAuthorizeService.WriteTuples
-// admin RPC.
-func (w *RelationProjector) WriteRaw(ctx context.Context, writes, deletes []authztypes.ConditionalTuple) (inserted, deleted int, err error) {
-	if w.relations == nil {
-		return 0, 0, fmt.Errorf("fga: writer not configured")
-	}
-	if err := w.relations.WriteConditionalTuples(ctx, writes, deletes); err != nil {
-		return 0, 0, err
-	}
-	return len(writes), len(deletes), nil
 }
 
 // ReadRaw — used by InternalAuthorizeService.ReadTuples.

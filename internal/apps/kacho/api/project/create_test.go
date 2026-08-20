@@ -194,6 +194,16 @@ type fakeProjRepo struct {
 	currentAccID domain.AccountID
 	fgaEmitted   []service.RelationTuple
 	fgaDeleted   []service.RelationTuple
+
+	// Выдачи по области и их ведомости выпущенных кортежей — см.
+	// delete_bindings_test.go. Дублёр ХРАНИТ их, а не глотает: репозиторий,
+	// молча принимающий дренаж, сделал бы невидимым ровно тот дефект, ради
+	// которого его подставляют.
+	bindingsByScope       map[string][]domain.AccessBinding
+	bindingLedger         map[domain.AccessBindingID][]access_binding.RelationTuple
+	deletedBindingIDs     []domain.AccessBindingID
+	bindingsInexhaustible bool
+	commitCount           int
 }
 
 func newFakeProjRepo() *fakeProjRepo { return &fakeProjRepo{} }
@@ -240,9 +250,11 @@ func (r *fakeProjReader) Users() user.ReaderIface                      { return 
 func (r *fakeProjReader) ServiceAccounts() service_account.ReaderIface { return nil }
 func (r *fakeProjReader) Groups() group.ReaderIface                    { return nil }
 func (r *fakeProjReader) Roles() role.ReaderIface                      { return nil }
-func (r *fakeProjReader) AccessBindings() access_binding.ReaderIface   { return nil }
-func (r *fakeProjReader) Commit(context.Context) error                 { return nil }
-func (r *fakeProjReader) Rollback(context.Context) error               { return nil }
+func (r *fakeProjReader) AccessBindings() access_binding.ReaderIface {
+	return &fakeProjABRdr{parent: r.parent}
+}
+func (r *fakeProjReader) Commit(context.Context) error   { return nil }
+func (r *fakeProjReader) Rollback(context.Context) error { return nil }
 
 type fakeProjWriter struct {
 	fakeProjReader
@@ -257,17 +269,26 @@ func (w *fakeProjWriter) Users() user.ReaderIface                      { return 
 func (w *fakeProjWriter) ServiceAccounts() service_account.ReaderIface { return nil }
 func (w *fakeProjWriter) Groups() group.ReaderIface                    { return nil }
 func (w *fakeProjWriter) Roles() role.ReaderIface                      { return nil }
-func (w *fakeProjWriter) AccessBindings() access_binding.ReaderIface   { return nil }
-func (w *fakeProjWriter) Commit(context.Context) error                 { return nil }
-func (w *fakeProjWriter) Rollback(context.Context) error               { return nil }
+func (w *fakeProjWriter) AccessBindings() access_binding.ReaderIface {
+	return &fakeProjABRdr{parent: w.parent}
+}
+func (w *fakeProjWriter) Commit(context.Context) error {
+	w.parent.mu.Lock()
+	w.parent.commitCount++
+	w.parent.mu.Unlock()
+	return nil
+}
+func (w *fakeProjWriter) Rollback(context.Context) error { return nil }
 
-func (w *fakeProjWriter) AccountsW() account.WriterIface                           { return nil }
-func (w *fakeProjWriter) ProjectsW() repoproject.WriterIface                       { return &fakeProjPWtr{parent: w.parent} }
-func (w *fakeProjWriter) UsersW() user.WriterIface                                 { return nil }
-func (w *fakeProjWriter) ServiceAccountsW() service_account.WriterIface            { return nil }
-func (w *fakeProjWriter) GroupsW() group.WriterIface                               { return nil }
-func (w *fakeProjWriter) RolesW() role.WriterIface                                 { return nil }
-func (w *fakeProjWriter) AccessBindingsW() access_binding.WriterIface              { return nil }
+func (w *fakeProjWriter) AccountsW() account.WriterIface                { return nil }
+func (w *fakeProjWriter) ProjectsW() repoproject.WriterIface            { return &fakeProjPWtr{parent: w.parent} }
+func (w *fakeProjWriter) UsersW() user.WriterIface                      { return nil }
+func (w *fakeProjWriter) ServiceAccountsW() service_account.WriterIface { return nil }
+func (w *fakeProjWriter) GroupsW() group.WriterIface                    { return nil }
+func (w *fakeProjWriter) RolesW() role.WriterIface                      { return nil }
+func (w *fakeProjWriter) AccessBindingsW() access_binding.WriterIface {
+	return &fakeProjABWtr{parent: w.parent}
+}
 func (w *fakeProjWriter) EmitAuditEvent(context.Context, service.AuditEvent) error { return nil }
 func (w *fakeProjWriter) EmitFGARelationWrite(_ context.Context, tuples []service.RelationTuple) error {
 	w.parent.mu.Lock()

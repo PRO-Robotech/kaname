@@ -112,7 +112,7 @@ var tierOnlyObjectTypes = map[string]bool{}
 //
 // None of these may carry a v_* relation (R-2) — they are not access targets:
 //
-//   - user / service_account / federated_subject — SUBJECT types. They appear on
+//   - user / service_account — SUBJECT types. They appear on
 //     the left of a tuple, never as an authz object.
 //   - group — the subject-SET type (`group#member` usersets). The grantable IAM
 //     Group resource is the separate `iam_group` type; this one only carries
@@ -125,12 +125,11 @@ var tierOnlyObjectTypes = map[string]bool{}
 //     (`fga_writer @ iam_fgaproxy:system`, SEC-A). Machine-only, never granted to
 //     a tenant subject.
 var nonGrantableModelTypes = map[string]string{
-	"user":              "subject type (left side of a tuple, never an authz object)",
-	"service_account":   "subject type (left side of a tuple, never an authz object)",
-	"federated_subject": "subject type (external IdP principal)",
-	"group":             "subject-set type for group#member usersets (the grantable resource is iam_group)",
-	"cluster":           "platform singleton cluster:cluster_kacho_root — super-admin ladder anchor, not a grantable resource",
-	"iam_fgaproxy":      "least-priv anchor for the service→IAM fgaproxy edge (fga_writer @ iam_fgaproxy:system)",
+	"user":            "subject type (left side of a tuple, never an authz object)",
+	"service_account": "subject type (left side of a tuple, never an authz object)",
+	"group":           "subject-set type for group#member usersets (the grantable resource is iam_group)",
+	"cluster":         "platform singleton cluster:cluster_kacho_root — super-admin ladder anchor, not a grantable resource",
+	"iam_fgaproxy":    "least-priv anchor for the service→IAM fgaproxy edge (fga_writer @ iam_fgaproxy:system)",
 }
 
 // canonicalModelRelPath — the canonical authorization model, relative to the

@@ -24,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/verdictsource"
 )
 
 // openSnapshot — a snapshot opener that is never called. The guard asks only whether one is
@@ -39,13 +40,13 @@ func TestOwnGateWiringGuard(t *testing.T) {
 	comparator := shadowverdict.New(nil, nil)
 
 	require.Empty(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, complete).WithComparator(comparator), complete),
+		ownGateWiringComplaint(authzcascade.Wrap(transport, complete).WithComparator(comparator), complete, verdictsource.Switchboard{}, true),
 		"the wiring the composition root builds must satisfy its own guard — otherwise the "+
 			"guard is either wrong or unreachable, and both look identical from outside")
 
 	// Piece one missing: the gates would answer from delivered relations only.
 	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, nil).WithComparator(comparator), complete),
+		ownGateWiringComplaint(authzcascade.Wrap(transport, nil).WithComparator(comparator), complete, verdictsource.Switchboard{}, true),
 		"delivered relations only",
 		"a relation store without a fact source must be refused, and the refusal must say why")
 
@@ -53,7 +54,7 @@ func TestOwnGateWiringGuard(t *testing.T) {
 	noBatch := authzcascade.New(nil)
 	require.False(t, noBatch.BatchReachable(), "premise: this resolver cannot batch")
 	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, noBatch).WithComparator(comparator), noBatch),
+		ownGateWiringComplaint(authzcascade.Wrap(transport, noBatch).WithComparator(comparator), noBatch, verdictsource.Switchboard{}, true),
 		"one object at a time",
 		"a resolver without the page read must be refused, and the refusal must name the cost")
 
@@ -65,7 +66,7 @@ func TestOwnGateWiringGuard(t *testing.T) {
 	// Провязка в пустоту выглядит исполненной, поэтому её и проверяет отказ в
 	// старте, а не память ревьюера.
 	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, complete), complete),
+		ownGateWiringComplaint(authzcascade.Wrap(transport, complete), complete, verdictsource.Switchboard{}, true),
 		"не предъявляя их сравнению",
 		"обёртка без сравнения обязана быть отвергнута, и отказ обязан назвать, чего не хватает")
 }

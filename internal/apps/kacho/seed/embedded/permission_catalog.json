@@ -891,15 +891,6 @@
     }
   },
   {
-    "fqn": "kacho.cloud.iam.v1.InternalAuthorizeService/WriteTuples",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
     "fqn": "kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
@@ -1004,15 +995,6 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/UnregisterResource",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
-    "fqn": "kacho.cloud.iam.v1.InternalIAMService/WriteCreatorTuple",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
     "scope_extractor": {

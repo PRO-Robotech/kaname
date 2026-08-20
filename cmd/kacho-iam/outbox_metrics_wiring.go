@@ -85,3 +85,61 @@ func runSubjectChangeOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec 
 		logger.Warn("subject_change outbox metrics scan failed", "table", subjectChangeOutboxTable, "err", err)
 	})
 }
+
+// auditOutboxTable — журнал аудита control-plane.
+//
+// Константой, а не полем чужой структуры, по той же причине, что и у соседей:
+// гейт repohygiene резолвит координату очереди разбором исходника, и адрес,
+// вычисляемый в рантайме, для него неотличим от отсутствующего.
+const auditOutboxTable = "kacho_iam.audit_outbox"
+
+// auditOutboxMaxAttempts — порог отравления.
+//
+// Здесь он объявлен ЗДЕСЬ, а не взят из конфигурации дренажа, ровно потому, что
+// дренажа НЕТ. Значение совпадает с умолчанием пакета дренажа: гейдж отравленных
+// обязан считать по тому же порогу, по которому будет травить будущий дренаж, —
+// иначе в день его появления величина сменит смысл молча.
+const auditOutboxMaxAttempts = 10
+
+// runAuditOutboxMetrics — скан журнала аудита, У КОТОРОГО ДРЕНАЖА НЕТ.
+//
+// # Почему сканер есть, а дренажа нет
+//
+// Приёмника аудита в продукте не существует (предикат: ни одного не-тестового
+// файла Go, объявляющего приёмник/экспортёр/отправитель аудита). Дренаж некуда
+// вести, и построить его — отдельная под-фаза со своей приёмкой, а не побочный
+// эффект наблюдаемости. Снять очередь тоже нельзя: это журнал аудита
+// control-plane, и его снятие — решение уровня требований, а не уборка кода.
+//
+// # Что тогда делает этот сканер
+//
+// Делает МОЛЧАНИЕ СЛЫШИМЫМ. `data-integrity.md` требует, чтобы «ноль
+// доставленных строк за всю жизнь очереди» было заметно; до этого сканера
+// заметить это было нечем — величины не существовало вовсе. Он НЕ изображает
+// доставку: `outbox_backlog_depth` растёт монотонно, `oldest_pending_age_seconds`
+// равен возрасту стенда, `poisoned` остаётся нулём (попыток не было). Именно
+// такая картина и есть верное описание положения дел.
+//
+// Замер на стенде kind-kacho 2026-08-20: строк 29 446, все недоставленные,
+// max(attempts)=0, старейшей 2 д 21 ч — ровно возраст стенда.
+//
+// # Почему форма объявляется
+//
+// Эта очередь помечает доставленность СОСТОЯНИЕМ (`status`), а не отметкой
+// времени. Пока форма подразумевалась, сканер над ней падал бы на первом же
+// скане («колонки sent_at нет») — то есть очередь была ненаблюдаема by
+// construction, и её ненаблюдаемость выглядела как ненужность наблюдения.
+//
+// Решение и предикат его пересмотра:
+// services/iam/docs/engineering/architecture/audit-outbox-has-no-receiver.md
+func runAuditOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec outboxmetrics.Recorder, logger *slog.Logger) {
+	collector := outboxmetrics.NewCollector(pool, rec, outboxmetrics.CollectorConfig{
+		Table:       auditOutboxTable,
+		MaxAttempts: auditOutboxMaxAttempts,
+		Interval:    outboxMetricsInterval,
+		Shape:       outboxmetrics.ShapeStatus,
+	})
+	collector.Run(ctx, func(err error) {
+		logger.Warn("audit outbox metrics scan failed", "table", auditOutboxTable, "err", err)
+	})
+}

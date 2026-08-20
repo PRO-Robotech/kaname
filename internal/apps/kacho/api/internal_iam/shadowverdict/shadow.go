@@ -65,6 +65,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/verdictsource"
 )
 
 // DefaultTimeout — срок одного теневого вызова.
@@ -94,6 +96,26 @@ const DefaultTimeout = 10 * time.Millisecond
 // сравнивают: срок сверки обязан быть строго меньше — механизм, который решений
 // НЕ ПРИНИМАЕТ, не вправе задержать ответ дольше, чем весь бюджет решения.
 const ReadBudget = 30 * time.Millisecond
+
+// EngineShadowTimeout — срок теневого вопроса к ДВИЖКУ на переключённом типе.
+//
+// Отдельная константа, а не `DefaultTimeout`, и это не удвоение одного
+// предмета: сроки бюджетируют РАЗНЫЕ ресурсы. `DefaultTimeout` выбран под
+// читающую транзакцию Postgres, которую теневой вопрос держит из общего с живым
+// путём пула, — там дорога каждая миллисекунда. Теневой вопрос к движку не
+// держит ни одного соединения к базе и не задерживает ответ вызывающему ничем:
+// он уходит вне пути запроса и его исход не ждут. Тот же десятимиллисекундный
+// срок на сетевом вызове отправил бы почти каждую сверку в «не выполнилось» —
+// и счётчик расхождений дал бы ноль ПО ПОСТРОЕНИЮ, неотличимый от согласия.
+// Прибор, слепнущий ровно в тот момент, когда им начинают судить, не измеряет
+// ничего.
+//
+// Величина выбрана из назначения: сверка не вправе пережить операцию, которую
+// она шадовит, поэтому срок равен всему бюджету чтения. Она НЕ выведена из
+// замера задержки движка — такого замера на этой ревизии нет, и это сказано
+// здесь, а не умолчано: появится замер — величина назначается по нему, а
+// «переживает ли сверка операцию» остаётся её потолком.
+const EngineShadowTimeout = ReadBudget
 
 // DefaultMaxInFlight — потолок теневых вопросов, идущих одновременно.
 //
@@ -139,6 +161,18 @@ const CompareSetLimit = 200
 // оставлять вызывающего гадать по длине.
 type Asker interface {
 	Allowed(ctx context.Context, subject, objectType, objectID, relation string, condCtx map[string]any) (allowed bool, err error)
+	// AllowedMany — тот же прямой вопрос о СТРАНИЦЕ объектов одного типа, ОДНОЙ
+	// читающей транзакцией.
+	//
+	// Не удобство, а стоимость: страница по контракту доходит до тысячи
+	// объектов, и цикл по `Allowed` открыл бы транзакцию на каждый. Один снимок
+	// на страницу вдобавок вернее — страница, собранная из тысячи снимков, не
+	// существовала целиком ни в один момент.
+	//
+	// Ответ обязан прийти в порядке заданных идентификаторов и той же длины:
+	// верный, но переставленный вердикт фильтрует страницу чужим ответом.
+	AllowedMany(ctx context.Context, subject, objectType string, objectIDs []string, relation string,
+		condCtx map[string]any) (allowed []bool, err error)
 	// Objects — какие объекты этого типа доступны субъекту. relations — набор,
 	// а не одно имя: движок отвечает на читающее действие ОБЪЕДИНЕНИЕМ двух
 	// отношений, и спросить форму об одном из них значило бы сравнить два разных
@@ -191,6 +225,35 @@ type Counters struct {
 	compared   atomic.Int64
 	diverged   atomic.Int64
 	unfinished atomic.Int64
+	// unaskable — решение, которое форме E задать НЕЛЬЗЯ (объект не разобран,
+	// область не названа).
+	//
+	// Своя клетка, а не доля «не выполнилось», и это не педантизм. «Форму
+	// спросить нельзя» и «форма не успела» требуют разных действий, а после
+	// переключения источника вердикта различаются ещё и последствием: первое
+	// означает, что вопрос этого рода форме не задаётся ВООБЩЕ, второе — что
+	// сверка не состоялась на этот раз. Условие переключения типа названо долей
+	// «спросить нельзя» по нему; доля, размазанная по общей корзине, не
+	// считается ни для одного типа.
+	unaskable atomic.Int64
+	// divergedFormWider / divergedFormNarrower — расхождение ПО НАПРАВЛЕНИЮ,
+	// подмножества `diverged`.
+	//
+	// Направления не равны: «форма разрешает там, где движок отказывал» —
+	// расширение доступа, «форма отказывает там, где движок разрешал» — отказ в
+	// обслуживании. Один счётчик на оба сделал бы их неотличимыми ровно там, где
+	// различие решает, откатывать ли тип.
+	divergedFormWider    atomic.Int64
+	divergedFormNarrower atomic.Int64
+	// verdictsForm / verdictsEngine — ИСТОЧНИК решения, посчитанный в точке, где
+	// источник выбирается.
+	//
+	// Без них «переключено» и «объявлено переключённым» неразличимы: рубильник
+	// может стоять в позиции «форма», а решения продолжать идти движком —
+	// например потому, что доставка настройки не перекатила под. Сумма двух
+	// обязана сходиться со знаменателем: у решения ровно один источник.
+	verdictsForm   atomic.Int64
+	verdictsEngine atomic.Int64
 }
 
 // Snapshot — мгновенный слепок счётчиков.
@@ -199,6 +262,13 @@ type Snapshot struct {
 	Compared   int64
 	Diverged   int64
 	Unfinished int64
+	Unaskable  int64
+	// DivergedFormWider / DivergedFormNarrower — подмножества Diverged.
+	DivergedFormWider    int64
+	DivergedFormNarrower int64
+	// VerdictsForm + VerdictsEngine == Decisions (у решения один источник).
+	VerdictsForm   int64
+	VerdictsEngine int64
 }
 
 // ComparedShare — доля сравнённых решений от всех, к которым теневой путь позван.
@@ -215,12 +285,37 @@ func (s Snapshot) ComparedShare() float64 {
 // Read отдаёт слепок.
 func (c *Counters) Read() Snapshot {
 	return Snapshot{
-		Decisions:  c.decisions.Load(),
-		Compared:   c.compared.Load(),
-		Diverged:   c.diverged.Load(),
-		Unfinished: c.unfinished.Load(),
+		Decisions:            c.decisions.Load(),
+		Compared:             c.compared.Load(),
+		Diverged:             c.diverged.Load(),
+		Unfinished:           c.unfinished.Load(),
+		Unaskable:            c.unaskable.Load(),
+		DivergedFormWider:    c.divergedFormWider.Load(),
+		DivergedFormNarrower: c.divergedFormNarrower.Load(),
+		VerdictsForm:         c.verdictsForm.Load(),
+		VerdictsEngine:       c.verdictsEngine.Load(),
 	}
 }
+
+// ClassBreakdownSeparator — чем разделены классы в поле `class_breakdown` сводки.
+//
+// # Почему это КОНСТАНТА, а не пробел
+//
+// Поле читает внешний прибор (`deploy/load-tests/iam-shadow-divergence-probe.sh`),
+// чтобы разложить расхождения по направлению. Ключ класса содержит пробелы —
+// «прямой вердикт», «движок вердикта не дал», — поэтому разделитель-пробел делает
+// поле неразбираемым by construction: прибор режет ключ на слова и объявляет
+// направление неразобранным.
+//
+// Ошибка не проявлялась, пока классов не бывало вовсе: разбор был зелёным по
+// ОТСУТСТВИЮ предмета, а не по верности. Первый же прогон с непустой сводкой дал
+// четыре ложных «не разобрано» на прогоне с НУЛЁМ расхождений — то есть отказ
+// прибора, выданный за находку о продукте.
+//
+// Величина выбрана так, чтобы не встречаться в ключе: ключ собирается из имени
+// вопроса, типа, отношения и причины, и точки с запятой в них нет ни одной.
+// Свойство держится пробой, а не выбором на глаз.
+const ClassBreakdownSeparator = " ;; "
 
 // DefaultSummaryEvery — как часто сравнение печатает сводку.
 //
@@ -237,6 +332,16 @@ type Comparator struct {
 	timeout time.Duration
 	logger  *slog.Logger
 	counts  Counters
+
+	// switchboard — по каким типам вердикт принимает ФОРМА (switch.go).
+	//
+	// Живёт ЗДЕСЬ, а не у двери решения, потому что дверей две поверхности —
+	// край и обёртка собственных стражей, — и обе держат ОДИН этот сравнитель.
+	// Рубильник у каждой двери разошёлся бы, и один вопрос об одном объекте
+	// получил бы два действующих источника.
+	//
+	// Нулевое значение законно: не переключено ничего.
+	switchboard verdictsource.Switchboard
 
 	// sem — потолок теневых вопросов в полёте (см. DefaultMaxInFlight). Занятый
 	// слот держится ровно столько, сколько живёт теневой вопрос; свободного нет —
@@ -485,7 +590,7 @@ func (c *Comparator) summarise(at time.Time) {
 		"decisions", s.Decisions, "compared", s.Compared,
 		"diverged", s.Diverged, "unfinished", s.Unfinished,
 		"compared_share", s.ComparedShare(),
-		"classes", len(classes), "class_breakdown", strings.Join(classes, " "))
+		"classes", len(classes), "class_breakdown", strings.Join(classes, ClassBreakdownSeparator))
 }
 
 // maybeSummarise печатает сводку не чаще, чем раз в период.
@@ -532,7 +637,13 @@ func (c *Comparator) Unaskable(reason, objectType, relation string) {
 		return
 	}
 	c.counts.decisions.Add(1)
-	c.counts.unfinished.Add(1)
+	// Источник решения — движок: маршрутизация к форме не состоялась. Считается
+	// здесь, чтобы сумма источников сходилась со знаменателем.
+	c.counts.verdictsEngine.Add(1)
+	// СВОЯ клетка, не «не выполнилось»: «спросить нельзя» — свойство вопроса, а
+	// «не успели» — свойство прогона, и условие переключения типа названо именно
+	// первой долей.
+	c.counts.unaskable.Add(1)
 	class := fmt.Sprintf("не задан|%s|%s|%s", objectType, relation, reason)
 	if first, seen := c.firstOfClass(class); first {
 		c.logger.Warn("shadow verdict: вопрос форме E не задан", append([]any{
@@ -569,6 +680,8 @@ func (c *Comparator) Ask(ctx context.Context, subject, objectType, objectID, rel
 		return func(bool, bool) {}
 	}
 	c.counts.decisions.Add(1)
+	// Источник решения — движок: форма спрашивается рядом и только сверяется.
+	c.counts.verdictsEngine.Add(1)
 
 	const question = "прямой вердикт"
 	unfinished := func(reason string) { c.unfinishedAt(question, reason, objectType, relation) }
@@ -599,21 +712,10 @@ func (c *Comparator) Ask(ctx context.Context, subject, objectType, objectID, rel
 				c.maybeSummarise()
 				return
 			}
-			c.counts.diverged.Add(1)
-			// Расхождение называется ПОИМЁННО: счётчик говорит «сколько», а разобрать
-			// можно только зная, на каком вопросе. Доля едет рядом (см. coverage).
-			//
-			// Поимённо — ОДИН РАЗ НА КЛАСС. Повторы копятся счётчиком класса и выходят
-			// сводкой; разбирают их всё равно по классу, а не по случаю (см. mu).
-			class := fmt.Sprintf("%s|%s|%s|движок=%v", question, objectType, relation, engineAllowed)
-			if first, seen := c.firstOfClass(class); first {
-				c.logger.Error("shadow verdict: РАСХОЖДЕНИЕ формы E с движком", append([]any{
-					"question", question, "engine", engineAllowed, "form_e", a.allowed,
-					"subject", subject, "object_type", objectType, "object_id", objectID, "relation", relation,
-					"class", class, "class_seen", seen,
-				}, c.coverage()...)...)
-			}
-			c.maybeSummarise()
+			// Счёт, направление и запись — ОДНО место на оба пути (см. switch.go):
+			// направление есть свойство ПАРЫ ответов, а не того, кого спросили
+			// первым, и вторая его реализация разошлась бы с первой молча.
+			c.recordDivergence(question, subject, objectType, objectID, relation, a.allowed, engineAllowed)
 		})
 	return func(engineAllowed, engineAnswered bool) {
 		deposit(engineVerdict{allowed: engineAllowed, answered: engineAnswered})
