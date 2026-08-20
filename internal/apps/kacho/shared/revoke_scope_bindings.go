@@ -86,12 +86,13 @@ func RevokeBindingsInScope(
 	resourceType domain.ResourceType,
 	resourceID string,
 	displayNoun string,
-) ([]outboxtypes.RelationTuple, error) {
+) ([]outboxtypes.RelationTuple, int, error) {
 	var fgaDeletes []outboxtypes.RelationTuple
+	var revoked int
 	for pass := 0; ; pass++ {
 		if pass >= ScopeBindingRevokeMaxPasses {
 			// Отказываем громко, а не рапортуем успех о частичной работе.
-			return nil, status.Errorf(codes.FailedPrecondition,
+			return nil, 0, status.Errorf(codes.FailedPrecondition,
 				"%s %s carries more than %d access bindings; delete them before deleting the %s",
 				displayNoun, resourceID,
 				ScopeBindingRevokeMaxPasses*ScopeBindingRevokePageSize,
@@ -102,7 +103,7 @@ func RevokeBindingsInScope(
 			abrepo.PageFilter{PageSize: ScopeBindingRevokePageSize},
 		)
 		if err != nil {
-			return nil, MapRepoErr(err)
+			return nil, 0, MapRepoErr(err)
 		}
 		if len(bindings) == 0 {
 			break
@@ -110,7 +111,7 @@ func RevokeBindingsInScope(
 		for _, b := range bindings {
 			stored, serr := w.AccessBindings().SelectEmittedTuples(ctx, b.ID)
 			if serr != nil {
-				return nil, MapRepoErr(serr)
+				return nil, 0, MapRepoErr(serr)
 			}
 			for _, tp := range stored {
 				fgaDeletes = append(fgaDeletes, outboxtypes.RelationTuple{
@@ -118,11 +119,12 @@ func RevokeBindingsInScope(
 				})
 			}
 			if derr := w.AccessBindingsW().Delete(ctx, b.ID); derr != nil {
-				return nil, MapRepoErr(derr)
+				return nil, 0, MapRepoErr(derr)
 			}
+			revoked++
 		}
 	}
-	return fgaDeletes, nil
+	return fgaDeletes, revoked, nil
 }
 
 // lowerASCII опускает первую букву существительного для хвоста сообщения

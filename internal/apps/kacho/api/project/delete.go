@@ -134,7 +134,7 @@ func (u *DeleteProjectUseCase) doDelete(ctx context.Context, id domain.ProjectID
 			// кортежей читается, пока строки выдач ещё на месте. Отказ дренажа
 			// (область сверх потолка) роняет всю транзакцию — проект остаётся
 			// целым вместе со своими выдачами, а не наполовину снятым.
-			bindingDeletes, rerr := shared.RevokeBindingsInScope(
+			bindingDeletes, _, rerr := shared.RevokeBindingsInScope(
 				ctx, w, domain.ResourceType("project"), string(id), "Project")
 			if rerr != nil {
 				return rerr

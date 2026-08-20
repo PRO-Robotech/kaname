@@ -1068,7 +1068,32 @@ func runServe(cfg config.Config) error {
 		// non-empty (the Design-A class-of-bug blind spot). nil-safe (degraded FGA →
 		// non-fatal skip).
 		WithRelationChecker(openfgaClient)
+	// Разовая уборка выдач, чья область УЖЕ УДАЛЕНА (#810, продолжение #792).
+	//
+	// ПОЧЕМУ ПЕРЕД ПОДМЁТКОЙ РЕКОНСАЙЛА, А НЕ ПОСЛЕ. Подмётка обходит КАЖДУЮ
+	// активную выдачу и материализует её кортежи — включая висячие. Пойди уборка
+	// второй, тот же старт сперва выписал бы кортежи выдачам, которые сам же
+	// сейчас снимет: лишняя работа, лишние строки очереди и пара «выдача-отзыв» на
+	// одном ключе партиции. Уборка первой снимает строки до того, как подмётка их
+	// увидит, и обходу нечего материализовать.
+	//
+	// ПОЧЕМУ ЭТО БЕЗОПАСНО ЗАПУСКАТЬ САМО. Обе таблицы — и `access_bindings`, и
+	// `projects`/`accounts` — лежат в ОДНОЙ базе iam, то есть в одной единице
+	// снятия и восстановления копии. Состояния «проекты потерялись, выдачи
+	// остались» согласованное восстановление не производит by construction,
+	// поэтому порога вида «слишком много, отказываюсь» здесь нет: на живом стенде
+	// висячими были 145 выдач из 193, и любой правдоподобный порог отказал бы
+	// ровно там, где уборка и нужна. Радиус одного старта ограничен потолком
+	// прогона, каждая область оставляет событие аудита.
+	orphanScopeSweeper := seed.NewOrphanScopeSweeper(kachoRepo, kachopg.NewOrphanScopeAdapter(pool),
+		seed.OrphanScopeConfig{Logger: logger.With(slog.String("component", "orphan_scope_sweep"))})
 	tasks = append(tasks, func() error {
+		if ores, oerr := orphanScopeSweeper.RunOnce(ctx); oerr != nil {
+			logger.Warn("orphan-scope sweep failed (next boot will retry)",
+				slog.Any("err", oerr),
+				slog.Int("scopes_revoked", ores.ScopesRevoked),
+				slog.Int("bindings_revoked", ores.BindingsRevoked))
+		}
 		if oerr := seed.BackfillOwnerBindings(ctx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}

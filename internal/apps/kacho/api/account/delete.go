@@ -155,7 +155,7 @@ func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID
 	// страницами до опустошения, симметрично по ведомости, с громким отказом
 	// вместо тихой частичной работы. Тело параметрично ровно по паре (вид
 	// области, id), и второй его экземпляр разошёлся бы с первым молча.
-	fgaDeletes, err := shared.RevokeBindingsInScope(
+	fgaDeletes, _, err := shared.RevokeBindingsInScope(
 		ctx, w, domain.ResourceType("account"), string(id), "Account")
 	if err != nil {
 		return err
