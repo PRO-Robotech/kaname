@@ -109,12 +109,21 @@ func TakeStrengthCensus(ctx context.Context, tx pgx.Tx, in StrengthCensusInput) 
 	}
 	// Пара (говорящий, область) — ровно тем соединением, которым её читает
 	// ветвь выдач: колонками, а не склейкой.
+	//
+	// ЗДЕСЬ ЭТОТ КОММЕНТАРИЙ ДОЛГО БЫЛ ЛОЖЕН. Он обещал колонки, а стоявший под
+	// ним предикат сравнивал СКЛЕЙКУ (#758) — то есть прибор мерил стоимость
+	// формы, от которой сам же и предостерегал, и гасил
+	// access_binding_subjects_subject_scope_idx на каждой точке сетки. Довод
+	// целиком — у census.go, где та же правка сделана тем же способом.
 	if err := scalar(&c.SpeakerScopeRows,
 		`SELECT count(*)::bigint
 		   FROM kacho_iam.access_binding_subjects bs
 		   JOIN kacho_iam.access_bindings b ON b.id = bs.binding_id
-		  WHERE bs.subject_type || ':' || bs.subject_id = ANY($1::text[])
-		    AND bs.resource_type = $2 AND bs.resource_id = $3
+		   JOIN (SELECT DISTINCT split_part(w, ':', 1) AS s_type,
+		                substr(w, length(split_part(w, ':', 1)) + 2) AS s_id
+		           FROM unnest($1::text[]) AS w) sp
+		     ON bs.subject_type = sp.s_type AND bs.subject_id = sp.s_id
+		  WHERE bs.resource_type = $2 AND bs.resource_id = $3
 		    AND b.status = 'ACTIVE' AND b.revoked_at IS NULL`,
 		in.Speakers, in.ScopeType, in.ScopeID); err != nil {
 		return c, err
@@ -126,6 +135,14 @@ func TakeStrengthCensus(ctx context.Context, tx pgx.Tx, in StrengthCensusInput) 
 	// Мощность цепи — ТЕМ ЖЕ обходом, каким её строит запрос вердикта. Своя
 	// редакция обхода была бы вторым местом об одном предмете и разошлась бы
 	// молча — причём в сторону «условие создано».
+	//
+	// ОБХОД тот же, а ПОТРЕБЛЯЕМЫЙ НАБОР с #811 — уже нет: армы вердикта читают
+	// отбор различных поверх обхода (scope_distinct), то есть ScopeDistinct, а
+	// не ScopeRows. Обе величины считаются и печатаются ПОРОЗНЬ ровно затем,
+	// чтобы их нельзя было перепутать: ось S объявляет мощность ОБХОДА (свойство
+	// фикстуры, и Verify сверяет именно её), а стоимость арма растёт по числу
+	// РАЗЛИЧНЫХ областей. Подменить одно другим значило бы переопределить ось
+	// сетки задним числом.
 	if err := tx.QueryRow(ctx, `
 		WITH RECURSIVE scope(s_type, s_id, depth) AS (
 		    SELECT $1::text, $2::text, 0

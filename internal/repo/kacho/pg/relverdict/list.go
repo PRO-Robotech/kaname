@@ -232,6 +232,31 @@ scope(object_id, s_type, s_id, depth) AS (
            ) e
      WHERE s.depth < $5::int
 ),
+-- scope_distinct — ОБЛАСТИ БЕЗ ПОВТОРОВ, и это ЕДИНСТВЕННОЕ, что читают армы.
+--
+-- Обход выше несёт в кортеже ГЛУБИНУ ШАГА, поэтому UNION не схлопывает предка,
+-- достигнутого разными путями. Форма цепи, которую пишет производитель для
+-- compute и nlb (ownerregister.ParentChain — проект И аккаунт сразу), даёт
+-- аккаунт на глубинах 1 и 2, а стоящий над ним кластер — на 2 и 3: шесть строк
+-- при четырёх различных областях.
+--
+-- Каждая лишняя строка УМНОЖАЕТ ОБА АРМА: ветвь выдач соединена с набором
+-- CROSS JOIN, ветвь фактов — по паре колонок. Отбор различных над ОТВЕТОМ
+-- прячет это в ответе и не трогает СТОИМОСТЬ, а на отказном вопросе короткого
+-- замыкания нет, и цена платится целиком. Измерено пробой
+-- scopedistinct_integration_test.go: 6 строк при 4 различных областях.
+--
+-- ОБХОД СОХРАНЯЕТСЯ ЦЕЛИКОМ — снимается только повтор. Это НЕ переход на одно
+-- чтение таблицы рёбер: тот переход опровергнут (таблица хранит присланную
+-- цепь, а не замыкание), и здесь его нет.
+--
+-- Наименьшая глубина БЕЗОПАСНА, и это проверяемо: единственное употребление
+-- глубины ниже по запросу — дискриминатор якоря sc.depth = 0, а якорь
+-- засевается нулём и по построению остаётся минимумом (выведенная строка даёт
+-- s.depth + 1 при s.depth не меньше нуля, то есть нуля дать не может).
+scope_distinct(object_id, s_type, s_id, depth) AS (
+    SELECT object_id, s_type, s_id, min(depth) FROM scope GROUP BY object_id, s_type, s_id
+),
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($6::text[], $7::text[])
 )
@@ -243,7 +268,7 @@ SELECT c.object_id,
         SELECT 1
           FROM kacho_iam.relation_fact f
           JOIN speaker sp ON sp.subject = f.subject
-          JOIN scope sc
+          JOIN scope_distinct sc
             ON sc.object_id = c.object_id
            AND sc.s_type = f.object_type AND sc.s_id = f.object_id
           JOIN fact_atom fa
@@ -262,7 +287,7 @@ SELECT c.object_id,
           -- чтения строк, и оба стоят теперь на ОДНОМ отношении (миграция
           -- 732001). Склейка субъекта выводила колонки из-под индекса.
           FROM speaker_pair sp
-          JOIN scope sc ON sc.object_id = c.object_id
+          JOIN scope_distinct sc ON sc.object_id = c.object_id
           JOIN kacho_iam.access_binding_subjects bs
             ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
            AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id

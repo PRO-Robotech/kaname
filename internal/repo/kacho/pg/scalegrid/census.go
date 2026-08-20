@@ -110,10 +110,25 @@ func TakeCensus(ctx context.Context, tx pgx.Tx, speakerSubjects []string) (Censu
 	// которыми за него говорят. Соединение идёт через `access_binding_subjects`,
 	// потому что именно её читает вердикт: считать по колонкам родительской
 	// таблицы значило бы завести второе представление о том, кто назван.
+	//
+	// СУБЪЕКТ — ПАРОЙ КОЛОНОК, а не склейкой (#758). Склейка
+	// subject_type || ':' || subject_id выводит обе колонки из-под
+	// access_binding_subjects_subject_scope_idx: сравнивать приходится
+	// вычисленное значение, а вычисленное значение отбирает строки только ПОСЛЕ
+	// того, как они прочитаны. Разбирается ПАРАМЕТР — ровно так же, как это
+	// делает speaker_pair запроса вердикта.
+	//
+	// Отбор различных на разобранных парах обязателен: без него строка выдачи
+	// сосчиталась бы по разу на каждое повторяющееся написание во входном
+	// наборе, и перепись разошлась бы со склейкой. Одна пара соответствует ровно
+	// одному написанию, поэтому на различных парах числа тождественны.
 	if err := scalar(&c.BindingsNamingSubject,
 		`SELECT count(*)::bigint
 		   FROM kacho_iam.access_binding_subjects bs
-		  WHERE bs.subject_type || ':' || bs.subject_id = ANY($1::text[])`, speakerSubjects); err != nil {
+		   JOIN (SELECT DISTINCT split_part(w, ':', 1) AS s_type,
+		                substr(w, length(split_part(w, ':', 1)) + 2) AS s_id
+		           FROM unnest($1::text[]) AS w) sp
+		     ON bs.subject_type = sp.s_type AND bs.subject_id = sp.s_id`, speakerSubjects); err != nil {
 		return c, err
 	}
 	if err := scalar(&c.GroupMemberships, `SELECT count(*)::bigint FROM kacho_iam.group_members`); err != nil {
