@@ -99,6 +99,12 @@ type services struct {
 	// (Resolve / ListChangedSince). Internal-only (ban #6), registered on :9091.
 	limitHandler *limitapp.Handler
 
+	// limitPublicHandler — та же административная поверхность пределов на
+	// ПУБЛИЧНОМ слушателе (ADM-1 S1, #878). Тонкий транспорт поверх УЖЕ
+	// собранного `limitHandler`: не копия его зависимостей, а он сам, — поэтому
+	// «оба пути делают одно» держится построением, а не совпадением сборки.
+	limitPublicHandler *limitapp.PublicHandler
+
 	// identityQuotaHandler — чтение квот, носителем которых является личность
 	// (число аккаунтов). ТОЛЬКО чтение: величину назначает администратор облака.
 	identityQuotaHandler *identityquotaapp.Handler
@@ -904,7 +910,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveClientHandler: interactiveClientHandler,
 
 		// resource-count ceilings (admin CRUD + owner-facing resolve/delta).
-		limitHandler: limitHandler,
+		limitHandler:       limitHandler,
+		limitPublicHandler: limitapp.NewPublicHandler(limitHandler),
 
 		// квоты личности — единственная поверхность, читаемая о себе самом.
 		identityQuotaHandler: identityQuotaHandler,

@@ -72,6 +72,21 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.userTokensHandler != nil {
 		iamv1.RegisterUserTokenServiceServer(srv, svcs.userTokensHandler)
 	}
+	// LimitService — административная поверхность пределов на ПУБЛИЧНОМ
+	// слушателе (ADM-1 S1, #878).
+	//
+	// ЗАПРЕТ 6 НЕ СМЯГЧЁН: наружу выставлен публичный `LimitService`, а не
+	// `InternalLimitService`. Переезжает ГЛАГОЛ, а не разрешение для внутреннего
+	// сервиса, — тем же приёмом, каким ADM-1 S1 опубликовал поверхность пула
+	// адресов. Доступ закрывает не место вызова, а отношение `system_admin` @
+	// `cluster`, которое подстановочный кортеж `user:*` НЕ выполняет.
+	//
+	// ЧТО ЭТО ЧИНИТ: без публичного адреса страница пределов консоли получала
+	// 404 — отказ, неотличимый от «такого раздела нет вовсе». Теперь отказ
+	// честен: 403 у того, кому не положено, и 200 у администратора.
+	if svcs != nil && svcs.limitPublicHandler != nil {
+		iamv1.RegisterLimitServiceServer(srv, svcs.limitPublicHandler)
+	}
 }
 
 // registerInternalServices — kacho-only/admin RPC на internal listener.

@@ -95,6 +95,18 @@ var Profile = listfiltergate.Profile{
 	PerPackage:     true,
 	ReceiverSuffix: "Handler",
 
+	// ExtraReceivers — второй транспортный тип того же ресурса. Сегодня он один:
+	// `limit.PublicHandler`, административная поверхность пределов на публичном
+	// слушателе (ADM-1 S1, #878).
+	//
+	// ПОЧЕМУ ОБЪЯВЛЕНИЕ, А НЕ ПЕРЕИМЕНОВАНИЕ. Гейт опознаёт транспорт по ТИПУ и
+	// без этой строки честно сказал: «объявление публичного List не привязано ни
+	// к какому ресурсу — его страница остаётся несуженной, пока гейт отчитывается
+	// об исправности». Это ровно тот вид молчания, ради которого гейт и заведён,
+	// поэтому закрывать его следует объявлением намерения, а не подгонкой имени
+	// под предикат.
+	ExtraReceivers: []string{"PublicHandler"},
+
 	// iam's per-object question to the model. VisibleSet is the batched form every
 	// page filter reaches; Visible is the single-object form. requireGrantAuthority
 	// is the per-row form used by ListByRole — see the caveat in the package comment.

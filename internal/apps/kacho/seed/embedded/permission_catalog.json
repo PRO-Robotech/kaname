@@ -1189,6 +1189,56 @@
     }
   },
   {
+    "fqn": "kacho.cloud.iam.v1.LimitService/Create",
+    "permission": "iam.limits.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.LimitService/Delete",
+    "permission": "iam.limits.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.LimitService/Get",
+    "permission": "iam.limits.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.LimitService/List",
+    "permission": "iam.limits.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.LimitService/Update",
+    "permission": "iam.limits.update",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.PermissionCatalogService/ListPermissionCatalog",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
