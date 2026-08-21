@@ -88,79 +88,126 @@ type SigningKeyCounts struct {
 	Failures    uint64
 }
 
-type labelledCollector struct {
+// ── Три коллектора, а не один обобщённый ────────────────────────────────────
+//
+// Обобщённый коллектор, читающий пары «метка → величина» из отображения,
+// собирался короче и был СНЯТ: со стороны разбора синтаксиса метка в нём
+// приходит ИЗ ДАННЫХ, и гейт закрытого словаря справедливо это находит.
+// Возражение «у нас-то ключи константные» здесь не работает: свойство обязано
+// быть видно тому, кто читает код, и тому, кто его проверяет, — иначе первый
+// же следующий коллектор возьмёт метку из арендатора, и счётчик превратится в
+// перечень обслуженных.
+//
+// Поэтому каждый коллектор перебирает СВОЙ набор с константными ключами, и все
+// клетки печатаются всегда, включая нулевые: клетка, которую не печатают, пока
+// она нулевая, неотличима от клетки, которой нет.
+
+type ownKeySetCollector struct {
+	read func() OwnKeySetCounts
 	desc *prometheus.Desc
-	read func() map[string]uint64
-}
-
-func (c *labelledCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
-
-// Collect отдаёт ВСЕ клетки закрытого набора, включая нулевые: клетка, которую
-// не печатают, пока она нулевая, неотличима от клетки, которой нет.
-func (c *labelledCollector) Collect(ch chan<- prometheus.Metric) {
-	for label, value := range c.read() {
-		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(value), label)
-	}
-}
-
-func (r *Registry) newLabelled(name, help, label string, cells []string, read func() map[string]uint64) {
-	if read == nil {
-		// nil-источник — ОТКАЗ: вечный ноль выглядит как работающее
-		// наблюдение и утверждает неправду о подсистеме, которую просто
-		// забыли подключить.
-		panic("metrics: " + name + " без источника величин — вечный ноль неотличим от нетронутой подсистемы")
-	}
-	c := &labelledCollector{
-		desc: prometheus.NewDesc(name,
-			help+" Cells ("+strings.Join(cells, "|")+") are all reported, including zeros, "+
-				"so \"never refused\" stays distinguishable from \"never executed\".",
-			[]string{label}, nil),
-		read: read,
-	}
-	r.reg.MustRegister(c)
 }
 
 // NewOwnKeySetCollector регистрирует читателя величин нашей записи набора.
+//
+// nil-источник — ОТКАЗ: вечный ноль выглядит как работающее наблюдение и
+// утверждает неправду о подсистеме, которую просто забыли подключить.
 func (r *Registry) NewOwnKeySetCollector(read func() OwnKeySetCounts) {
-	r.newLabelled(KeySetOutcomesMetric,
-		"Outcomes of serving the platform's own verification key set, by outcome.",
-		"outcome", KeySetOutcomes, func() map[string]uint64 {
-			c := read()
-			return map[string]uint64{
-				KeySetOutcomeServed:      c.Served,
-				KeySetOutcomeUnavailable: c.Unavailable,
-				KeySetOutcomeEmpty:       c.Empty,
-			}
-		})
+	if read == nil {
+		panic("metrics: NewOwnKeySetCollector без источника величин — " +
+			"вечный ноль неотличим от неподключённого публикатора")
+	}
+	r.reg.MustRegister(&ownKeySetCollector{
+		read: read,
+		desc: prometheus.NewDesc(KeySetOutcomesMetric,
+			"Outcomes of serving the platform's own verification key set, by outcome ("+
+				strings.Join(KeySetOutcomes, "|")+"). Successful answers are counted alongside "+
+				"refusals, so \"never refused\" stays distinguishable from \"never reached\"; "+
+				"an empty key set is its own bucket because, unlike an outage, waiting never fixes it.",
+			[]string{"outcome"}, nil),
+	})
+}
+
+func (c *ownKeySetCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c *ownKeySetCollector) Collect(ch chan<- prometheus.Metric) {
+	counts := c.read()
+	for outcome, value := range map[string]uint64{
+		KeySetOutcomeServed:      counts.Served,
+		KeySetOutcomeUnavailable: counts.Unavailable,
+		KeySetOutcomeEmpty:       counts.Empty,
+	} {
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(value), outcome)
+	}
+}
+
+type introspectCollector struct {
+	read func() IntrospectCounts
+	desc *prometheus.Desc
 }
 
 // NewTokenIntrospectionCollector регистрирует читателя величин авторитета отзыва.
 func (r *Registry) NewTokenIntrospectionCollector(read func() IntrospectCounts) {
-	r.newLabelled(IntrospectOutcomesMetric,
-		"Outcomes of answering whether a presented token is still live, by outcome.",
-		"outcome", IntrospectOutcomes, func() map[string]uint64 {
-			c := read()
-			return map[string]uint64{
-				IntrospectOutcomeActive:      c.Active,
-				IntrospectOutcomeInactive:    c.Inactive,
-				IntrospectOutcomeUnavailable: c.Unavailable,
-			}
-		})
+	if read == nil {
+		panic("metrics: NewTokenIntrospectionCollector без источника величин — " +
+			"вечный ноль неотличим от неподключённого авторитета отзыва")
+	}
+	r.reg.MustRegister(&introspectCollector{
+		read: read,
+		desc: prometheus.NewDesc(IntrospectOutcomesMetric,
+			"Outcomes of answering whether a presented token is still live, by outcome ("+
+				strings.Join(IntrospectOutcomes, "|")+"). \"Could not answer\" is a THIRD "+
+				"outcome, not a shade of \"inactive\": collapsing them would make a database "+
+				"failure indistinguishable from a revocation.",
+			[]string{"outcome"}, nil),
+	})
+}
+
+func (c *introspectCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c *introspectCollector) Collect(ch chan<- prometheus.Metric) {
+	counts := c.read()
+	for outcome, value := range map[string]uint64{
+		IntrospectOutcomeActive:      counts.Active,
+		IntrospectOutcomeInactive:    counts.Inactive,
+		IntrospectOutcomeUnavailable: counts.Unavailable,
+	} {
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(value), outcome)
+	}
+}
+
+type signingKeyCollector struct {
+	read func() SigningKeyCounts
+	desc *prometheus.Desc
 }
 
 // NewSigningKeyCollector регистрирует читателя величин ключницы.
 func (r *Registry) NewSigningKeyCollector(read func() SigningKeyCounts) {
-	r.newLabelled(SigningKeyEventsMetric,
-		"Signing-key lifecycle events, by event.",
-		"event", SigningKeyEvents, func() map[string]uint64 {
-			c := read()
-			return map[string]uint64{
-				SigningKeyEventGenerated:   c.Generated,
-				SigningKeyEventActivated:   c.Activated,
-				SigningKeyEventRetired:     c.Retired,
-				SigningKeyEventRemoved:     c.Removed,
-				SigningKeyEventCompromised: c.Compromised,
-				SigningKeyEventFailure:     c.Failures,
-			}
-		})
+	if read == nil {
+		panic("metrics: NewSigningKeyCollector без источника величин — " +
+			"вечный ноль неотличим от неподключённой ключницы")
+	}
+	r.reg.MustRegister(&signingKeyCollector{
+		read: read,
+		desc: prometheus.NewDesc(SigningKeyEventsMetric,
+			"Signing-key lifecycle events, by event ("+strings.Join(SigningKeyEvents, "|")+
+				"). \"Compromised\" is its own bucket because declaring a key leaked and "+
+				"retiring it from rotation are decisions of different cost.",
+			[]string{"event"}, nil),
+	})
+}
+
+func (c *signingKeyCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c *signingKeyCollector) Collect(ch chan<- prometheus.Metric) {
+	counts := c.read()
+	for event, value := range map[string]uint64{
+		SigningKeyEventGenerated:   counts.Generated,
+		SigningKeyEventActivated:   counts.Activated,
+		SigningKeyEventRetired:     counts.Retired,
+		SigningKeyEventRemoved:     counts.Removed,
+		SigningKeyEventCompromised: counts.Compromised,
+		SigningKeyEventFailure:     counts.Failures,
+	} {
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(value), event)
+	}
 }
