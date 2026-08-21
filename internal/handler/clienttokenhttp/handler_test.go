@@ -262,6 +262,10 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 		clientassertion.OutcomeMalformedSerialization,
 		clientassertion.OutcomeDuplicateHeaderMember,
 		clientassertion.OutcomeUnsupportedCritical,
+		// Объявленный тип утверждения — третий независимый признак разделения
+		// двух видов подписанного. Перепись поймала его без входа раньше
+		// человека: исход завёлся, а подающего его входа не было.
+		clientassertion.OutcomeTokenTypeMismatch,
 		clientassertion.OutcomeAlgorithmNotAllowed,
 		clientassertion.OutcomeAlgorithmMismatch,
 		clientassertion.OutcomeIdentityMismatch,
