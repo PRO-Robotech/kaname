@@ -84,6 +84,9 @@ const (
 	OutcomeMalformedSerialization Outcome = "malformed-serialization"
 	OutcomeDuplicateHeaderMember  Outcome = "duplicate-header-member"
 	OutcomeUnsupportedCritical    Outcome = "unsupported-critical-member"
+	// #nosec G101 -- машинный ПРИЗНАК ПРИЧИНЫ ОТКАЗА, уезжающий в журнал и в
+	// счётчик, а не секрет: значения этого словаря наружу не выходят вовсе,
+	// потому что ответ предъявителю у всех исходов один.
 	OutcomeTokenTypeMismatch      Outcome = "token-type-mismatch"
 	OutcomeAlgorithmNotAllowed    Outcome = "algorithm-not-allowed"
 	OutcomeAlgorithmMismatch      Outcome = "algorithm-mismatch"

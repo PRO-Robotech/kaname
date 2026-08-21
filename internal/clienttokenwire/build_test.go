@@ -35,14 +35,20 @@ import (
 // Дублёр не снисходительнее продукта: он не глотает то, на чём настоящий
 // отвечает отказом, — он лишь запоминает, с каким сроком его позвали.
 
-type recordingResolver struct{ deadline time.Time; had bool }
+type recordingResolver struct {
+	deadline time.Time
+	had      bool
+}
 
 func (r *recordingResolver) ResolveAssertionClient(ctx context.Context, _ string) (domain.AssertionClient, error) {
 	r.deadline, r.had = ctx.Deadline()
 	return domain.AssertionClient{}, domain.ErrAssertionClientUnknown
 }
 
-type recordingReplay struct{ deadline time.Time; had bool }
+type recordingReplay struct {
+	deadline time.Time
+	had      bool
+}
 
 func (r *recordingReplay) Redeem(ctx context.Context, _, _ string, _ time.Time) error {
 	r.deadline, r.had = ctx.Deadline()
