@@ -39,17 +39,28 @@ func (c AuthNConfig) ResolveHookSharedSecret() string {
 	return os.Getenv(envName)
 }
 
-// ResolveJWKSEncryptionKey returns the 32-byte AES-GCM key decoded from hex.
-// Source: authn.jwks-encryption-key-hex directly, or the ENV variable named
-// by authn.jwks-encryption-key-hex-env (default KACHO_IAM_JWKS_ENC_KEY).
-// The key must be exactly 32 bytes (256 bit); otherwise error.
+// ResolveJWKSEncryptionKey возвращает 32-байтовый ключ ОБЁРТКИ приватной
+// половины подписного ключа, декодированный из hex.
 //
-// NOTE: nothing encrypts or decrypts with this key any more — its only consumer
-// was the oidc_jwks_keys store, dropped in migration 0065. The sole remaining
-// caller is validateProductionAuthNSecrets, which still requires the key to be
-// present and well-formed at boot. Whether that requirement should itself be
-// retired is a separate decision: dropping it here would change production
-// start-up behaviour.
+// Источник: authn.jwks-encryption-key-hex напрямую либо переменная окружения,
+// названная authn.jwks-encryption-key-hex-env (по умолчанию
+// KACHO_IAM_JWKS_ENC_KEY). Ключ обязан быть ровно 32 байта.
+//
+// # У этой ручки снова есть потребитель — и он ЕДИНСТВЕННЫЙ
+//
+// Ею оборачивается приватная половина подписного ключа в ключнице
+// (internal/keywrap, задача #897). Приватная половина ложится в базу, класть её
+// открытым текстом нельзя, значит ключ обёртки нужен по существу — вопрос был
+// лишь в том, сколько ручек об одном предмете окажется в конфигурации.
+//
+// Второй ручки не заводится намеренно: две ручки об одном предмете дают ту, что
+// неизбежно окажется необязательной, и профиль развёртывания, задавший «не ту»,
+// выглядел бы настроенным. Форма совпадает — страж уже требовал ровно 32 байта,
+// то есть размер ключа симметричного шифра, которым обёртка и делается.
+//
+// Имя ручки НЕ переименовано осознанно: переименование стоило бы правки каждого
+// профиля развёртывания и дало бы окно, в котором старое имя молча
+// игнорируется. Сменился смысл, и он записан здесь.
 func (c AuthNConfig) ResolveJWKSEncryptionKey() ([]byte, error) {
 	raw := c.JWKSEncryptionKeyHex
 	if raw == "" {

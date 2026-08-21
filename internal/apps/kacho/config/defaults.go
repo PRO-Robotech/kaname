@@ -83,6 +83,16 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KACHO_IAM_JWKS_ENC_KEY")
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
+	// Своя чеканка токенов (задача #897). Умолчания заданы ТОЛЬКО у величин,
+	// у которых умолчание осмысленно: путь нашей записи набора и срок ключа.
+	// У издателя и алгоритма умолчаний НЕТ — подпись умолчанием была бы
+	// решением, принятым за оператора.
+	v.SetDefault("authn.token-signing.enabled", false)
+	v.SetDefault("authn.token-signing.issuer", "")
+	v.SetDefault("authn.token-signing.algorithm", "")
+	v.SetDefault("authn.token-signing.allowed-algorithms", "")
+	v.SetDefault("authn.token-signing.key-set-path", "/.well-known/kacho/jwks.json")
+	v.SetDefault("authn.token-signing.key-lifetime", "2160h")
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
 	// иначе клиент проигрывает гонку и получает ПУСТОЕ поле (затирание очищает

@@ -161,7 +161,45 @@ const (
 	// clientAuthMutual — mTLS с RequireAndVerifyClientCert (требует client-CA).
 	// Прежнее жестко-зашитое поведение; теперь — явный opt-in per-edge.
 	clientAuthMutual = "mutual"
+
+	// clientAuthOptionalMutual — client-cert ЗАПРАШИВАЕТСЯ и, если предъявлен,
+	// ВЕРИФИЦИРУЕТСЯ против client-CA (tls.VerifyClientCertIfGiven); не
+	// предъявлен — соединение продолжается. Требует client-CA.
+	//
+	// Режим заведён ради ребра, на котором соседствуют две поверхности с
+	// разными требованиями: набор проверочных ключей обязан оставаться
+	// origin-agnostic (потребитель не предъявляет ничего и не должен), а
+	// авторитет отзыва принимает предъявленный токен и потому обязан знать,
+	// КТО спрашивает.
+	//
+	// Опасность режима названа прямо: сам по себе он НИЧЕГО не сужает —
+	// соединение без сертификата проходит. Сужает обработчик, который требует
+	// проверенного пира; поэтому обработчик, полагающийся на этот режим,
+	// обязан отказывать при отсутствии сертификата САМ, а не считать, что за
+	// него это сделал транспорт.
+	clientAuthOptionalMutual = "optional-mutual"
 )
+
+// JWKSProxyVerifiesCaller отвечает, способен ли слушатель набора проверочных
+// ключей УСТАНОВИТЬ, кто к нему пришёл.
+//
+// Вопрос нужен не набору ключей — ему личность спрашивающего не нужна и не
+// должна быть нужна, — а СОСЕДНЕЙ поверхности того же слушателя: авторитету
+// отзыва, которому присылают предъявленный токен. Он обязан знать, кто
+// спрашивает, и потому не монтируется на слушателе, который сертификата даже
+// не запрашивает: обработчик, не имеющий чем отказать, — контроль, который не
+// откажет ни разу.
+func (m MTLSConfig) JWKSProxyVerifiesCaller() bool {
+	if !m.JWKSProxyServerMTLS.Enable {
+		return false
+	}
+	switch resolveClientAuthMode(m.JWKSProxyClientAuthMode) {
+	case clientAuthMutual, clientAuthOptionalMutual:
+		return true
+	default:
+		return false
+	}
+}
 
 // resolveClientAuthMode возвращает эффективный ClientAuth-режим для ребра:
 // пустая строка → безопасный per-edge дефолт server-tls-only (явное осознанное
@@ -301,13 +339,14 @@ func validateServerEdge(cfg grpcsrv.TLSServer, mode string) error {
 	case clientAuthServerTLSOnly:
 		// server-tls-only: client-cert не верифицируется → client-CA не нужен.
 		return nil
-	case clientAuthMutual:
+	case clientAuthMutual, clientAuthOptionalMutual:
 		if len(cfg.ClientCAFiles) == 0 {
-			return fmt.Errorf("clientAuthMode=mutual requires a non-empty client_ca_files (RequireAndVerifyClientCert needs a client CA)")
+			return fmt.Errorf("clientAuthMode=%s requires a non-empty client_ca_files (verifying a client cert needs a client CA)", mode)
 		}
 		return nil
 	default:
-		return fmt.Errorf("unknown clientAuthMode %q (expected %s|%s)", mode, clientAuthServerTLSOnly, clientAuthMutual)
+		return fmt.Errorf("unknown clientAuthMode %q (expected %s|%s|%s)",
+			mode, clientAuthServerTLSOnly, clientAuthMutual, clientAuthOptionalMutual)
 	}
 }
 
@@ -343,19 +382,27 @@ func serverTLSConfig(cfg grpcsrv.TLSServer, mode string) (*tls.Config, error) {
 		// Encryption + server-authentication only; no client-cert requested.
 		tlsCfg.ClientAuth = tls.NoClientCert
 		return tlsCfg, nil
-	case clientAuthMutual:
+	case clientAuthMutual, clientAuthOptionalMutual:
 		if len(cfg.ClientCAFiles) == 0 {
-			return nil, fmt.Errorf("clientAuthMode=mutual requires a non-empty client_ca_files (RequireAndVerifyClientCert needs a client CA)")
+			return nil, fmt.Errorf("clientAuthMode=%s requires a non-empty client_ca_files (verifying a client cert needs a client CA)", mode)
 		}
 		clientCAs, lerr := loadCAPool(cfg.ClientCAFiles)
 		if lerr != nil {
 			return nil, fmt.Errorf("load client CA pool: %w", lerr)
 		}
-		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+		if mode == clientAuthMutual {
+			tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+		} else {
+			// Сертификат ЗАПРАШИВАЕТСЯ и верифицируется, если предъявлен.
+			// Сам по себе режим ничего не сужает — сужает обработчик, который
+			// требует проверенного пира.
+			tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven
+		}
 		tlsCfg.ClientCAs = clientCAs
 		return tlsCfg, nil
 	default:
-		return nil, fmt.Errorf("unknown clientAuthMode %q (expected %s|%s)", mode, clientAuthServerTLSOnly, clientAuthMutual)
+		return nil, fmt.Errorf("unknown clientAuthMode %q (expected %s|%s|%s)",
+			mode, clientAuthServerTLSOnly, clientAuthMutual, clientAuthOptionalMutual)
 	}
 }
 

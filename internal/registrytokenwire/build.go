@@ -6,6 +6,7 @@ package registrytokenwire
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/registrytokenhttp"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
 )
 
 // BuildConfig — the composition inputs for the registry `/iam/token` shim.
@@ -50,6 +52,12 @@ type BuildConfig struct {
 	AnonymousClientID      string
 	AnonymousKeyID         string
 	AnonymousPrivateKeyPEM string
+	// Signer — НАШ подписант. nil означает «контур ещё на прежнем издателе»:
+	// законное состояние до перевода, а не полусобранная зависимость.
+	Signer *tokensigner.Signer
+	// TokenTTL — срок выпускаемого токена контура. Слагаемое арифметики
+	// отсрочки снятия ключа, поэтому объявлено числом, а не выведено.
+	TokenTTL time.Duration
 }
 
 // Build assembles the registry `/iam/token` shim from a pgx pool: the SA-key
@@ -91,6 +99,13 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (http.Handler, error) {
 			PrivateKeyPEM: cfg.AnonymousPrivateKeyPEM,
 		},
 	}, validator, signer, exchanger)
+
+	if cfg.Signer != nil {
+		// Контур переводится на СВОЮ чеканку. Прежний издатель на нём больше
+		// не звучит; окно двух издателей закрывается сроком уже выданных
+		// токенов, а не решением.
+		useCase = useCase.WithLocalMinter(NewLocalMinter(cfg.Signer, cfg.TokenTTL))
+	}
 
 	tokenHandler := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
 		Realm:          cfg.Realm,

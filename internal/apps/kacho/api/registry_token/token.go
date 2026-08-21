@@ -174,8 +174,11 @@ type IssueRegistryTokenUseCase struct {
 	validator CredentialValidator
 	signer    AssertionSigner
 	exchanger TokenExchanger
-	now       func() time.Time
-	jti       func() (string, error)
+	// minter — НАШ подписант. nil означает «контур ещё на прежнем издателе»;
+	// это законное состояние до перевода, а не полусобранная зависимость.
+	minter LocalMinter
+	now    func() time.Time
+	jti    func() (string, error)
 }
 
 // NewIssueRegistryTokenUseCase — builder. AssertionTTL is clamped to
@@ -221,11 +224,35 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
+	service := in.Service
+	if service == "" {
+		service = u.cfg.DefaultService
+	}
+	now := u.now()
+
+	// Контур переведён на НАШУ чеканку — токен выпускает наш подписант, и
+	// утверждение для прежнего издателя не строится вовсе: подписывать его
+	// было бы работой без адресата.
+	if u.mintsLocally() {
+		out, merr := u.minter.MintToken(ctx, MintInput{
+			Subject:  cred.Subject,
+			Audience: service,
+			Scope:    u.cfg.Scope,
+		})
+		if merr != nil {
+			// Неисправность СВОЕЙ чеканки — недоступность издателя, а не
+			// негодные учётные данные: предъявитель ни при чём, и повтор
+			// осмыслен. Откатываться к прежнему издателю здесь нельзя —
+			// это было бы молчаливым снятием перевода контура.
+			return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
+		}
+		return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
+	}
+
 	jti, err := u.jti()
 	if err != nil {
 		return IssueOutput{}, err
 	}
-	now := u.now()
 	assertion, err := u.signer.Sign(AssertionInput{
 		KeyID:         cred.KeyID,
 		ClientID:      cred.ClientID,
@@ -241,10 +268,6 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
-	service := in.Service
-	if service == "" {
-		service = u.cfg.DefaultService
-	}
 	out, err := u.exchanger.Exchange(ctx, ExchangeInput{
 		ClientAssertion: assertion,
 		Audience:        service,
@@ -295,11 +318,32 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
+	if service == "" {
+		service = u.cfg.DefaultService
+	}
+	now := u.now()
+
+	// Анонимный поток переводится тем же решением: два издателя на ОДНОМ
+	// контуре означали бы, что приёмная сторона обязана держать обе записи
+	// ради одного и того же реестра.
+	if u.mintsLocally() {
+		out, merr := u.minter.MintToken(ctx, MintInput{
+			Subject:  u.cfg.Anonymous.ClientID,
+			Audience: service,
+			// Пол чтения энфорсится ЗДЕСЬ и приёмной стороной: анонимный
+			// токен никогда не просит глагола записи.
+			Scope: AnonymousReadScope,
+		})
+		if merr != nil {
+			return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
+		}
+		return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
+	}
+
 	jti, err := u.jti()
 	if err != nil {
 		return IssueOutput{}, err
 	}
-	now := u.now()
 	assertion, err := u.signer.Sign(AssertionInput{
 		KeyID:         u.cfg.Anonymous.KeyID,
 		ClientID:      u.cfg.Anonymous.ClientID,
@@ -314,9 +358,6 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
-	if service == "" {
-		service = u.cfg.DefaultService
-	}
 	out, err := u.exchanger.Exchange(ctx, ExchangeInput{
 		ClientAssertion: assertion,
 		Audience:        service,

@@ -154,10 +154,11 @@ type PostgresConfig struct {
 //	HookSharedSecret      — Bearer-token Hydra uses to authenticate calls to
 //	                        token_hook/refresh_hook. If empty — accepted
 //	                        without auth (dev mode only).
-//	JWKSEncryptionKeyHex  — 32-byte AES-GCM key in hex (64 chars). It no longer
-//	                        encrypts anything (the oidc_jwks_keys store it was
-//	                        minted for was dropped in migration 0065), but the
-//	                        production boot guard still REQUIRES it — see
+//	JWKSEncryptionKeyHex  — 32-байтовый ключ ОБЁРТКИ приватной половины
+//	                        подписного ключа, в hex (64 символа). Ею
+//	                        оборачивается приватная половина в ключнице
+//	                        (задача #897); ручка об этом предмете в дереве
+//	                        ОДНА, и её значение меняет исход старта — см.
 //	                        validateProductionAuthNSecrets.
 //	HooksHTTPEndpoint     — HTTP listener for webhooks from Hydra/Kratos.
 //	                        Default `tcp://0.0.0.0:9092` (separate port from
@@ -207,20 +208,25 @@ type AuthNConfig struct {
 	// start rather than falling back to the system roots — that fallback is the
 	// state nobody can see, because the operator configured verification against
 	// the internal CA and the process is not doing it.
-	HydraTokenCAFile        string        `mapstructure:"hydra-token-ca-file"`
-	HydraJWKSURL            string        `mapstructure:"hydra-jwks-url"`
-	HydraJWKSCAFile         string        `mapstructure:"hydra-jwks-ca-file"`
-	HookSharedSecret        string        `mapstructure:"hook-shared-secret"`
-	HookSharedSecretEnv     string        `mapstructure:"hook-shared-secret-env"`
-	JWKSEncryptionKeyHex    string        `mapstructure:"jwks-encryption-key-hex"`
-	JWKSEncryptionKeyHexEnv string        `mapstructure:"jwks-encryption-key-hex-env"`
-	HooksHTTPEndpoint       string        `mapstructure:"hooks-http-endpoint"`
-	SAKeyRedactGrace        time.Duration `mapstructure:"sakey-redact-grace"`
-	UserTokenRedactGrace    time.Duration `mapstructure:"usertoken-redact-grace"`
-	SAKeyDefaultTTL         time.Duration `mapstructure:"sakey-default-ttl"`
-	SAKeyMaxTTL             time.Duration `mapstructure:"sakey-max-ttl"`
-	SAKeyAccessTokenTTL     time.Duration `mapstructure:"sakey-access-token-ttl"`
-	SAKeyBindDPoP           bool          `mapstructure:"sakey-bind-dpop"`
+	HydraTokenCAFile        string `mapstructure:"hydra-token-ca-file"`
+	HydraJWKSURL            string `mapstructure:"hydra-jwks-url"`
+	HydraJWKSCAFile         string `mapstructure:"hydra-jwks-ca-file"`
+	HookSharedSecret        string `mapstructure:"hook-shared-secret"`
+	HookSharedSecretEnv     string `mapstructure:"hook-shared-secret-env"`
+	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`
+	JWKSEncryptionKeyHexEnv string `mapstructure:"jwks-encryption-key-hex-env"`
+	// TokenSigning — СВОЯ чеканка токенов (задача #897): издатель, алгоритм,
+	// перечень допустимых алгоритмов приёма, путь нашей записи публикуемого
+	// набора и срок ключа. Пока выключена, её настройки не требуются; будучи
+	// включённой, требует их все — незаданное здесь означает «не сужаем».
+	TokenSigning         TokenSigningConfig `mapstructure:"token-signing"`
+	HooksHTTPEndpoint    string             `mapstructure:"hooks-http-endpoint"`
+	SAKeyRedactGrace     time.Duration      `mapstructure:"sakey-redact-grace"`
+	UserTokenRedactGrace time.Duration      `mapstructure:"usertoken-redact-grace"`
+	SAKeyDefaultTTL      time.Duration      `mapstructure:"sakey-default-ttl"`
+	SAKeyMaxTTL          time.Duration      `mapstructure:"sakey-max-ttl"`
+	SAKeyAccessTokenTTL  time.Duration      `mapstructure:"sakey-access-token-ttl"`
+	SAKeyBindDPoP        bool               `mapstructure:"sakey-bind-dpop"`
 	// BootstrapMint — caller gate + key source for
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`
