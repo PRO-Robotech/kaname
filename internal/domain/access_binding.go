@@ -67,6 +67,27 @@ type AccessBinding struct {
 	// via Update(update_mask=["deletion_protection"]) (C-03). Default false.
 	DeletionProtection bool
 
+	// GrantedRelation — ВТОРАЯ ФОРМА выдачи: имя отношения модели, выдаваемое
+	// напрямую на области выдачи, взаимоисключающе с RoleID (ограничение БД
+	// `access_bindings_grant_form_ck`). Роль раздаёт ГЛАГОЛЫ через свои правила, а
+	// встроенные права платформы выражены именованными отношениями
+	// (`system_viewer`, `quota_reader`, `viewer` на кластере) — подобрать роль под
+	// каждое означало бы завести роли с пустыми правилами.
+	//
+	// Непусто ТОЛЬКО у системной выдачи: отношение — внутреннее имя, от которого
+	// зависит решение о доступе, и выдавать его вправе только платформа. На вход
+	// создания это поле не принимается вовсе — его нет в запросе, поэтому «принято
+	// и проигнорировано» здесь невозможно by construction.
+	GrantedRelation string
+
+	// System — выдача заведена платформой (встроенный доступ: права служебных
+	// учёток, публичное чтение справочников). OUTPUT-ONLY на публичном контракте.
+	//
+	// Отвечает на вопрос «кто выдал» точнее, чем подставленная учётка: выдал не
+	// человек, а платформа, поэтому GrantedByUserID у такой выдачи пуст, и это не
+	// пробел аудита, а его содержание.
+	System bool
+
 	// Subjects — the full multi-subject set (RBAC rules-model 2026).
 	// Persisted in the access_binding_subjects child table; SubjectType/
 	// SubjectID above remain the legacy single = Subjects[0] (projection +
@@ -96,8 +117,32 @@ func (b AccessBinding) Validate() error {
 	// F8: per-object target types must be in the closed registry; arms mutually
 	// exclusive. AllInScope / empty (whole-anchor) is always well-formed.
 	errs = multierr.Append(errs, b.Target.Validate())
-	if b.SubjectID == "" || b.RoleID == "" || b.ResourceID == "" {
+	if b.SubjectID == "" || b.ResourceID == "" {
 		errs = multierr.Append(errs, ErrEmpty)
+	}
+	// РОВНО ОДНА форма выдачи. Обе сразу — два источника материализации у одной
+	// строки; ни одной — выдача, которая ничего не выдаёт. То же ограничение
+	// стоит в БД (`access_bindings_grant_form_ck`): здесь оно ради тона отказа,
+	// там — ради того, что путь записи не один.
+	switch {
+	case b.RoleID != "" && b.GrantedRelation != "":
+		errs = multierr.Append(errs, fmt.Errorf(
+			"Illegal argument granted_relation %q together with role_id %q",
+			b.GrantedRelation, b.RoleID))
+	case b.RoleID == "" && b.GrantedRelation == "":
+		errs = multierr.Append(errs, ErrEmpty)
+	}
+	// Форма отношения — только системная выдача. Причина в комментарии поля.
+	if b.GrantedRelation != "" && !b.System {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"Illegal argument granted_relation %q on a non-system access binding", b.GrantedRelation))
+	}
+	// Подстановочный субъект («любой аутентифицированный») — тоже только у
+	// системной выдачи: это единственный субъект, которого нельзя ни назвать, ни
+	// отозвать поимённо.
+	if b.SubjectID == "*" && !(b.System && b.SubjectType == "user") {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"Illegal argument subject_id %q on a non-system access binding", b.SubjectID))
 	}
 	// Cluster is a singleton scope — resource_id MUST equal
 	// ClusterSingletonID. Any other value is rejected up-front so callers

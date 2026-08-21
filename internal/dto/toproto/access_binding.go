@@ -68,6 +68,11 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		// UNSET while nothing has materialized — an epoch-zero timestamp would read
 		// as "materialized in 1970" and defeat the whole point.
 		MaterializedAt: materializedAtProto(b.MaterializedAt),
+		// Вторая форма выдачи и признак встроенности. Проецируются на КАЖДОМ
+		// чтении: встроенный доступ обязан быть виден там же, где обычный, иначе
+		// «ничего не выдано» и «выдано в обход» снова становятся неотличимы.
+		GrantedRelation: b.GrantedRelation,
+		System:          b.System,
 	}, nil
 }
 
