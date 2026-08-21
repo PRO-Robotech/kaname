@@ -731,6 +731,20 @@ func runServe(cfg config.Config) error {
 				Source: signingKeystore,
 				Logger: logger.With(slog.String("component", "jwks_own_keyset")),
 			})
+			// Читатели величин. Выданные считаются наравне с отказами: пока
+			// наружу выходят одни отказы, ноль в них отвечает сразу на два
+			// вопроса — «отказов не было» и «сюда никто не приходил».
+			metricsReg.NewOwnKeySetCollector(func() metrics.OwnKeySetCounts {
+				st := ourKeySet.Stats()
+				return metrics.OwnKeySetCounts{Served: st.Served, Unavailable: st.Unavailable, Empty: st.Empty}
+			})
+			metricsReg.NewSigningKeyCollector(func() metrics.SigningKeyCounts {
+				st := signingKeystore.Stats()
+				return metrics.SigningKeyCounts{
+					Generated: st.Generated, Activated: st.Activated, Retired: st.Retired,
+					Removed: st.Removed, Compromised: st.Compromised, Failures: st.Failures,
+				}
+			})
 			records = append(records, jwksproxyhttp.Record{
 				Issuer:  cfg.AuthN.TokenSigning.Issuer,
 				Path:    cfg.AuthN.TokenSigning.ResolveKeySetPath(),
@@ -771,6 +785,12 @@ func runServe(cfg config.Config) error {
 				Revocations:       kachopg.NewMintedTokenRevocationRepo(pool),
 				Logger:            logger.With(slog.String("component", "token_introspection")),
 				RequireClientCert: true,
+			})
+			metricsReg.NewTokenIntrospectionCollector(func() metrics.IntrospectCounts {
+				st := introspect.Stats()
+				return metrics.IntrospectCounts{
+					Active: st.Active, Inactive: st.Inactive, Unavailable: st.Unavailable,
+				}
 			})
 			jwksMux.Handle(tokenintrospecthttp.IntrospectPath, introspect)
 		}
