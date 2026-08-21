@@ -32,7 +32,11 @@ import (
 
 // assertionFixture — минимальный стенд реестра.
 type assertionFixture struct {
-	pool    *pgxpool.Pool
+	pool *pgxpool.Pool
+	// dsn — строка подключения к ТОЙ ЖЕ базе. Нужна пробе, которой требуется
+	// ВТОРОЙ пул к ней: недоступность хранилища проверяется закрытым пулом, а
+	// не дублёром, договорившимся с пробой вернуть ошибку.
+	dsn     string
 	repo    *kachopg.AssertionClientRepo
 	account string
 	user    string
@@ -42,12 +46,14 @@ type assertionFixture struct {
 func newAssertionFixture(t *testing.T) assertionFixture {
 	t.Helper()
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
 	f := assertionFixture{
 		pool:    pool,
+		dsn:     dsn,
 		repo:    kachopg.NewAssertionClientRepo(pool),
 		account: "acc_aaaaaaaaaaaaaaaaa",
 		user:    "usr_aaaaaaaaaaaaaaaaa",
