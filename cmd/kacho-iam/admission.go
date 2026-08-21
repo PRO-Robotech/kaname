@@ -31,23 +31,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
-
-// admissionReportInterval — как часто в журнал уходит счёт допущенных и
-// отвергнутых. Отчёт печатается ВСЕГДА, включая нули: «ноль отказов за всю жизнь
-// контроля» обязано быть заметно, иначе мёртвый ограничитель невидим. Отличает
-// его от живого ПАРА чисел — ноль отвергнутых при нуле допущенных означает
-// «никто не звал», а при миллионе допущенных — «предел ни разу не достигнут».
-const admissionReportInterval = time.Minute
-
-// admissionIdleWindow — за сколько простоя ведро субъекта убирается. Величина
-// щедрая намеренно: убрать ведро значит вернуть субъекту полный всплеск.
-const admissionIdleWindow = 10 * time.Minute
 
 // listenerAdmission — пара ограничителей процесса.
 type listenerAdmission struct {
@@ -98,42 +86,13 @@ func (l listenerAdmission) arm(logger *slog.Logger, cfg config.Config) {
 	}
 }
 
-// report — фоновая задача: периодически печатает счётчики обоих слушателей и
-// убирает вёдра простаивающих субъектов.
+// report — фоновая задача: счёт допущенных и отвергнутых плюс уборка вёдер
+// простаивающих субъектов.
 //
-// Уборка живёт здесь, а не внутри ограничителя: пространство личностей задаёт
-// вызывающий, поэтому у роста числа вёдер обязан быть владелец в композиционном
-// корне, а не фоновая горутина, запущенная библиотекой за спиной у процесса.
+// Тело — общее с остальными композиционными корнями ([grpcsrv.ReportAdmission]):
+// оно было написано здесь и у носителя контура слово в слово, а край стал бы
+// третьей копией. Метод остаётся, потому что его предмет — ПАРА слушателей
+// именно этого процесса.
 func (l listenerAdmission) report(ctx context.Context, logger *slog.Logger) {
-	t := time.NewTicker(admissionReportInterval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			l.logOnce(logger, "request admission final counters")
-			return
-		case <-t.C:
-			for _, a := range []*grpcsrv.Admission{l.public, l.internal} {
-				if a != nil {
-					a.EvictIdle(admissionIdleWindow)
-				}
-			}
-			l.logOnce(logger, "request admission counters")
-		}
-	}
-}
-
-func (l listenerAdmission) logOnce(logger *slog.Logger, msg string) {
-	for _, a := range []*grpcsrv.Admission{l.public, l.internal} {
-		if a == nil {
-			continue
-		}
-		s := a.Stats()
-		logger.Info(msg,
-			"listener", a.Listener(),
-			"admitted", s.Admitted,
-			"rejected_rate", s.RejectedRate,
-			"rejected_in_flight", s.RejectedInFlight,
-			"subjects", s.Subjects)
-	}
+	grpcsrv.ReportAdmission(ctx, logger, "", l.public, l.internal)
 }
