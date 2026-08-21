@@ -5,8 +5,9 @@ package pg_test
 
 // reconcile_materialization_matrix_integration_test.go — the per-verb / per-object
 // MATERIALIZATION MATRIX regression, guarding two owner-tuple defects and the class
-// they belong to (testcontainers Postgres 16; asserts on the emitted-tuple ledger,
-// the same observable the fga_outbox drainer applies to OpenFGA).
+// they belong to (testcontainers Postgres 16; asserts on the emitted-tuple ledger —
+// тот же набор, который проход кладёт строками журнала `fga_outbox`, а триггер
+// проецирует в прямой факт).
 //
 // The matrix pins, for the two canonical creator/owner subjects, the FULL per-object
 // relation set the reconciler must materialize:

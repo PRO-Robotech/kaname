@@ -28,9 +28,9 @@ import (
 	"strings"
 )
 
-// RelationChecker — narrow port for an FGA relation check. Satisfied by
+// RelationChecker — narrow port for a relation check. Satisfied by
 // clients.RelationStore (same Check signature). Use-cases depend on this
-// narrow interface, not the full OpenFGA client (Interface Segregation).
+// narrow interface, not on the whole decision door (Interface Segregation).
 type RelationChecker interface {
 	Check(ctx context.Context, subject, relation, object string) (bool, error)
 }

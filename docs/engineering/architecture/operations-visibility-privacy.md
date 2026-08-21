@@ -11,7 +11,7 @@ identity of who created each operation:
 |---|---|---|
 | `UserService.ListOperations` / `AccessBindingService.ListOperations` (+ the existing 5: Account/Project/SA/Group/Role) | viewer on the resource (api-gateway permission-catalog, `required_relation:"viewer"`) | **No** |
 | `AccountService.ListAllOperations` (account-scoped public) | self (account owner) OR account-admin (FGA `admin@account`) — `requireAccountViewAuthority` | **No** |
-| `InternalOperationsService.ListIamOperations` (cluster-wide Internal) | `system_admin@cluster` (in-handler ReBAC Check + gateway catalog) | **No** |
+| `InternalOperationsService.ListIamOperations` (cluster-wide Internal) | `system_admin@cluster` (проверка отношения в обработчике + каталог прав на краю) | **No** |
 | `OperationService.Get` / `Cancel` (per-id) | ownership-gated per-creator | **Yes** |
 
 So an account-viewer of `acc-X` sees the operations created by **every**

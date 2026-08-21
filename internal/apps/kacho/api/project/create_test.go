@@ -23,7 +23,6 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
@@ -124,28 +123,28 @@ func TestUpdateProject_Sync_UnknownMaskField(t *testing.T) {
 // ── SEC-L: Create writes the cluster parent-tuple ──────────────────────
 
 // projSpyFGA records WriteTuples calls.
+// ─────────────────────────────────────────────────────────────────────────────
+// ЗДЕСЬ СТОЯЛА ВТОРАЯ ПОЛОВИНА УТВЕРЖДЕНИЯ — И ОНА БОЛЬШЕ НЕ МОЖЕТ УПАСТЬ
+//
+// Дублёр записывал набор, переданный ПОСТ-КОММИТНОЙ записи кортежей у внешнего
+// движка, а проба требовала, чтобы этот набор был ПУСТ: «в транзакции — да, мимо
+// неё — нет».
+//
+// Записи мимо транзакции больше не существует: порт `clients.RelationStore` несёт
+// один метод — вопрос о доступе. Продукт физически не может пройти тем путём,
+// значит набор пуст ПО ПОСТРОЕНИЮ ТИПА, и утверждение о его пустоте зеленело бы
+// при любом поведении. Проба, которая не может упасть, хуже отсутствующей: она
+// занимает место и отчитывается зелёным.
+//
+// Отрицание не потеряно — оно переехало с прогона на СБОРКУ: возвращение
+// пост-коммитной записи потребует вернуть метод в порт, и это не проходит молча.
+// Живая половина (намерение со-коммитится в той же транзакции) осталась выше и
+// по-прежнему падает.
 type projSpyFGA struct {
-	mu    sync.Mutex
-	wrote []clients.RelationTuple
 }
 
 func (s *projSpyFGA) Check(context.Context, string, string, string) (bool, error) {
 	return false, nil
-}
-func (s *projSpyFGA) WriteTuples(_ context.Context, t []clients.RelationTuple) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.wrote = append(s.wrote, t...)
-	return nil
-}
-func (s *projSpyFGA) DeleteTuples(context.Context, []clients.RelationTuple) error { return nil }
-
-func (s *projSpyFGA) snapshot() []clients.RelationTuple {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := make([]clients.RelationTuple, len(s.wrote))
-	copy(cp, s.wrote)
-	return cp
 }
 
 // TestCreateProject_SECL_EmitsHierarchyAndClusterTupleInTx: the freshly-created
@@ -182,8 +181,6 @@ func TestCreateProject_SECL_EmitsHierarchyAndClusterTupleInTx(t *testing.T) {
 	assert.True(t, accSeen, "project→account hierarchy intent co-committed in-tx")
 	assert.True(t, clusterSeen,
 		"SEC-L: project:<id>#cluster@cluster:cluster_kacho_root must be co-committed in-tx")
-	assert.Empty(t, fga.snapshot(),
-		"create path must NOT write tuples post-commit via RelationStore (now in-tx outbox)")
 }
 
 // ── in-memory fake Repo + ops ──────────────────────────────────────────────

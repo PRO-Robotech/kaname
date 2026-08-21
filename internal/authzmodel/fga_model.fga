@@ -1,13 +1,25 @@
 model
   schema 1.1
 
-# OpenFGA Authorization Model v2 — Kachō (rbac-2026 Contract-A: FLAT INDEX).
+# Authorization Model v2 — Kachō (rbac-2026 Contract-A: FLAT INDEX).
 #
-# This file is the **canonical source** of the authorization model. It is
-# bundled into kacho-proto so every consumer (kacho-iam, openfga-bootstrap-job,
-# admin-UI catalog) reads from the same artifact. Helm umbrella's
-# `openfga-model-stub-configmap.yaml` is generated from this file at
-# image-build time (acceptance §5.1) — `make openfga-model-json`.
+# Написана на DSL отношений (наследие внешнего движка, который её когда-то
+# исполнял). Движок снят стадией S6 эпика #747; ЯЗЫК остался, и разбирает его
+# теперь сама служба — `services/iam/internal/authzmodel` компилирует отсюда план
+# вывода, которым реляционная форма считает вердикт. Прошедшее время в разборах
+# ниже относится к тому движку и оставлено как история, а не как описание
+# сегодняшнего тракта.
+#
+# This file is the **canonical source** of the authorization model, and since the
+# external relations engine was retired (S6 of epic #747) it is the source the
+# DECISION itself compiles from: `services/iam/internal/authzmodel` embeds a
+# byte-identical copy and builds the resolution plan the relational form answers
+# with. The two copies are kept identical by `make -C deploy fga-model-embed`;
+# edit the canonical file only.
+#
+# The engine's model-stub configmap and the target that produced its JSON are
+# gone with the engine: nothing converts this file to the engine's wire format
+# any more, because there is no engine to feed.
 #
 # rbac-2026 Contract-A (Explicit RBAC model 2026, acceptance §0 D-5 / §9):
 # for TENANT roles the model is a **FLAT INDEX** (Zanzibar-as-storage). There is
@@ -420,7 +432,7 @@ type iam_access_binding
 # RegisterResource/UnregisterResource, gated by a ReBAC Check
 # `service_account:<sva>#fga_writer@iam_fgaproxy:system` (authzguard.FGAProxyGate,
 # fgaProxyObject="iam_fgaproxy:system"). Without this type the Check is rejected
-# by OpenFGA ("object type is undefined in the authorization model" → status 400),
+# движком ("object type is undefined in the authorization model" → status 400),
 # the gate denies every module, and NO owner-hierarchy tuple is ever written — so
 # resource creators cannot view their own resources once real authz is enforced.
 # The fga_writer tuples are seeded by kacho-iam migration 0009 (least-priv).
@@ -652,7 +664,7 @@ type nlb_network_load_balancer
     # announce_writer — inbound data-plane feedback gate for
     # `InternalLoadBalancerAnnounceService/ReportAnnounceState` (:9091, mTLS).
     # The permission catalog REQUIRED this relation on this type while the model
-    # never declared it, so OpenFGA rejected the Check as a model validation
+    # never declared it, so the engine rejected the Check as a model validation
     # error and the RPC was denied for EVERY subject — a broken-by-construction
     # gate, not a least-priv default (same defect class as #68 nlb_listener
     # `project` and #71 storage_* types).
@@ -663,7 +675,7 @@ type nlb_network_load_balancer
     # tenants neither produce nor read it. Hence, deliberately:
     #   * `[service_account]` ONLY — no `user`, no `group#member`, no `user:*`.
     #     A human/tenant principal cannot even be WRITTEN as the subject of this
-    #     tuple (OpenFGA rejects the write), so it can never be handed out via a
+    #     tuple (the engine rejected the write), so it can never be handed out via a
     #     custom role or a group;
     #   * NO `or admin|editor|viewer` derivation — a project editor must NOT be
     #     able to forge the announce-state of a load balancer;
@@ -732,7 +744,7 @@ type nlb_target_group
 type nlb_listener
   relations
     # #68: nlb emits `nlb_listener #project @project` (fga_intent.go) parity with
-    # nlb_network_load_balancer / nlb_target_group; without this relation OpenFGA
+    # nlb_network_load_balancer / nlb_target_group; without this relation the engine
     # rejected the tuple → drainer dead-lettered it → listener hierarchy never
     # materialized → listener authz broke. Contract-A direct project link.
     define project: [project]
@@ -812,7 +824,7 @@ type registry_repository
 # #71: the storage owner-registration edge (storage→iam RegisterResource,
 # SEC-D / CS-1 GAP-D) emits `storage_<t>:<id> #project @project:<proj>` for every
 # Volume/Snapshot/Image (services/storage/.../fgaregister.go). These TYPES were
-# ABSENT from the model → OpenFGA rejected every storage owner-tuple ("type
+# ABSENT from the model → the engine rejected every storage owner-tuple ("type
 # 'storage_volume' not found") → drainer permanent-poison → the resource's
 # project hierarchy never materialized → the gateway anti-BOLA scope_extractor
 # {storage_volume,volume_id} / {storage_snapshot,snapshot_id} / {storage_image,

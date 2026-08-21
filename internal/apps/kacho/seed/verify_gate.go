@@ -72,10 +72,10 @@ type VerifyReconcileEngine interface {
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 }
 
-// VerifyRelationChecker — the real-FGA Check port the relation-satisfies-action gate
-// uses (Design-B). Implemented by *clients.OpenFGAHTTPClient (the production
-// FGA client). nil → the gate is a non-fatal skip (no assertion made), so a
-// degraded FGA never crashes boot.
+// VerifyRelationChecker — the REAL Check port the relation-satisfies-action gate
+// uses (Design-B). Implemented by the decision door (internal/authzcascade) over the
+// relational form. nil → the gate is a non-fatal skip (no assertion made), so an
+// unwired resolver never crashes boot.
 type VerifyRelationChecker interface {
 	Check(ctx context.Context, subject, relation, object string) (bool, error)
 }

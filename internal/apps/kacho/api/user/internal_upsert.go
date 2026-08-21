@@ -52,7 +52,6 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
@@ -65,7 +64,7 @@ import (
 // content — project, iam-native, cross-service) after the bootstrap tx commits.
 // Implemented by reconcile.Reconciler — the SAME single materialization path as
 // Account.Create's owner auto-binding (account/create.go OwnerBindingReconciler).
-// Under the FLAT OpenFGA model the hierarchy parent-pointers grant no access, so
+// Under the FLAT rights model the hierarchy parent-pointers grant no access, so
 // without this the bootstrap user is 403 on the content of their own account.
 // nil-safe: when unwired the periodic sweep materializes it, just not synchronously.
 type OwnerBindingReconciler interface {
@@ -84,14 +83,16 @@ type UpsertFromIdentityUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
 
-	// relations / logger — на bootstrap-path этот use-case создает User + Account
-	// + Project + 2 AccessBinding в обход
-	// CreateAccount/CreateProject/CreateAccessBinding use-case'ов, поэтому
-	// обязан сам эмитить ВСЕ FGA-tuples, которые те пишут. Без `iam_user`-
-	// hierarchy-tuple per-resource UserService.Get никогда не авторизуется
-	// (FGA Check `no path`). nil → no-op (OpenFGA не сконфигурирован).
-	relations clients.RelationStore
-	logger    *slog.Logger
+	// logger — диагностика необязательных пост-коммитных шагов (активация
+	// приглашения, материализация собственнической выдачи).
+	//
+	// Рядом стояло поле двери решения. На bootstrap-пути этот use-case создаёт
+	// User + Account + Project + две выдачи в обход соседних use-case'ов и обязан
+	// сам эмитить всё, что те пишут, — но эмитит он это СТРОКАМИ ЖУРНАЛА в своей
+	// writer-tx, а не через дверь. После снятия внешнего движка поле перестало
+	// читаться какой-либо веткой вовсе и снято: значение, которое присваивают и
+	// не читают, выглядит как провязанная зависимость и ею не является.
+	logger *slog.Logger
 	// reconciler — rbac-contract-a-flat-fallout: post-commit owner-binding
 	// materialization for the bootstrap path (parity with Account.Create). nil-safe.
 	reconciler OwnerBindingReconciler
@@ -150,10 +151,13 @@ func (uc *UpsertFromIdentityUseCase) WithReconciler(r OwnerBindingReconciler) *U
 	return uc
 }
 
-// WithRelationStore wires the OpenFGA tuple-writer. Без него
-// bootstrap-созданные User/Account/Project недоступны через per-resource RPC.
-func (uc *UpsertFromIdentityUseCase) WithRelationStore(relations clients.RelationStore, logger *slog.Logger) *UpsertFromIdentityUseCase {
-	uc.relations = relations
+// WithLogger провязывает диагностику необязательных пост-коммитных шагов.
+//
+// Прежде метод назывался `WithRelationStore` и принимал дверь решения вторым
+// параметром — но исхода она не меняла, а после снятия внешнего движка перестала
+// читаться вовсе. Имя, обещающее провязку источника вердикта, на такой функции
+// вводит в заблуждение сильнее, чем отсутствие функции.
+func (uc *UpsertFromIdentityUseCase) WithLogger(logger *slog.Logger) *UpsertFromIdentityUseCase {
 	uc.logger = logger
 	return uc
 }
@@ -375,7 +379,7 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 			// rbac-contract-a-fix (forward-mat, C-01b): co-commit a reconcile event in
 			// the SAME activation writer-tx (ban #10) so the now-ACTIVE invitee user
 			// forward-materializes under the inviter-account's owner `*.*` binding —
-			// the flat OpenFGA model dropped the iam_user `from account` ACCESS cascade,
+			// the flat rights model dropped the iam_user `from account` ACCESS cascade,
 			// so the parent-pointer above no longer grants the owner Get on the user.
 			if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(activated.ID)); rerr != nil {
 				_ = w.Rollback(ctx)
@@ -529,8 +533,8 @@ func (uc *UpsertFromIdentityUseCase) countOwnedAccounts(ctx context.Context, use
 //     существующего user-id. iam.user.created НЕ эмитится (user-identity не нова —
 //     активация уже эмитировала iam.user.updated в Step-1).
 //
-// Для bootstrap-admin (@prorobotech.ru) — Future: + 1 OpenFGA-tuple
-// kacho_system:root#admin (out-of-scope without outbox-wiring).
+// Кластерное право администратора этот путь не эмитит вовсе: его ставит отдельный
+// реконсайлер старта (`seed.RunBootstrapAdmin`) по адресу почты из настроек.
 func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 	ctx context.Context, candidateUserID string, in UpsertFromIdentityInput, actor string, newIdentity bool,
 ) (domain.User, error) {
@@ -543,7 +547,7 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 	// of their personal account. The owner role (OwnerRoleID, migration 0035)
 	// carries the `*.*.*` wildcard whose ARM_ANCHOR forward-materializes per-object
 	// access over the account's content (project, iam-native, cross-service). Under
-	// the flat OpenFGA model the prior admin-role binding (plus inert hierarchy
+	// the flat rights model the prior admin-role binding (plus inert hierarchy
 	// pointers) granted the user NO access on their own account's content → 403.
 	ownerAB := domain.AccessBinding{
 		ID:                 domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
@@ -718,8 +722,17 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 				return domain.User{}, aerr
 			}
 			ownerBindingID = createdOwner.ID
-			if _, err := w.AccessBindingsW().Insert(ctx, projectAB); err != nil {
+			createdProjectAB, err := w.AccessBindingsW().Insert(ctx, projectAB)
+			if err != nil {
 				return domain.User{}, err
+			}
+			// Состав субъектов записывается вместе с выдачей — иначе она
+			// невидима форме вердикта, и человек не имеет прав на проекте,
+			// который сам же и завёл. Замер на живом стенде: из 111 выдач без
+			// состава 110 пришли отсюда.
+			if serr := w.AccessBindingsW().InsertSubjects(ctx, createdProjectAB.ID,
+				[]domain.Subject{{Type: projectAB.SubjectType, ID: projectAB.SubjectID}}); serr != nil {
+				return domain.User{}, serr
 			}
 
 			// 5. Durable audit_outbox iam.user.created in the SAME bootstrap tx

@@ -14,10 +14,19 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// handler_consistency_test.go — the InternalIAMService.Check handler must forward
-// CheckRequest.consistency to CheckRelation so the owner-tuple confirm-gate probe
-// reaches OpenFGA with HIGHER_CONSISTENCY (Koren-1 tail fix). The enforcement gate
-// (unset consistency) must keep the default (HigherConsistency=false).
+// handler_consistency_test.go — переброс поля `CheckRequest.consistency` с провода в
+// `CheckRelationRequest.HigherConsistency`, и РОВНО это.
+//
+// Что здесь утверждается: транспортный переход. Заданное на проводе значение доезжает
+// до запроса решателя, незаданное — не подменяется сильным чтением.
+//
+// Чего здесь НЕ утверждается, и это надо знать читателю: что дальше с этим полем
+// что-нибудь происходит. Прежде его читала необязательная способность решателя,
+// вынуждавшая движок к сильному чтению мимо кэша и реплики. Способность снята вместе с
+// движком, и на сегодняшнем дереве `CheckRelation` поле НЕ ЧИТАЕТ — то есть значение
+// принимается и не меняет поведения. Это дефект контракта, а не свойство, и он заведён
+// отдельно; проба оставлена честной по своему предмету, чтобы переход не сломали молча
+// заодно.
 
 func TestInternalIAM_Check_ForwardsHigherConsistency(t *testing.T) {
 	authz := &fakeAuthorizer{result: &service.CheckResult{Allowed: true}}

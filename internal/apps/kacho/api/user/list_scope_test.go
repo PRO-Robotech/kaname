@@ -4,18 +4,26 @@
 package user
 
 // list_scope_test.go — единая модель видимости (паритет с
-// account/serviceAccount/role List). ListUsersUseCase фильтрует через UNION FGA
-// viewer ∪ v_list на iam_user:
+// account/serviceAccount/role List). ListUsersUseCase сужает страницу
+// ОБЪЕДИНЕНИЕМ отношений `viewer` ∪ `v_list` на iam_user:
 //
-//	visible(iam_user) = ListObjects(subj,"viewer","iam_user")
-//	                  ∪ ListObjects(subj,"v_list","iam_user")
+//	видим(iam_user) ⟺ вопрос о доступе отвечает «да» на viewer ЛИБО на v_list
+//
+// Здесь стояло `ListObjects(subj, …)` — ПЕРЕЧИСЛЕНИЕ объектов у чужого хранилища
+// отношений. Ни этого RPC, ни хранилища в дереве нет (S6), а само перечисление
+// снято раньше и по своей причине: у него был жёсткий серверный предел и не было
+// продолжения, поэтому объекты сверх предела становились владельцу невидимы
+// НАВСЕГДА при живых правах. Сегодня страница читается курсором из своей базы, а
+// права проверяются пообъектно на идентификаторах ЭТОЙ страницы
+// (`internal/authzfilter`).
 //
 // Прежняя membership-over-show модель (любой член аккаунта видел ВСЕХ user'ов
-// аккаунта) устранена (T3.3 D-5): видны только user'ы с per-object viewer/v_list
-// грантом (включая self через self-tuple → viewer-ветку). Инварианты:
-// anonymous → empty (до FGA); FGA-ошибка → Unavailable (fail-closed); cluster-admin/
-// operator/owner покрыты веткой viewer (tier-cascade); не-forwarded principal
-// (system/bootstrap fallback) — тоже anonymous → empty.
+// аккаунта) устранена (T3.3 D-5): видны только user'ы с пообъектным правом
+// viewer/v_list (включая себя — через самокортеж, ветвью viewer). Инварианты:
+// anonymous → empty (до вопроса о доступе); отказ источника вердикта →
+// Unavailable (fail-closed); cluster-admin/operator/owner покрыты веткой viewer
+// (каскад уровней); не-forwarded principal (system/bootstrap fallback) — тоже
+// anonymous → empty.
 
 import (
 	"context"
@@ -119,7 +127,14 @@ func fgaObjectID(object string) string {
 	return object
 }
 
-// userUnionFGAStub — relation-aware FGA ListObjects stub (viewer vs v_list).
+// userUnionFGAStub — дублёр источника вердикта, различающий ОТНОШЕНИЕ (viewer
+// против v_list): он и есть предмет этого файла.
+//
+// У него стоял ещё метод `ListObjects` — перечисление объектов у чужого
+// хранилища. Порт его больше не объявляет, прод-код не зовёт, и держать его тут
+// значило бы дать дублёру способность ШИРЕ настоящего: фильтр страницы выбирает
+// путь, спрашивая у переданного ему значения, какие способности оно предлагает,
+// — и лишний метод молча увёл бы пробы на путь, которым продукт не ходит.
 type userUnionFGAStub struct {
 	clients.RelationQueries
 	mu    sync.Mutex // the per-object Check port is called concurrently
@@ -137,20 +152,6 @@ func (s *userUnionFGAStub) set(relation, subject string, ids []string) {
 		s.idsBy[relation] = map[string][]string{}
 	}
 	s.idsBy[relation][subject] = ids
-}
-
-func (s *userUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ string,
-	_ map[string]any, _ int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls[relation]++
-	if s.err != nil {
-		return nil, s.err
-	}
-	if m := s.idsBy[relation]; m != nil {
-		return m[subject], nil
-	}
-	return nil, nil
 }
 
 // CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
@@ -319,7 +320,11 @@ func TestListUsers_SystemBootstrapFallback_FailClosed(t *testing.T) {
 func TestListUsers_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := &scopeUserRepo{users: seedListUsers()}
 	fga := newUserUnionFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	// Текст ошибки — ЛЮБОЙ: предмет пробы в том, что отказ ИСТОЧНИКА вердикта
+	// превращается в Unavailable, а не в пустую страницу. Здесь стояло имя
+	// снятого RPC внешнего движка — оно называло механизм, которого нет, и
+	// следующий читатель искал бы его в дереве.
+	fga.err = stderrors.New("источник вердикта недоступен")
 	uc := NewListUsersUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxListUser(listMemberID), repouser.ListFilter{AccountID: listAcctA})
 	require.Error(t, err)

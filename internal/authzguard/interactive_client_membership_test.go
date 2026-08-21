@@ -59,7 +59,12 @@ func TestInteractiveClientRPCs_AreGatewayFronted(t *testing.T) {
 
 // TestInteractiveClientReads_AreUnderTheReadFloor — the two reads pass the
 // `system_viewer@cluster` floor. They are reads of the admin surface, so they sit
-// with InternalAuthorizeService/ReadTuples, not with the hot-path exemptions.
+// with InternalSessionRevocationsService/ListByUser, not with the hot-path
+// exemptions.
+//
+// Соседом здесь назывался InternalAuthorizeService/ReadTuples — службы с таким
+// именем в контракте больше нет (снята вместе с внешним движком прав), и указание
+// на неё послало бы читателя искать образец, которого не существует.
 func TestInteractiveClientReads_AreUnderTheReadFloor(t *testing.T) {
 	set := make(map[string]struct{})
 	for _, m := range ReadFloorRPCs() {

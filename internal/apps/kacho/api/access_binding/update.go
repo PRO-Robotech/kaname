@@ -120,7 +120,7 @@ func (u *UpdateAccessBindingUseCase) WithObjectReconciler(r ObjectForwardReconci
 	return u
 }
 
-// WithRelationStore wires the OpenFGA RelationStore used by requireGrantAuthority
+// WithRelationStore wires the door to the rights decision used by requireGrantAuthority
 // (delegated-admin authority path), mirroring Create/Delete.
 func (u *UpdateAccessBindingUseCase) WithRelationStore(relations clients.RelationStore, logger *slog.Logger) *UpdateAccessBindingUseCase {
 	u.relations = relations

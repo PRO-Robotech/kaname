@@ -136,7 +136,7 @@ anti-anonymous интерсептором (`UNAUTHENTICATED`). Освобожд�
 
 ## Авторизация
 
-Авторизация — **per-RPC, ReBAC** через **OpenFGA**. На каждый RPC gateway (или сам IAM)
+Авторизация — **per-RPC**, по модели прав. На каждый RPC gateway (или сам IAM)
 проверяет отношение субъекта к объекту scope:
 
 - **verb-bearing чтение/мутации** ресурса гейтятся точным отношением: `Get` → `v_get`,
@@ -154,7 +154,7 @@ anti-anonymous интерсептором (`UNAUTHENTICATED`). Освобожд�
   (выдача учётных данных, выдача и отзыв прав, блокировка, необратимое удаление) — 24 записи
   каталога прав из 289, а не пользовательская поверхность целиком.
 
-Если отношения нет → `PERMISSION_DENIED` (HTTP `403`). Недоступность OpenFGA на request-path →
+Если отношения нет → `PERMISSION_DENIED` (HTTP `403`). Недоступность базы IAM на пути запроса →
 fail-closed. Полная модель — [Авторизация](/architecture/authz).
 
 ```mermaid
@@ -162,7 +162,7 @@ flowchart LR
   cli["Клиент"] -->|"Bearer JWT"| agw["api-gateway"]
   agw -->|"verify JWT"| agw
   agw -->|"iam.v1.* + subject"| iam["kacho-iam"]
-  iam -->|"Check(subject, relation, object)"| fga["OpenFGA"]
+  iam -->|"Check(subject, relation, object)"| pg[("PostgreSQL kacho_iam")]
   fga -->|"allow / deny"| iam
   iam -->|"SQL"| pg[("kacho_iam")]
 ```
@@ -191,7 +191,7 @@ flowchart LR
     <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Корректный по формату, но несуществующий ресурс</td></tr>
     <tr><td><code>ALREADY_EXISTS</code></td><td>409</td><td>Нарушение UNIQUE (например, дублирующее имя роли)</td></tr>
     <tr><td><code>FAILED_PRECONDITION</code></td><td>409</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection)</td></tr>
-    <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>Peer (OpenFGA / Hydra) недоступен — fail-closed для мутаций</td></tr>
+    <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>База IAM или peer (Hydra) недоступны — fail-closed для мутаций</td></tr>
     <tr><td><code>UNAUTHENTICATED</code></td><td>401</td><td>Нет / невалиден JWT (или анонимный запрос)</td></tr>
     <tr><td><code>PERMISSION_DENIED</code></td><td>403</td><td>Нет нужного отношения в authz-Check</td></tr>
     <tr><td><code>INTERNAL</code></td><td>500</td><td>Внутренняя ошибка (фиксированный текст, без утечки SQL)</td></tr>
@@ -260,7 +260,7 @@ flowchart LR
     <tr><td><code>RoleService</code></td><td>Get / List / Create / Update / Delete / ListOperations</td><td>[Role](/api/role)</td></tr>
     <tr><td><code>AccessBindingService</code></td><td>Get / Create / Update / Delete + 7 read-RPC (ListByScope / ListBySubject / ...)</td><td>[AccessBinding](/api/access-binding)</td></tr>
     <tr><td><code>SAKeyService / UserTokenService</code></td><td>Issue / List / Revoke</td><td>[Токены доступа](/api/tokens)</td></tr>
-    <tr><td><code>AuthorizeService / PermissionCatalogService</code></td><td>Check / BatchCheck / ListObjects / ListSubjects / ExpandRelations / WhoAmI / ListPermissionCatalog</td><td>[Авторизация](/api/authorize)</td></tr>
+    <tr><td><code>AuthorizeService / PermissionCatalogService</code></td><td>Check / BatchCheck / ListSubjects / ExpandRelations / WhoAmI / ListPermissionCatalog</td><td>[Авторизация](/api/authorize)</td></tr>
     <tr><td><code>OperationService</code></td><td>Get / Cancel</td><td>[Операции](/api/operations)</td></tr>
   </tbody>
 </table>

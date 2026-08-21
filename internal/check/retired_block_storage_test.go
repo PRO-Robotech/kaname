@@ -42,8 +42,9 @@ import (
 // negative half.
 //
 // SCOPE, EXACTLY. This gate reads artefacts that live in the repository: iam's
-// four Go vocabularies, the canonical authorization model, and the generated
-// openfga-bootstrap ConfigMap. It says nothing about rows in a running database —
+// four Go vocabularies, the canonical authorization model, and the EMBEDDED copy
+// the service compiles its decision plan from. It says nothing about rows in a
+// running database —
 // the seeded system roles, their selectors and the resource mirror are effective
 // state, and they are asserted against a real migrated schema in
 // services/iam/internal/repo/kacho/pg/retired_block_storage_integration_test.go.
@@ -53,7 +54,13 @@ import (
 
 // retiredType — one retired block-storage type, in both spellings iam uses: the
 // dotted `<module>.<resource>` key (role rules, role_rule_selectors.object_types,
-// resource_mirror.object_type, AccessBinding target) and the OpenFGA object type.
+// resource_mirror.object_type, AccessBinding target) and the object type of the
+// authorization model.
+//
+// The `fga` field name is historical and stays: the model file is still
+// `fga_model.fga` and the spelling is still its own. What changed is WHO reads it —
+// the external relation engine is retired; the model is now compiled into the
+// decision plan by `internal/authzmodel` and answered out of iam's own tables.
 type retiredType struct {
 	dotted string
 	fga    string
@@ -202,12 +209,25 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 	}
 }
 
-// canonicalModelRelPath / configMapRelPath — the two authorization-model artefacts
-// in the tree. The first is the source; the second is what the bootstrap Job
-// actually sends to OpenFGA, so both have to be checked.
+// canonicalModelRelPath / embeddedModelRelPath — the two authorization-model
+// artefacts in the tree. The first is the source; the second is the copy the
+// service EXECUTES — it is what `internal/authzmodel` compiles the decision plan
+// from, so both have to be checked.
+//
+// The second path used to be the generated bootstrap ConfigMap: the block a Job
+// sent to the external relation engine. That engine is retired, the sub-chart is
+// gone with it, and its artefact no longer exists — but the property this gate
+// held does. It simply got SHARPER: the second copy is no longer "what we shipped
+// to somebody else's store", it is "what answers the question". A retired type
+// surviving there is not stale packaging, it is a live declaration.
+//
+// Do NOT collapse this to a single path. The two copies are kept byte-identical
+// by `make -C deploy fga-model-embed`; a gate reading only one of them would stay
+// green while the other drifted, which is the exact failure the pair exists to
+// catch.
 const (
 	canonicalModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
-	configMapRelPath      = "deploy/helm/umbrella/charts/openfga-bootstrap/templates/openfga-model-stub-configmap.yaml"
+	embeddedModelRelPath  = "services/iam/internal/authzmodel/fga_model.fga"
 )
 
 // monorepoRoot walks up from the package directory to the module root.
@@ -245,80 +265,38 @@ func declaredTypes(dsl string) map[string]bool {
 // both artefacts. This is the step the compute-side gate explicitly refused to
 // authorize, and it is only safe once the vocabularies above are clean: a declared
 // type that nothing emits onto is dead weight, but an emitted type that is not
-// declared is a write OpenFGA refuses permanently.
+// declared is a question the relational form REFUSES to answer — an error, not a
+// denial (`relverdict.Ask` has no plan for it).
 func TestRetiredBlockStorageIsNotInAuthorizationModel(t *testing.T) {
 	root := monorepoRoot(t)
 
 	canonical, err := os.ReadFile(filepath.Join(root, canonicalModelRelPath))
 	require.NoError(t, err, "canonical authorization model %s is missing — this gate has no source of truth", canonicalModelRelPath)
-	cmRaw, err := os.ReadFile(filepath.Join(root, configMapRelPath))
-	require.NoError(t, err, "generated model ConfigMap %s is missing — the applied model cannot be checked", configMapRelPath)
+	embRaw, err := os.ReadFile(filepath.Join(root, embeddedModelRelPath))
+	require.NoError(t, err, "embedded authorization model %s is missing — the executed model cannot be checked", embeddedModelRelPath)
 
 	canonicalTypes := declaredTypes(string(canonical))
 	require.NotEmpty(t, canonicalTypes, "canonical model parsed to zero types — parser or model is broken")
-	cmTypes := declaredTypes(string(cmRaw))
-	require.NotEmpty(t, cmTypes, "ConfigMap model.fga block parsed to zero types — parser or artefact is broken")
+	embTypes := declaredTypes(string(embRaw))
+	require.NotEmpty(t, embTypes, "embedded model parsed to zero types — parser or artefact is broken")
 	t.Logf("scanned: %s declares %d types, %s declares %d types",
-		canonicalModelRelPath, len(canonicalTypes), configMapRelPath, len(cmTypes))
+		canonicalModelRelPath, len(canonicalTypes), embeddedModelRelPath, len(embTypes))
 
 	for _, r := range retiredBlockStorage {
 		require.Falsef(t, canonicalTypes[r.fga], "%s still declares `type %s` — the authorization type outlives the resource", canonicalModelRelPath, r.fga)
-		require.Falsef(t, cmTypes[r.fga], "%s still declares `type %s` — the APPLIED model outlives the resource", configMapRelPath, r.fga)
+		require.Falsef(t, embTypes[r.fga], "%s still declares `type %s` — the EXECUTED model outlives the resource", embeddedModelRelPath, r.fga)
 	}
 	for _, l := range liveBlockStorage {
 		require.Truef(t, canonicalTypes[l.fga], "%s does not declare `type %s` — the live owner must be declared, or the negative half above proves nothing", canonicalModelRelPath, l.fga)
-		require.Truef(t, cmTypes[l.fga], "%s does not declare `type %s` — the live owner must be declared, or the negative half above proves nothing", configMapRelPath, l.fga)
+		require.Truef(t, embTypes[l.fga], "%s does not declare `type %s` — the live owner must be declared, or the negative half above proves nothing", embeddedModelRelPath, l.fga)
 	}
 
-	// model.json is the block the bootstrap Job actually POSTs. The DSL copy above
-	// can be correct while this one is a stale transform (`make openfga-model-json`
-	// forgotten), and then the cluster keeps enforcing the retired types.
-	jsonTypes := configMapJSONTypes(t, string(cmRaw))
-	require.NotEmpty(t, jsonTypes, "ConfigMap model.json block declared zero types — parser or artefact is broken")
-	t.Logf("scanned: %s model.json declares %d types", configMapRelPath, len(jsonTypes))
-	for _, r := range retiredBlockStorage {
-		require.Falsef(t, jsonTypes[r.fga], "%s model.json still declares type %q — this is the artefact OpenFGA is given", configMapRelPath, r.fga)
-	}
-	for _, l := range liveBlockStorage {
-		require.Truef(t, jsonTypes[l.fga], "%s model.json does not declare type %q — the live owner must be in the applied model", configMapRelPath, l.fga)
-	}
-}
-
-// configMapJSONTypes extracts the type names from the ConfigMap's `model.json`
-// block-scalar (one compact JSON line, indented by the generator).
-func configMapJSONTypes(t *testing.T, cm string) map[string]bool {
-	t.Helper()
-	var payload string
-	inBlock := false
-	for _, line := range strings.Split(cm, "\n") {
-		if !inBlock {
-			if strings.TrimRight(line, " ") == "  model.json: |-" {
-				inBlock = true
-			}
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "{") {
-			payload = trimmed
-			break
-		}
-	}
-	require.NotEmpty(t, payload, "no `model.json` block found in %s — the applied model cannot be checked", configMapRelPath)
-
-	var model struct {
-		TypeDefinitions []struct {
-			Type string `json:"type"`
-		} `json:"type_definitions"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(payload), &model), "decode model.json block")
-	out := make(map[string]bool, len(model.TypeDefinitions))
-	for _, td := range model.TypeDefinitions {
-		out[td.Type] = true
-	}
-	return out
+	// A third arm stood here: the JSON transform of the model, the block a Job
+	// POSTed to the external relation engine. Its predicate was "the DSL copy can be
+	// right while the transform is stale". There is no transform any more — the
+	// service reads the DSL directly — so the arm had nothing left to disagree with.
+	// It is removed with its subject rather than left asserting over an artefact
+	// that no longer exists.
 }
 
 // TestRetiredBlockStorageIsNotInPermissionCatalog — both embedded copies of the

@@ -27,7 +27,7 @@ import (
 // insertion order preserved on read-back. The real pg SelectEmittedTuples returns
 // a deterministic `ORDER BY relation, object, fga_user`; the fake returns
 // insertion order. Both are valid for the SET-based symmetric-revoke contract
-// (the drainer applies a set to OpenFGA), but a raw `map[tuple]struct{}` iterates
+// (the projection of the journal applies a set), but a raw `map[tuple]struct{}` iterates
 // in RANDOM order, which makes TestFGASymmetric's require.Equal(written, deleted)
 // flaky/failing. Insertion order is deterministic AND matches the order in which
 // create.go captured the write-set (it feeds the SAME `tuples` slice to both

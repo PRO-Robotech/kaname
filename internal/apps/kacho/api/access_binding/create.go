@@ -19,7 +19,8 @@ package access_binding
 //     writer-tx as the binding INSERT. Tx rollback ⇒ no orphan fga_outbox rows.
 //   - Relations are resolved permission-based via
 //     `authzmap.PermissionsToRelations(role.Permissions)`.
-//   - Drainer (clients/fga_applier.go) asynchronously applies to OpenFGA.
+//   - The journal row becomes a direct fact by trigger, in the SAME commit —
+//     there is no separate delivery step to wait for.
 
 import (
 	"context"
@@ -100,9 +101,10 @@ type SelectorReconciler interface {
 type CreateAccessBindingUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
-	// relations — the OpenFGA RelationStore. The grant TUPLES are NOT written
-	// through it (they go via the atomic fga_outbox emit-in-tx flow; drainer
-	// applies). It IS a live dependency on the READ side: requireGrantAuthority
+	// relations — the door to the rights decision. The grant TUPLES are NOT written
+	// through it (they go via the atomic fga_outbox emit-in-tx flow, and a trigger
+	// folds them into direct facts). It IS a live dependency on the READ side:
+	// requireGrantAuthority
 	// resolves delegated-admin grant-authority (Path 2 — FGA `admin`/
 	// `system_admin` on the scope object) through this client. Do not drop it.
 	relations  clients.RelationStore
@@ -121,8 +123,8 @@ func (u *CreateAccessBindingUseCase) WithReconciler(r SelectorReconciler) *Creat
 	return u
 }
 
-// WithRelationStore wires the OpenFGA RelationStore. Grant tuples are emitted
-// via fga_outbox (not through this client), but the store is required on the
+// WithRelationStore wires the door to the rights decision. Grant tuples are emitted
+// via fga_outbox (not through this client), but the door is required on the
 // READ side by requireGrantAuthority to resolve delegated-admin grant authority
 // (FGA `admin`/`system_admin` on the scope object). Logger is used for failure
 // diagnostics.
@@ -353,8 +355,8 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	tuples = dedupeTuples(tuples)
 
 	// Atomic emit-in-tx. The fga_outbox INSERT commits iff the binding
-	// INSERT commits (запрет #10). Drainer (clients/fga_applier.go) applies
-	// tuples to OpenFGA asynchronously.
+	// INSERT commits (запрет #10), and a trigger on that INSERT folds the row
+	// into a direct fact within the same commit.
 	if err := w.AccessBindingsW().EmitRelationWrite(ctx, tuples); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}

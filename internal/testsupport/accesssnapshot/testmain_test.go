@@ -4,28 +4,27 @@
 package accesssnapshot
 
 import (
-	"os"
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
-// TestMain hands this package ONE Postgres and ONE OpenFGA for the whole binary.
+// TestMain выдаёт пакету ОДИН Postgres на весь тестовый бинарь: каждая проба
+// получает свою базу, клонированную из шаблона, промигрированного один раз.
 //
-// Инструменту нужны оба, и по разным причинам: страницы объектов он берёт
-// курсором из СВОЕЙ базы (у неё нет серверного предела перечисления), а вопрос
-// о доступе задаёт НАСТОЯЩЕМУ движку прав продовым клиентом. Подменив второе,
-// он утверждал бы про свою копию правил.
+// Второго провайдера здесь больше нет. Прежняя редакция поднимала рядом внешнее
+// хранилище отношений, объясняя это тем, что вопрос о доступе обязан задаваться
+// НАСТОЯЩЕЙ решающей стороне, — довод верный, и он никуда не делся, только
+// решающая сторона теперь одна и живёт в ЭТОЙ ЖЕ базе (реляционная форма iam).
+// Значит и провайдер нужен один: заводить второй «за компанию» значило бы
+// платить минутами за то, чего проба не спрашивает.
 //
-// Ничего не стартует здесь: оба провайдера поднимаются по первому обращению, и
+// Ничего не стартует здесь: Postgres поднимается по первому обращению, и
 // прогон, где всё пропущено под кратким режимом, не платит ни за что.
 func TestMain(m *testing.M) {
-	os.Exit(fgatest.Run(func() int {
-		return pgtest.Run(m, pgtest.Config{
-			Name:    "iam",
-			Migrate: pgtest.Goose(migrations.FS),
-		})
-	}))
+	pgtest.Run(m, pgtest.Config{
+		Name:    "iam",
+		Migrate: pgtest.Goose(migrations.FS),
+	})
 }

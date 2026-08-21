@@ -148,8 +148,8 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 }
 
 // RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write
-// into kacho_iam.fga_outbox (drainer applies it to OpenFGA). Idempotent: repeat
-// of the same tuple → OK, never AlreadyExists (drainer already_exists→success).
+// into kacho_iam.fga_outbox, out of which a trigger folds the direct fact in the
+// same commit. Idempotent: repeat of the same tuple → OK, never AlreadyExists.
 //
 // authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
 // (cert-cert→SA → `fga_writer@iam_fgaproxy:system`). cluster-internal :9091.
@@ -255,20 +255,23 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument object: required")
 	}
 	if h.authz == nil {
-		// FGA stack not wired — fail-closed (interceptor treats Unavailable
-		// as deny, not as "skip the gate").
-		return nil, status.Error(codes.Unavailable, "authz unavailable: openfga not configured")
+		// Источник вердикта не провязан — fail-closed (интерсептор читает
+		// Unavailable как отказ, а не как «пропустить страж»).
+		return nil, status.Error(codes.Unavailable, "authz unavailable: verdict source not wired")
 	}
 
 	res, err := h.authz.CheckRelation(ctx, service.CheckRelationRequest{
 		Subject:  req.GetSubjectId(),
 		Relation: req.GetRelation(),
 		Object:   req.GetObject(),
-		// Forward the read-consistency preference. Only HIGHER_CONSISTENCY is
-		// promoted to a strong read; UNSPECIFIED/MINIMIZE_LATENCY keep OpenFGA's
-		// cache-eligible default (hot enforcement gate). The owner-tuple confirm-gate
-		// sets HIGHER_CONSISTENCY so its read-after-own-write is never served a
-		// stale-replica negative.
+		// Требование свежести передаётся дальше, и оно ВЫПОЛНЕНО безусловно:
+		// вердикт читает ведущую базу службы, поэтому собственная закоммиченная
+		// запись вызывающего видна следующему же чтению by construction.
+		//
+		// Поле остаётся не «на всякий случай», а как ИМЯ требования: пути чтения с
+		// отстающей реплики сегодня нет (он вне границ приёмки R7-3), и появится
+		// он — различать требование будет тот, кто его заведёт. Прежде на этом
+		// поле ветвился вызов к чужому хранилищу, отвечавшему со своей копии.
 		HigherConsistency: req.GetConsistency() == iamv1.CheckRequest_HIGHER_CONSISTENCY,
 	})
 	if err != nil {

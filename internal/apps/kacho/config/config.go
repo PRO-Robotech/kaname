@@ -21,8 +21,8 @@ import (
 //	repository:    { postgres }
 //	authn:         { mode, domain, hydra-issuer, hooks, jwks, dpop }
 //
-// OpenFGA + the gateway-internal drainer are configured from KACHO_IAM_*
-// env vars in the composition root (cmd/kacho-iam), not from this YAML.
+// The gateway-internal drainer is configured from KACHO_IAM_* env vars in the
+// composition root (cmd/kacho-iam), not from this YAML.
 //
 // Every section is `mapstructure`-tagged (viper uses mapstructure for
 // Unmarshal by default). Defaults live in defaults.go.
@@ -31,11 +31,11 @@ type Config struct {
 	APIServer  APIServerConfig  `mapstructure:"api-server"`
 	Repository RepositoryConfig `mapstructure:"repository"`
 	AuthN      AuthNConfig      `mapstructure:"authn"`
-	// AuthZ — кто принимает решение о доступе (см. verdict_source.go).
-	AuthZ AuthZConfig `mapstructure:"authz"`
-	// OpenFGA is configured from KACHO_IAM_OPENFGA_* env vars in the composition
-	// root (cmd/kacho-iam), not from this YAML. The Prometheus /metrics listener
-	// is real — see APIServer.MetricsEndpoint.
+	// Секции `authz` здесь НЕТ, и это не пропуск. Она держала ровно две ручки —
+	// перечень типов, переключённых на реляционную форму, и признак теневой
+	// сверки, — и обе снялись вместе с внешним движком отношений: переключать
+	// больше нечего, сверять не с чем. Оставленная пустой секция была бы
+	// обещанием настройки, которой нет.
 }
 
 // LoggerConfig — logger section.

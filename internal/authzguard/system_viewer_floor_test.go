@@ -226,8 +226,6 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
 		"/kacho.cloud.iam.v1.InternalUserService/Get",
 		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
 	}
 	for _, m := range mustHave {
 		if _, ok := set[m]; !ok {
@@ -253,7 +251,6 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 		"/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
 		"/kacho.cloud.iam.v1.InternalClusterService/GrantAdmin",
 		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReloadModel",
 		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
 		"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 	}

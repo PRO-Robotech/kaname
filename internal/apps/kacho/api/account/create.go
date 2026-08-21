@@ -75,7 +75,7 @@ func ownerTuples(a domain.Account) []service.RelationTuple {
 //
 // This mirrors access_binding.hierarchyParentTuple for an account-scoped binding,
 // wiring the owner-binding OBJECT into the account hierarchy. rbac-contract-a-fix:
-// under the flat OpenFGA model the `viewer/editor from account` ACCESS computed
+// under the flat rights model the `viewer/editor from account` ACCESS computed
 // relations on iam_access_binding were removed, so this parent-pointer is the
 // hierarchy/lineage edge only — the account owner's Get/List/Delete authz on the
 // owner-binding OBJECT is materialized per-object by the reconciler (the owner `*.*`
@@ -372,7 +372,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// Owner-binding OBJECT hierarchy parent-pointer co-committed in the SAME
 	// writer-tx (parity with a regular AccessBinding.Create, tuplesForBinding/
 	// hierarchyParentTuple): account:<A>#account@iam_access_binding:<id>.
-	// rbac-contract-a-fix: under the FLAT OpenFGA model (Contract-A) the
+	// rbac-contract-a-fix: under the FLAT rights model (Contract-A) the
 	// `viewer/editor from account` ACCESS cascade on iam_access_binding was REMOVED,
 	// so this pointer is the hierarchy/lineage edge only — it no longer by itself
 	// grants the scope owner a path to the binding OBJECT. The owner's Get/List/Delete

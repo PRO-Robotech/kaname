@@ -68,7 +68,6 @@ func DeclaredAuthzLanes() []string {
 type subjectAuthorizer interface {
 	Check(ctx context.Context, req service.CheckRequest) (*service.CheckResult, error)
 	BatchCheck(ctx context.Context, reqs []service.CheckRequest) ([]*service.CheckResult, error)
-	ListObjects(ctx context.Context, req service.ListObjectsRequest) (*service.ListObjectsResult, error)
 	ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error)
 	ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error)
 }
@@ -137,12 +136,8 @@ func (d *InstrumentedSubjectAuthorizer) BatchCheck(ctx context.Context, reqs []s
 	return res, nil
 }
 
-// ListObjects / ListSubjects / ExpandRelations — сквозной проход БЕЗ
+// ListSubjects / ExpandRelations — сквозной проход БЕЗ
 // наблюдения: у них своя цена и свой предмет.
-func (d *InstrumentedSubjectAuthorizer) ListObjects(ctx context.Context, req service.ListObjectsRequest) (*service.ListObjectsResult, error) {
-	return d.inner.ListObjects(ctx, req)
-}
-
 func (d *InstrumentedSubjectAuthorizer) ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error) {
 	return d.inner.ListSubjects(ctx, req)
 }

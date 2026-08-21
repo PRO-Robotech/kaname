@@ -4,11 +4,15 @@
 package role
 
 // list_vlist_union_test.go — Design-B (flat-authz verb-bearing complete). The
-// custom-role List visibility is the UNION of the principal's FGA `viewer`-set
-// AND `v_list`-set on iam_role:
+// custom-role List visibility is the UNION of two DIRECT per-object questions on
+// iam_role, asked about each row of the page:
 //
-//	visible(iam_role) = ListObjects(subject, "viewer", "iam_role")
-//	                  ∪ ListObjects(subject, "v_list", "iam_role")
+//	видна(iam_role:<id>) = Check(subject, "viewer", "iam_role:"+<id>)
+//	                     ∨ Check(subject, "v_list", "iam_role:"+<id>)
+//
+// The two relations are declared once, in authzfilter.RelationsFor("iam_role"), and
+// asked in that order — the second only for what the first denied, which makes the
+// order a cost decision and never a correctness one.
 //
 // Rationale (parity with account/project List, D-6a): on the decoupled model a
 // grant of `iam.roles.{get,list}` with a names/labels selector materializes ONLY
@@ -17,7 +21,20 @@ package role
 // v_list-only grant from its grantee. The union surfaces it (selector-visible)
 // while content (v_get) remains gated.
 //
-// RED until ListRolesUseCase unions viewer ∪ v_list on iam_role.
+// # What this header used to say
+//
+// Both arms were spelled as enumerations — ListObjects(subject, <relation>,
+// "iam_role") — and iam_role is the one type whose page predicate is still a union,
+// so the formula survived longer here than elsewhere. The enumeration itself did
+// not: the external relation engine was removed in stage S6 and
+// clients.RelationQueries carries no method that enumerates objects. The predicate
+// is unchanged; the SHAPE is not, and that was the point — the enumeration was
+// capped server-side with no continuation token, so past that population a role's
+// own grantee fell outside the returned prefix and the role became permanently
+// invisible while row and grant both existed.
+//
+// The trailing "RED until ListRolesUseCase unions viewer ∪ v_list" is dropped: the
+// union landed, and a note announcing a red that is green states nothing.
 
 import (
 	"context"
@@ -35,8 +52,8 @@ import (
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
 )
 
-// roleUnionFGAStub — relation-aware ListObjects stub: distinguishes viewer vs
-// v_list so the union and dedup are observable.
+// roleUnionFGAStub — relation-aware stub clients.RelationQueries: it distinguishes
+// viewer from v_list so the union and the dedup stay observable.
 type roleUnionFGAStub struct {
 	clients.RelationQueries
 	mu    sync.Mutex                     // the per-object Check port is called concurrently
@@ -56,23 +73,10 @@ func (s *roleUnionFGAStub) set(relation, subject string, ids []string) {
 	s.idsBy[relation][subject] = ids
 }
 
-func (s *roleUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ string,
-	_ map[string]any, _ int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls[relation]++
-	if s.err != nil {
-		return nil, s.err
-	}
-	if m := s.idsBy[relation]; m != nil {
-		return m[subject], nil
-	}
-	return nil, nil
-}
-
-// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
-// of enumerating (internal/authzfilter), answering from the SAME (relation,
-// subject) id-sets, so these tests' fixtures and intent are unchanged.
+// CheckWithContext — the DIRECT per-object question the use-case asks
+// (internal/authzfilter), answering from the seeded (relation, subject) id-sets, so
+// these tests' fixtures and intent are unchanged by the removal of the enumeration
+// door.
 func (s *roleUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
 	_ map[string]any) (bool, error) {
 	s.mu.Lock()
@@ -153,7 +157,7 @@ func TestListRoles_Union_FGAUnavailable_FailClosed(t *testing.T) {
 	seedCustomRole(repo, "rol-c1", "acc-A")
 
 	fga := newRoleUnionFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	fga.err = stderrors.New("relation form did not answer: connection closed")
 
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
 	_, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
@@ -161,7 +165,8 @@ func TestListRoles_Union_FGAUnavailable_FailClosed(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok, "want grpc status; got %v", err)
 	require.Equal(t, codes.Unavailable, st.Code(),
-		"FGA outage on either relation → UNAVAILABLE fail-closed")
+		"a question that could not be answered on EITHER relation → UNAVAILABLE fail-closed;\n"+
+			"\"could not ask\" is not \"not allowed\"")
 }
 
 // BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
@@ -169,13 +174,18 @@ func TestListRoles_Union_FGAUnavailable_FailClosed(t *testing.T) {
 //
 // It is not optional politeness: authzfilter takes its batched path whenever the
 // checker offers this method, so a stub that omitted it would leave every test in
-// this file exercising a code path production does not take. It refuses an
-// over-cap partition the way the relation store refuses one — an error, never a
-// trim — so the stub is never more permissive than the thing it stands in for.
+// this file exercising a code path production does not take.
+//
+// The refusal above authzfilter.MaxBatchChecksPerRequest keeps the stub from being
+// SLACKER than the declaration it stands behind: that constant is the partition size
+// authzfilter itself declares and splits a page against, so a filter that stopped
+// honouring its own declaration goes red here instead of quietly changing the shape
+// of the request. An error, never a trim — a short answer is indistinguishable from
+// a page of denials.
 func (s *roleUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
 	objects []string, condCtx map[string]any) ([]bool, error) {
 	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
-		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+		return nil, fmt.Errorf("batch of %d objects exceeds the declared partition size %d",
 			len(objects), authzfilter.MaxBatchChecksPerRequest)
 	}
 	out := make([]bool, len(objects))

@@ -88,11 +88,11 @@ func measureListCost(t *testing.T, s costState) costMeasurement {
 	var visible []string
 	for i := 0; i < 10; i++ {
 		p := e.seedProject(t, e.callerAcc, projectName(10000+i))
-		e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", p))
+		e.grantVerb(t, "user", string(e.callerUser), "project", p, "get")
 		visible = append(visible, p)
 	}
 
-	counter := newCountingQueries(e.fga.Client)
+	counter := newCountingQueries(e.gates)
 	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(counter)
 
 	got, _, err := uc.Execute(e.ctxUser(e.callerUser), repoproject.ListFilter{PageSize: 10})

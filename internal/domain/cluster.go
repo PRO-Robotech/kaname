@@ -12,7 +12,7 @@ import (
 
 // Cluster — singleton (id = `cluster_kacho_root`). Корень
 // иерархии cluster → account → project → resource.
-// Используется как OpenFGA-объект для `cluster:cluster_kacho_root#system_admin@user:usr_xxx`.
+// Используется как объект модели прав для `cluster:cluster_kacho_root#system_admin@user:usr_xxx`.
 type Cluster struct {
 	ID          ClusterID
 	Name        ClusterName

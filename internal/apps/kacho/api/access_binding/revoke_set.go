@@ -4,15 +4,15 @@
 package access_binding
 
 // revoke_set.go — the tuple-set a teardown (hard Delete / soft Revoke) may actually
-// remove from OpenFGA.
+// remove from the rights state.
 //
 // THE RULE. The emitted-tuple ledger (kacho_iam.access_binding_emitted_tuples) is
-// keyed PER BINDING (binding_id, fga_user, relation, object); an OpenFGA tuple is
+// keyed PER BINDING (binding_id, fga_user, relation, object); the tuple itself is
 // NOT refcounted. Two bindings of the SAME subject on the SAME scope with the same
 // verbs therefore hold TWO ledger rows for ONE live tuple. Replaying a binding's own
-// ledger set verbatim onto OpenFGA consequently deletes access that ANOTHER, still
+// ledger set verbatim as deletions consequently removes access that ANOTHER, still
 // ACTIVE binding grants — silent access-loss, and self-sustaining: the ledger is
-// read as the mirror of the store, so no reconcile pass ever notices the divergence
+// read as the mirror of that state, so no reconcile pass ever notices the divergence
 // and re-writes the tuple. A tuple may be removed only when the LAST ACTIVE binding
 // claiming it releases it.
 //

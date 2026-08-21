@@ -15,7 +15,7 @@ package pg_test
 //     hierarchy pointers) — ZERO per-object content tuples;
 //   - it NEVER called ReconcileBinding / emitted a reconcile event.
 //
-// Under the flat OpenFGA model the hierarchy parent-pointers grant NO access
+// В плоской форме прав иерархические указатели на предка НЕ дают доступа
 // (`<rel> from account` cascade removed), so the bootstrap user got 403 on the
 // content of their OWN account: their project, their access_bindings, their
 // iam-native content, cross-service content. This is the ~90% root of the flat

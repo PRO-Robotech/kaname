@@ -213,7 +213,7 @@ go test -short -count=1 -timeout 120s -run TestProject \
 - [`01-account.md`](01-account.md) — owner Account-а.
 - [`08-access-binding.md`](08-access-binding.md) — bindings на `project` resource_type.
 - [`07-role.md`](07-role.md) — project-scoped custom roles.
-- [`29-openfga-check.md`](29-openfga-check.md) — FGA hierarchy propagation.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — FGA hierarchy propagation.
 
 ## Ссылки на код
 

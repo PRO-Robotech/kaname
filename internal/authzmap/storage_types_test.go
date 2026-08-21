@@ -4,14 +4,12 @@
 package authzmap_test
 
 import (
-	"context"
 	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
 // storageDottedToFGA — the dotted closed-table key (resource_mirror.object_type,
@@ -122,45 +120,19 @@ func TestStorageModel_DefinesTypesAndProjectRelation(t *testing.T) {
 	}
 }
 
-// TestStorageModel_ProjectTuple_OpenFGACheck loads the DEPLOYED model into a real
-// OpenFGA and proves #71 end-to-end for each storage type: (1) the storage-emitted
-// `storage_<t> #project @project` tuple is a VALID write (pre-fix OpenFGA rejected
-// it → drainer poison), (2) a materialized owner resolves the resource's v_* verbs
-// (the anti-BOLA object-self path the gateway takes for Get/Update/Delete), and
-// (3) a cross-account subject is denied (the project link leaks no access — the
-// live 403 for the owner was a fail-CLOSED gap, never an over-grant). Real OpenFGA
-// container; skipped under -short.
-func TestStorageModel_ProjectTuple_OpenFGACheck(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	ctx := context.Background()
-
-	for _, ty := range storageTypes {
-		t.Run(ty, func(t *testing.T) {
-			obj := ty + ":res-71test"
-
-			// (1) The project owner-hierarchy tuple storage emits is now a valid FGA
-			//     write. h.Write t.Fatalf's on an OpenFGA reject — pre-#71 this failed
-			//     with "type '" + ty + "' not found".
-			h.Write(t, "project:prj-71test", "project", obj)
-
-			// (2) Owner's materialized DIRECT v_* resolves (the object-self scope the
-			//     gateway Checks for Get/Update/Delete).
-			h.Write(t, "service_account:sva-owner71", "v_get", obj)
-			h.Write(t, "service_account:sva-owner71", "v_update", obj)
-			h.Write(t, "service_account:sva-owner71", "v_delete", obj)
-			for _, rel := range []string{"v_get", "v_update", "v_delete"} {
-				ok, err := h.Client.CheckWithContextConsistent(ctx, "service_account:sva-owner71", rel, obj, nil)
-				require.NoError(t, err)
-				require.Truef(t, ok, "%s owner must resolve %s (object-self anti-BOLA path)", ty, rel)
-			}
-
-			// (3) A cross-account SA with no tuple on this object is DENIED — the
-			//     project relation is a structural hierarchy link, not a grant.
-			for _, rel := range []string{"v_get", "v_update", "v_delete"} {
-				ok, err := h.Client.CheckWithContextConsistent(ctx, "service_account:sva-cross71", rel, obj, nil)
-				require.NoError(t, err)
-				require.Falsef(t, ok, "cross-account SA must NOT resolve %s on %s", rel, ty)
-			}
-		})
-	}
-}
+// Здесь стояла TestStorageModel_ProjectTuple_OpenFGACheck: она грузила заготовку
+// модели из карты чарта загрузки движка отношений в поднятый контейнером движок и
+// утверждала три вещи — что указатель на проект есть ВАЛИДНАЯ запись, что владелец
+// разрешает глаголы объекта, и что субъект соседнего аккаунта их не разрешает.
+//
+// Первое снято ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: движка, который мог бы отвергнуть запись
+// «тип не найден», в дереве нет, а прямой факт своей базы словаря типов не держит —
+// отвергать стало нечему и некому. Два оставшихся живы и проверяются формой вердикта
+// в super_admin_cascade_test.go: все ТРИ типа хранилища стоят в переписи объектов её
+// мира (`storage_volume`, `storage_snapshot`, `storage_image`), поэтому «достаёт по
+// указателю» и «сосед не достаёт» утверждаются там на тех же типах и тем же вопросом,
+// каким его задаёт продукт. Двух мест об одном предмете здесь не заводится.
+//
+// Структурное утверждение выше при этом стало НЕСУЩИМ: план вывода `storage_*.v_*`
+// компилируется из той самой строки `define project`, и без неё тип потеряет источники
+// «аккаунт» и «кластер» — то есть каскад до тома, снимка и образа просто исчезнет.

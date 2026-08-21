@@ -32,12 +32,12 @@ import (
 // kachoRepo / opsRepo / relationStore прокидываются из composition root
 // (serve.go) — provision hook (Kratos user-provisioning, C4) строит
 // UpsertFromIdentityUseCase из тех же зависимостей, что wiring.go, и
-// переиспользует уже-собранный OpenFGA-клиент (не дублирует его).
+// переиспользует уже собранную дверь решения (не дублирует её).
 func buildHooksMux(
 	pool *pgxpool.Pool,
 	kachoRepo kachorepo.Repository,
 	opsRepo operations.Repo,
-	relationStore *clients.OpenFGAHTTPClient,
+	relationStore clients.RelationStore,
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
@@ -95,14 +95,14 @@ func buildHooksMux(
 	// Provision hook (C4): Kratos registration/login → UpsertFromIdentity.
 	// Reuse the SAME repo/opsRepo/relationStore the gRPC InternalUserService
 	// wiring uses (wiring.go) — same bootstrap + FGA-tuple side-effects, no
-	// duplicate OpenFGA client. rbac-contract-a-flat-fallout: ALSO wire the owner-
+	// duplicate decision door. rbac-contract-a-flat-fallout: ALSO wire the owner-
 	// binding reconciler so the Kratos provision-hook signup path (the LIVE
 	// signup path) forward-materializes the bootstrap owner's per-object content
 	// access — parity with the gRPC InternalUserService wiring (wiring.go). Without
 	// it the LIVE signup user is 403 on their own account's content until the sweep.
 	provisionReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool), logger)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kachoRepo, opsRepo).
-		WithRelationStore(relationStore, logger).
+		WithLogger(logger).
 		WithReconciler(provisionReconciler).
 		// ЖИВОЙ путь первого входа: именно здесь активируются приглашения на
 		// настоящем трафике. Счётчик без этой провязки был бы всегда нулевым.

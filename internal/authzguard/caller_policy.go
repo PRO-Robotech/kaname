@@ -113,12 +113,11 @@ func GatewayFrontedInternalRPCs() []string {
 		"/kacho.cloud.iam.v1.InternalLimitService/Create",
 		"/kacho.cloud.iam.v1.InternalLimitService/Update",
 		"/kacho.cloud.iam.v1.InternalLimitService/Delete",
-		// InternalAuthorizeService — tuple/model administration (admin tooling).
-		// WriteTuples stood here and is gone: the RPC was retired (#788) — the
-		// service is read-only with respect to the relation store now.
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReloadModel",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
+		// Четырёх методов администрирования хранилища отношений здесь больше нет:
+		// служба снята вместе с внешним движком (стадия S6 эпика #747). Запись
+		// круга, называющая метод, которого не существует, — не безобидный
+		// остаток: она переживает свой предмет и делает вид, что круг шире, чем
+		// он есть.
 		// InternalIAMService — cluster admin mutation (admin tooling). The
 		// fga-proxy writes are NOT here (module SAs, in-handler gate).
 		"/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",

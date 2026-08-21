@@ -70,16 +70,20 @@ func parseConditionSites(t *testing.T) ([]conditionSite, int) {
 // TestConditionedRelationHasAProducer — a relation may require a condition only
 // if something can produce a tuple that satisfies it.
 //
-// OpenFGA validates a write against the type restriction. When the restriction
-// for a subject type reads `[user with <cond>]`, an UNCONDITIONED tuple for that
-// subject is refused outright:
+// Ограничение типа читается на записи: когда оно для субъектного типа выглядит
+// как `[user with <cond>]`, БЕЗУСЛОВНАЯ строка для этого субъекта условию не
+// удовлетворяет и права по этой ветви не даёт.
 //
-//	{"code":"validation_error","message":"Invalid tuple 'account:aX#admin@user:u1'.
-//	 Reason: condition is missing"}
+// Здесь стояло «OpenFGA отвергает такую запись» вместе с текстом его отказа.
+// Внешнего движка в дереве нет (S6), и называть его нынешним контролёром значило
+// бы направлять читателя к тому, чего не существует. Свойство при этом не
+// изменилось и стало ПРЯМЕЕ: условие лежит на самой строке прямого факта
+// (`relation_fact.condition_name`), и вопрос о доступе вычисляет его сам —
+// безусловная строка против условного ограничения просто не даёт основания.
 //
-// So a `with` clause on a relation whose only producer writes unconditioned
-// tuples does not narrow that relation — it makes the relation's direct-subject
-// branch UNWRITABLE. The grant then never materializes, the write is refused for
+// Так что `with` на отношении, чей единственный производитель пишет безусловные
+// строки, это отношение НЕ сужает — он делает его прямую субъектную ветвь
+// НЕИСПОЛНИМОЙ. The grant then never materializes, the write is refused for
 // good (a refusal that repeats identically is not transient), and the row wedges
 // its outbox partition. Access still resolves through whatever computed branch
 // the relation unions in, so the relation keeps answering — which is why this is
@@ -112,10 +116,11 @@ func TestConditionedRelationHasAProducer(t *testing.T) {
 		seen[s.String()] = true
 		if _, declared := unproducedConditionSites[s.String()]; !declared {
 			t.Errorf("%s:%d declares `with %s` on %s#%s, and nothing in production can write a "+
-				"tuple carrying that condition (see TestConditionProducerPremise). OpenFGA refuses "+
-				"an unconditioned tuple against a conditioned restriction, so this clause does not "+
-				"narrow the relation — it removes the direct-subject branch and wedges the outbox "+
-				"partition of every grant that tries to use it. Either give the condition a "+
+				"tuple carrying that condition (see TestConditionProducerPremise). Безусловная "+
+				"строка против условного ограничения основания не даёт, поэтому оговорка не "+
+				"сужает отношение — она снимает его прямую субъектную ветвь и заклинивает "+
+				"партицию журнала у всякой выдачи, которая попробует ею воспользоваться. "+
+				"Either give the condition a "+
 				"producer, or drop the clause; declaring it and listing it below is only for what "+
 				"already shipped.",
 				canonicalModelRelPath, s.Line, s.Condition, s.Type, s.Relation)

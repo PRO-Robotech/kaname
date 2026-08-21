@@ -29,7 +29,7 @@ import (
 
 // ObjectReconciler — narrow post-commit port (rbac-contract-a-fix, C-01b /
 // issue #232): SYNCHRONOUSLY materialize the per-object access on a freshly-created
-// iam-native object right after the create writer-tx commits. Under the flat OpenFGA
+// iam-native object right after the create writer-tx commits. Under the flat rights
 // model (Contract-A) the `<rel> from account` ACCESS cascade on iam leaf types is
 // gone, so the owner's / account-admin's per-object admin/v_* tuple on project:<id>
 // is materialized per-object by the reconciler — and the async event drain races a
@@ -61,9 +61,9 @@ type ObjectReconciler interface {
 type CreateProjectUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
-	// Optional OpenFGA hook. When wired, a freshly-created Project also gets
-	// its `project:<id>#account@account:<account_id>` hierarchy tuple written
-	// so FGA `viewer/editor/admin from account` cascades resolve — without it
+	// Optional hook into the rights model. When wired, a freshly-created Project also
+	// gets its `project:<id>#account@account:<account_id>` hierarchy tuple written
+	// so the `from account` cascades resolve — without it
 	// the api-gateway per-RPC authz middleware can never authorise a
 	// project-scoped Get/Update/Delete.
 	relations  clients.RelationStore
@@ -188,9 +188,10 @@ func (u *CreateProjectUseCase) doCreate(ctx context.Context, p domain.Project, a
 	// the GET-after-create race the async event drain would otherwise lose under the flat
 	// model (iam-project newman `get-confirms` 403). The owner `*.*` ARM_ANCHOR over
 	// iam.project finds this brand-new project (IAMDirectSelectorBindingsMatchingObject,
-	// arm='anchor') and the reconciler's sync-FGA writer applies the admin tuple to
-	// OpenFGA before this returns. Best-effort/non-fatal: the project is durably created
-	// and the co-committed reconcile event + periodic sweep are the at-least-once
+	// arm='anchor') and emits the admin tuple into the journal, out of which a trigger
+	// folds the direct fact in the same transaction — so the grant is a fact before this
+	// returns, with nothing to catch up on. Best-effort/non-fatal: the project is durably
+	// created and the co-committed reconcile event + periodic sweep are the at-least-once
 	// backstop. nil-safe.
 	//
 	// IAM-FMB throughput fix: the sync post-commit materialization takes the ADDITIVE

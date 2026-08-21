@@ -100,11 +100,10 @@ type Writer interface {
 	// inside THIS writer-tx — atomic with the surrounding resource mutation
 	// (запрет #10 / SEC-D). The intent row commits iff the
 	// resource INSERT commits, so a rolled-back create leaves no orphan intent
-	// AND a committed create always leaves the owner-tuple intent that the live
-	// fga_outbox drainer (cmd/kacho-iam/serve.go) delivers to OpenFGA at-least-once
-	// + idempotently (409 → success). This replaces the former best-effort
+	// AND a committed create always leaves the owner-tuple intent, out of which a
+	// trigger folds the direct fact in the SAME commit. This replaces the former
 	// прежний путь записи ПОСЛЕ коммита ("Non-fatal", снят), который терял
-	// the tuple on any FGA outage → owner locked out of their own resource.
+	// the tuple on any outage of the store → owner locked out of their own resource.
 	//
 	// Used by the own-resource Create use-cases (Account/Project/Group/
 	// ServiceAccount/Role) + user bootstrap to co-commit the owner/hierarchy

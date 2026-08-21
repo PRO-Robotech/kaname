@@ -7,20 +7,27 @@ package group
 // mirror bug (E-31 ExpandAccess, broader group-based authz):
 //
 //   AddMember writes ONLY the group_members row (iam DB) and never emitted the
-//   FGA `group:<gid>#member` userset tuple, so a binding on a GROUP subject
-//   (`<obj>#<rel>@group:<gid>#member`) resolved its userset to EMPTY in OpenFGA —
-//   members got no real access and ExpandAccess found no concrete members.
+//   `group:<gid>#member` userset tuple, so a binding on a GROUP subject
+//   (`<obj>#<rel>@group:<gid>#member`) resolved its userset to EMPTY — members got
+//   no real access and ExpandAccess found no concrete members.
 //
 // These white-box tests pin the co-commit contract: doAdd MUST co-commit
 // EmitFGARelationWrite({user|service_account:<member>, "member", group:<gid>})
 // in the SAME writer-tx, and doRemove MUST co-commit the symmetric
-// EmitFGARelationDelete. The tuple's OBJECT type is `group` (the userset type
-// the binding's subjectRef points at — group_model.fga `type group`), NOT
-// `iam_group` (the object-scope hierarchy type used by group Create).
+// EmitFGARelationDelete. The tuple's OBJECT type is `group` (the userset type the
+// binding's subjectRef points at — `type group` in the authorization model,
+// proto/kacho/cloud/iam/v1/fga_model.fga), NOT `iam_group` (the object-scope
+// hierarchy type used by group Create).
 //
-// The FGA outbox row is exercised end-to-end (real Postgres tx + real OpenFGA
-// Check/ExpandAccess) by member_fga_outbox_integration_test.go; this unit test
-// proves the use-case emits the RIGHT tuple shape without a DB.
+// The journal row is exercised end-to-end against a real Postgres by
+// repo/kacho/pg/group_member_fga_outbox_integration_test.go; this unit test proves
+// the use-case emits the RIGHT tuple shape without a DB.
+//
+// The journal (`kacho_iam.fga_outbox`) survived stage S6 — what was removed is the
+// external engine that used to consume it. A database trigger now folds each row
+// into `kacho_iam.relation_fact`, which is what a verdict is read from, so the
+// co-commit contract this file pins is if anything more load-bearing than before:
+// the emit IS the materialization, in the same transaction.
 
 import (
 	"context"

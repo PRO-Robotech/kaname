@@ -111,9 +111,11 @@ var Profile = listfiltergate.Profile{
 	// page filter reaches; Visible is the single-object form. requireGrantAuthority
 	// is the per-row form used by ListByRole — see the caveat in the package comment.
 	Filters: []string{"VisibleSet", "Visible", "requireGrantAuthority"},
-	// The hand-written FLOOR only. `ListAllowedIDs` is another service's vocabulary
-	// and has no declaration anywhere in iam, so nothing can derive it; `ListObjects`
-	// is kept because a floor that shrinks when a derivation breaks is not a floor.
+	// The hand-written FLOOR only. Оба имени — чужой словарь: `ListAllowedIDs`
+	// не объявлен в iam нигде, а `ListObjects` был поверхностью снятого хранилища
+	// отношений (стадия S6, эпик #747) и объявления тоже больше не имеет. Пол
+	// держится именно ими: пол, съёживающийся вместе со снятой деривацией, полом
+	// не является — имя, которое нельзя вывести, обязано быть выписано.
 	Banned: []string{"ListAllowedIDs", "ListObjects"},
 	// Where the ban actually comes FROM. iam asks the authorization question through
 	// exactly two declared surfaces, and both are named here so their method sets
@@ -213,21 +215,19 @@ var Profile = listfiltergate.Profile{
 
 		// ---- the store's answer IS the response ----
 		//
-		// These two RPCs EXPOSE the authorization store's enumeration: ListObjects
-		// answers "which objects may this subject act on", ListSubjects the inverse.
-		// The enumerate-then-narrow ban is about narrowing YOUR OWN page by asking the
-		// store to enumerate; here the enumeration is what the caller came for, so the
-		// ban is inapplicable by construction, not waived. What protects them is the
-		// gate on the subject or the resource the caller named.
+		// This RPC EXPOSES the enumeration itself: ListSubjects answers "who may act
+		// on this resource". The enumerate-then-narrow ban is about narrowing YOUR OWN
+		// page by asking for an enumeration; here the enumeration is what the caller
+		// came for, so the ban is inapplicable by construction, not waived. What
+		// protects it is the gate on the resource the caller named.
 		//
 		// ListSubjects was declared ParentGate until #651, and that was an
 		// under-declaration nothing could reveal: the ban held two names, neither of
-		// them `ListSubjects`, so the wrong shape cost nothing and stayed. Deriving the
-		// ban from the store's method set surfaced it on the first run. The evidence
-		// demanded is UNCHANGED by the correction — listfiltergate judges StoreQuery in
-		// the same branch as ParentGate, so `authorizeCaller` must still be reached AND
-		// its verdict must still stop the response.
-		"authorize.ListObjects":  {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
+		// them `ListSubjects`, so the wrong shape cost nothing and stayed.
+		//
+		// Второй записи здесь больше нет: перечисление ОБЪЕКТОВ снято с контракта
+		// стадией S6 (эпик #747). Объявление, пережившее свой RPC, делает вид, что
+		// профиль покрывает поверхность, которой нет.
 		"authorize.ListSubjects": {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
 
 		// ---- settled by the per-RPC authorization at the edge ----

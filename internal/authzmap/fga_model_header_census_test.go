@@ -323,116 +323,25 @@ func nilIfEmpty(s []string) []string {
 	return s
 }
 
-// modelTypeMention — имя типа модели, упомянутое в прозе. Приставка домена —
-// признак структурный: типы модели именуются `<домен>_<ресурс>`, и ни одно
-// обычное слово этих приставок не несёт.
-var modelTypeMention = regexp.MustCompile(`\b((?:vpc|compute|storage|nlb|iam|registry)_[a-z_0-9]+)\b`)
-
-// TestChartPreambleNamesNoRetiredType — преамбула сгенерированного чарта не
-// вправе называть тип, которого модель больше не объявляет.
+// Здесь стояли TestChartPreambleNamesNoRetiredType и парная к ней
+// TestChartPreamblePredicateCutsBothWays: первая читала РУКОПИСНУЮ преамбулу
+// сгенерированной карты чарта — ту часть файла, до которой генератор не доходил,
+// — и требовала, чтобы ни одно упомянутое в ней имя типа не пережило снятия
+// этого типа из модели; вторая доказывала предикат просроченного упоминания
+// инъекцией в обе стороны.
 //
-// # Почему это отдельная поверхность
+// Обе сняты ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: ни карты, ни подчарта загрузки движка
+// отношений, ни генератора в дереве нет — движок снят целиком (S6). Второй
+// поверхности правки, ради которой гейт и заводился, больше не существует: у
+// канонической модели осталась одна производная — вшитая копия
+// `services/iam/internal/authzmodel/fga_model.fga`, и она порождается ЦЕЛИКОМ,
+// рукописной части в ней нет вовсе, а побайтовое равенство пары держит
+// `TestEmbeddedModelIsByteIdenticalToCanonical` того пакета.
 //
-// `openfga-model-stub-configmap.yaml` генерируется из канонической модели, но
-// генератор переписывает файл ТОЛЬКО начиная с `data:`
-// (`gen-openfga-model-configmap.py`: `lines[:data_idx] + data + lines[end_idx:]`).
-// Всё, что выше, — рукописная преамбула `{{/* … */}}`, до которой регенерация не
-// доходит. Поэтому она пережила и снятие типа, и мою правку шапки: копия
-// перечня, лежащая в трёх экранах от оригинала, расходилась с ним молча.
+// Проба, доказывающая предикат, снята вместе с ним по той же причине, по какой
+// заводилась: без потребителя она утверждала бы свойство функции, которую никто
+// не зовёт, — то есть занимала бы слот и отчитывалась зелёным.
 //
-// Померено на bdafe2c4: преамбула называла `iam_condition` (снят, надгробие в
-// теле) и молчала про `nlb_listener`, `registry_registry`, `registry_repository`.
-// Перечень оттуда УБРАН — дублировать список, лежащий ниже в том же файле,
-// незачем: независимости это не давало, а вторую поверхность правки создавало.
-//
-// # Что именно проверяется
-//
-// Не «списка нет» (это запрет по форме, который обходится переписыванием), а
-// «нет ПРОСРОЧЕННОГО имени»: любое упоминание `<домен>_<ресурс>` в преамбуле
-// обязано соответствовать живому `type` в модели. Предикат самоистекающий —
-// пока имена живые, он молчит; как только тип снимут, преамбула краснеет вместе
-// с ним. Живое упоминание остаётся законным: гейт запрещает ложь, а не прозу.
-func TestChartPreambleNamesNoRetiredType(t *testing.T) {
-	root := monorepoRoot(t)
-
-	dslRaw, err := os.ReadFile(filepath.Join(root, canonicalModelRelPath))
-	require.NoErrorf(t, err, "канонический %s не прочитан", canonicalModelRelPath)
-	body := map[string]bool{}
-	for _, typ := range modelBodyTypes(string(dslRaw)) {
-		body[typ] = true
-	}
-	require.NotEmpty(t, body, "в модели не разобрано ни одного `type` — сломан разбор, а не «преамбула чиста»")
-
-	cmRaw, err := os.ReadFile(filepath.Join(root, configMapRelPath))
-	require.NoErrorf(t, err, "чарт %s не прочитан", configMapRelPath)
-
-	// Преамбула — всё, что ДО `data:`: ровно та часть, которую генератор не
-	// переписывает и за которой поэтому никто не следит.
-	idx := strings.Index(string(cmRaw), "\ndata:")
-	require.Positivef(t, idx, "в %s не найден ключ `data:` — граница преамбулы не определяется, "+
-		"и «упоминаний нет» значило бы «нечем было искать»", configMapRelPath)
-	preamble := string(cmRaw)[:idx]
-
-	mentions := map[string]bool{}
-	for _, m := range modelTypeMention.FindAllStringSubmatch(preamble, -1) {
-		mentions[m[1]] = true
-	}
-
-	var stale []string
-	for typ := range mentions {
-		if !body[typ] {
-			stale = append(stale, typ)
-		}
-	}
-	sort.Strings(stale)
-
-	t.Logf("осмотрено: преамбула чарта %d байт, упомянуто типов модели %d, живых `type` в модели %d",
-		len(preamble), len(mentions), len(body))
-
-	for _, typ := range stale {
-		t.Errorf("преамбула %s называет `%s`, а модель такой тип не объявляет.\n\n"+
-			"Генератор переписывает файл только начиная с `data:`, поэтому преамбула "+
-			"переживает и снятие типа, и правку канонической шапки — молча. Убери имя "+
-			"либо верни тип в модель.", configMapRelPath, typ)
-	}
-}
-
-// TestChartPreamblePredicateCutsBothWays — предикат просроченного упоминания
-// проверен инъекцией в обе стороны на синтетическом входе.
-//
-// Без положительного направления «просроченных нет» неотличимо от предиката,
-// который просроченное видеть не умеет; без отрицательного — от запрета называть
-// типы вообще, который снёс бы законную прозу.
-func TestChartPreamblePredicateCutsBothWays(t *testing.T) {
-	// Живые типы фикстуры. `iam_user` здесь ОБЯЗАТЕЛЕН: он стоит рядом со снятым
-	// в проверке ниже, и без него предикат пометил бы просроченным ещё и его —
-	// то есть красное направление доказывалось бы совпадением, а не предметом.
-	body := map[string]bool{"vpc_network": true, "nlb_listener": true, "iam_user": true}
-
-	staleOf := func(text string) []string {
-		var out []string
-		seen := map[string]bool{}
-		for _, m := range modelTypeMention.FindAllStringSubmatch(text, -1) {
-			if !body[m[1]] && !seen[m[1]] {
-				seen[m[1]] = true
-				out = append(out, m[1])
-			}
-		}
-		sort.Strings(out)
-		return out
-	}
-
-	// (а) КРАСНОЕ: снятый тип назван — ровно тот дефект, что был в дереве.
-	require.Equal(t, []string{"iam_condition"},
-		staleOf("IAM resource-types: iam_user / iam_condition."),
-		"просроченное упоминание не поймано")
-	require.Equal(t, []string{"iam_condition", "storage_image"},
-		staleOf("covers vpc_network / storage_image / iam_condition"),
-		"поймано не всё просроченное")
-
-	// (б) МОЛЧАЛИВОЕ: живые типы и обычная проза той же формы.
-	require.Empty(t, staleOf("covers vpc_network and nlb_listener"),
-		"живое упоминание объявлено просроченным — гейт запрещает прозу, а не ложь")
-	require.Empty(t, staleOf("bootstrap job performs idempotent deploy; see model_id secret"),
-		"обычные слова приняты за имена типов — приставка домена перестала быть дискриминатором")
-}
+// Что от урока осталось действующим и живёт выше по файлу: перечень имён,
+// лежащий в другом месте того же документа, расходится с оригиналом МОЛЧА, и
+// ловить надо не «список есть», а «названо просроченное».

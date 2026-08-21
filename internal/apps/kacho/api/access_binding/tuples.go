@@ -20,7 +20,8 @@ package access_binding
 //     w.AccessBindingsW().EmitRelationDelete(ctx, tuples)        // revoke (symmetric)
 //  5. w.Commit(ctx)
 //
-// Drainer (clients/fga_applier.go) asynchronously applies to OpenFGA.
+// A trigger on the fga_outbox INSERT folds the row into a direct fact in the SAME
+// commit — nothing is delivered afterwards.
 
 import (
 	"fmt"
@@ -167,7 +168,7 @@ func capSynthesizedAccountAdmin(
 //	account:<resourceID>  →  account  →  iam_access_binding:<bindingID>
 //	cluster:<resourceID>  →  cluster  →  iam_access_binding:<bindingID>
 //
-// rbac-contract-a-fix: under the FLAT OpenFGA model the `<rel> from <scope>` ACCESS
+// rbac-contract-a-fix: under the FLAT rights model the `<rel> from <scope>` ACCESS
 // computed relations on iam_access_binding were removed, so this parent-pointer is
 // the hierarchy/lineage edge only — it no longer by itself grants the scope owner a
 // viewer path to the binding object. The owner's/grantor's access on the binding
@@ -222,7 +223,7 @@ func tuplesForBinding(b domain.AccessBinding, relations []authzmap.Relation) []a
 //	account:<resourceID>  →  account  →  iam_access_binding:<bindingID>
 //	cluster:<resourceID>  →  cluster  →  iam_access_binding:<bindingID>
 //
-// rbac-contract-a-fix: the flat OpenFGA model dropped the `<rel> from <scope>` ACCESS
+// rbac-contract-a-fix: the flat rights model dropped the `<rel> from <scope>` ACCESS
 // computed-relations on iam_access_binding, so this is the lineage edge only — the
 // scope owner's Get/List/Delete authz on the binding OBJECT is materialized
 // per-object by the reconciler (owner `*.*` ARM_ANCHOR over iam.accessBinding), not

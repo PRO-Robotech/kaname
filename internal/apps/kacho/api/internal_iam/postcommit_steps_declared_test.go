@@ -34,7 +34,6 @@ func TestPostCommitStepConstantsMatchTheDeclaredLabelSet(t *testing.T) {
 
 	produced := []string{
 		stepForwardAdditive, stepForwardGuarded,
-		stepTupleWrite, stepTupleDelete,
 		stepResidualRead, stepResidualWithdraw,
 	}
 	declared := append([]string(nil), metrics.RegisterPostCommitSteps...)

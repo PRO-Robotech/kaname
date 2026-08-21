@@ -8,19 +8,19 @@ package access_binding
 //
 // THE DEFECT (observed live). The emitted-tuple ledger
 // (kacho_iam.access_binding_emitted_tuples) is keyed PER BINDING
-// (binding_id, fga_user, relation, object), while an OpenFGA tuple is NOT
-// refcounted. Two bindings of the SAME subject on the SAME scope with the same
-// role therefore hold TWO ledger rows for ONE live tuple. Delete/Revoke replayed
-// its own ledger set verbatim onto OpenFGA, so tearing down binding A deleted the
-// tuple binding B — still ACTIVE — also grants: the subject silently lost
-// v_get/v_list/v_update while its ACTIVE binding claimed to give them. Live proof:
-// two subjects holding `edit` on one project, both ledgers listing
-// v_get/v_list/v_update/editor, yet OpenFGA holding all four for one subject and
-// only `editor` for the other — the one whose sibling bindings the fixture
-// preclean had revoked.
+// (binding_id, fga_user, relation, object), while the fact a verdict resolves
+// against is NOT refcounted — it is one row per (object, relation, subject). Two
+// bindings of the SAME subject on the SAME scope with the same role therefore hold
+// TWO ledger rows for ONE live fact. Delete/Revoke replayed its own ledger set
+// verbatim, so tearing down binding A removed the access binding B — still ACTIVE —
+// also grants: the subject silently lost v_get/v_list/v_update while its ACTIVE
+// binding claimed to give them. Live proof: two subjects holding `edit` on one
+// project, both ledgers listing v_get/v_list/v_update/editor, yet all four resolving
+// for one subject and only `editor` for the other — the one whose sibling bindings
+// the fixture preclean had revoked.
 //
-// SELF-SUSTAINING: the ledger is treated as the mirror of OpenFGA, so no
-// reconcile pass ever notices the divergence and re-writes the lost tuple.
+// SELF-SUSTAINING: the ledger is treated as the mirror of the materialized state, so
+// no reconcile pass ever notices the divergence and re-states the lost tuple.
 //
 // THE RULE (already enforced INSIDE the reconciler by
 // ReconcileStore.TuplesStillClaimedByOtherBindings — this suite extends the very
@@ -30,6 +30,23 @@ package access_binding
 // NOT to be confused with the deliberate anti-over-grant boundary on hierarchical
 // scopes: nothing here widens a grant — the retained tuple is one an ACTIVE
 // binding independently entitles the subject to.
+//
+// # Where these assertions used to look, and where they look now
+//
+// The contract was pinned on TWO removal paths: what the use-case asked of the
+// external relation engine straight after commit (clients.RelationStore.DeleteTuples)
+// and what it stated in the journal for the drainer. Stage S6 removed the engine —
+// the port no longer carries DeleteTuples, and the journal
+// (`kacho_iam.fga_outbox`) stopped being a queue toward anything external: a database
+// trigger folds each of its rows into `kacho_iam.relation_fact` inside the SAME
+// transaction, and that table is what a verdict is read from.
+//
+// So there is exactly one removal path now, and it is the one that was called the
+// "backstop". The engine-side assertions are dropped rather than kept pointing at a
+// method nothing can call: with no producer they would have been true by
+// construction of the fake's type, unable to go red for any product reason — while
+// still reading like proof. Nothing about the RULE changed, and the journal
+// assertions below are the same statements, now made about the only path there is.
 
 import (
 	"context"
@@ -42,7 +59,6 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 )
@@ -154,48 +170,41 @@ func newCrossClaimFixture(t *testing.T) crossClaimFixture {
 	return f
 }
 
-// assertSharedTuplesSurvive pins the contract on the OBSERVABLE (what was asked of
-// OpenFGA + what was enqueued for the async drain), not on an internal code path:
-// the tuples another ACTIVE binding still claims are absent from BOTH removal
-// paths, while the binding-private hierarchy pointer is removed by both.
+// assertSharedTuplesSurvive pins the contract on the OBSERVABLE — the revoke set the
+// use-case STATES in its writer-tx — and not on an internal code path: the tuples
+// another ACTIVE binding still claims are absent from it, while the binding-private
+// hierarchy pointer is in it.
+//
+// That set is the whole removal: a database trigger folds the journal row into the
+// fact table inside the same transaction, so a tuple named here is gone at the commit
+// and a tuple omitted here is never touched.
+//
+// The negative arm is kept IN PAIR with the positive one on purpose. "The shared
+// tuple was not removed" is the assertion most likely to be satisfied by a revoke
+// that removes nothing at all; the private-tuple arm is what makes an empty revoke
+// set fail rather than pass.
 func assertSharedTuplesSurvive(t *testing.T, f crossClaimFixture, verb string) {
 	t.Helper()
 
-	syncDeleted := f.fga.drainDeleted()
+	revoked := f.repo.drainFGADeleted()
+	require.NotEmpty(t, revoked,
+		"%s stated no revoke set at all — every assertion below would then hold vacuously", verb)
 	for _, s := range f.shared {
-		assert.NotContains(t, syncDeleted,
-			clients.RelationTuple{User: s.User, Relation: s.Relation, Object: s.Object},
-			"%s must NOT remove {User:%q Relation:%q Object:%q} from OpenFGA — another ACTIVE "+
-				"binding still grants it (the OpenFGA tuple is not refcounted, the ledger is per-binding)",
+		assert.NotContains(t, revoked, s,
+			"%s must NOT state a revoke for {User:%q Relation:%q Object:%q} still claimed by an "+
+				"ACTIVE binding (the materialized fact is not refcounted, the ledger is per-binding)",
 			verb, s.User, s.Relation, s.Object)
 	}
 	for _, p := range f.private {
-		assert.Contains(t, syncDeleted,
-			clients.RelationTuple{User: p.User, Relation: p.Relation, Object: p.Object},
-			"%s must still remove its OWN unshared tuple {User:%q Relation:%q Object:%q}",
-			verb, p.User, p.Relation, p.Object)
-	}
-
-	// The at-least-once async backstop must carry the SAME reduced set — otherwise
-	// the drainer re-applies the very deletion the sync path correctly skipped and
-	// the access is lost a few seconds later instead of immediately.
-	asyncDeleted := f.repo.drainFGADeleted()
-	for _, s := range f.shared {
-		assert.NotContains(t, asyncDeleted, s,
-			"%s must NOT enqueue an fga_outbox delete for {User:%q Relation:%q Object:%q} still "+
-				"claimed by an ACTIVE binding (async drain would strip it later)",
-			verb, s.User, s.Relation, s.Object)
-	}
-	for _, p := range f.private {
-		assert.Contains(t, asyncDeleted, p,
-			"%s must keep the async backstop for its OWN unshared tuple {User:%q Relation:%q Object:%q}",
+		assert.Contains(t, revoked, p,
+			"%s must still revoke its OWN unshared tuple {User:%q Relation:%q Object:%q}",
 			verb, p.User, p.Relation, p.Object)
 	}
 }
 
 // TestDeleteAccessBinding_TupleClaimedByAnotherActiveBinding_IsNotRevoked — HARD
-// delete: the binding row goes away, but a tuple another ACTIVE binding still
-// claims stays live in OpenFGA (and is not enqueued for the async delete).
+// delete: the binding row goes away, but a tuple another ACTIVE binding still claims
+// is not named in the revoke set, so the access it grants survives.
 func TestDeleteAccessBinding_TupleClaimedByAnotherActiveBinding_IsNotRevoked(t *testing.T) {
 	f := newCrossClaimFixture(t)
 
@@ -244,13 +253,12 @@ func TestDeleteAccessBinding_NoOtherClaim_RevokesWholeEmittedSet(t *testing.T) {
 	defer cancel()
 	require.NoError(t, operations.Wait(waitCtx), "async Delete worker must complete")
 
-	syncDeleted := f.fga.drainDeleted()
+	revoked := f.repo.drainFGADeleted()
 	want := append(append([]ab_repo.RelationTuple{}, f.shared...), f.private...)
-	require.Len(t, syncDeleted, len(want),
-		"with no surviving claim the revoke must remove the WHOLE emitted set")
+	require.Len(t, revoked, len(want),
+		"with no surviving claim the revoke must cover the WHOLE emitted set")
 	for _, w := range want {
-		assert.Contains(t, syncDeleted,
-			clients.RelationTuple{User: w.User, Relation: w.Relation, Object: w.Object},
+		assert.Contains(t, revoked, w,
 			"unclaimed tuple {User:%q Relation:%q Object:%q} must be revoked", w.User, w.Relation, w.Object)
 	}
 }

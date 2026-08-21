@@ -41,9 +41,8 @@ RPC.
 
 Бизнес-ценность в том, что **личности и права вынесены в единый домен с одним владельцем**.
 Не нужно повторять модель прав в каждом сервисе, не расходятся списки пользователей, а решение
-«разрешить/запретить» принимается в одном месте по единой модели ReBAC (relationship-based
-access control) поверх OpenFGA. Разработчик описывает роль в терминах *«какие глаголы над
-какими ресурсами»* и привязывает её к субъекту на нужном уровне иерархии — платформа сама
+«разрешить/запретить» принимается в одном месте по единой модели прав. Разработчик описывает
+роль в терминах *«какие глаголы над какими ресурсами»* и привязывает её к субъекту на нужном уровне иерархии — платформа сама
 разворачивает это в проверяемые отношения.
 
 API следует **конвенциям Kachō**: плоские (flat) ресурсы, camelCase JSON, REST-пути
@@ -132,22 +131,20 @@ flowchart LR
     hydra["Ory Hydra<br/>OAuth2 tokens"]
   end
   subgraph store["Хранилище"]
-    pg[("PostgreSQL<br/>kacho_iam · outbox")]
-    fga[("OpenFGA<br/>ReBAC")]
+    pg[("PostgreSQL<br/>kacho_iam · права · outbox")]
   end
 
   cli --> agw
   agw -->|"kacho.cloud.iam.v1"| iam
   iam -->|"SQL · pgx"| pg
-  iam -->|"tuples / Check"| fga
   iam -->|"identity hooks"| kratos
   iam -->|"OAuth2 clients"| hydra
   peers -->|"InternalIAMService.Check"| iam
 ```
 
 Система построена по принципу **database-per-service**: kacho-iam владеет схемой `kacho_iam` и
-общается с другими доменами только по API. Модель авторизации материализуется в OpenFGA как
-набор tuple'ов; проверка `Check` резолвит отношение субъекта к объекту. Подробнее —
+общается с другими доменами только по API. Права хранятся в той же схеме, и проверка `Check`
+складывает вердикт запросом к ней — отдельного хранилища отношений нет. Подробнее —
 [Модель авторизации](/architecture/authz).
 
 ## Ключевые возможности
@@ -160,8 +157,8 @@ flowchart LR
   </div>
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>🔑</span>
-    <span className={hero.featureTitle}>ReBAC-авторизация</span>
-    <span className={hero.featureBody}>Per-RPC <code>Check</code> поверх OpenFGA; verb-bearing отношения <code>v_get</code>/<code>v_update</code>/<code>v_delete</code>/<code>v_list</code>.</span>
+    <span className={hero.featureTitle}>Авторизация по отношениям</span>
+    <span className={hero.featureBody}>Per-RPC <code>Check</code> по модели прав; verb-bearing отношения <code>v_get</code>/<code>v_update</code>/<code>v_delete</code>/<code>v_list</code>.</span>
   </div>
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>▤</span>
@@ -181,7 +178,7 @@ flowchart LR
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>📓</span>
     <span className={hero.featureTitle}>Async-мутации + audit</span>
-    <span className={hero.featureBody}>Create/Update/Delete возвращают <code>Operation</code>; изменения материализуются в FGA через transactional-outbox.</span>
+    <span className={hero.featureBody}>Create/Update/Delete возвращают <code>Operation</code>; выдача и отношение фиксируются одной транзакцией.</span>
   </div>
 </div>
 
@@ -192,8 +189,7 @@ flowchart LR
   <tbody>
     <tr><td>Go</td><td>Язык реализации (чистая архитектура: handler → use-case → domain)</td></tr>
     <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>kacho-proto</code>, домен <code>kacho.cloud.iam.v1</code>)</td></tr>
-    <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kacho_iam</code> (без ORM — sqlc + handwritten pgx)</td></tr>
-    <tr><td>OpenFGA</td><td>ReBAC-движок авторизации (tuple-store + Check / ListObjects)</td></tr>
+    <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kacho_iam</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
     <tr><td>Ory Kratos</td><td>Аутентификация и хранение личностей (login / passkey); User — проекция identity</td></tr>
     <tr><td>Ory Hydra</td><td>OAuth 2.0 authorization server: токены сервис-аккаунтов и пользователей</td></tr>
     <tr><td>Goose</td><td>Версионирование схемы (набор миграций <code>0001…</code>)</td></tr>

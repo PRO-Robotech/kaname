@@ -7,6 +7,11 @@ package authzguard
 // no" from "the store could not be asked". Both are non-allows, but only the
 // first is a decision; the second must reach the caller as such so it can answer
 // Unavailable instead of asserting that the resource does not exist.
+//
+// «Хранилище» здесь — СВОЯ база службы прав: со снятия внешнего движка на вопрос
+// отвечает реляционная форма (`relverdict`) читающей транзакцией. Свойство от
+// этого не изменилось, а вот вид отказа изменился, и он тут и есть вход: отказ
+// читающей транзакции, а не отказ соединения с чужим движком.
 
 import (
 	"context"
@@ -33,7 +38,7 @@ func readerCtx() context.Context {
 // TestAllowsVerb_StoreUnreachable_ReportsTheOutage — every Check fails: the
 // verdict is "unknown", not "denied".
 func TestAllowsVerb_StoreUnreachable_ReportsTheOutage(t *testing.T) {
-	boom := errors.New("dial openfga: connection refused")
+	boom := errors.New("relverdict: транзакция чтения: dial tcp 127.0.0.1:5432: connect: connection refused")
 	chk := checkerFn(func(context.Context, string, string, string) (bool, error) {
 		return false, boom
 	})
@@ -65,7 +70,7 @@ func TestAllowsVerb_StoreAnswersNo_IsAPlainDenial(t *testing.T) {
 // told "no" by both questions — one of them was never answered, so the outage
 // must reach the caller rather than becoming a 404.
 func TestAllowsVerb_ClusterAdminProbeUnreachable_IsNotADenial(t *testing.T) {
-	boom := errors.New("dial openfga: connection refused")
+	boom := errors.New("relverdict: транзакция чтения: dial tcp 127.0.0.1:5432: connect: connection refused")
 	chk := checkerFn(func(_ context.Context, _, relation, object string) (bool, error) {
 		if relation == "system_admin" && object == "cluster:"+domain.ClusterSingletonID {
 			return false, boom

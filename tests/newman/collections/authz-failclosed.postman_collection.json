@@ -49,7 +49,7 @@
       "description": "class:AUTHZ | class:FLOW | class:FAIL_CLOSED | priority:P0",
       "item": [
         {
-          "name": "AUTHZ-FAILCLOSED-OPENFGA-DOWN :: any-authz-gated-rpc-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-OPENFGA-DOWN :: any-authz-gated-rpc-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -140,7 +140,7 @@
       "description": "class:AUTHZ | class:FLOW | class:FAIL_CLOSED | class:NEG | priority:P0",
       "item": [
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-projects-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-projects-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -222,7 +222,7 @@
           ]
         },
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-accounts-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-accounts-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -304,7 +304,7 @@
           ]
         },
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-users-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-users-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -386,7 +386,7 @@
           ]
         },
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-groups-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-groups-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -468,7 +468,7 @@
           ]
         },
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-service-accounts-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-service-accounts-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -550,7 +550,7 @@
           ]
         },
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-roles-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-roles-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [
@@ -632,7 +632,7 @@
           ]
         },
         {
-          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-access-bindings-during-openfga-outage",
+          "name": "AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200 :: list-access-bindings-during-verdict-source-outage",
           "request": {
             "method": "GET",
             "header": [

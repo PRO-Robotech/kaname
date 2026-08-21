@@ -17,6 +17,7 @@ package listvisibility_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
@@ -109,7 +110,7 @@ func queriesOr(e *env, a listArgs) clients.RelationQueries {
 	if a.queries != nil {
 		return a.queries
 	}
-	return e.fga.Client
+	return e.gates
 }
 
 // grantOwn makes `id` visible to the caller THE WAY PRODUCTION DOES — on BOTH
@@ -129,13 +130,23 @@ func queriesOr(e *env, a listArgs) clients.RelationQueries {
 // keeps the fixture describing production uniformly instead of surface by
 // surface.
 //
-// The binding's role is any seeded system role: this helper is about the grant
-// EXISTING in iam's tables (which is what the narrowing reads), while WHICH
-// relation the caller ends up holding is stated by the tuple written beside it.
+// Роль выдачи ПРОЕЦИРУЕТ ровно тот глагол, которым эта поверхность делает объект
+// членом страницы (`pageRelation` без приставки). Прежде здесь стояли ДВЕ строки —
+// произвольная системная роль ради самой строки выдачи и отдельный глагольный
+// кортеж, называвший отношение. Второй половины больше нет: своя база глагольных
+// строк не производит, отношение ВЫВОДИТСЯ из проекции роли. Поэтому «какая роль»
+// перестало быть безразличным — теперь именно она и говорит, какое отношение
+// вызывающий получит.
 func grantOwn(t *testing.T, e *env, s surface, id string) {
 	t.Helper()
-	e.seedAccessBindingFor(t, "user", string(e.callerUser), e.anySystemRoleID(t), s.fgaType, id)
-	e.fga.Write(t, fgaUser(e.callerUser), s.pageRelation, fgaObject(s.fgaType, id))
+	e.grantVerb(t, "user", string(e.callerUser), s.fgaType, id, verbOf(s.pageRelation))
+}
+
+// verbOf снимает приставку отношения-глагола: роль раздаёт ГЛАГОЛЫ, приставку
+// знает компилятор модели. Второе место, где она пишется, разошлось бы с первым
+// молча — и разошлось бы там, где расхождение читается как «права нет».
+func verbOf(relation string) string {
+	return strings.TrimPrefix(relation, "v_")
 }
 
 func storeOr(e *env, a listArgs) clients.RelationStore {
@@ -145,7 +156,7 @@ func storeOr(e *env, a listArgs) clients.RelationStore {
 	if a.store != nil {
 		return a.store
 	}
-	return e.fga.Client
+	return e.gates
 }
 
 func allSurfaces() []surface {
@@ -174,7 +185,10 @@ func projectSurface() surface {
 			return e.seedProject(t, e.callerAcc, "prj-own")
 		},
 		linkOwnToHierarchy: func(t *testing.T, e *env, id string) {
-			e.fga.Write(t, "account:"+string(e.callerAcc), "account", fgaObject("project", id))
+			// У проекта указатель на аккаунт берётся ИЗ ЖУРНАЛА — оттуда же, откуда
+			// его берёт цепь областей: его со-коммитит `Project.Create`, а миграции
+			// проектов не сеют.
+			e.factThroughJournal(t, "project", id, "account", "account:"+string(e.callerAcc))
 		},
 		list: func(t *testing.T, e *env, ctx context.Context, a listArgs) ([]string, string, error) {
 			uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(queriesOr(e, a))
@@ -186,7 +200,7 @@ func projectSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := projectapp.NewGetProjectUseCase(e.repo).WithRelationStore(e.fga.Client)
+			uc := projectapp.NewGetProjectUseCase(e.repo).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.ProjectID(id))
 			return err
 		},
@@ -223,7 +237,11 @@ func accountSurface() surface {
 			return e.seedAccount(t, e.foreignUser, "own")
 		},
 		linkOwnToHierarchy: func(t *testing.T, e *env, id string) {
-			e.fga.Write(t, clusterObject(), "cluster", fgaObject("account", id))
+			// Предок АККАУНТА — кластер, и он выводится из схемы (accounts ×
+			// clusters): аккаунты сеются в том числе миграциями, указателя в
+			// журнале у них нет. Писать его здесь значило бы завести второй
+			// источник одного звена.
+			_ = id
 		},
 		list: func(t *testing.T, e *env, ctx context.Context, a listArgs) ([]string, string, error) {
 			uc := accountapp.NewListAccountsUseCase(e.repo).WithRelationStore(queriesOr(e, a))
@@ -235,7 +253,7 @@ func accountSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := accountapp.NewGetAccountUseCase(e.repo).WithRelationStore(e.fga.Client)
+			uc := accountapp.NewGetAccountUseCase(e.repo).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.AccountID(id))
 			return err
 		},
@@ -256,7 +274,14 @@ func userSurface() surface {
 			return e.seedUser(t, e.callerAcc, "own")
 		},
 		linkOwnToHierarchy: func(t *testing.T, e *env, id string) {
-			e.fga.Write(t, "account:"+string(e.callerAcc), "account", fgaObject("iam_user", id))
+			// Собственные типы iam звена НЕ пишут: цепь областей выводит его из
+			// КОЛОНКИ ИХ ЖЕ СТРОКИ — `account_id` у пользователя, группы, учётки и
+			// роли аккаунта, `project_id` у роли проекта, пара
+			// `resource_type`/`resource_id` у привязки. Строка И ЕСТЬ объект,
+			// колонка неизменяема, а журнал по этим типам наблюдаемо неполон
+			// (миграции сеют такие строки и указателя не пишут). Второй источник
+			// одного звена здесь был бы двумя местами об одном предмете.
+			_ = id
 		},
 		// The caller's own row is visible without any tuple — a code floor keyed
 		// on the caller's id (§3.3). It is not the object under test, but it IS
@@ -274,7 +299,7 @@ func userSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := userapp.NewGetUserUseCase(e.repo).WithRelationStore(e.fga.Client)
+			uc := userapp.NewGetUserUseCase(e.repo).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.UserID(id))
 			return err
 		},
@@ -295,7 +320,14 @@ func groupSurface() surface {
 			return e.seedGroup(t, e.callerAcc, "grp-own")
 		},
 		linkOwnToHierarchy: func(t *testing.T, e *env, id string) {
-			e.fga.Write(t, "account:"+string(e.callerAcc), "account", fgaObject("iam_group", id))
+			// Собственные типы iam звена НЕ пишут: цепь областей выводит его из
+			// КОЛОНКИ ИХ ЖЕ СТРОКИ — `account_id` у пользователя, группы, учётки и
+			// роли аккаунта, `project_id` у роли проекта, пара
+			// `resource_type`/`resource_id` у привязки. Строка И ЕСТЬ объект,
+			// колонка неизменяема, а журнал по этим типам наблюдаемо неполон
+			// (миграции сеют такие строки и указателя не пишут). Второй источник
+			// одного звена здесь был бы двумя местами об одном предмете.
+			_ = id
 		},
 		list: func(t *testing.T, e *env, ctx context.Context, a listArgs) ([]string, string, error) {
 			uc := groupapp.NewListGroupsUseCase(e.repo).WithRelationStore(queriesOr(e, a))
@@ -307,7 +339,7 @@ func groupSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := groupapp.NewGetGroupUseCase(e.repo).WithRelationStore(e.fga.Client)
+			uc := groupapp.NewGetGroupUseCase(e.repo).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.GroupID(id))
 			return err
 		},
@@ -328,7 +360,14 @@ func serviceAccountSurface() surface {
 			return e.seedServiceAccount(t, e.callerAcc, "sva-own")
 		},
 		linkOwnToHierarchy: func(t *testing.T, e *env, id string) {
-			e.fga.Write(t, "account:"+string(e.callerAcc), "account", fgaObject("iam_service_account", id))
+			// Собственные типы iam звена НЕ пишут: цепь областей выводит его из
+			// КОЛОНКИ ИХ ЖЕ СТРОКИ — `account_id` у пользователя, группы, учётки и
+			// роли аккаунта, `project_id` у роли проекта, пара
+			// `resource_type`/`resource_id` у привязки. Строка И ЕСТЬ объект,
+			// колонка неизменяема, а журнал по этим типам наблюдаемо неполон
+			// (миграции сеют такие строки и указателя не пишут). Второй источник
+			// одного звена здесь был бы двумя местами об одном предмете.
+			_ = id
 		},
 		list: func(t *testing.T, e *env, ctx context.Context, a listArgs) ([]string, string, error) {
 			uc := saapp.NewListServiceAccountsUseCase(e.repo).WithRelationStore(queriesOr(e, a))
@@ -340,7 +379,7 @@ func serviceAccountSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := saapp.NewGetServiceAccountUseCase(e.repo).WithRelationStore(e.fga.Client)
+			uc := saapp.NewGetServiceAccountUseCase(e.repo).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.ServiceAccountID(id))
 			return err
 		},
@@ -365,7 +404,14 @@ func roleSurface() surface {
 			return e.seedCustomRole(t, e.callerAcc, "rol_own")
 		},
 		linkOwnToHierarchy: func(t *testing.T, e *env, id string) {
-			e.fga.Write(t, "account:"+string(e.callerAcc), "account", fgaObject("iam_role", id))
+			// Собственные типы iam звена НЕ пишут: цепь областей выводит его из
+			// КОЛОНКИ ИХ ЖЕ СТРОКИ — `account_id` у пользователя, группы, учётки и
+			// роли аккаунта, `project_id` у роли проекта, пара
+			// `resource_type`/`resource_id` у привязки. Строка И ЕСТЬ объект,
+			// колонка неизменяема, а журнал по этим типам наблюдаемо неполон
+			// (миграции сеют такие строки и указателя не пишут). Второй источник
+			// одного звена здесь был бы двумя местами об одном предмете.
+			_ = id
 		},
 		// The system catalog is a floor: `is_system` bypasses the filter entirely,
 		// so those rows belong in the answer for every caller.
@@ -380,7 +426,7 @@ func roleSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := roleapp.NewGetRoleUseCase(e.repo).WithRelationStore(e.fga.Client)
+			uc := roleapp.NewGetRoleUseCase(e.repo).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.RoleID(id))
 			return err
 		},
@@ -409,7 +455,14 @@ func accessBindingSurface() surface {
 			// scope. This fixture's binding is account-scoped in the hierarchy sense
 			// (its project lives in the caller's account), so the pointer is
 			// `account`.
-			e.fga.Write(t, "account:"+string(e.callerAcc), "account", fgaObject("iam_access_binding", id))
+			// Собственные типы iam звена НЕ пишут: цепь областей выводит его из
+			// КОЛОНКИ ИХ ЖЕ СТРОКИ — `account_id` у пользователя, группы, учётки и
+			// роли аккаунта, `project_id` у роли проекта, пара
+			// `resource_type`/`resource_id` у привязки. Строка И ЕСТЬ объект,
+			// колонка неизменяема, а журнал по этим типам наблюдаемо неполон
+			// (миграции сеют такие строки и указателя не пишут). Второй источник
+			// одного звена здесь был бы двумя местами об одном предмете.
+			_ = id
 		},
 		list: func(t *testing.T, e *env, ctx context.Context, a listArgs) ([]string, string, error) {
 			uc := abapp.NewListUseCase(e.repo).
@@ -423,7 +476,7 @@ func accessBindingSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := abapp.NewGetAccessBindingUseCase(e.repo).WithRelationQueries(e.fga.Client)
+			uc := abapp.NewGetAccessBindingUseCase(e.repo).WithRelationQueries(e.gates)
 			_, err := uc.Execute(ctx, domain.AccessBindingID(id))
 			return err
 		},

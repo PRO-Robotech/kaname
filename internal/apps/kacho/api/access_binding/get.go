@@ -116,8 +116,8 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 	// Check on AB.Get. Fail-closed: FGA error → UNAVAILABLE. Resolver unwired → deny.
 	//
 	// The question is asked DIRECTLY on this one object. It used to be answered by
-	// membership in an FGA ListObjects enumeration of every visible binding, which
-	// OpenFGA caps server-side at 1000 with no continuation token — past that
+	// membership in an enumeration of every visible binding, which the external
+	// relations engine capped server-side at 1000 with no continuation token — past that
 	// population a caller's OWN granted binding fell outside the prefix and this Get
 	// returned 403 forever (internal/authzfilter package doc).
 	visible, verr := bindingVisibleToCaller(ctx, u.queries, string(got.ID))

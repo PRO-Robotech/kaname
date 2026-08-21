@@ -5,12 +5,13 @@ package access_binding
 
 // expand_access_test.go — unit
 // tests for ExpandAccess: an object+relation is resolved into concrete principals
-// (groups already expanded server-side by FGA ListUsers), groups themselves are
-// NOT returned, and the set is deduplicated (a principal granted directly AND via
-// a group appears once, E-30 no double-grant anomaly). The REAL graph traversal
-// (computed usersets + scope_grant indirection + group expansion) is exercised by
-// the real-OpenFGA integration suite; here a fake lister returns a fixed concrete
-// set — modelling ListUsers' contract: it has ALREADY traversed the graph.
+// (groups already expanded by the source), groups themselves are NOT returned, and
+// the set is deduplicated (a principal granted directly AND via a group appears
+// once, E-30 no double-grant anomaly). The REAL graph traversal (computed usersets +
+// scope_grant indirection + group expansion) is exercised against a real Postgres by
+// the relational form's own integration suite (repo/kacho/pg/relverdict); here a fake
+// lister returns a fixed concrete set — modelling ListUsers' contract: it has
+// ALREADY traversed the graph.
 
 import (
 	"context"

@@ -83,9 +83,7 @@ func (c Config) Validate() error {
 				fmt.Errorf("production mode: repository.postgres.ssl-mode must be one of require|verify-ca|verify-full (got %q)",
 					c.Repository.Postgres.SSLMode))
 		}
-		// (production-strict adds no DB-TLS requirement beyond this gate; any
-		// future extapi.openfga.tls.* strict-only checks go under a
-		// c.AuthN.Mode == ModeProductionStrict branch here.)
+		// (production-strict adds no DB-TLS requirement beyond this gate.)
 	}
 
 	return errs
@@ -362,13 +360,6 @@ func (c Config) validateMode() error {
 // (no other side-effects), consistent with the Resolve* methods.
 //
 // Errors name WHICH setting is missing — never the secret value (security.md).
-//
-// OpenFGA store-id is intentionally NOT validated here: it is provisioned at
-// runtime by the openfga-bootstrap-job (which then re-rolls the pod), so an
-// empty store-id on first boot is a deliberate, documented fail-closed state
-// (a loud WARN + Check-deny in cmd/kacho-iam/env.go), required for the helm
-// `--wait` install ordering. Failing Validate on it would break that boot
-// sequence.
 func (c Config) validateProductionAuthNSecrets() error {
 	var errs error
 	if strings.TrimSpace(c.AuthN.ResolveHookSharedSecret()) == "" {

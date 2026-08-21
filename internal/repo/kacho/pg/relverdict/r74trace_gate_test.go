@@ -71,6 +71,37 @@ const (
 	r74LastDeclared = 18
 )
 
+// r74RetiredScenarios — сценарии, чей ПРЕДМЕТ снят, а идентификатор остался.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЗАЧЕМ ЭТОТ ПЕРЕЧЕНЬ ВООБЩЕ ЕСТЬ
+//
+// Требовать пробу для сценария, у которого больше нет предмета, — значит требовать
+// проверку несуществующего механизма. Исходов было бы два, и оба плохие: написать
+// пробу, которая не может упасть, либо держать гейт красным, пока его не отключат.
+//
+// Поэтому третий: назвать идентификатор ЗДЕСЬ вместе с фактом, которым его предмет
+// истёк. Тогда трассировка остаётся полной по построению — у каждого требуемого
+// идентификатора либо проба, либо запись с причиной, — а «нечего проверять» не
+// путается с «забыли проверить».
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЗАПИСЬ САМА ИСТЕКАЕТ
+//
+// Появилась проба с этим номером — запись становится находкой: она бы молча
+// прикрыла сценарий, у которого предмет ВЕРНУЛСЯ. Это проверяет судья ниже, а не
+// чья-то память.
+var r74RetiredScenarios = map[int]string{
+	4: "предмет — решение ПРИБОРА подачи по составу нагрузки: он отказывался выдавать " +
+		"вердикт, получив состав без пяти собственных типов iam. Прибор мерил долю " +
+		"расхождений ДВУХ форм и снят вместе со второй формой (стадия S6 эпика #747, " +
+		"внешний движок прав). Предикат снятия записи: появится прибор, у которого " +
+		"есть, с чем сравнивать",
+	12: "предмет — разложение расхождения по НАПРАВЛЕНИЮ и по типу: «форма шире» " +
+		"против «форма уже». Направления не существует, когда форма одна, — сравнивать " +
+		"не с чем (стадия S6). Предикат снятия записи: вернулась вторая форма решения",
+}
+
 // r74ProbeName — имя пробы, называющей идентификатор под-фазы. Число ловится как
 // `\d+`, а не как `\d{2}`, намеренно: запись одной цифрой — тоже находка, и
 // поймать её лучше, чем не заметить (по `R7_4_05` она не ищется).
@@ -118,7 +149,7 @@ func r74Scan(files []string) (r74Corpus, error) {
 //
 // Границы перечня — параметры, а не константы внутри: иначе предпосылку («перечень
 // пуст») нельзя было бы предъявить, и она осталась бы заявленной.
-func judgeR74Traceability(c r74Corpus, first, lastRequired, lastDeclared int) []string {
+func judgeR74Traceability(c r74Corpus, first, lastRequired, lastDeclared int, retired map[int]string) []string {
 	if lastRequired < first || lastDeclared < lastRequired {
 		return []string{fmt.Sprintf("ПРЕДПОСЫЛКА: перечень идентификаторов вырожден "+
 			"(первый %d, последний требуемый %d, последний объявленный %d) — сторожить нечего, "+
@@ -131,12 +162,36 @@ func judgeR74Traceability(c r74Corpus, first, lastRequired, lastDeclared int) []
 
 	var findings []string
 
-	// (а) идентификатор без пробы.
+	// (а) идентификатор без пробы. Снятые предметом — не находка, но и не тишина:
+	// они называются отдельной строкой, чтобы «нечего проверять» было видно.
 	var missing []string
 	for id := first; id <= lastRequired; id++ {
-		if len(c.ByID[id]) == 0 {
-			missing = append(missing, fmt.Sprintf("R7-4-%02d", id))
+		if len(c.ByID[id]) != 0 {
+			continue
 		}
+		if _, gone := retired[id]; gone {
+			continue
+		}
+		missing = append(missing, fmt.Sprintf("R7-4-%02d", id))
+	}
+
+	// (а2) запись о снятом предмете, у которой предмет ВЕРНУЛСЯ. Послабление,
+	// которому больше нечего прикрывать, прикроет следующее.
+	var revived []string
+	for id, why := range retired {
+		if len(c.ByID[id]) == 0 {
+			continue
+		}
+		revived = append(revived, fmt.Sprintf("R7-4-%02d ← %s", id, strings.Join(c.ByID[id], ", ")))
+		_ = why
+	}
+	sort.Strings(revived)
+	if len(revived) != 0 {
+		findings = append(findings, fmt.Sprintf(
+			"СЦЕНАРИЙ ОБЪЯВЛЕН СНЯТЫМ, А ПРОБА С ЕГО НОМЕРОМ ЕСТЬ (%d): %s\n"+
+				"  Значит предмет вернулся, а запись в r74RetiredScenarios осталась и "+
+				"прикрывает его молча. Снимите запись",
+			len(revived), strings.Join(revived, " · ")))
 	}
 	if len(missing) != 0 {
 		findings = append(findings, fmt.Sprintf(
@@ -204,7 +259,7 @@ func TestR7_4_18_EveryScenarioIdentifierHasAProbeNamedAfterIt(t *testing.T) {
 		c.Files, c.Probes, r74LastDeclared-r74First+1, r74LastRequired-r74First+1,
 		len(covered), strings.Join(covered, " · "))
 
-	for _, f := range judgeR74Traceability(c, r74First, r74LastRequired, r74LastDeclared) {
+	for _, f := range judgeR74Traceability(c, r74First, r74LastRequired, r74LastDeclared, r74RetiredScenarios) {
 		t.Errorf("%s\n  Корпус — ИНДЕКС git: проба, написанная и не добавленная в индекс, "+
 			"читается как отсутствующая, потому что в свежем клоне её тоже нет", f)
 	}
@@ -224,7 +279,7 @@ func TestR7_4_18_TheTraceGateFallsOnAGapAndOnAPhantomAndStaysSilentOnASplit(t *t
 
 	// (б) ЗАКОННЫЙ БЛИЗНЕЦ №1 — полная трассировка: молчание. Без положительного
 	// контроля красное на дефекте неотличимо от красного на чём угодно.
-	if got := judgeR74Traceability(full(), r74First, r74LastRequired, r74LastDeclared); got != nil {
+	if got := judgeR74Traceability(full(), r74First, r74LastRequired, r74LastDeclared, nil); got != nil {
 		t.Fatalf("полная трассировка покраснела: %v", got)
 	}
 
@@ -235,7 +290,7 @@ func TestR7_4_18_TheTraceGateFallsOnAGapAndOnAPhantomAndStaysSilentOnASplit(t *t
 	split.ByID[r74First] = append(split.ByID[r74First],
 		"TestR7_4_01_Injection", "TestR7_4_01_Premise", "TestR7_4_01_InCI")
 	split.Probes += 3
-	if got := judgeR74Traceability(split, r74First, r74LastRequired, r74LastDeclared); got != nil {
+	if got := judgeR74Traceability(split, r74First, r74LastRequired, r74LastDeclared, nil); got != nil {
 		t.Errorf("дробление одного сценария на несколько проб объявлено находкой: %v.\n"+
 			"  Требование — «хотя бы одна проба на идентификатор», а не «ровно одна»", got)
 	}
@@ -244,7 +299,7 @@ func TestR7_4_18_TheTraceGateFallsOnAGapAndOnAPhantomAndStaysSilentOnASplit(t *t
 	for id := r74First; id <= r74LastRequired; id++ {
 		gap := full()
 		delete(gap.ByID, id)
-		findings := judgeR74Traceability(gap, r74First, r74LastRequired, r74LastDeclared)
+		findings := judgeR74Traceability(gap, r74First, r74LastRequired, r74LastDeclared, nil)
 		want := fmt.Sprintf("R7-4-%02d", id)
 		if len(findings) != 1 || !strings.Contains(findings[0], want) {
 			t.Errorf("проба сценария %s снята → ожидалась одна находка с его номером, "+
@@ -256,7 +311,7 @@ func TestR7_4_18_TheTraceGateFallsOnAGapAndOnAPhantomAndStaysSilentOnASplit(t *t
 	phantom := full()
 	phantom.ByID[99] = []string{"TestR7_4_99_NamesNothing"}
 	phantom.Probes++
-	findings := judgeR74Traceability(phantom, r74First, r74LastRequired, r74LastDeclared)
+	findings := judgeR74Traceability(phantom, r74First, r74LastRequired, r74LastDeclared, nil)
 	if len(findings) != 1 || !strings.Contains(findings[0], "R7-4-99") {
 		t.Errorf("проба несуществующего сценария → ожидалась одна находка с номером 99, "+
 			"получено %v", findings)
@@ -265,7 +320,7 @@ func TestR7_4_18_TheTraceGateFallsOnAGapAndOnAPhantomAndStaysSilentOnASplit(t *t
 	// (а) КРАСНОЕ С КООРДИНАТОЙ №3 — номер записан одной цифрой.
 	odd := full()
 	odd.Malformed = []string{"TestR7_4_5_Probe (в services/…/x_test.go)"}
-	findings = judgeR74Traceability(odd, r74First, r74LastRequired, r74LastDeclared)
+	findings = judgeR74Traceability(odd, r74First, r74LastRequired, r74LastDeclared, nil)
 	if len(findings) != 1 || !strings.Contains(findings[0], "TestR7_4_5_Probe") {
 		t.Errorf("однозначная запись номера → ожидалась одна находка с именем пробы, "+
 			"получено %v", findings)
@@ -275,20 +330,40 @@ func TestR7_4_18_TheTraceGateFallsOnAGapAndOnAPhantomAndStaysSilentOnASplit(t *t
 	// объявить находкой собственное имя.
 	selfOnly := full()
 	delete(selfOnly.ByID, r74LastDeclared)
-	if got := judgeR74Traceability(selfOnly, r74First, r74LastRequired, r74LastDeclared); got != nil {
+	if got := judgeR74Traceability(selfOnly, r74First, r74LastRequired, r74LastDeclared, nil); got != nil {
 		t.Errorf("отсутствие пробы у идентификатора %d объявлено находкой: %v.\n"+
 			"  Требование пробы стоит на 01…%02d; %d — сам этот сценарий",
 			r74LastDeclared, got, r74LastRequired, r74LastDeclared)
 	}
 
+	// СНЯТЫЙ ПРЕДМЕТ — обе стороны.
+	//
+	// (1) идентификатор, объявленный снятым, БЕЗ пробы — молчание: требовать
+	// проверку несуществующего механизма значит требовать пробу, которая не может
+	// упасть.
+	retiredGap := full()
+	delete(retiredGap.ByID, 4)
+	if got := judgeR74Traceability(retiredGap, r74First, r74LastRequired, r74LastDeclared,
+		map[int]string{4: "предмет снят"}); got != nil {
+		t.Errorf("сценарий со снятым предметом объявлен находкой: %v", got)
+	}
+	// (2) он же, но проба С ЕГО НОМЕРОМ появилась — НАХОДКА: предмет вернулся, а
+	// запись осталась и прикрывает его молча.
+	revived := judgeR74Traceability(full(), r74First, r74LastRequired, r74LastDeclared,
+		map[int]string{4: "предмет снят"})
+	if len(revived) != 1 || !strings.Contains(revived[0], "ОБЪЯВЛЕН СНЯТЫМ") {
+		t.Errorf("вернувшийся предмет не назван находкой: %v.\n"+
+			"  Послабление, которому больше нечего прикрывать, прикроет следующее", revived)
+	}
+
 	// ПРЕДПОСЫЛКИ: вырожденный перечень и пустой корпус — ОТКАЗ, а не «находок нет».
-	if got := judgeR74Traceability(full(), r74First, r74First-1, r74LastDeclared); len(got) != 1 ||
+	if got := judgeR74Traceability(full(), r74First, r74First-1, r74LastDeclared, nil); len(got) != 1 ||
 		!strings.Contains(got[0], "ПРЕДПОСЫЛКА") {
 		t.Errorf("вырожденный перечень идентификаторов: ожидался отказ, получено %v", got)
 	}
 	empty := full()
 	empty.Files = 0
-	if got := judgeR74Traceability(empty, r74First, r74LastRequired, r74LastDeclared); len(got) != 1 ||
+	if got := judgeR74Traceability(empty, r74First, r74LastRequired, r74LastDeclared, nil); len(got) != 1 ||
 		!strings.Contains(got[0], "ПРЕДПОСЫЛКА") {
 		t.Errorf("пустой корпус файлов: ожидался отказ, получено %v", got)
 	}

@@ -10,6 +10,13 @@
 //   - cert-identity injected via grpcsrv.WithCertIdentity;
 //   - ReBAC decision injected via a fake RelationChecker.
 //
+// Со снятия внешнего движка прав вопрос уходит не чужому хранилищу, а двери
+// решения над реляционной формой собственной базы (`authzcascade.Client` поверх
+// `relverdict`). Для ЭТОЙ пробы источник ответа безразличен по построению —
+// проверяется, как страж распоряжается ответом, — но вид ОТКАЗА источника уже не
+// безразличен: он и есть вход двух проб ниже, поэтому берётся из сегодняшнего
+// мира, а не из мира снятого движка.
+//
 // Scenarios:
 //
 //	valid SAN → resolved to module SA → ReBAC allow → nil.
@@ -33,8 +40,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
 // sva derives the deterministic ServiceAccount id for a module svc-name
@@ -47,9 +54,13 @@ func sva(svc string) string {
 }
 
 // fakeChecker records the (subject,relation,object) and returns a canned allow.
-// When err is non-nil it is returned verbatim (modelling a backend failure:
-// FGA 5xx / network drop / ErrNotConfigured), so the gate can distinguish a
-// transport-failed Check from an explicit deny (allowed==false, nil err).
+// When err is non-nil it is returned verbatim (modelling a source failure: база
+// не отвечает / дверь решения собрана без формы), so the gate can distinguish a
+// Check that never got an answer from an explicit deny (allowed==false, nil err).
+//
+// Дублёр НЕ снисходительнее настоящего: единственная его вольность — отвечать
+// без базы, а форму ответа он повторяет дословно, включая то, что «ошибка» и
+// «нет» — разные исходы (см. authzcascade.Client.Check).
 type fakeChecker struct {
 	allowSubjects map[string]bool
 	err           error
@@ -168,21 +179,25 @@ func TestRelationWriteGate_D02_ProdModeAnonymousFailClosed(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "prod-mode anonymous → fail-closed")
 }
 
-// TestRelationWriteGate_I1_BackendFailureIsUnavailable — backend outage → Unavailable.
+// TestRelationWriteGate_I1_BackendFailureIsUnavailable — источник не ответил → Unavailable.
 //
-// A FGA-Check that fails at the transport layer (5xx / network drop /
-// ErrNotConfigured) is NOT an authorization decision — it is a backend outage.
-// Collapsing it to PermissionDenied would let the outbox drainer poison a
-// legitimate owner-tuple intent (it would treat "denied" as a permanent
-// rejection). The gate must surface codes.Unavailable (retryable, fail-closed):
-// the caller retries, the intent is preserved.
+// Вопрос, не получивший ответа, — НЕ решение о доступе. Два вида такого исхода, и
+// оба берутся из сегодняшнего мира: база службы прав не отвечает (форма читает
+// её читающей транзакцией) и дверь решения собрана без формы
+// (`authzcascade.ErrFormNotWired`) — последний ЗАМЕЩАЕТ здесь снятый вместе с
+// движком `clients.ErrNotConfigured` и означает ровно то же: спросить не у кого.
+//
+// Схлопывание любого из них в PermissionDenied отравило бы законное намерение в
+// очереди регистраций: дренаж читает отказ в правах как ТЕРМИНАЛЬНЫЙ и больше не
+// повторяет строку. Страж обязан отдать codes.Unavailable (повторяемо,
+// fail-closed): вызывающий повторит, намерение уцелеет.
 func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
 	}{
-		{"fga 5xx / network drop", errors.New("openfga check: status 503: backend unavailable")},
-		{"fga not configured", clients.ErrNotConfigured},
+		{"база службы прав не отвечает", errors.New("relverdict: транзакция чтения: dial tcp 127.0.0.1:5432: connect: connection refused")},
+		{"дверь решения собрана без формы", authzcascade.ErrFormNotWired},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// A well-formed, verified module cert that resolves to a known SA;
@@ -201,9 +216,15 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 			require.Equal(t, codes.Unavailable, status.Code(err),
 				"backend Check failure must be Unavailable (retryable), never PermissionDenied — "+
 					"else the drainer poisons a legitimate intent")
-			// Backend error text must NOT leak through the gate.
-			require.NotContains(t, status.Convert(err).Message(), "openfga",
-				"raw backend error must not leak to the caller")
+			// Текст отказа источника НЕ вытекает через стража: ни адрес базы, ни
+			// внутреннее имя двери решения вызывающему не адресованы.
+			msg := status.Convert(err).Message()
+			require.NotContains(t, msg, "relverdict",
+				"сырой текст отказа источника не вытекает к вызывающему")
+			require.NotContains(t, msg, "authzcascade",
+				"внутреннее имя двери решения не вытекает к вызывающему")
+			require.NotContains(t, msg, "5432",
+				"координата базы не вытекает к вызывающему")
 		})
 	}
 }

@@ -27,7 +27,7 @@ import (
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
 // materialize the per-object access of every binding whose selector matches the
 // freshly-created iam_service_account, right after Create commits. The flat
-// OpenFGA model dropped the `<rel> from account` ACCESS cascade on
+// rights model dropped the `<rel> from account` ACCESS cascade on
 // iam_service_account, so the per-object tuple is materialized per-object; the
 // sync call closes the GET-after-create race the async drain would otherwise lose.
 // Implemented by reconcile.Reconciler. nil-safe (reconcile event + sweep backstop).
@@ -137,7 +137,7 @@ func (u *CreateServiceAccountUseCase) doCreate(ctx context.Context, sa domain.Se
 				return domain.ServiceAccount{}, aerr
 			}
 			// FGA service-account→account hierarchy parent-pointer intent co-committed
-			// in the SAME writer-tx (запрет #10). Under the FLAT OpenFGA model
+			// in the SAME writer-tx (запрет #10). Under the FLAT rights model
 			// (Contract-A) the `<rel> from account` ACCESS cascade on
 			// iam_service_account was removed, so this parent-pointer is the
 			// hierarchy/ownership lineage edge only — it no longer grants access. The

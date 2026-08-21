@@ -14,25 +14,28 @@
 // all: the caller gets `200` with an empty array while a Get on that same object
 // by id answers `200`.
 //
-// # Why real Postgres AND real OpenFGA
+// # Почему настоящий Postgres, и почему источник вердикта тоже настоящий
 //
-// The defect is an ORDER of operations between the database page and the rights
-// filter, so neither side may be a lenient double:
+// Дефект — это ПОРЯДОК операций между страницей базы и фильтром прав, поэтому ни
+// одна из сторон не вправе быть снисходительным дублёром:
 //
-//   - a fake repository that ignores `PageSize` (the one the package's existing
-//     unit tests use) hides the defect BY CONSTRUCTION — it hands the whole
-//     population to the filter, which is exactly the state the product never
-//     reaches;
-//   - a fake relation store that answers from an allow-list would not exercise
-//     the batched question path, the store's 50-object partition ceiling, or the
-//     model's structural derivations (`owner`, `super_admin`, `group#member`),
-//     all of which the acceptance names as visibility paths that the narrowing
-//     must know.
+//   - подставной репозиторий, игнорирующий `PageSize` (тот, которым пользуются
+//     обычные юниты пакета), прячет дефект BY CONSTRUCTION — он отдаёт фильтру всю
+//     совокупность, то есть ровно то состояние, до которого продукт не доходит;
+//   - подставной источник вердикта, отвечающий по списку разрешённых, не прошёл бы
+//     ни батчевым путём вопроса, ни разбиением страницы на партии, ни структурными
+//     выводами модели (`owner`, `super_admin`, членство в группе), — а приёмка
+//     называет их всех путями видимости, которые сужение обязано знать.
 //
-// So: `kachopg.NewTestPostgres` (testcontainers, migrated) plus `fgatest.New`
-// (real openfga/openfga loaded with the canonical `fga_model.fga`). This is the
-// harness `readauthz` already uses for the single-object side of the same
-// contract; these probes are its list-side counterpart.
+// Поэтому: `kachopg.NewTestPostgres` (контейнер, промигрирован) плюс ТА ЖЕ дверь
+// решения, которую композиционный корень провязывает стражам в проде —
+// `authzcascade.Wrap(relverdict.NewAsker(pool))` поверх той же базы.
+//
+// Здесь стоял поднятый контейнером внешний движок отношений. Он снят целиком (S6):
+// вердикт считает форма поверх собственных таблиц iam, и вопрос о доступе теперь
+// читает ТЕ ЖЕ строки, которые пишет фикстура, — выдачу, членство, прямой факт.
+// Следствие для фикстуры названо там, где она их пишет: пообъектного глагольного
+// кортежа своя база не производит вовсе, право приходит ВЫДАЧЕЙ.
 //
 // # Creation time is an INPUT of these probes, not an accident
 //
@@ -60,9 +63,11 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 )
 
 // probePageSize — the page size every threshold probe asks for. It is the
@@ -70,12 +75,18 @@ import (
 // stand was running when the defect was observed.
 const probePageSize int32 = 50
 
-// env bundles one test's live Postgres, live OpenFGA store and the identities
-// every scenario shares.
+// env bundles one test's live Postgres, the live decision door over it and the
+// identities every scenario shares.
 type env struct {
-	pool *pgxpool.Pool
-	repo *kachopg.Repository
-	fga  *fgatest.Harness
+	pool  *pgxpool.Pool
+	repo  *kachopg.Repository
+	gates *authzcascade.Client
+
+	// probeRoles — memo of the system roles this test seeded, keyed by
+	// «тип объекта + глагол». Одна роль на пару, а не на выдачу: роль здесь —
+	// НОСИТЕЛЬ глагола, и заводить её заново на каждую выдачу значило бы
+	// множить строки, за которыми проба не следит.
+	probeRoles map[string]string
 
 	// base + seq produce the strictly increasing creation timestamps the cursor
 	// orders by. base is placed in the FUTURE so that rows seeded by migrations
@@ -105,10 +116,11 @@ func newEnv(t *testing.T) *env {
 	pgtest.ClosePoolAtEnd(t, pool)
 
 	e := &env{
-		pool: pool,
-		repo: kachopg.New(pool, nil),
-		fga:  fgatest.New(t),
-		base: time.Now().UTC().Truncate(time.Second).Add(time.Hour),
+		pool:       pool,
+		repo:       kachopg.New(pool, nil),
+		gates:      authzcascade.Wrap(relverdict.NewAsker(pool)),
+		probeRoles: map[string]string{},
+		base:       time.Now().UTC().Truncate(time.Second).Add(time.Hour),
 	}
 	t.Cleanup(e.repo.Close)
 
@@ -376,10 +388,6 @@ func lastSix(s string) string {
 	return s[len(s)-6:]
 }
 
-func fgaUser(id domain.UserID) string { return "user:" + string(id) }
-
-func fgaObject(objectType, id string) string { return objectType + ":" + id }
-
 func projectName(i int) string    { return fmt.Sprintf("prj-seed-%04d", i) }
 func groupName(i int) string      { return fmt.Sprintf("grp-seed-%04d", i) }
 func svcAccountName(i int) string { return fmt.Sprintf("sva-seed-%04d", i) }
@@ -387,3 +395,107 @@ func svcAccountName(i int) string { return fmt.Sprintf("sva-seed-%04d", i) }
 // roleName obeys the custom-role name grammar (`^[a-z][a-z0-9_]{0,40}$`), which
 // is NOT the grammar of the other names — a dash is refused there.
 func roleName(i int) string { return fmt.Sprintf("rol_seed_%04d", i) }
+
+// ── право и структурный факт: два разных посева, и путать их нельзя ──────────
+
+// grantVerb выдаёт субъекту ГЛАГОЛ на область — тем же, чем это выражено в
+// продукте: ролью, проецирующей глагол, и привязкой этой роли на область.
+//
+// ПОЧЕМУ НЕ ПРЯМАЯ ГЛАГОЛЬНАЯ СТРОКА. Своя база её не производит вовсе: проекция
+// журнала глаголы намеренно не переносит (миграция 0098) — их ВЫВОДИТ форма из
+// выдачи. Фикстура, писавшая такую строку, описывала бы состояние, до которого
+// продукт не доходит, и сужение страницы, читающее ВЫДАЧИ при отборе кандидатов,
+// не нашло бы по ней ни одного кандидата: право было бы «видно» вопросу о доступе
+// и невидимо отбору. Ровно этот разрыв фикстура здесь и обязана не заводить.
+//
+// Область — САМ ОБЪЕКТ, а не его предок: пробы этого пакета говорят про ОДИН
+// видимый объект среди многих невидимых, и выдача на предка сделала бы видимыми
+// всех соседей разом.
+func (e *env) grantVerb(t *testing.T, subjectType, subjectID, objectType, objectID, verb string) string {
+	t.Helper()
+	return e.seedAccessBindingFor(t, subjectType, subjectID,
+		e.probeRole(t, objectType, verb), objectType, objectID)
+}
+
+// probeRole заводит (и запоминает) СИСТЕМНУЮ роль, проецирующую один глагол на
+// один тип.
+//
+// Системную, а не арендную, и это не удобство: страж назначаемости продукта
+// (миграция 0072) отвергает роль одного аккаунта в области другого, а пробы
+// `account`-поверхности намеренно выдают право на ЧУЖОЙ аккаунт — там видимость
+// обязана приходить от выдачи, а не от владения. Системная роль назначаема где
+// угодно, поэтому одна форма посева обслуживает все семь поверхностей; выбирать
+// её по поверхности значило бы завести семь разных фикстур на один предмет.
+//
+// Имя типа берётся ТЕМ ЖЕ переводчиком, каким его читает вопрос о доступе
+// (`authzmap.CatalogTypeName`): проекция хранится в точечной форме каталога, и
+// строка, написанная именем модели, не была бы найдена — а «не найдено» здесь
+// неотличимо от «права нет».
+func (e *env) probeRole(t *testing.T, objectType, verb string) string {
+	t.Helper()
+	key := objectType + "/" + verb
+	if id, ok := e.probeRoles[key]; ok {
+		return id
+	}
+	ctx := context.Background()
+	id := ids.NewID(domain.PrefixRole)
+	name := fmt.Sprintf("probe-%d", len(e.probeRoles)+1)
+	catalog := authzmap.CatalogTypeName(objectType)
+
+	// `is_system` — вычисляемая колонка (следует за cluster_id), поэтому не
+	// задаётся. Пустые `permissions` законны только при непустых `rules`.
+	_, err := e.pool.Exec(ctx, `
+		INSERT INTO roles (id, cluster_id, name, permissions, rules)
+		VALUES ($1, $2, $3, '[]'::jsonb,
+		        jsonb_build_array(jsonb_build_object(
+		            'module',    'probe',
+		            'resources', jsonb_build_array('*'),
+		            'verbs',     jsonb_build_array($4::text))))`,
+		id, domain.ClusterSingletonID, name, verb)
+	require.NoErrorf(t, err, "seed probe role %s (%s/%s)", name, objectType, verb)
+
+	_, err = e.pool.Exec(ctx,
+		`INSERT INTO role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
+		id, catalog, verb)
+	require.NoError(t, err, "seed role_verb")
+
+	// Без селектора роль не адресует ни одного объекта — и это верно, а не
+	// пробел фикстуры. Ветвь ЯКОРНАЯ: она разрешает тип в области независимо от
+	// меток, а метки в предмете этих проб не участвуют.
+	_, err = e.pool.Exec(ctx, `
+		INSERT INTO role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
+		VALUES ($1, 'fp-probe', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, id, catalog)
+	require.NoError(t, err, "seed role_rule_selectors")
+
+	e.probeRoles[key] = id
+	return id
+}
+
+// factThroughJournal кладёт СТРУКТУРНОЕ отношение (`account`, `cluster`,
+// `system_admin`, `member`, `subject`) через журнал — тем же путём, каким его
+// кладёт продукт, — и утверждает, что триггер его спроецировал.
+//
+// Утверждение о проекции несущее: без него «право не сработало» было бы
+// неотличимо от «фикстура ничего не посеяла». Глагольное отношение сюда не
+// проходит by construction (проекция глаголы не переносит), и это защита от
+// того, чтобы посеять право не тем способом.
+func (e *env) factThroughJournal(t *testing.T, objectType, objectID, relation, subject string) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := e.pool.Exec(ctx, `
+		INSERT INTO fga_outbox (event_type, payload, created_at)
+		VALUES ('fga.tuple.write',
+		        jsonb_build_object('user', $1::text, 'relation', $2::text,
+		                           'object', $3::text || ':' || $4::text),
+		        now())`, subject, relation, objectType, objectID)
+	require.NoErrorf(t, err, "журнал %s:%s --%s--> %s", objectType, objectID, relation, subject)
+
+	var landed int
+	require.NoError(t, e.pool.QueryRow(ctx, `
+		SELECT count(*)::int FROM relation_fact
+		 WHERE object_type = $1 AND object_id = $2 AND relation = $3 AND subject = $4`,
+		objectType, objectID, relation, subject).Scan(&landed))
+	require.Equalf(t, 1, landed,
+		"строка журнала %s:%s --%s--> %s не спроецировалась в прямой факт — фикстура ничего "+
+			"не посеяла, и проба судила бы пустое состояние", objectType, objectID, relation, subject)
+}

@@ -11,18 +11,22 @@ package access_binding
 // the binding-AS-OBJECT). Both are O(scope): a broad role bound at account scope
 // materializes every in-scope object of every selectable type. While those passes
 // ran INSIDE the operation worker-fn, `done` did not flip until the whole scope had
-// been walked and written to OpenFGA — i.e. `done` was gated on exactly the
+// been walked and materialized — i.e. `done` was gated on exactly the
 // eventually-consistent downstream side-effect it is forbidden to gate on.
 //
 // Measured on the stand: an `admin` (verbs `*`) binding at account scope took 29.06s
 // to report done, while its `view` sibling created 0.4s earlier on the SAME scope
 // took 4.3s — the difference is the per-object tuple count each role emits, i.e.
-// pure materialization volume. A client polling a 15s budget times out on the first
+// pure materialization volume. That measurement was taken against the external
+// relation engine of the day; stage S6 removed it and materialization is cheaper
+// now. The numbers stay as the ORIGIN of the rule, not as a current benchmark —
+// what makes the rule stand is the contract (`done` = durability of the row), and
+// that does not depend on how expensive the pass happens to be. A client polling a 15s budget times out on the first
 // and not the second, and the binding row was durable within milliseconds in both.
 //
 // The contract this pins: the worker-fn returns once the writer-tx commits. The
 // materialization passes still run — immediately, off the done-path — and the
-// co-committed fga_outbox rows + reconcile event + periodic sweep remain the
+// co-committed journal rows + reconcile event + periodic sweep remain the
 // at-least-once backstop.
 
 import (

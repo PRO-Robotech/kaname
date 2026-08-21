@@ -56,12 +56,16 @@ func RegisterDefaults(v *viper.Viper) {
 
 	// authz — кто принимает решение о доступе.
 	//
-	// Умолчания названы ЯВНО, а не оставлены нулевым значением структуры:
-	// «источник вердикта — как получится» не является состоянием, в котором
-	// служба прав вправе подняться. Пусто = решает движок по каждому типу;
-	// сверка включена = «расхождений ноль» отличимо от «сравнений ноль».
-	v.SetDefault("authz.verdict-form-types", []string{})
-	v.SetDefault("authz.shadow-compare", true)
+	// ЗДЕСЬ БЫЛО ДВЕ РУЧКИ — обе про выбор между движком и своей формой, и обе
+	// пережили свой предмет: движка больше нет, вердикт считается только в своей
+	// базе, выбирать не из чего. Ручка, у которой ноль читателей, — объявленное
+	// без предмета: следующий читатель принимает её за переключатель и строит на
+	// ней вывод, а она не меняет ничего.
+	//
+	// Отдельная цена была у второй: срок ожидания сверки составлял 50 мс при
+	// бюджете чтения 30 мс, то есть механизм, решений не принимавший, был вправе
+	// задержать ответ дольше всего бюджета операции (#751). Он снят вместе с тем,
+	// что сверял, — а не «настроен покороче».
 
 	// authn
 	// Safe-by-default (prod-readiness F14): an un-configured binary fails CLOSED
@@ -119,9 +123,10 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.bootstrap-mint.signing-key-env", "KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM")
 	v.SetDefault("authn.bootstrap-mint.allowed-client-sans", []string{})
 
-	// OpenFGA, the gateway-internal drainer, Enterprise SSO, Governance,
-	// Federation/CAEP/ComplianceReport/Notify and the dead healthcheck
-	// placeholder were all removed (dead config) — OpenFGA + the drainer are
-	// configured from KACHO_IAM_* env vars in the composition root. The
+	// The external relations engine, the gateway-internal drainer, Enterprise SSO,
+	// Governance, Federation/CAEP/ComplianceReport/Notify and the dead healthcheck
+	// placeholder were all removed from this YAML (dead config). The drainer is
+	// configured from KACHO_IAM_* env vars in the composition root; the engine no
+	// longer exists at all, so it is configured nowhere. The
 	// Prometheus metrics listener default is set above (api-server.metrics-endpoint).
 }

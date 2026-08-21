@@ -140,7 +140,7 @@ func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindin
 // then keyset-paginates by (created_at, id) ASC. Read VISIBILITY is NOT a
 // predicate here — the use-case applies it per-object to the returned page
 // (internal/authzfilter); the former FGA visible-id push-down was capped at
-// 1000 objects by OpenFGA and silently hid a tenant's own bindings.
+// 1000 objects by the external engine and silently hid a tenant's own bindings.
 // The page_token decode is the authoritative format backstop (garbage →
 // InvalidArgument), independent of the handler pre-check.
 //
@@ -1074,12 +1074,11 @@ func (w *abWriter) EmitSubjectChangeEvent(ctx context.Context, evt access_bindin
 
 // EmitRelationWrite — atomically appends N grant rows into
 // kacho_iam.fga_outbox (event_type='fga.tuple.write') in the current
-// writer-tx (atomicity required — see within-service refs). Drainer
-// (clients/fga_applier.go) asynchronously applies to OpenFGA with retry +
-// idempotency.
+// writer-tx (atomicity required — see within-service refs). A trigger on that
+// INSERT folds each row into a direct fact in the same commit.
 //
-// The binding INSERT and FGA enqueue commit-or-rollback atomically — no
-// post-commit sync OpenFGA writes that could diverge from the DB on failure.
+// The binding INSERT and the enqueue commit-or-rollback atomically — no
+// post-commit write that could diverge from the DB on failure.
 func (w *abWriter) EmitRelationWrite(ctx context.Context, tuples []access_binding.RelationTuple) error {
 	return w.emitFGAOutbox(ctx, "fga.tuple.write", tuples)
 }
@@ -1147,7 +1146,7 @@ func (w *abWriter) ReplaceEmittedTuples(ctx context.Context, bindingID domain.Ac
 // payload — a second rendering of a shape whose whole point is that every producer
 // agrees on it. The two drifted the moment the row stopped being one tuple: this
 // path kept splitting a subject's relation set across rows, so a grant made through
-// a binding still reached OpenFGA one relation at a time while the same grant made
+// a binding still landed one relation at a time while the same grant made
 // through the reconciler arrived whole. One emitter, one shape, one unit of
 // atomicity — the drift has nowhere to happen.
 func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples []access_binding.RelationTuple) error {
@@ -1339,8 +1338,8 @@ func (r *abReader) SelectEmittedTuples(ctx context.Context, bindingID domain.Acc
 
 // SelectTuplesClaimedByOtherActiveBindings returns the subset of `tuples` that some
 // OTHER *ACTIVE* binding also records in the emitted-tuple ledger — the tuples a
-// revoke of excludeBinding must NOT strip from OpenFGA (an OpenFGA tuple is not
-// refcounted, the ledger is keyed per binding; see the ReaderIface doc).
+// revoke of excludeBinding must NOT strip (the tuple is not refcounted, the ledger
+// is keyed per binding; see the ReaderIface doc).
 //
 // ONE query for the whole candidate set: the triples are shipped as three parallel
 // arrays and unnested into a join against the ledger, so the probe costs one

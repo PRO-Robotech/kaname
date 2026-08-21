@@ -7,7 +7,9 @@ package group
 // unit proof that group Create SYNCHRONOUSLY materializes per-object access on the
 // freshly-created iam_group object right after the writer-tx commits.
 //
-// Regression (Contract-A flat model): the flat OpenFGA model removed the
+// Regression (Contract-A flat model): the flat authorization model
+// (`proto/kacho/cloud/iam/v1/fga_model.fga`, still the canonical declaration —
+// stage S6 removed the external ENGINE, not the model) dropped the
 // `<rel> from account` ACCESS cascade on iam_group, so a Group created inside an
 // account got NO admin/v_* tuple by derivation. The async reconcile event
 // (EmitReconcileEvent → worker drain) materializes it eventually, but a client

@@ -26,16 +26,23 @@ const (
 	// floorOnlyMethod — a non-gateway RPC: any verified module may call it.
 	floorOnlyMethod = "/kacho.cloud.iam.v1.InternalIAMService/Check"
 
-	// authorizeListObjectsMethod — the AuthorizeService.ListObjects RPC the RBAC
-	// rules-model D consumer per-object List filter (kacho-vpc / kacho-compute /
-	// kacho-nlb) calls service→service over the verified-mTLS :9091 edge. It is
-	// NOT gateway-fronted: any verified module SA may call it (the explicit
-	// subject in the request is the authz view, NOT the caller's access).
-	authorizeListObjectsMethod = "/kacho.cloud.iam.v1.AuthorizeService/ListObjects"
-	// authorizeBatchCheckMethod / authorizeCheckMethod — the other two
-	// AuthorizeService RPCs consumers reuse on the same edge.
+	// authorizeBatchCheckMethod — RPC, которым пообъектный фильтр страницы
+	// (kacho-vpc / kacho-compute / kacho-nlb) судит идентификаторы СВОЕЙ страницы
+	// service→service по ребру проверенного mTLS (:9091). НЕ gateway-fronted:
+	// звать вправе любая проверенная модульная SA — явный субъект в запросе есть
+	// авторизационный вид, а НЕ доступ вызывающего.
+	//
+	// Здесь стоял `AuthorizeService/ListObjects`, и он был представителем этого
+	// ребра. RPC снят вместе с внешним движком: перечисление у чужого хранилища
+	// имело жёсткий предел и не имело продолжения, поэтому объекты сверх предела
+	// становились владельцу невидимы навсегда при живых правах. Утверждение о
+	// снятом имени ничего не защищает — представителем ребра стал тот вызов,
+	// который его сегодня несёт.
 	authorizeBatchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
-	authorizeCheckMethod      = "/kacho.cloud.iam.v1.AuthorizeService/Check"
+	// authorizeCheckMethod / authorizeListSubjectsMethod — остальные RPC
+	// AuthorizeService, которые потребители держат на том же ребре.
+	authorizeCheckMethod        = "/kacho.cloud.iam.v1.AuthorizeService/Check"
+	authorizeListSubjectsMethod = "/kacho.cloud.iam.v1.AuthorizeService/ListSubjects"
 )
 
 // okHandler is a no-op unary handler returning a sentinel so a "pass" is
@@ -247,9 +254,6 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
 		"/kacho.cloud.iam.v1.InternalClusterService/ListAdmins",
 		"/kacho.cloud.iam.v1.InternalClusterService/Get",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReloadModel",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
 		"/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
 		// SessionRevocations admin/gateway-fronted RPCs: Revoke is driven by
 		// the api-gateway logout handler; ListByUser is admin-UI fronted.
@@ -287,7 +291,7 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 
 // ── RBAC rules-model D: AuthorizeService consumer list-filter edge ───────────
 //
-// AuthorizeService (ListObjects / BatchCheck / Check) is registered ALSO on the
+// AuthorizeService (BatchCheck / Check / ListSubjects) is registered ALSO on the
 // internal listener (grpc_register.go) so consumers (vpc/compute/nlb) reach it
 // over the verified-mTLS :9091 edge they already reuse for InternalIAMService.
 // Check. These tests pin the AUTHZ-ALLOWANCE: the internal caller-policy admits
@@ -299,10 +303,10 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 // the consumer list-filter edge.
 
 // TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — a verified module SA
-// (kacho-vpc) may call AuthorizeService.{ListObjects,BatchCheck,Check} on the
+// (kacho-vpc) may call AuthorizeService.{BatchCheck,Check,ListSubjects} on the
 // internal listener, prod AND dev (they are floor-only, not gateway-fronted).
 func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
-	methods := []string{authorizeListObjectsMethod, authorizeBatchCheckMethod, authorizeCheckMethod}
+	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod, authorizeListSubjectsMethod}
 	for _, prod := range []bool{true, false} {
 		p := testPolicy(prod)
 		for _, m := range methods {
@@ -314,27 +318,27 @@ func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 }
 
 // TestCallerPolicy_AuthorizeService_NoCert_Prod — anonymous (no verified module
-// cert) calling AuthorizeService.ListObjects in prod → PermissionDenied
+// cert) calling AuthorizeService.BatchCheck in prod → PermissionDenied
 // (fail-closed floor). The consumer edge requires a verified module cert.
 func TestCallerPolicy_AuthorizeService_NoCert_Prod(t *testing.T) {
 	p := testPolicy(true)
-	err := p.allow(context.Background(), authorizeListObjectsMethod)
+	err := p.allow(context.Background(), authorizeBatchCheckMethod)
 	if status.Code(err) != codes.PermissionDenied {
-		t.Errorf("prod no cert on AuthorizeService.ListObjects: code = %v, want PermissionDenied", status.Code(err))
+		t.Errorf("prod no cert on AuthorizeService.BatchCheck: code = %v, want PermissionDenied", status.Code(err))
 	}
 }
 
 // TestCallerPolicy_AuthorizeService_Unary_ModuleCert_Prod — the unary
-// interceptor lets a verified module SA through to the handler on ListObjects.
+// interceptor lets a verified module SA through to the handler on BatchCheck.
 func TestCallerPolicy_AuthorizeService_Unary_ModuleCert_Prod(t *testing.T) {
 	p := testPolicy(true)
-	info := &grpc.UnaryServerInfo{FullMethod: authorizeListObjectsMethod}
+	info := &grpc.UnaryServerInfo{FullMethod: authorizeBatchCheckMethod}
 	out, err := p.Unary()(newVPCCtx(), nil, info, okHandler)
 	if err != nil {
-		t.Fatalf("unary prod vpc on AuthorizeService.ListObjects: unexpected error %v", err)
+		t.Fatalf("unary prod vpc on AuthorizeService.BatchCheck: unexpected error %v", err)
 	}
 	if out != "ok" {
-		t.Errorf("unary prod vpc on AuthorizeService.ListObjects: handler not reached (out=%v)", out)
+		t.Errorf("unary prod vpc on AuthorizeService.BatchCheck: handler not reached (out=%v)", out)
 	}
 }
 
@@ -347,8 +351,7 @@ func TestAuthorizeService_NotGatewayFronted(t *testing.T) {
 	for _, m := range GatewayFrontedInternalRPCs() {
 		set[m] = struct{}{}
 	}
-	for _, m := range []string{authorizeListObjectsMethod, authorizeBatchCheckMethod, authorizeCheckMethod,
-		"/kacho.cloud.iam.v1.AuthorizeService/ListSubjects"} {
+	for _, m := range []string{authorizeBatchCheckMethod, authorizeCheckMethod, authorizeListSubjectsMethod} {
 		if _, ok := set[m]; ok {
 			t.Errorf("AuthorizeService RPC %q must NOT be gateway-fronted (consumer module-SA edge would be denied)", m)
 		}
@@ -366,8 +369,7 @@ func TestAuthorizeService_NotSystemViewerFloored(t *testing.T) {
 	for _, m := range ReadFloorRPCs() {
 		set[m] = struct{}{}
 	}
-	for _, m := range []string{authorizeListObjectsMethod, authorizeBatchCheckMethod, authorizeCheckMethod,
-		"/kacho.cloud.iam.v1.AuthorizeService/ListSubjects"} {
+	for _, m := range []string{authorizeBatchCheckMethod, authorizeCheckMethod, authorizeListSubjectsMethod} {
 		if _, ok := set[m]; ok {
 			t.Errorf("AuthorizeService RPC %q must NOT be system_viewer-floored (consumer module-SA may not hold system_viewer)", m)
 		}

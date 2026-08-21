@@ -28,7 +28,6 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
@@ -155,27 +154,22 @@ func TestUpsertFromIdentity_Metadata_NewUserID(t *testing.T) {
 // spyFGA records WriteTuples calls so the test can assert the SEC-L cluster
 // parent-pointer tuples are emitted on the bootstrap path. Mirrors the spyFGA
 // helper in account/create_test.go and satisfies clients.RelationStore.
-type spyFGA struct {
-	mu    sync.Mutex
-	wrote []clients.RelationTuple
-}
-
-func (s *spyFGA) Check(context.Context, string, string, string) (bool, error) { return false, nil }
-func (s *spyFGA) WriteTuples(_ context.Context, t []clients.RelationTuple) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.wrote = append(s.wrote, t...)
-	return nil
-}
-func (s *spyFGA) DeleteTuples(context.Context, []clients.RelationTuple) error { return nil }
-
-func (s *spyFGA) snapshot() []clients.RelationTuple {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := make([]clients.RelationTuple, len(s.wrote))
-	copy(cp, s.wrote)
-	return cp
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// ЗДЕСЬ СТОЯЛ ДУБЛЁР ВТОРОЙ ПОЛОВИНЫ УТВЕРЖДЕНИЯ — ОН СНЯТ ВМЕСТЕ С ПРЕДМЕТОМ
+//
+// Он записывал набор, переданный ПОСТ-КОММИТНОЙ записи кортежей у внешнего
+// движка, а проба требовала, чтобы этот набор был ПУСТ: «в транзакции — да, мимо
+// неё — нет».
+//
+// Записи мимо транзакции больше не существует: у use-case'а нет ни поля, ни
+// параметра, через которые она шла. Продукт физически не может пройти тем путём,
+// значит утверждение о пустоте зеленело бы при любом поведении, а дублёр без
+// утверждения — просто тип, который некому подставить.
+//
+// Отрицание не потеряно — оно переехало с прогона на СБОРКУ: возвращение
+// пост-коммитной записи потребует вернуть и порт, и провязку, и это не проходит
+// молча. Живая половина (намерение со-коммитится в той же транзакции) осталась
+// ниже и по-прежнему падает.
 
 // TestUpsertFromIdentity_SECL_BootstrapEmitsClusterParentTuplesInTx — 1.4-10b
 // (S2-iam): the signup/identity-bootstrap path that provisions a NEW account +
@@ -187,8 +181,7 @@ func (s *spyFGA) snapshot() []clients.RelationTuple {
 // guarantee.
 func TestUpsertFromIdentity_SECL_BootstrapEmitsClusterParentTuplesInTx(t *testing.T) {
 	repo := newFakeUserRepo() // existingActive nil → bootstrap path
-	fga := &spyFGA{}
-	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser()).WithRelationStore(fga, nil)
+	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser())
 
 	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
 		ExternalID:  "zit-bootstrap-secl",
@@ -223,8 +216,6 @@ func TestUpsertFromIdentity_SECL_BootstrapEmitsClusterParentTuplesInTx(t *testin
 		"SEC-L: bootstrap must co-commit account:<id>#cluster@cluster:cluster_kacho_root in-tx")
 	assert.True(t, projectClusterSeen,
 		"SEC-L: bootstrap must co-commit project:<id>#cluster@cluster:cluster_kacho_root in-tx")
-	assert.Empty(t, fga.snapshot(),
-		"bootstrap must NOT write tuples post-commit via RelationStore (now in-tx outbox)")
 }
 
 // ── fakes ────────────────────────────────────────────────────────────────

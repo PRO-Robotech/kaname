@@ -14,7 +14,7 @@ import dedent from 'ts-dedent'
 пользователя, объявить роль и привязать её. Все примеры используют нейтральные идентификаторы.
 
 :::info Что нужно
-Go-тулчейн (для сборки из исходников), доступный PostgreSQL и **OpenFGA** (ReBAC-хранилище).
+Go-тулчейн (для сборки из исходников) и доступный **PostgreSQL**.
 Для интерактивного входа и выпуска токенов дополнительно нужны Ory Kratos и Ory Hydra — в
 локальном стенде они поднимаются helm-umbrella. REST-примеры идут через `api-gateway` (порт
 указан как `18080` для локального стенда — подставьте свой).
@@ -38,7 +38,7 @@ Go-тулчейн (для сборки из исходников), доступ�
 
 Схема `kacho_iam` создаётся набором goose-миграций: таблицы аккаунтов, проектов, пользователей,
 сервис-аккаунтов, групп (+ `group_members`), ролей, привязок доступа, а также audit-outbox и
-`fga_register_outbox` (материализация tuple'ов в OpenFGA). Мигратор — отдельный бинарь.
+`fga_outbox` (журнал намерений об отношениях). Мигратор — отдельный бинарь.
 
 <CodeBlock language="bash">
   {dedent`
@@ -61,18 +61,18 @@ Go-тулчейн (для сборки из исходников), доступ�
 
 API-сервер поднимает **несколько listener'ов**: публичный tenant-facing (`:9090`),
 cluster-internal (`:9091`, `InternalIAMService.Check` для peer-сервисов), listener хуков
-идентичности (`:9092`) и Prometheus-метрики (`:9095`). Для авторизации нужен доступный OpenFGA.
+идентичности (`:9092`) и Prometheus-метрики (`:9095`). Отдельного хранилища прав не требуется —
+вердикт складывается той же базой.
 
 <CodeBlock language="bash">
   {dedent`
     KACHO_IAM_DB_PASSWORD=secret \\
-    KACHO_IAM_OPENFGA_ENDPOINT=localhost:8080 \\
     bin/kacho-iam serve
   `}
 </CodeBlock>
 
-Production-режим обязывает mTLS на публичном и internal listener'ах и сконфигурированный
-OpenFGA — иначе сервис откажется стартовать (fail-closed, без «insecure downgrade»). Детали —
+Production-режим обязывает mTLS на публичном и internal listener'ах — иначе сервис откажется
+стартовать (fail-closed, без «insecure downgrade»). Детали —
 [Конфигурация](/install/configuration).
 
 ## 4. Создать аккаунт
@@ -193,10 +193,11 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
   `}
 </CodeBlock>
 
-:::tip Grant-latency — проверяйте через poll-retry
-После создания привязки решение доступа материализуется в OpenFGA не мгновенно (пропагация
-~0.6–2 c). Если сразу за `Create` вызвать authz-filtered `List` или `AuthorizeService.Check`,
-результат может ещё не отражать грант — используйте poll-retry, а не мгновенный assert.
+:::tip Право действует сразу; отстать может кэш края
+После `done=true` привязка **уже действует**: вызов, идущий мимо кэша прав api-gateway, видит её
+немедленно. Отстаёт только кэш края (его сброс идёт очередью), поэтому первый вызов сразу за
+`Create` стоит повторить с небольшим отступом. Повтор нужен из-за кэша, а не из-за распространения
+права.
 :::
 
 ## 9. Проверить, что видит пользователь
@@ -215,7 +216,7 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
 ## Дальше
 
 - Конвенции, порты, формат ошибок и пагинация — [Обзор API](/api/overview).
-- Модель прав (ReBAC, verb-bearing отношения, scope) — [Авторизация](/architecture/authz).
+- Модель прав (verb-bearing отношения, scope) — [Авторизация](/architecture/authz).
 - Личности и токены (Kratos / Hydra) — [Идентичность и токены](/architecture/identity).
 - Поля и все методы ресурсов — [Account](/api/account) … [AccessBinding](/api/access-binding).
 - Конфигурация и развёртывание — [Конфигурация](/install/configuration) и

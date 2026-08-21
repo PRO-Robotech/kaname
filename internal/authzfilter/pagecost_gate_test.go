@@ -72,10 +72,11 @@ func dearestPredicate() (string, []string) {
 // and that type is DERIVED here, not named: a literal would quietly stop being the
 // worst one the moment a dearer type is declared.
 //
-// Counts, not seconds: a question is an HTTP round-trip to the relation store in a
-// separate pod, so wall time here would measure this machine and assert nothing
-// about a deployment. The same reasoning the sibling page-cost measurement in
-// authzcascade writes down at length.
+// Counts, not seconds: wall time here would measure this machine and assert nothing
+// about a deployment. That reasoning is untouched by the question having stopped
+// being an HTTP round-trip to a separate pod — it is a query against the service's
+// own database now, cheaper per question and still a cost that grows with the page,
+// which is the only thing this ceiling is about.
 //
 // The premises are asserted rather than assumed, because the number is a product
 // of exactly two things: widen the dearest type's predicate or move
@@ -153,9 +154,9 @@ func TestVisibleSet_WorstCasePageCost(t *testing.T) {
 // positions are exempt from making the question per-row.
 //
 // The positions have to be per-name rather than global, because the names are not
-// all the same function. The relation client takes (ctx, subject, relation,
-// object, …); the read guard takes (ctx, checker, [relation,] type, id) and reads
-// its subject from the context. A single global "the relation is argument 2" would
+// all the same function. The door onto the relation form takes (ctx, subject,
+// relation, object, …); the read guard takes (ctx, checker, [relation,] type, id)
+// and reads its subject from the context. A single global "the relation is argument 2" would
 // therefore exempt the guard's TYPE argument and, worse, exempt
 // SubjectIsClusterAdmin's SUBJECT — turning a genuine per-row question into a
 // cleared cascade. Every position that is not named here identifies what the
@@ -175,13 +176,26 @@ type entryPointShape struct {
 	relationVariadicFrom int
 }
 
-// relationQuestionEntryPoints — every call that puts a relation question on the
-// wire to the relation store. Keyed by NAME, deliberately, and all three of the
-// ways that can go wrong are asserted below rather than hoped about:
+// relationQuestionEntryPoints — every call that puts a relation question to the form
+// that answers it. Keyed by NAME, deliberately, and all three of the ways that can
+// go wrong are asserted below rather than hoped about:
+//
+// The question no longer leaves the process for another pod: it is resolved by the
+// service's own database (repo/kacho/pg/relverdict) behind authzcascade.Client. That
+// makes each question cheaper and changes NOTHING about why this gate exists —
+// per-row still means one query per row, and a query per row is a cost that grows
+// with the page and that nothing here measures.
 //
 //   - a name that stops existing leaves a slot that can never fire again, so the
 //     premise test requires each of these to still be declared in the package it
-//     claims (an exception that has nothing left to except is a finding);
+//     claims (an exception that has nothing left to except is a finding). That
+//     premise has now fired for real: with the external relation engine removed
+//     (stage S6) three names listed here — `CheckConsistent`,
+//     `CheckWithContextualTuples` and `ListObjects` — had nothing behind them
+//     anywhere in the tree, and the door itself moved out of `clients`. They are
+//     removed and the root re-keyed, which is what the premise is for: a gate
+//     scanning for names that cannot appear is quiet for a reason that has nothing
+//     to do with the tree being clean;
 //   - a name that is added to the PORT without being listed here would be invisible
 //     to the gate, so every method of the ObjectChecker port must appear, checked
 //     by reflection against the port itself;
@@ -198,13 +212,16 @@ type entryPointShape struct {
 // Keying only on client method names made that idiom, and a loop around it,
 // contribute nothing to any counter, including the blind-spot counter.
 var relationQuestionEntryPoints = map[string]entryPointShape{
-	// Relation client: (ctx, subject, relation, object, …).
+	// The door onto the relation form: (ctx, subject, relation, object, …).
 	"Check":                      {relationClientRoot, 1, 2, -1},
-	"CheckConsistent":            {relationClientRoot, 1, 2, -1},
 	"CheckWithContext":           {relationClientRoot, 1, 2, -1},
 	"CheckWithContextConsistent": {relationClientRoot, 1, 2, -1},
-	"CheckWithContextualTuples":  {relationClientRoot, 1, 2, -1},
-	"ListObjects":                {relationClientRoot, 1, 2, -1},
+	// BatchCheckWithContext(ctx, subject, relation, objects, condCtx) — the batched
+	// door. Argument 3 is the set of objects it asks about, and it is NOT exempted:
+	// varying it per iteration means one request per row, which is the same defect as
+	// varying a single object — only harder to see, because the call already looks
+	// batched.
+	"BatchCheckWithContext": {relationClientRoot, 1, 2, -1},
 
 	// Read guard: subject always from ctx, so no subject argument.
 	// AllowsVGet(ctx, checker, fgaType, id)                                     — relation fixed ("v_get").
@@ -255,9 +272,17 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 // the wider question, and a report once cited this gate as proof about a file
 // that lay outside it.
 const (
-	useCaseTreeRoot    = "../apps/kacho/api"
-	serviceTreeRoot    = ".."
-	relationClientRoot = "../clients"
+	useCaseTreeRoot = "../apps/kacho/api"
+	serviceTreeRoot = ".."
+	// relationClientRoot points at `authzcascade`, not at `clients`, and that
+	// difference is what premise 2 exists to catch. `clients` declares the PORTS
+	// (RelationStore, RelationQueries) — interface method sets, which are not function
+	// declarations and which this AST scan cannot see. Its IMPLEMENTATION used to live
+	// there as well, as methods on the HTTP adapter for the external engine; that
+	// adapter was removed in stage S6 and the door is now authzcascade.Client over the
+	// service's own relational form. Leaving the old root would have left every listed
+	// name "declared nowhere" — which is exactly what premise 2 reported.
+	relationClientRoot = "../authzcascade"
 	relationGuardRoot  = "../authzguard"
 )
 
@@ -463,11 +488,13 @@ var declaredPerRowQuestions = map[string]string{
 		"per-scope admin question — so up to 2000 per contract-sized page, plus " +
 		"per-row DB reads for hierarchy scopes. THE BLOCKER THIS DECLARATION USED " +
 		"TO NAME IS GONE: it read 'converging it needs the batched question tracked " +
-		"in known-divergences §11', and that question now exists and is wired " +
-		"(clients.OpenFGAHTTPClient.BatchCheckWithContext). What remains is that " +
-		"the value here is a clients.RelationStore, which does not carry it, and " +
-		"that the loop interleaves relation questions with DB reads — a request-path " +
-		"change to an authorization surface, with its own acceptance.",
+		"in known-divergences §11', and that question exists and is wired " +
+		"(authzcascade.Client.BatchCheckWithContext, resolved by ONE read " +
+		"transaction over the service's own relational form). What remains is that " +
+		"the value here is a clients.RelationStore, whose narrowed method set does " +
+		"not carry it, and that the loop interleaves relation questions with DB " +
+		"reads — a request-path change to an authorization surface, with its own " +
+		"acceptance.",
 	"../apps/kacho/api/authorize/handler.go: authorizeCaller": "" +
 		"Per-item caller authority in BatchCheck, bounded by the contract at 100 " +
 		"items (rejected above that). SAME CORRECTION: this declaration used to say " +

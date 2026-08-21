@@ -107,7 +107,8 @@ func withPrincipal(uid domain.UserID) context.Context {
 
 // seedUserAccount inserts a user + an owning account (the user owns the account)
 // and returns both ids. The user is the account owner so owner-gated CRUD
-// (Update/Delete) authorises with the principal == owner path (no OpenFGA).
+// (Update/Delete) authorises with the principal == owner path — the relation model
+// is not asked at all, which is why these fixtures need no grants.
 func seedUserAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) (domain.UserID, domain.AccountID) {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))

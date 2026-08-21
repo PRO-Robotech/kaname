@@ -36,8 +36,9 @@ package account
 //     unchanged from before the repair.
 //
 // The visibility filter is FGA-relation-driven. Instead of the legacy
-// owner-only Go post-filter (`OwnerUserID == principal.ID`), the use-case asks
-// OpenFGA which account ids the principal may see and returns only those rows.
+// owner-only Go post-filter (`OwnerUserID == principal.ID`), the use-case asks the
+// rights model, per candidate id, whether the principal may see that account, and
+// returns only those rows.
 //
 // On the flat explicit model `account` is a verb-bearing
 // resource with NO `from account` access-cascade. Visibility is the UNION of

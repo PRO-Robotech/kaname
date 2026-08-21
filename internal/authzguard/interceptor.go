@@ -73,18 +73,18 @@ var whitelistFullMethod = map[string]struct{}{
 	"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject": {},
 	// Check — internal RPC.
 	"/kacho.cloud.iam.v1.InternalIAMService/Check": {},
-	// AuthorizeService.{ListObjects,ListSubjects} bypass: cluster-internal
-	// peer calls (kacho-vpc/cmd/vpc/main.go bootstrap-time peer call,
-	// kacho-compute idem) arrive with NO PerRPCCredentials — they are not
-	// user-requests but preflight authz-queries: "which resource_ids are
-	// <verb>-accessible to caller X?" (ListObjects) and the inverse "who
-	// may <verb> this resource?" (ListSubjects). The suffix matcher on
-	// "List" does NOT cover them — "ListObjects" / "ListSubjects" do not
-	// end in "List" (HasSuffix is the only permitted matcher per the
-	// readonlySuffixes contract above), so an explicit FullMethod entry is
-	// required. Defence-in-depth for production-strict (cross-pod authn)
-	// is delivered later via mTLS — this whitelist is the interim guard.
-	"/kacho.cloud.iam.v1.AuthorizeService/ListObjects":  {},
+	// AuthorizeService.ListSubjects bypass: cluster-internal peer calls arrive
+	// with NO PerRPCCredentials — they are not user-requests but preflight
+	// authz-queries ("who may <verb> this resource?"). The suffix matcher on
+	// "List" does NOT cover it — "ListSubjects" does not end in "List" (HasSuffix
+	// is the only permitted matcher per the readonlySuffixes contract above), so
+	// an explicit FullMethod entry is required. Defence-in-depth for
+	// production-strict (cross-pod authn) is delivered via mTLS — this whitelist
+	// is the interim guard.
+	//
+	// Записи для перечисления ОБЪЕКТОВ здесь больше нет: RPC снят с контракта
+	// стадией S6 (эпик #747). Послабление, пережившее свой метод, не истекает
+	// само — оно достаётся следующему RPC, который назовут этим именем.
 	"/kacho.cloud.iam.v1.AuthorizeService/ListSubjects": {},
 }
 

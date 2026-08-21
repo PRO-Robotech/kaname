@@ -8,7 +8,17 @@ package accesssnapshot
 //
 // Здесь инструмент работает целиком, как он будет работать на стадиях, меняющих
 // доступ: страницы объектов берутся курсором из НАСТОЯЩЕЙ базы, вопрос о доступе
-// задаётся НАСТОЯЩЕМУ движку прав ПРОДОВЫМ клиентом.
+// задаётся НАСТОЯЩЕЙ решающей стороне — той же двери, которую композиционный
+// корень выдаёт стражам службы (`authzcascade.Wrap(relverdict.NewAsker(pool))`,
+// см. cmd/kacho-iam/wiring.go).
+//
+// ЧТО ЗДЕСЬ ИЗМЕНИЛОСЬ И ПОЧЕМУ ЭТО НЕ ОСЛАБЛЕНИЕ. Прежняя редакция спрашивала
+// внешний движок прав, поднятый рядом, и выдавала право записью кортежа. Движка
+// нет; право теперь и есть закоммиченная строка своей базы — роль, её проекция
+// глаголов, селектор и привязка на область, — а решение выносит реляционная
+// форма. Дублёра при этом не появилось: спрашивается ровно то значение, которым
+// решает продукт, — иначе инструмент утверждал бы про свою копию правил, а не
+// про правила.
 //
 // Утверждение — про границу: выдача в одном аккаунте не даёт доступа в другом.
 // Это и есть содержание «не расширяясь» в статике; равенство множеств до и после
@@ -25,7 +35,9 @@ import (
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 )
 
 // seedAccountWithProjects заводит аккаунт, его владельца и n проектов.
@@ -63,8 +75,9 @@ func seedAccountWithProjects(t *testing.T, ctx context.Context, pool *pgxpool.Po
 }
 
 // projectsOfAccount — страница проектов аккаунта курсором ИЗ СВОЕЙ БАЗЫ.
-// Именно так снимок и обязан обходить объекты: у своей базы нет серверного
-// предела перечисления, а у движка прав он есть, общий на тип.
+// Именно так снимок и обязан обходить объекты: перечисление «всего доступного»
+// имеет жёсткий предел и не имеет продолжения, а курсор по своей базе перечисляет
+// ровно то, что в ней лежит (см. шапку пакета).
 func projectsOfAccount(pool *pgxpool.Pool, accID string) PageFunc {
 	return func(ctx context.Context, after string, limit int) ([]string, error) {
 		rows, err := pool.Query(ctx, `
@@ -88,6 +101,51 @@ func projectsOfAccount(pool *pgxpool.Pool, accID string) PageFunc {
 	}
 }
 
+// grantProjectRead выдаёт право читать ОДИН проект — так же, как его выдаёт
+// продукт: ролью, её проекцией глаголов, селектором и привязкой на область.
+//
+// Прямым фактом это не сеется, и не по стилю: глагол ВЫВОДИТСЯ из выдачи и
+// копией не хранится — проекция журнала строку `v_*` отвергает намеренно
+// (миграция 0098). Фикстура, положившая такой факт мимо производителя, посеяла бы
+// состояние, которого продукт не производит, и первое же расхождение вывода с
+// выдачей осталось бы незамеченным.
+//
+// Тип объекта берётся из КАТАЛОГА (`authzmap.DottedType`), а не выписывается
+// строкой: выписанный разошёлся бы с каталогом молча, и соединение перестало бы
+// сходиться — то есть выдача исчезла бы, выглядя честным отказом.
+func grantProjectRead(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
+	roleID, bindingID, userID, projectID string) {
+	t.Helper()
+	dotted, known := authzmap.DottedType("project")
+	require.Truef(t, known, "каталог не знает типа project — посев назвал бы тип, которого нет")
+
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		_, err := pool.Exec(ctx, sql, args...)
+		require.NoErrorf(t, err, "посев: %s", sql)
+	}
+	exec(`INSERT INTO kacho_iam.clusters (id, name) VALUES ('cluster_kacho_root', 'kacho')
+	      ON CONFLICT DO NOTHING`)
+	exec(`INSERT INTO kacho_iam.roles (id, name, permissions, rules, cluster_id)
+	      VALUES ($1, $2, '[]'::jsonb,
+	              jsonb_build_array(jsonb_build_object(
+	                  'module',    'test',
+	                  'resources', jsonb_build_array('*'),
+	                  'verbs',     jsonb_build_array('get'))),
+	              'cluster_kacho_root')`, roleID, "test.snapshot.get")
+	exec(`INSERT INTO kacho_iam.role_verb (role_id, object_type, verb) VALUES ($1, $2, 'get')`,
+		roleID, dotted)
+	exec(`INSERT INTO kacho_iam.role_rule_selectors
+	        (role_id, rule_fp, arm, object_types, match_labels)
+	      VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, dotted)
+	exec(`INSERT INTO kacho_iam.access_bindings
+	        (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
+	      VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		bindingID, userID, roleID, projectID)
+	exec(`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+	      VALUES ($1, 'user', $2)`, bindingID, userID)
+}
+
 func TestIntegration_GrantDoesNotReachAcrossAccounts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -97,19 +155,27 @@ func TestIntegration_GrantDoesNotReachAcrossAccounts(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	h := fgatest.New(t)
+	// Дверь решения — ТА ЖЕ, что у продукта: форма поверх ведущего пула.
+	door := authzcascade.Wrap(relverdict.NewAsker(pool))
 
 	accA, projectsA := seedAccountWithProjects(t, ctx, pool, "snapa", 3)
 	accBID, projectsB := seedAccountWithProjects(t, ctx, pool, "snapb", 3)
 
 	const subject = "user:usr0000000000snapusr"
+	// Субъект выдачи — настоящий пользователь: строка привязки на него ссылается.
+	const subjectUser = "usr0000000000snapusr"
+	_, err = pool.Exec(ctx, `
+		INSERT INTO kacho_iam.users (id, external_id, email, account_id)
+		VALUES ($1, $1, $1 || '@example.test', $2)`, subjectUser, accA)
+	require.NoError(t, err)
+
 	// Выдача РОВНО на один проект аккаунта A.
 	granted := projectsA[1]
-	h.Write(t, subject, "v_get", "project:"+granted)
+	grantProjectRead(t, ctx, pool, "rol-snapshot", "acb-snapshot", subjectUser, granted)
 
-	inA, err := Take(ctx, h.Client, projectsOfAccount(pool, accA), subject, "v_get", "project")
+	inA, err := Take(ctx, door, projectsOfAccount(pool, accA), subject, "v_get", "project")
 	require.NoError(t, err)
-	inB, err := Take(ctx, h.Client, projectsOfAccount(pool, accBID), subject, "v_get", "project")
+	inB, err := Take(ctx, door, projectsOfAccount(pool, accBID), subject, "v_get", "project")
 	require.NoError(t, err)
 
 	t.Logf("перепись: аккаунт A — осмотрено %d, доступно %v; аккаунт B — осмотрено %d, доступно %v",

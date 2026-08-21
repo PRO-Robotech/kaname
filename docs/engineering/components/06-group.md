@@ -264,7 +264,7 @@ go test -short -count=1 -timeout 120s \
 
 - [`03-user.md`](03-user.md) / [`04-service-account.md`](04-service-account.md) — members.
 - [`08-access-binding.md`](08-access-binding.md) — bindings на subject_type=group.
-- [`29-openfga-check.md`](29-openfga-check.md) — FGA member-tuple propagation.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — FGA member-tuple propagation.
 
 ## Ссылки на код
 

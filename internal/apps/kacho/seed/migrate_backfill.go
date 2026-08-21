@@ -124,7 +124,7 @@ var (
 	// binding-lifecycle tuple the reconcile-sweep does NOT materialize; without it the
 	// account owner has no viewer/editor path to its own owner-binding object and
 	// Get/Delete authz-DENY. Idempotent via the NOT EXISTS payload de-dupe; the
-	// fga_outbox drainer is at-least-once + idempotent at OpenFGA. It also covers
+	// journal row folds into a direct fact by trigger, in the same commit. It also covers
 	// accounts created AFTER goose.Up, which a migration can never see.
 	backfillOwnerHierarchyTuplesSQL = `
 INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)

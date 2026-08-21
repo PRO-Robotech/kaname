@@ -1,15 +1,20 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// authorize_context_test.go — the CEL condition-context handed to OpenFGA must
-// be server-authoritative for principal/connection attributes. AuthorizeService
-// is reachable on the PUBLIC listener and the inner caller-authority gate allows
-// a self-query, so a tenant could otherwise forge acr_value / amr_claims /
-// mfa_at / client_ip in the request body and satisfy a mfa_fresh /
-// source_ip_in_range condition without actually holding the assurance
-// (CWE-807 / security.md "no reliance on untrusted inputs in a security
-// decision"). These tests pin that the service strips those keys and only
-// server-derived values (current_time, trusted acr) reach FGA.
+// authorize_context_test.go — условный контекст, доезжающий до решающей стороны,
+// обязан быть СЕРВЕРНЫМ в части свойств принципала и соединения.
+//
+// AuthorizeService выставлен на ПУБЛИЧНОМ листенере, а внутренний страж
+// caller-authority разрешает вопрос о себе, — значит арендатор иначе мог бы
+// прислать в теле запроса acr_value / amr_claims / mfa_at / client_ip и
+// удовлетворить условие mfa_fresh / source_ip_in_range, НЕ обладая заявленной
+// гарантией (CWE-807 / security.md «решение о доступе не опирается на
+// недоверенный ввод»). Пробы закрепляют, что служба вырезает эти ключи и до
+// решения доходят только серверные значения (current_time, доверенный acr).
+//
+// Предмет от смены решающей стороны не изменился: вырезание идёт ДО того, как
+// контекст кому-либо передан, поэтому проба утверждает про службу, а не про то,
+// кто отвечает за ней.
 package service
 
 import (
@@ -21,7 +26,7 @@ import (
 
 func TestAuthorize_Check_StripsForgedSecurityContext(t *testing.T) {
 	m := &mockRelations{checkResp: true}
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: m, ModelID: "m1"})
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: m})
 
 	_, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_alice",
@@ -54,7 +59,7 @@ func TestAuthorize_Check_StripsForgedSecurityContext(t *testing.T) {
 	}
 	// No trusted acr in ctx → the forged acr_value must NOT survive.
 	if v, ok := cc["acr_value"]; ok {
-		t.Errorf("forged acr_value must not reach FGA without a trusted source, got %v", v)
+		t.Errorf("forged acr_value must not reach the relation store without a trusted source, got %v", v)
 	}
 	// current_time is always server-forced.
 	if _, ok := cc["current_time"]; !ok {
@@ -68,7 +73,7 @@ func TestAuthorize_Check_StripsForgedSecurityContext(t *testing.T) {
 
 func TestAuthorize_Check_OverlaysTrustedACROverForgedValue(t *testing.T) {
 	m := &mockRelations{checkResp: true}
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: m, ModelID: "m1"})
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: m})
 
 	// The interceptor chain places the FD-4-trusted acr on ctx.
 	ctx := grpcsrv.WithTrustedACR(context.Background(), "2", true)
@@ -86,26 +91,7 @@ func TestAuthorize_Check_OverlaysTrustedACROverForgedValue(t *testing.T) {
 	}
 }
 
-func TestAuthorize_ListObjects_StripsForgedSecurityContext(t *testing.T) {
-	m := &mockRelations{listResp: []string{"vpcn_a"}}
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: m, ModelID: "m1"})
-
-	_, err := svc.ListObjects(context.Background(), ListObjectsRequest{
-		Subject:      "user:usr_alice",
-		ResourceType: "vpc_network",
-		Action:       "vpc.networks.list",
-		Context:      map[string]any{"client_ip": "10.0.0.1", "acr_value": "3"},
-	})
-	if err != nil {
-		t.Fatalf("ListObjects err: %v", err)
-	}
-	if _, ok := m.lastCondCtx["client_ip"]; ok {
-		t.Error("client_ip must be stripped from ListObjects client context")
-	}
-	if _, ok := m.lastCondCtx["acr_value"]; ok {
-		t.Error("forged acr_value must not reach FGA on ListObjects without a trusted source")
-	}
-	if _, ok := m.lastCondCtx["current_time"]; !ok {
-		t.Error("current_time must be server-forced into ListObjects condCtx")
-	}
-}
+// Здесь стояла третья проба — та же санитария условного контекста на пути
+// ПЕРЕЧИСЛЕНИЯ ОБЪЕКТОВ. Снята вместе с предметом: перечисление снято с
+// контракта (оно отвечало ограниченным префиксом без продолжения, см.
+// authorize_service.go). Оставлять её было бы утверждением о пути, которого нет.

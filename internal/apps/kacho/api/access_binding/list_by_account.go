@@ -13,8 +13,8 @@ package access_binding
 // `account` but we still enforce at the use-case layer in case the gateway
 // catalog drifts):
 //   - account owner — allowed via authzguard.IsSelf on Account.OwnerUserID.
-//   - FGA `admin` on `account:<id>` — allowed via OpenFGA Check (delegated
-//     administration; mirrors requireGrantAuthority's Path 2).
+//   - FGA `admin` on `account:<id>` — allowed via a Check against the rights
+//     model (delegated administration; mirrors requireGrantAuthority's Path 2).
 //   - everyone else — PermissionDenied.
 
 import (

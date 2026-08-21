@@ -6,15 +6,21 @@
 // authorize_service.Check (public AuthZ) AND CheckRelation (InternalIAMService.Check)
 // apply a cluster-admin short-circuit: a subject holding the flat
 // `cluster:cluster_kacho_root#system_admin` relation is ALLOWED on ANY resource
-// without a per-object tuple (D-9 is a flat super-gate, not a `<rel> from cluster`
-// cascade).
+// without a per-object grant of its own (D-9 is a flat super-gate, not a
+// `<rel> from cluster` cascade).
 //
-// ORDERING (#3, perf): the per-object FGA resolve runs FIRST; the cluster-admin
+// ORDERING (#3, perf): the per-object resolve runs FIRST; the cluster-admin
 // short-circuit is the FALLBACK on a per-object DENY. The common allow case costs
-// exactly ONE FGA round-trip (no redundant cluster-admin Check); only a denied
-// request pays the second round-trip to test cluster-admin authority. Correctness
-// and fail-closed are preserved — a cluster-admin is still allowed on everything,
-// just resolved second.
+// exactly ONE question to the relation store (no redundant cluster-admin Check);
+// only a denied request pays the second question to test cluster-admin authority.
+// Correctness and fail-closed are preserved — a cluster-admin is still allowed on
+// everything, just resolved second.
+//
+// СТОРОНА, ОТВЕЧАЮЩАЯ НА ОБА ВОПРОСА, ТЕПЕРЬ ОДНА. Прежняя редакция называла
+// здесь внешний движок прав и его кортежи. Его нет: на вопрос об объекте и на
+// вопрос о плоском надзоре отвечает одна и та же дверь решения над реляционной
+// формой. Порядок и цена, которые утверждает файл, от этого не изменились — они
+// про то, СКОЛЬКО вопросов задаёт край, а не про то, кто на них отвечает.
 package service
 
 import (
@@ -40,12 +46,11 @@ func (c *scClusterChecker) Check(_ context.Context, subject, relation, object st
 }
 
 func TestAuthorize_Check_ClusterAdminShortCircuit(t *testing.T) {
-	// FGA grants NOTHING (checkResp:false) — only the short-circuit can allow.
-	fga := &mockRelations{checkResp: false}
+	// The relation store grants NOTHING (checkResp:false) — only the short-circuit can allow.
+	store := &mockRelations{checkResp: false}
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_root": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -61,25 +66,24 @@ func TestAuthorize_Check_ClusterAdminShortCircuit(t *testing.T) {
 		t.Fatalf("cluster-admin must be allowed via short-circuit (D-02); deny=%v", res.DenyReasons)
 	}
 	// #3: per-object resolve runs FIRST (denies here), then the cluster-admin
-	// fallback allows → exactly ONE FGA Check + ONE short-circuit Check.
-	if fga.checkCalls != 1 {
-		t.Fatalf("per-object FGA resolve must run first (1 call); got %d", fga.checkCalls)
+	// fallback allows → exactly ONE per-object question + ONE short-circuit Check.
+	if store.checkCalls != 1 {
+		t.Fatalf("per-object resolve must run first (1 call); got %d", store.checkCalls)
 	}
 	if cl.calls != 1 {
 		t.Fatalf("cluster-admin fallback must run once on deny; got %d", cl.calls)
 	}
-	// Flat super-gate: relation/object are the singleton cluster tuple.
+	// Flat super-gate: relation/object are the singleton cluster object.
 	if cl.gotRelation != "system_admin" || cl.gotObject != "cluster:"+domain.ClusterSingletonID {
 		t.Fatalf("short-circuit must Check the flat cluster relation, got %q on %q", cl.gotRelation, cl.gotObject)
 	}
 }
 
 func TestAuthorize_Check_NonClusterAdmin_NoShortCircuit(t *testing.T) {
-	fga := &mockRelations{checkResp: false}
+	store := &mockRelations{checkResp: false}
 	cl := &scClusterChecker{admins: map[string]bool{}} // nobody is cluster-admin
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -92,19 +96,18 @@ func TestAuthorize_Check_NonClusterAdmin_NoShortCircuit(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if res.Allowed {
-		t.Fatalf("non-cluster-admin must NOT short-circuit (resolves to FGA deny)")
+		t.Fatalf("non-cluster-admin must NOT short-circuit (resolves to a per-object deny)")
 	}
-	if fga.checkCalls != 1 {
-		t.Fatalf("non-cluster-admin must fall through to the FGA Check; got %d calls", fga.checkCalls)
+	if store.checkCalls != 1 {
+		t.Fatalf("non-cluster-admin must fall through to the per-object question; got %d calls", store.checkCalls)
 	}
 }
 
 func TestAuthorize_CheckRelation_ClusterAdminShortCircuit(t *testing.T) {
-	fga := &mockRelations{checkResp: false}
+	store := &mockRelations{checkResp: false}
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_root": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -119,9 +122,9 @@ func TestAuthorize_CheckRelation_ClusterAdminShortCircuit(t *testing.T) {
 	if !res.Allowed {
 		t.Fatalf("cluster-admin must be allowed via CheckRelation short-circuit (КФ-2)")
 	}
-	// #3: per-object resolve first (deny), then cluster-admin fallback → 1 FGA + 1 SC.
-	if fga.checkCalls != 1 {
-		t.Fatalf("CheckRelation per-object resolve must run first (1 call); got %d", fga.checkCalls)
+	// #3: per-object resolve first (deny), then cluster-admin fallback → 1 per-object + 1 super-gate.
+	if store.checkCalls != 1 {
+		t.Fatalf("CheckRelation per-object resolve must run first (1 call); got %d", store.checkCalls)
 	}
 	if cl.calls != 1 {
 		t.Fatalf("CheckRelation cluster-admin fallback must run once on deny; got %d", cl.calls)
@@ -129,14 +132,13 @@ func TestAuthorize_CheckRelation_ClusterAdminShortCircuit(t *testing.T) {
 }
 
 // TestAuthorize_Check_Allow_NoClusterAdminRoundTrip — #3: the common allow case
-// (FGA grants the per-object relation) must NOT issue the cluster-admin
-// short-circuit Check. Exactly ONE FGA round-trip; zero cluster-admin Checks.
+// (the relation store grants the per-object relation) must NOT issue the cluster-admin
+// short-circuit Check. Exactly ONE question to the relation store; zero cluster-admin Checks.
 func TestAuthorize_Check_Allow_NoClusterAdminRoundTrip(t *testing.T) {
-	fga := &mockRelations{checkResp: true} // per-object FGA allows
+	store := &mockRelations{checkResp: true} // the per-object resolve allows
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_x": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -151,8 +153,8 @@ func TestAuthorize_Check_Allow_NoClusterAdminRoundTrip(t *testing.T) {
 	if !res.Allowed {
 		t.Fatalf("per-object allow must be allowed")
 	}
-	if fga.checkCalls != 1 {
-		t.Fatalf("allow path must do exactly 1 FGA Check; got %d", fga.checkCalls)
+	if store.checkCalls != 1 {
+		t.Fatalf("allow path must do exactly 1 per-object question; got %d", store.checkCalls)
 	}
 	if cl.calls != 0 {
 		t.Fatalf("#3: allow path must NOT issue the cluster-admin short-circuit; got %d", cl.calls)
@@ -164,11 +166,10 @@ func TestAuthorize_Check_Allow_NoClusterAdminRoundTrip(t *testing.T) {
 // cluster-admin fallback) must issue the cluster-admin short-circuit Check AT MOST
 // ONCE for the subject (memoized per-batch), not once per item.
 func TestAuthorize_BatchCheck_ClusterAdmin_SingleShortCircuit(t *testing.T) {
-	fga := &mockRelations{checkResp: false} // every per-object resolve denies
+	store := &mockRelations{checkResp: false} // every per-object resolve denies
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_root": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -195,11 +196,11 @@ func TestAuthorize_BatchCheck_ClusterAdmin_SingleShortCircuit(t *testing.T) {
 }
 
 // TestAuthorize_Check_NilClusterChecker_NoShortCircuit — backward-compat: an
-// unwired ClusterAdminChecker (nil) never short-circuits; the ordinary FGA path
+// unwired ClusterAdminChecker (nil) never short-circuits; the ordinary per-object path
 // is the sole decision (fail-closed, no panic).
 func TestAuthorize_Check_NilClusterChecker_NoShortCircuit(t *testing.T) {
-	fga := &mockRelations{checkResp: true} // FGA itself allows
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: fga, ModelID: "m1"})
+	store := &mockRelations{checkResp: true} // the per-object resolve itself allows
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
 
 	res, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_root",
@@ -210,6 +211,6 @@ func TestAuthorize_Check_NilClusterChecker_NoShortCircuit(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if !res.Allowed {
-		t.Fatalf("nil cluster-checker must defer to FGA (which allowed)")
+		t.Fatalf("nil cluster-checker must defer to the per-object resolve (which allowed)")
 	}
 }

@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 )
 
 // latencyRelations — an Authorizer that records how many store round-trips a pass
@@ -50,20 +48,21 @@ func (m *latencyRelations) CheckWithContext(ctx context.Context, subject, relati
 	return false, nil // every per-object resolve denies: the worst case, and the shape a page filter hits
 }
 
-func (m *latencyRelations) ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error) {
-	return nil, nil
-}
-
 func (m *latencyRelations) ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error) {
 	return nil, "", nil
 }
 
-func (m *latencyRelations) Expand(ctx context.Context, objectType, objectID, relation string) (*authztypes.ExpandTree, error) {
+func (m *latencyRelations) Sources(ctx context.Context, objectType, objectID, relation string) ([]string, error) {
 	return nil, nil
 }
 
-func (m *latencyRelations) ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]authztypes.ConditionalTuple, string, error) {
-	return nil, "", nil
+// DirectRelations — диагностика хвоста текста отказа. Она НЕ учитывается
+// счётчиками выше, и это осознанно: предмет файла — сколько вопросов о ВЕРДИКТЕ
+// пачка задаёт одновременно, а не сколько всего обращений к хранилищу делает
+// ответ. Считать её здесь значило бы смешать две величины и получить число,
+// которого никто не измерял.
+func (m *latencyRelations) DirectRelations(ctx context.Context, subject, objectType, objectID string, limit int) ([]string, error) {
+	return nil, nil
 }
 
 func (m *latencyRelations) snapshot() (calls, maxInFly int) {
@@ -143,8 +142,8 @@ func TestBatchCheck_ResolvesItsItemsConcurrently(t *testing.T) {
 	// would add cost that is not this property, making the observed concurrency
 	// harder to attribute. The MAGNITUDE of the win belongs to a measurement
 	// against a real store; the PROPERTY belongs here.
-	fga := &latencyRelations{perCheck: perCheck}
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: fga, ModelID: "m1"})
+	store := &latencyRelations{perCheck: perCheck}
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
 
 	start := time.Now()
 	results, err := svc.BatchCheck(context.Background(), batchOfSameSubject(slice))
@@ -156,7 +155,7 @@ func TestBatchCheck_ResolvesItsItemsConcurrently(t *testing.T) {
 		t.Fatalf("results: got %d want %d", len(results), slice)
 	}
 
-	calls, maxInFly := fga.snapshot()
+	calls, maxInFly := store.snapshot()
 	t.Logf("slice=%d items | store round-trips=%d | max in flight=%d | per-check=%v | wall=%v | caller budget=%v",
 		slice, calls, maxInFly, perCheck, wall.Round(time.Millisecond), callerBudget)
 	t.Logf("sequential wall would be %v; a contract page (1000 ids = 10 slices) at this latency costs %v of store time",
@@ -192,14 +191,14 @@ func TestBatchCheck_ResolvesItsItemsConcurrently(t *testing.T) {
 func TestBatchCheck_ConcurrencyIsBounded(t *testing.T) {
 	const slice = 100
 
-	fga := &latencyRelations{perCheck: 2 * time.Millisecond}
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: fga, ModelID: "m1"})
+	store := &latencyRelations{perCheck: 2 * time.Millisecond}
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
 
 	if _, err := svc.BatchCheck(context.Background(), batchOfSameSubject(slice)); err != nil {
 		t.Fatalf("BatchCheck: %v", err)
 	}
 
-	_, maxInFly := fga.snapshot()
+	_, maxInFly := store.snapshot()
 	t.Logf("slice=%d | max in flight=%d | declared bound=%d", slice, maxInFly, batchCheckParallelism)
 
 	if maxInFly > batchCheckParallelism {
@@ -227,11 +226,10 @@ func TestBatchCheck_ConcurrencyIsBounded(t *testing.T) {
 func TestBatchCheck_ClusterAdminMemoStaysDedupedUnderConcurrency(t *testing.T) {
 	const slice = 100
 
-	fga := &latencyRelations{perCheck: time.Millisecond}
+	store := &latencyRelations{perCheck: time.Millisecond}
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_tenant": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -244,7 +242,7 @@ func TestBatchCheck_ClusterAdminMemoStaysDedupedUnderConcurrency(t *testing.T) {
 			t.Fatalf("item %d: cluster-admin must resolve via the super-gate; deny=%v", i, r.DenyReasons)
 		}
 	}
-	storeCalls, _ := fga.snapshot()
+	storeCalls, _ := store.snapshot()
 	t.Logf("slice=%d | store round-trips=%d | super-gate questions=%d (memoized; one per subject, not per item)",
 		slice, storeCalls, cl.calls)
 	// Volume examined: the super-gate is only reached on the DENY path, so a pass
@@ -352,11 +350,10 @@ func batchOfDistinctSubjects(n int) []CheckRequest {
 func TestBatchCheck_SuperGateDoesNotSerialiseDistinctSubjects(t *testing.T) {
 	const slice = 100
 
-	fga := &latencyRelations{}
+	store := &latencyRelations{}
 	cl := &latencyClusterChecker{perCheck: 5 * time.Millisecond, admins: map[string]bool{}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -367,7 +364,7 @@ func TestBatchCheck_SuperGateDoesNotSerialiseDistinctSubjects(t *testing.T) {
 	wall := time.Since(start)
 
 	calls, maxInFly, maxPerSubject := cl.snapshot()
-	storeCalls, _ := fga.snapshot()
+	storeCalls, _ := store.snapshot()
 	t.Logf("slice=%d distinct subjects | store round-trips=%d | super-gate questions=%d "+
 		"| max in flight=%d | max per subject=%d | wall=%s",
 		slice, storeCalls, calls, maxInFly, maxPerSubject, wall.Round(time.Millisecond))

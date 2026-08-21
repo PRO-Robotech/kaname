@@ -9,7 +9,12 @@ package service
 // resolves on the v_* relations. A cluster-admin with NO per-object tuple on a
 // foreign object is ALLOWED via the short-circuit when the gate Check resolves a
 // v_get/v_list/v_update/v_delete (or the create-child `editor`) relation that the
-// per-object FGA denies.
+// per-object resolve denies.
+//
+// Отвечающая сторона у обоих вопросов теперь ОДНА — дверь решения над реляционной
+// формой; прежде вторым был внешний движок прав. Утверждение файла про это не
+// говорит и говорить не должно: его предмет — что надзор администратора облака
+// переживает расцепление энфорсмента с ярусом, а не то, кто выносит вердикт.
 
 import (
 	"context"
@@ -21,11 +26,10 @@ import (
 // tuple) short-circuits to ALLOW. Public Check path (action → v_get via catalog
 // required_relation forwarded by the gateway).
 func TestAuthorize_VBC08_ClusterAdminForeignGet_ShortCircuit(t *testing.T) {
-	fga := &mockRelations{checkResp: false} // no per-object tuple → FGA denies
+	store := &mockRelations{checkResp: false} // ни одного пообъектного права → отказ
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_ca": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -42,9 +46,9 @@ func TestAuthorize_VBC08_ClusterAdminForeignGet_ShortCircuit(t *testing.T) {
 	if !res.Allowed {
 		t.Fatalf("VBC-08-CA: cluster-admin foreign GET must short-circuit ALLOW on v_get DENY; deny=%v", res.DenyReasons)
 	}
-	// Per-object resolve runs first (v_get deny), short-circuit fallback allows.
-	if fga.checkCalls != 1 {
-		t.Fatalf("VBC-08-CA: per-object v_get resolve must run first (1 call); got %d", fga.checkCalls)
+	// Пообъектный вопрос идёт первым (отказ на v_get), надзор разрешает вторым.
+	if store.checkCalls != 1 {
+		t.Fatalf("VBC-08-CA: per-object v_get resolve must run first (1 call); got %d", store.checkCalls)
 	}
 	if cl.calls != 1 {
 		t.Fatalf("VBC-08-CA: cluster-admin fallback must run once on v_get deny; got %d", cl.calls)
@@ -59,11 +63,10 @@ func TestAuthorize_VBC08_ClusterAdminForeignGet_ShortCircuit(t *testing.T) {
 // already-resolved v_get relation from the consumer permission_map; the
 // cluster-admin short-circuit must allow on the per-object DENY.
 func TestAuthorize_VBC08_ClusterAdminForeignGet_ConsumerPlan(t *testing.T) {
-	fga := &mockRelations{checkResp: false}
+	store := &mockRelations{checkResp: false}
 	cl := &scClusterChecker{admins: map[string]bool{"user:usr_ca": true}}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations:           fga,
-		ModelID:             "m1",
+		Relations:           store,
 		ClusterAdminChecker: cl,
 	})
 
@@ -87,10 +90,10 @@ func TestAuthorize_VBC08_ClusterAdminForeignGet_ConsumerPlan(t *testing.T) {
 func TestAuthorize_VBC09_ClusterAdminForeignListCrudCreate(t *testing.T) {
 	for _, rel := range []string{"v_list", "v_delete", "editor"} {
 		t.Run("cluster_admin_allow_"+rel, func(t *testing.T) {
-			fga := &mockRelations{checkResp: false}
+			store := &mockRelations{checkResp: false}
 			cl := &scClusterChecker{admins: map[string]bool{"user:usr_ca": true}}
 			svc := NewAuthorizeService(AuthorizeServiceConfig{
-				Relations: fga, ModelID: "m1", ClusterAdminChecker: cl,
+				Relations: store, ClusterAdminChecker: cl,
 			})
 			res, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 				Subject: "user:usr_ca", Relation: rel, Object: "compute_instance:inst_foreign",
@@ -103,10 +106,10 @@ func TestAuthorize_VBC09_ClusterAdminForeignListCrudCreate(t *testing.T) {
 			}
 		})
 		t.Run("non_cluster_admin_deny_"+rel, func(t *testing.T) {
-			fga := &mockRelations{checkResp: false}
+			store := &mockRelations{checkResp: false}
 			cl := &scClusterChecker{admins: map[string]bool{}} // nobody
 			svc := NewAuthorizeService(AuthorizeServiceConfig{
-				Relations: fga, ModelID: "m1", ClusterAdminChecker: cl,
+				Relations: store, ClusterAdminChecker: cl,
 			})
 			res, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 				Subject: "user:usr_x", Relation: rel, Object: "compute_instance:inst_foreign",

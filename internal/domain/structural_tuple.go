@@ -9,26 +9,25 @@ import "strings"
 // structural relation triples the authorization model derives the super-access
 // cascade over.
 //
-// There are two consumers, and the reason this lives in domain is that they must
-// never disagree:
+// There WERE two consumers, and the reason this lives in domain is that they had to
+// agree:
 //
 //   - the emitter — access_binding/tuples.go::hierarchyParentTuple,
 //     account/create.go::ownerTuples, project/create.go::projectStructuralTuples —
-//     enqueues the triple into kacho_iam.fga_outbox inside the writer transaction, to
-//     be applied to OpenFGA by the drainer;
-//   - the resolver — internal/authzcascade — supplies the SAME triple as a
-//     request-scoped contextual tuple, so the cascade resolves from committed state
-//     instead of waiting for that delivery.
+//     enqueues the triple into kacho_iam.fga_outbox inside the writer transaction,
+//     out of which a trigger folds the direct fact in the SAME commit;
+//   - the resolver — it supplied the SAME triple as a request-scoped tuple, so the
+//     cascade resolved from committed state instead of waiting for a delivery.
 //
-// If those two projections were written twice, a change to one would silently
-// change what the cascade means depending on whether the queue had caught up. With
-// one function there is nothing to drift: the stored tuple and the contextual one
-// are the same function of the same columns. On AccessBinding the columns are
-// immutable after Create (scopeType/scopeId), so they cannot even differ over time.
+// The second consumer went away with the external engine: the form reads the
+// committed rows itself, so there is nothing left to hand it, and there is no
+// delivery to outrun. The single-source rule outlives it for the emitters that
+// remain — three call sites derive the same triple from the same columns, and
+// writing it three times would let one of them drift. On AccessBinding the columns
+// are immutable after Create (scopeType/scopeId), so they cannot differ over time.
 
 // StructuralTuple — one relation triple. Transport-neutral on purpose: the emitter
-// converts it to its repo tuple type and the resolver to its OpenFGA wire type, and
-// domain stays free of both.
+// converts it to its repo tuple type, and domain stays free of that type.
 type StructuralTuple struct {
 	// User — the SOURCE of the relation: the parent object ("account:<id>") for a
 	// parent-pointer, or the subject ("user:<id>") for the account owner.

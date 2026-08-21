@@ -4,15 +4,22 @@
 package listvisibility_test
 
 // doubles_test.go — the three wrappers the probes put between a use-case and the
-// LIVE relation store.
+// LIVE decision door.
 //
-// None of them is a stand-in for the store: each EMBEDS the production client
-// and delegates every question it does not have a reason to touch. That is not
+// None of them is a stand-in for the door: each EMBEDS the production client and
+// delegates every question it does not have a reason to touch. That is not
 // tidiness, it decides what is being measured. `authzfilter.VisibleSet` chooses
 // its path by asserting capabilities on the checker it was handed — a wrapper
 // that implemented only the single-object door would silently move the whole
 // page onto the one-question-per-row path, and a probe counting questions would
 // then be reporting the wrapper's shape rather than the product's cost.
+//
+// Здесь у двух обёрток стояли ещё `WriteTuples`/`DeleteTuples`. Их предмет снят
+// вместе с внешним движком отношений: писать кортежи больше некуда — состояние,
+// из которого складывается ответ, есть свёртка СОБСТВЕННОГО журнала, и пишет в
+// него тот же коммит, что меняет выдачу. Обёртка, сохранившая эти методы, была бы
+// ШИРЕ настоящего порта, а дублёр шире предмета первым же делом перестаёт ловить
+// то, ради чего его подставляют.
 
 import (
 	"context"
@@ -21,7 +28,6 @@ import (
 	"sync"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // ── counting ─────────────────────────────────────────────────────────────────
@@ -141,14 +147,6 @@ func (s *subjectQuestionDown) CheckWithContext(ctx context.Context, subject, rel
 	return s.RelationQueries.CheckWithContext(ctx, subject, relation, object, condCtx)
 }
 
-func (s *subjectQuestionDown) WriteTuples(ctx context.Context, t []clients.RelationTuple) error {
-	return s.store.WriteTuples(ctx, t)
-}
-
-func (s *subjectQuestionDown) DeleteTuples(ctx context.Context, t []clients.RelationTuple) error {
-	return s.store.DeleteTuples(ctx, t)
-}
-
 func (s *subjectQuestionDown) timesAsked() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -181,14 +179,6 @@ func (s *storeDown) BatchCheckWithContext(context.Context, string, string, []str
 
 func (s *storeDown) Check(context.Context, string, string, string) (bool, error) {
 	return false, errStoreDown
-}
-
-func (s *storeDown) WriteTuples(ctx context.Context, t []clients.RelationTuple) error {
-	return s.store.WriteTuples(ctx, t)
-}
-
-func (s *storeDown) DeleteTuples(ctx context.Context, t []clients.RelationTuple) error {
-	return s.store.DeleteTuples(ctx, t)
 }
 
 // ── mid-request hook ─────────────────────────────────────────────────────────
@@ -250,6 +240,3 @@ func (h *hookedQueries) BatchCheckWithContext(ctx context.Context, subject, rela
 	h.maybeFire()
 	return h.RelationQueries.BatchCheckWithContext(ctx, subject, relation, objects, condCtx)
 }
-
-// clusterObject — the singleton every cluster-tier tuple hangs off.
-func clusterObject() string { return "cluster:" + domain.ClusterSingletonID }

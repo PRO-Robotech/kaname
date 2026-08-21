@@ -5,12 +5,12 @@ package internal_iam
 
 // handler_test.go — unit-тесты InternalIAMService.Check.
 //
-// Check делегирует в AuthorizeService.CheckRelation. Тест мокает authorizer
-// port-iface (без OpenFGA / OPA) и проверяет transport-маппинг:
+// Check делегирует в AuthorizeService.CheckRelation. Тест ставит дублёра на порт
+// решателя и проверяет transport-маппинг:
 //   - allowed=true                                  → CheckResponse{Allowed:true}
 //   - allowed=false (deny path)                     → CheckResponse{Allowed:false, Reason}
 //   - missing subject_id / relation / object        → InvalidArgument
-//   - authorizer == nil (FGA stack not wired)       → Unavailable (fail-closed)
+//   - authorizer == nil (решатель не провязан)      → Unavailable (fail-closed)
 //   - CheckRelation -> "authz unavailable"          → Unavailable
 //   - CheckRelation -> "Illegal argument ..."       → InvalidArgument
 //   - CheckRelation -> generic error                → Internal
@@ -57,9 +57,8 @@ func newCheckHandler(authz Authorizer) *Handler {
 
 func TestInternalIAM_Check_Allowed(t *testing.T) {
 	authz := &fakeAuthorizer{result: &service.CheckResult{
-		Allowed:              true,
-		AuthorizationModelID: "model_v2",
-		CheckedAt:            time.Now().UTC().Truncate(time.Second),
+		Allowed:   true,
+		CheckedAt: time.Now().UTC().Truncate(time.Second),
 	}}
 	h := newCheckHandler(authz)
 
@@ -153,8 +152,8 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 	}{
 		// Backend-unavailable is classified by the typed iamerr.ErrUnavailable
 		// sentinel (robust to error-text rewording), not an error-string prefix.
-		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: openfga check: status 503"), codes.Unavailable, ""},
-		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "policy unavailable: opa down"), codes.Unavailable, ""},
+		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: read relation_fact: conn refused"), codes.Unavailable, ""},
+		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable"), codes.Unavailable, ""},
 		{"illegal argument", errors.New("Illegal argument relation: required"), codes.InvalidArgument, ""},
 		// Leak-lock (audit r3): the Internal default must be the OPAQUE fixed text,
 		// never err.Error() — an un-sentineled pgx/DB error carries driver text

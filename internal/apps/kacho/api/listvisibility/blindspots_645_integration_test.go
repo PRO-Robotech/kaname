@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
 )
 
@@ -77,7 +78,7 @@ func TestList645_04_RefillLosesNothingAndRepeatsNothingWhenARowArrivesMidRequest
 	}
 	for i := 0; i < 25; i++ {
 		p := e.seedProject(t, e.callerAcc, projectName(200+i))
-		e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", p))
+		e.grantVerb(t, "user", string(e.callerUser), "project", p, "get")
 		visible = append(visible, p)
 		// two invisible rows between every pair of visible ones
 		e.seedProject(t, e.foreignAcc, projectName(300+i))
@@ -91,10 +92,10 @@ func TestList645_04_RefillLosesNothingAndRepeatsNothingWhenARowArrivesMidRequest
 	insertMidRequest := func() {
 		inserted = e.seedProjectAt(t, e.callerAcc, "prj-midflight",
 			e.timestampOf(t, "projects", visible[3]).Add(500*time.Millisecond))
-		e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", inserted))
+		e.grantVerb(t, "user", string(e.callerUser), "project", inserted, "get")
 	}
 
-	hooked := newHookedQueries(e.fga.Client, 1, insertMidRequest)
+	hooked := newHookedQueries(e.gates, 1, insertMidRequest)
 	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(hooked)
 
 	seen := map[string]int{}
@@ -168,19 +169,24 @@ func TestList645_16b_SubjectQuestionFailureIsUnavailableNotANarrowedPage(t *test
 
 			admin := e.seedUser(t, e.foreignAcc, "cloudadmin")
 			ctx := e.ctxAs(admin, "user")
-			// The cloud administrator's authority is structural: one tuple on the
-			// cluster singleton, and no per-object tuple anywhere.
-			e.fga.Write(t, "user:"+admin, "system_admin", clusterObject())
+			// Власть администратора облака СТРУКТУРНА: одна строка на синглтоне
+			// кластера, и ни одной пообъектной нигде.
+			e.factThroughJournal(t, "cluster", domain.ClusterSingletonID,
+				"system_admin", "user:"+admin)
 
 			s.seedForeign(t, e, plan.foreign)
 			own := s.seedOwn(t, e)
-			// The premise of the §3.1 derivation, established by the fixture rather
-			// than assumed: the account points at the cluster, and the object points
-			// at the account. Four of the seven types have no direct path to the
-			// cluster in the model at all, and reach it only through this chain —
-			// without the pointers the chain breaks at its first step and the probe
-			// would go red saying nothing about its subject.
-			e.fga.Write(t, clusterObject(), "cluster", "account:"+string(e.callerAcc))
+			// Предпосылка вывода §3.1 — устанавливается фикстурой, а не
+			// подразумевается: объект указывает на аккаунт, аккаунт — на кластер.
+			// Четыре типа из семи прямого пути к кластеру в модели не имеют вовсе и
+			// достают до него только этой цепью; порвись она на первом звене, проба
+			// покраснела бы, не сказав ничего о своём предмете.
+			//
+			// Звено «аккаунт → кластер» здесь БОЛЬШЕ НЕ ПИШЕТСЯ: цепь областей
+			// выводит его из схемы (accounts × clusters), потому что аккаунты сеются
+			// в том числе миграциями и указателя в журнале у них нет. Проверка
+			// предпосылки ниже покрывает и это звено — она спрашивает про аккаунт,
+			// а ответ на нём достижим только через кластер.
 			require.NotNil(t, s.linkOwnToHierarchy, "%s: every surface must state its parent pointer", s.name)
 			s.linkOwnToHierarchy(t, e, own)
 
@@ -188,7 +194,7 @@ func TestList645_16b_SubjectQuestionFailureIsUnavailableNotANarrowedPage(t *test
 			// resolve `admin` on the account before anything is asked about a list.
 			// This is the step whose reading misled a round of review of the
 			// acceptance itself.
-			adminOnAccount, err := e.fga.Client.CheckWithContext(ctx, "user:"+admin, "admin",
+			adminOnAccount, err := e.gates.CheckWithContext(ctx, "user:"+admin, "admin",
 				"account:"+string(e.callerAcc), nil)
 			require.NoError(t, err)
 			require.True(t, adminOnAccount,
@@ -215,7 +221,7 @@ func TestList645_16b_SubjectQuestionFailureIsUnavailableNotANarrowedPage(t *test
 
 			// Negative half, same run: the subject question is the only thing that
 			// fails.
-			down := newSubjectQuestionDown(e.fga.Client, e.fga.Client)
+			down := newSubjectQuestionDown(e.gates, e.gates)
 			gotDown, _, errDown := s.list(t, e, ctx, listArgs{
 				pageSize: wholePopulationFits, queries: down, store: down,
 			})
@@ -267,10 +273,10 @@ func TestList645_21_TokenOfThePreviousFormIsRefusedByTheFirstDecoder(t *testing.
 	// A population big enough that a real traversal issues a real token.
 	for i := 0; i < 60; i++ {
 		p := e.seedProject(t, e.callerAcc, projectName(i))
-		e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", p))
+		e.grantVerb(t, "user", string(e.callerUser), "project", p, "get")
 	}
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 
 	// The previous form, verbatim: base64(std) of `<RFC3339Nano>|<id>`, the
 	// boundary of a RAW page.
@@ -347,7 +353,7 @@ func TestList645_23_UnresolvableRightsAreUnavailableOnEverySurface(t *testing.T)
 			require.Contains(t, got, own, "%s: control — with rights resolvable the object is there", s.name)
 
 			// Negative half: the store answers nothing.
-			down := newStoreDown(e.fga.Client, e.fga.Client)
+			down := newStoreDown(e.gates, e.gates)
 			gotDown, _, errDown := s.list(t, e, ctx, listArgs{pageSize: 1000, queries: down, store: down})
 			require.Error(t, errDown,
 				"%s: rights could not be resolved, so the answer must be a refusal; got %d row(s) "+

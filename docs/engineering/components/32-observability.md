@@ -38,8 +38,8 @@
 | `principal_id`   | То же — вместе с `principal_type` (anti-anonymous gate).         |
 | `err`            | На ERROR/WARN-записях с причиной отказа.                         |
 
-`component` принимает значения фоновых воркеров: `fga_outbox_drainer`,
-`subject_change_drainer`, `bootstrap_admin_reconciler`, `rsab_reconciler`,
+`component` принимает значения фоновых воркеров: `subject_change_drainer`,
+`bootstrap_admin_reconciler`, `rsab_reconciler`,
 `p8_backfill`, `p8_verify_gate`. Reconciler-backstop LRO логируется без
 выделенного `component` (сообщение `LRO orphan reconciler backstop started`).
 
@@ -49,8 +49,8 @@
 # Tail подов.
 kubectl -n kacho logs -l app=kacho-iam -f --max-log-requests 10
 
-# Loki query — только записи fga_outbox-drainer'а уровня WARN и выше.
-{namespace="kacho",app="kacho-iam"} |= "fga_outbox_drainer" | json | level="WARN"
+# Loki query — только записи дренажа сброса кэша уровня WARN и выше.
+{namespace="kacho",app="kacho-iam"} |= "subject_change_drainer" | json | level="WARN"
 ```
 
 ## Metrics
@@ -139,7 +139,9 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
   expr: rate(kacho_iam_authz_check_decisions_total{decision="error"}[5m]) > 1
   for: 10m
   annotations:
-    summary: "authz Check возвращает error — backend OpenFGA недоступен/деградирует"
+    summary: "authz Check возвращает error — база kacho_iam недоступна или деградирует"
+    description: "Вердикт складывается реляционной формой в собственной базе службы;
+      отказ означает fail-closed по всем доменам — см. engineering/architecture/failure-domains.md"
 
 - alert: KachoIAMLROStranded
   expr: increase(kacho_iam_lro_terminal_write_failures_total[15m]) > 0
@@ -200,7 +202,7 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
 
 - [`33-runbook.md`](33-runbook.md) — что делать при alert.
 - [`31-deployment.md`](31-deployment.md) — env vars, порты и mTLS для observability.
-- [`29-openfga-check.md`](29-openfga-check.md) — latency-бюджет authz Check hot-path.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — latency-бюджет authz Check hot-path.
 
 ## Ссылки на код
 

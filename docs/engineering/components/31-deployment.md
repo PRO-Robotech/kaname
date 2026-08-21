@@ -40,17 +40,18 @@ gRPC-поверхности — иначе утекла бы внутрення�
 **Публичный `:9090`** (`registerPublicServices`): `OperationService`,
 `AccountService`, `ProjectService`, `UserService`, `ServiceAccountService`,
 `GroupService`, `RoleService`, `AccessBindingService`, `AuthorizeService`
-(PDP: `Check`/`ListObjects`/`ListSubjects`), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
+(`Check`/`BatchCheck`/`ListSubjects`/`ExpandRelations`/`WhoAmI`), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
 taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
 
 **Internal `:9091`** (`registerInternalServices`, только cluster-internal —
 запрет #6): `InternalIAMService` (`Check` + `RegisterResource`/`UnregisterResource`
-fgaproxy owner-tuples), `InternalAuthorizeService`, `InternalClusterService`
+владение чужими ресурсами), `InternalClusterService`
 (cluster-admin gранты — time-bombed/permanent), `InternalUserService`
 (`UpsertFromIdentity`), `InternalOperationsService`,
 `InternalSessionRevocationsService`. `AuthorizeService` дополнительно
-регистрируется и здесь — чтобы consumer'ы (vpc/compute/nlb) звали `ListObjects`
-по уже доверенному mTLS-ребру `:9091`, не открывая отдельный публичный коннект.
+регистрируется и здесь — чтобы сервисы платформы (vpc/compute/nlb) спрашивали
+вердикт по уже доверенному mTLS-ребру `:9091`, не открывая отдельный публичный
+коннект.
 
 **HTTP `:9092`** (`iamhooks`): `POST /iam/v1/hooks/token`,
 `POST /iam/v1/hooks/refresh` (Hydra OAuth2-хуки), `POST /iam/v1/hooks/provision`
@@ -68,7 +69,6 @@ flowchart TB
     subgraph KachoNS[Namespace kacho]
         APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kacho-iam]
         IAM -- pgx master + read-replica --> PG[(Postgres kacho_iam)]
-        IAM -- HTTP ReBAC Check + fga_outbox tuples --> FGA[OpenFGA]
         Kratos[Ory Kratos] -- provision-hook :9092 --> IAM
         Hydra[Ory Hydra] -- token/refresh-hook :9092 --> IAM
         IAM -- admin API: JWKS --> Hydra
@@ -132,8 +132,8 @@ Pod hardened: `runAsNonRoot` (uid 65532), `readOnlyRootFilesystem`,
 `sslMode: disable`, mTLS выключен). Production-деплой обязан переопределить:
 `authn.mode: production` (или `production-strict`), включить server-side mTLS
 обоих gRPC-listener'ов (иначе `kacho-iam` fail-fast'ит на старте и отказывается
-подниматься на незащищенных `:9090`/`:9091`), задать `sslMode: require` (или
-`verify-full`) и подключить OpenFGA.
+подниматься на незащищенных `:9090`/`:9091`) и задать `sslMode: require` (или
+`verify-full`).
 
 ## Config + ENV-override
 
@@ -188,27 +188,25 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 | ENV | Назначение |
 |---|---|
 | `KACHO_IAM_DB_PASSWORD` | пароль Postgres (`password-from-env`) |
-| `KACHO_IAM_OPENFGA_STORE_ID` | OpenFGA store-id (provision'ится bootstrap-job'ом; пусто → authz fail-closed) |
-| `KACHO_IAM_OPENFGA_MODEL_ID` | опц. pinned authorization-model id |
-| `KACHO_IAM_OPENFGA_ENDPOINT` | адрес OpenFGA (дефолт `kacho-umbrella-openfga:8080`) |
-| `KACHO_IAM_AUTHZ_PROVIDER` | бэкенд authz (дефолт `openfga`; неизвестный → fail-closed) |
 | `KACHO_IAM_HOOK_TOKEN` | shared secret HMAC для Ory-webhooks |
 | `KACHO_IAM_JWKS_ENC_KEY` | 32-байтный AES-GCM ключ (hex) для шифрования private JWKS в БД |
 | `KACHO_IAM_HYDRA_ADMIN_TOKEN` | Bearer для Hydra admin API (опц.) |
 | `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL` | если задан — bootstrap-admin reconciler выдает `system_admin@cluster` этому юзеру (опц.) |
 
-OpenFGA-параметры читаются напрямую из `KACHO_IAM_OPENFGA_*` в composition root
-(`cmd/kacho-iam/env.go`). Per-операционные таймауты FGA — `KACHO_IAM_FGA_CHECK_TIMEOUT_MS`
-/ `KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS` / `KACHO_IAM_FGA_WRITE_TIMEOUT_MS`.
+> [!note] До стадии S6 здесь стояли четыре переменные внешнего движка прав
+> `KACHO_IAM_OPENFGA_ENDPOINT`, `KACHO_IAM_OPENFGA_STORE_ID`,
+> `KACHO_IAM_OPENFGA_MODEL_ID`, `KACHO_IAM_AUTHZ_PROVIDER` и три срока
+> (`KACHO_IAM_FGA_CHECK_TIMEOUT_MS`, `…_LIST_OBJECTS_…`, `…_WRITE_…`). Ни у одной
+> не осталось читателя: движок снят вместе со своим клиентом. Выставлять их не
+> нужно и бессмысленно — процесс их не читает.
+
+Вердикт о доступе складывается **той же базой**, что и остальное состояние службы,
+и настраивается общими `KACHO_IAM_DB_*`. Отдельного бэкенда авторизации нет.
 
 ## Внешние зависимости
 
 - **Postgres** (`kacho_iam`) — master-pool обязателен; read-replica (`slave-url`)
   опциональна (CQRS Reader-TX, иначе fallback на master).
-- **OpenFGA** — ReBAC `Check` + sync owner/grant-tuple'ов через `fga_outbox`
-  drainer. Store-id provision'ится отдельным openfga-bootstrap-job'ом, который
-  пишет id в Secret и пере-роллит Deployment; до этого момента клиент честно
-  fail-closed'ит (deny).
 - **Ory Kratos** — identity-provider; `provision`-хук создает/активирует
   Account/Project/AccessBinding для нового identity (`UpsertFromIdentity`).
 - **Ory Hydra** — OAuth2/OIDC; `token`/`refresh`-хуки обогащают claims и проверяют
@@ -221,8 +219,6 @@ OpenFGA-параметры читаются напрямую из `KACHO_IAM_OPE
 
 - **LRO worker** (`operations`-таблица из corelib) — async-исполнение мутаций +
   orphan-reconciler, добивающий осиротевшие `done=false` операции умершего процесса.
-- **`fga_outbox` drainer** — LISTEN/NOTIFY по `kacho_iam_fga_outbox`; применяет
-  записанные в writer-tx tuple'ы в OpenFGA (идемпотентно, retry на 5xx).
 - **`subject_change_outbox` drainer** — push `InvalidateSubject` на internal-порт
   api-gateway, убирая окно сходимости poll-инвалидации кэша.
 - **bootstrap-admin reconciler** — повторяет выдачу `system_admin@cluster`, пока
@@ -301,7 +297,6 @@ sequenceDiagram
     participant Init as initContainer kacho-migrator
     participant PG as Postgres
     participant Pod as kacho-iam Pod
-    participant Boot as openfga-bootstrap-job
 
     Helm->>Init: start init-container
     Init->>PG: goose up (схема kacho_iam)
@@ -311,9 +306,7 @@ sequenceDiagram
     Pod->>PG: pgxpool master (+ опц. read-replica)
     Pod->>Pod: gRPC :9090/:9091 + HTTP :9092/:9095 + worker'ы
     Pod-->>Helm: Ready (TCP-probe :9090)
-    Boot->>Boot: создать OpenFGA store
-    Boot->>Pod: записать KACHO_IAM_OPENFGA_STORE_ID в Secret + re-roll
-    Pod->>Pod: re-start с provision'енным store-id → authz активен
+    Note over Pod: authz активен сразу — отдельной задачи подготовки хранилища прав нет
 ```
 
 ## Smoke-проверки

@@ -274,7 +274,7 @@ type ReconcileStore interface {
 	// different subject cannot match). The emitted-tuple ledger PK is keyed PER BINDING
 	// (binding_id, fga_user, relation, object — migration 0024), so two bindings of the
 	// SAME subject that materialize the IDENTICAL FGA tuple on the SAME object hold TWO
-	// ledger rows for ONE non-refcounted OpenFGA tuple. The eager-revoke of one binding's
+	// ledger rows for ONE non-refcounted tuple. The eager-revoke of one binding's
 	// member must NOT delete a tuple another active binding still claims (the cross-binding
 	// shared-tuple class). The reconciler subtracts this set
 	// before emitting a tuple-delete, so the shared tuple is revoked only when the LAST
@@ -345,17 +345,6 @@ type TxRunner interface {
 type Reconciler struct {
 	tx     TxRunner
 	logger *slog.Logger
-	// syncFGA — OPTIONAL direct OpenFGA writer. When
-	// wired (WithSyncFGA), a reconcile pass collects the per-object tuples it emits to
-	// fga_outbox for ACTIVE members and — AFTER the writer-tx COMMITS — synchronously
-	// applies them to OpenFGA, closing the create-path read-after-write race (a Check
-	// immediately after Operation-done would otherwise miss the still-undrained tuple).
-	// nil ⇒ async-only (the fga_outbox drainer is the sole applier — unchanged
-	// behaviour). The durable fga_outbox enqueue ALWAYS happens in the writer-tx (ban
-	// #10 preserved); the sync write is purely a read-after-write closer and the later
-	// async drain of the SAME rows is an idempotent no-op (WriteTuples treats
-	// already_exists as applied).
-	syncFGA SyncFGAWriter
 	// size — OPTIONAL recorder of how big one binding's materialization is. nil ⇒ the
 	// observation is a no-op; the pass itself does not depend on it.
 	size SizeRecorder
@@ -375,33 +364,27 @@ type SizeRecorder interface {
 	ObserveBindingMaterialization(objects, tuples int)
 }
 
-// SyncFGAWriter — the narrow direct-apply port the reconciler uses to close the
-// read-after-write gap in BOTH directions. Satisfied by an adapter over
-// clients.RelationStore (*clients.OpenFGAHTTPClient). Defined here so the reconcile
-// use-case depends only on a local port (Clean Architecture — no clients import).
+// SyncFGATuple — одна тройка набора, собираемого проходом реконсайлера.
 //
-// Both methods must be idempotent at the SET level so the async drain of the SAME
-// fga_outbox rows is a safe no-op: WriteTuples treats already_exists as applied,
-// DeleteTuples treats already-absent as applied (its postcondition is "none of these
-// tuples is in the store").
-//
-// BOTH DIRECTIONS OR NEITHER. Carrying only the additions makes the permissive direction
-// take effect in the caller's request while the restrictive one waits out the queue —
-// backwards for a mechanism whose job is to stop saying yes. A revoke that has been
-// derived, committed and enqueued but not applied is a standing grant on state the
-// product already reports as gone.
-type SyncFGAWriter interface {
-	WriteTuples(ctx context.Context, tuples []SyncFGATuple) error
-	DeleteTuples(ctx context.Context, tuples []SyncFGATuple) error
-}
-
-// SyncFGATuple — one FGA tuple for the direct sync write. Mirrors domain.MembershipTuple
-// (and clients.RelationTuple) field-for-field so the wiring adapter is a trivial map.
+// Имя историческое и оставлено намеренно: тип пересекает границу пакета, а
+// переименование ради красоты стоило бы правки вызывающих без единого изменения
+// свойства. Адресат у набора теперь один — вычитание переживших выдач в базе.
 type SyncFGATuple struct {
 	User     string
 	Relation string
 	Object   string
 }
+
+// ПРЯМОГО ПИСАТЕЛЯ В ЧУЖОЕ ХРАНИЛИЩЕ У РЕКОНСАЙЛЕРА БОЛЬШЕ НЕТ.
+//
+// Он применял вычисленный набор ПОСЛЕ коммита, чтобы закрыть окно между коммитом
+// и дренажом очереди. Окна нет: прямой факт складывается из строки журнала
+// триггером, в той же транзакции, — то есть материализация стала тождеством
+// коммита, и догонять её нечем.
+//
+// Сбор набора (`syncFGACollector`) ОСТАЛСЯ и остался не по инерции: вычитание
+// переживших выдач при снятии («кортеж, который держит другая действующая
+// выдача, не снимается») делается его же данными и делается в базе.
 
 // New constructs the reconciler.
 func New(tx TxRunner, logger *slog.Logger) *Reconciler {
@@ -409,15 +392,6 @@ func New(tx TxRunner, logger *slog.Logger) *Reconciler {
 		logger = slog.Default()
 	}
 	return &Reconciler{tx: tx, logger: logger}
-}
-
-// WithSyncFGA wires the OPTIONAL direct OpenFGA writer.
-// nil-safe: a nil writer leaves the reconciler async-only (existing behaviour). The
-// reconciler applies the collected ACTIVE-member tuples to it AFTER each writer-tx
-// commits (never inside the tx — a rollback must not leave OpenFGA tuples).
-func (r *Reconciler) WithSyncFGA(w SyncFGAWriter) *Reconciler {
-	r.syncFGA = w
-	return r
 }
 
 // WithSizeRecorder wires the OPTIONAL materialization-size recorder. nil-safe: an
@@ -448,14 +422,22 @@ func (r *Reconciler) observeSize(desired []DesiredMember) {
 }
 
 // syncFGACollector accumulates, across a single reconcile pass, the per-object tuples a
-// reconcileBinding emitted to fga_outbox for ACTIVE members. It is applied to OpenFGA
-// AFTER the pass's writer-tx commits. nil when sync-FGA
-// is unwired (the collect calls are then cheap no-ops). Not concurrency-shared: one
-// collector per WithTx pass, and a pass runs single-goroutine under the per-binding
-// advisory lock.
+// reconcileBinding emitted to fga_outbox for ACTIVE members. NOTHING is applied anywhere
+// after the pass commits — see the note above SyncFGATuple: the direct fact is folded out
+// of the journal row by a trigger, inside the same transaction. What the collector is
+// still FOR is the subtraction at the end of the pass: flushDeletes must not strip a
+// tuple this very pass re-wrote. A nil collector de-duplicates nothing and the collect
+// calls degrade to cheap pass-throughs. Not concurrency-shared: one collector per WithTx
+// pass, and a pass runs single-goroutine under the per-binding advisory lock.
 type syncFGACollector struct {
-	tuples []SyncFGATuple
-	seen   map[SyncFGATuple]struct{}
+	// seen — что ЭТОТ проход уже записал. Единственный носитель, ради которого
+	// сбор и существует: вычитание в конце прохода.
+	//
+	// Рядом лежали два накопителя — записанное и снятое, — и оба уезжали
+	// пост-коммитным применителем в чужое хранилище. Применителя нет (стадия S6,
+	// эпик #747), и накопители сняты вместе с ним: срез, который заполняют и
+	// никогда не читают, снаружи неотличим от работающего механизма.
+	seen map[SyncFGATuple]struct{}
 	// pendingDeletes — the per-binding FGA tuple-deletes the pass wants to emit,
 	// DEFERRED to the end of the pass (flushDeletes) so the cross-binding
 	// shared-tuple subtraction can run against the FULL pass write-set + the
@@ -466,13 +448,6 @@ type syncFGACollector struct {
 	// deferral a binding revoked BEFORE its sibling binding writes the identical
 	// tuple would strip a still-valid cross-binding tuple.
 	pendingDeletes []pendingDelete
-	// revoked — the tuples flushDeletes actually enqueued for removal, i.e. the set
-	// AFTER both subtractions (re-written in this pass, still claimed by another
-	// active binding). It is applied directly to the store after the writer-tx
-	// commits, the mirror image of `tuples`. Disjoint from `seen` by construction —
-	// flushDeletes drops every candidate this pass (re)wrote — so applying the two
-	// directions in one post-commit step cannot strip a live grant.
-	revoked []SyncFGATuple
 }
 
 // pendingDelete — one binding's deferred tuple-delete request (the eager-revoke
@@ -495,16 +470,15 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 // and returns exactly the subset NOT already emitted in this pass — the set the caller
 // must enqueue into fga_outbox.
 //
-// De-dup is mandatory for the batched sync write: one reconcile pass (ReconcileObject
-// fanning over many bindings, or the scope-self member plus a `*.*` content member that
-// both target account:<X>, or two rules of one binding whose verb sets overlap) derives
-// the SAME tuple more than once, and OpenFGA's batch Write rejects the WHOLE request on
-// a duplicate (cannot_allow_duplicate_tuples_in_one_request) — distinct from the
-// idempotent already_exists across requests.
+// One reconcile pass (ReconcileObject fanning over many bindings, or the scope-self
+// member plus a `*.*` content member that both target account:<X>, or two rules of one
+// binding whose verb sets overlap) derives the SAME tuple more than once. The de-dup used
+// to be mandatory for a second reason as well — the external engine's batch write refused
+// a whole request that carried a duplicate — and that reason went away with the engine.
 //
-// The fga_outbox enqueue is de-duplicated by the SAME set (producer cost). A second
-// outbox row for a tuple this very transaction already enqueued is pure waste: the
-// drainer would apply a byte-identical write twice. The measured stand showed 27 outbox
+// What remains is producer cost, and it is enough on its own: a second fga_outbox row for
+// a tuple this very transaction already enqueued buys nothing, because both rows fold
+// into the same direct fact. The measured stand showed 27 outbox
 // rows for 21 distinct tuples in a single pass — 2.2 rows per distinct tuple table-wide.
 // The de-dup is strictly PER-PASS (per writer-tx) and keyed on the tuple, so it can never
 // collapse a grant → revoke → grant sequence: those are three separate passes, each with
@@ -530,7 +504,6 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 			continue
 		}
 		c.seen[st] = struct{}{}
-		c.tuples = append(c.tuples, st)
 		fresh = append(fresh, t)
 	}
 	return fresh
@@ -543,7 +516,7 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 // binding re-materialized the identical tuple — col.seen) and (b) tuples still recorded
 // in the ledger of an ACTIVE binding OTHER than the revoking one (cross-binding shared
 // claim — TuplesStillClaimedByOtherBindings). The remainder — tuples no surviving claim
-// keeps alive — is the only set safe to delete from the non-refcounted OpenFGA store.
+// keeps alive — is the only set safe to delete from the non-refcounted rights state.
 // This makes the cross-binding shared-tuple revoke order-independent: a binding
 // revoked before its sibling writes the same tuple no longer
 // strips it. The per-binding ledger ForgetEmittedTuples already ran inline at revoke
@@ -585,45 +558,8 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
 			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
 		}
-		// Record the SAME set for the post-commit direct apply. The durable enqueue
-		// above stays the at-least-once backstop; this only decides whether the caller
-		// waits for it.
-		for _, t := range revoke {
-			c.revoked = append(c.revoked, SyncFGATuple{User: t.User, Relation: t.Relation, Object: t.Object})
-		}
 	}
 	return nil
-}
-
-// applyAfterCommit synchronously applies BOTH directions the pass produced — the tuples
-// it granted and the tuples it revoked — to OpenFGA after the writer-tx committed.
-// Idempotent at the set level (already_exists ⇒ applied; already-absent ⇒ applied), so
-// the later async drain of the SAME fga_outbox rows is a no-op. Best-effort: an error is
-// logged, NOT returned — the durable fga_outbox + async drainer are the at-least-once
-// backstop, so a transient OpenFGA blip degrades to the pre-fix async path rather than
-// failing a pass whose tx already committed.
-//
-// REVOKES GO FIRST. The two sets are disjoint (flushDeletes drops every candidate this
-// pass re-wrote), so the order cannot change the outcome — but a large grant batch must
-// never stand between a derived revoke and the store. The restrictive direction is the
-// one whose delay is a security consequence.
-func (r *Reconciler) applyAfterCommit(ctx context.Context, c *syncFGACollector) {
-	if r.syncFGA == nil || c == nil {
-		return
-	}
-	if len(c.revoked) > 0 {
-		if err := r.syncFGA.DeleteTuples(ctx, c.revoked); err != nil {
-			r.logger.WarnContext(ctx, "reconcile: synchronous FGA revoke failed; async drain will backstop",
-				"tuple_count", len(c.revoked), "error", err)
-		}
-	}
-	if len(c.tuples) == 0 {
-		return
-	}
-	if err := r.syncFGA.WriteTuples(ctx, c.tuples); err != nil {
-		r.logger.WarnContext(ctx, "reconcile: synchronous FGA write failed; async drain will backstop",
-			"tuple_count", len(c.tuples), "error", err)
-	}
 }
 
 // ReconcileBinding recomputes the full desired membership of one binding from the
@@ -640,9 +576,9 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 	}); err != nil {
 		return err
 	}
-	// AFTER commit only: a rollback above returns early,
-	// so OpenFGA is never written for an uncommitted diff.
-	r.applyAfterCommit(ctx, col)
+	// После коммита не применяется НИЧЕГО: откат выше возвращает управление раньше,
+	// а прямой факт складывается из строки журнала триггером в той же транзакции —
+	// значит незакоммиченный diff не материализуется by construction.
 	return nil
 }
 
@@ -754,7 +690,6 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		return err
 	}
 	// AFTER commit only.
-	r.applyAfterCommit(ctx, col)
 	return nil
 }
 
@@ -813,7 +748,6 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 	}); err != nil {
 		return err
 	}
-	r.applyAfterCommit(ctx, col)
 	return nil
 }
 
@@ -1215,10 +1149,10 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			if !tupleOK {
 				return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 			}
-			// Enqueue ONLY the tuples this pass has not already enqueued, and collect the
-			// same set for the post-commit synchronous OpenFGA write (read-after-write
-			// closer). The outbox write-set and the sync write-set are therefore the SAME
-			// de-duplicated set — no drift in content, only duplicate rows removed.
+			// Enqueue ONLY the tuples this pass has not already enqueued, and record the
+			// same set in the pass collector — the set the deletion subtraction below
+			// reads, so a tuple re-written here is never stripped by a sibling's revoke
+			// in the same pass.
 			if fresh := col.collectNew(tuples); len(fresh) > 0 {
 				if err := s.EmitTupleWrite(ctx, fresh); err != nil {
 					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
@@ -1303,7 +1237,7 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 // tuple-delete itself is DEFERRED into the collector (deferDelete) and emitted at the end
 // of the pass by flushDeletes, which additionally subtracts the CROSS-binding still-claimed
 // set (another active binding of the same subject holds the identical tuple — the
-// non-refcounted OpenFGA store must keep it alive until the LAST binding releases it).
+// non-refcounted rights state must keep it alive until the LAST binding releases it).
 // The ledger ForgetEmittedTuples stays inline here because it
 // is binding-local bookkeeping (this binding no longer claims the tuple); only the global
 // FGA delete is cross-binding-sensitive and therefore deferred.

@@ -21,7 +21,8 @@
 
 Правила для публичного и internal слушателей **одинаковы**: ни одного
 неаутентифицированного/неавторизованного запроса. Транспорт — mTLS (service→service)
-либо TLS+JWT (user→edge); поверх — per-RPC authz-Check через OpenFGA ReBAC. Внутренний
+либо TLS+JWT (user→edge); поверх — per-RPC authz-Check, чей вердикт складывает
+реляционная форма в собственной базе службы. Внутренний
 периметр не считается доверенным (defense-in-depth против lateral movement): mTLS на
 `:9091` обязателен и не освобождает от authz.
 
@@ -49,7 +50,8 @@ scope'ом internal-CA + NetworkPolicy + hardening'ом pod'ов модулей.
 
 ## Публичный PDP (`AuthorizeService`) и режим production-strict
 
-`AuthorizeService` (`Check` / `ListObjects` / `ListSubjects`) — это PDP: api-gateway и
+`AuthorizeService` (`Check` / `BatchCheck` / `ListSubjects` / `ExpandRelations`) — это PDP:
+api-gateway и
 другие потребители вызывают его, чтобы получить решение авторизации. По своей роли он
 **обязан** быть доступен на публичном слушателе — следовательно, его защита строится на
 транспортной аутентификации и строгом режиме, а не на сокрытии endpoint'а:
@@ -77,7 +79,7 @@ PDP, может **перечислять** authz-отношения о чужи�
   api-gateway — единственная authz-front-door платформы — вызывает `Check` с subject'ом
   **end-user'а** (`subj.FGA`), а НЕ со своей транспортной identity; он спрашивает «может
   ли пользователь X сделать Y», не будучи пользователем X. Аналогично consumer-модули
-  (`vpc`/`compute`) на bootstrap вызывают `ListObjects`/`ListSubjects` про subject,
+  (`vpc`/`compute`) на bootstrap вызывают `ListSubjects` про subject,
   который не совпадает с их транспортной identity. Требование «subject == caller»
   **сломало бы** и per-user Check у gateway, и кросс-сервисный preflight. Поэтому
   self-scoping не применяется.
@@ -119,7 +121,14 @@ PDP, может **перечислять** authz-отношения о чужи�
 
 ## Целостность данных authz
 
-Гранты `AccessBinding` транслируются в OpenFGA-tuples через transactional-outbox
-(`fga_outbox`) внутри той же writer-транзакции — запись гранта и постановка tuple в
-очередь атомарны; drainer доставляет at-least-once и идемпотентно. Это исключает
-рассинхрон «грант есть в БД, а tuple в FGA нет».
+Выдача `AccessBinding` и намерение об отношении пишутся **одной writer-транзакцией**:
+строка выдачи, строка журнала `fga_outbox` и прямой факт (`relation_fact`, складываемый
+триггером журнала) появляются вместе либо не появляются вовсе.
+
+Рассинхрон «выдача есть в БД, а право не действует» **невыразим by construction**: до
+стадии S6 он был возможен, потому что право materialized во внешнем хранилище через
+дренаж очереди; хранилища и дренажа нет, а вычисление вердикта читает те же строки,
+которые транзакция и записала.
+
+Обратная сторона размена названа отдельно: недоступность этой базы означает отказ в
+доступе целиком — [`failure-domains.md`](failure-domains.md).

@@ -233,11 +233,9 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 	if needsFull {
 		return r.ReconcileBinding(ctx, bindingID)
 	}
-	// AFTER commit only (a rollback returns early): apply the collected tuples to OpenFGA
-	// synchronously (idempotent read-delta), so the subject's per-object grant is visible
-	// without waiting for the async fga_outbox drain — the point of the fast-path. Best-
-	// effort: an error degrades to the durable async drainer (D-5 backstop).
-	r.applyAfterCommit(ctx, col)
+	// После коммита не применяется НИЧЕГО, и это не упущение: прямой факт
+	// складывается из строки журнала триггером в ТОЙ ЖЕ транзакции, поэтому окна
+	// между коммитом и видимостью выдачи нет — догонять его нечем.
 	return nil
 }
 
@@ -454,11 +452,10 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 	if needsFull {
 		return r.ReconcileObject(ctx, objectType, objectID)
 	}
-	// AFTER commit only (a rollback returns early): apply the collected tuples to
-	// OpenFGA synchronously (idempotent read-delta), so the creator's per-object grant
-	// is visible without waiting for the async fga_outbox drain — the whole point of the
-	// fast-path. Best-effort: an error degrades to the durable async drainer.
-	r.applyAfterCommit(ctx, col)
+	// После коммита не применяется НИЧЕГО: прямой факт складывается из строки
+	// журнала триггером в ТОЙ ЖЕ транзакции, поэтому выдача видна ровно с коммитом.
+	// Быстрый путь остаётся быстрым не потому, что кто-то догоняет запись, а потому
+	// что он не считает того, чего не трогал.
 	return nil
 }
 
@@ -524,7 +521,7 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 }
 
 // materializeForwardMember накапливает ОДНОГО ACTIVE-члена: строку члена, кортежи для
-// очереди fga_outbox (и для пост-коммитной синхронной записи в OpenFGA) и записи реестра
+// журнала fga_outbox (из его строки триггер складывает прямой факт) и записи реестра
 // выданных кортежей. Всё это уходит в базу одним flush'ем на проход, в той же
 // транзакции (ban #10) и с той же идемпотентностью: повтор прохода или наложение
 // асинхронного полного прохода на те же кортежи — безопасный no-op.
@@ -533,8 +530,8 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 		BindingID: bs.BindingID, RoleID: domain.RoleID(bs.RoleID), RuleFP: dm.RuleFP,
 		ObjectType: dm.ObjectType, ObjectID: dm.ObjectID, VerificationStatus: domain.VerificationActive,
 	})
-	// Enqueue ONLY the tuples this pass has not already enqueued, and collect the same set
-	// for the post-commit synchronous OpenFGA write (read-after-write closer). Per-pass
+	// Enqueue ONLY the tuples this pass has not already enqueued, and record the same set
+	// in the pass collector, whose surviving consumer is the deletion subtraction. Per-pass
 	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
 	w.fresh = append(w.fresh, col.collectNew(dm.Tuples)...)
 	// Co-commit the emitted member-tuple into the ledger — the symmetric revoke +

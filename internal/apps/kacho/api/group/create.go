@@ -25,7 +25,7 @@ import (
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
 // materialize the per-object access of every binding whose selector matches a
 // freshly-created iam-native object, right after Create commits. Under the flat
-// OpenFGA model (Contract-A) the `<rel> from account` ACCESS cascade on iam leaf
+// rights model (Contract-A) the `<rel> from account` ACCESS cascade on iam leaf
 // types is gone, so the owner's / account-admin's per-object admin/v_* tuple is
 // materialized per-object by the reconciler — and the async event drain races a
 // client that GETs the object right after the Operation reports done. The sync
@@ -139,7 +139,7 @@ func (u *CreateGroupUseCase) doCreate(ctx context.Context, g domain.Group, actor
 				return domain.Group{}, aerr
 			}
 			// FGA group→account hierarchy parent-pointer intent co-committed in the
-			// SAME writer-tx (запрет #10). Under the FLAT OpenFGA model (Contract-A)
+			// SAME writer-tx (запрет #10). Under the FLAT rights model (Contract-A)
 			// the `<rel> from account` ACCESS cascade on iam_group was removed, so this
 			// `account:<acc>#account@iam_group:<id>` pointer is the hierarchy/ownership
 			// lineage edge only — it no longer grants access. The owner's/creator's

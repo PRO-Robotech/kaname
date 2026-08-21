@@ -6,23 +6,27 @@
 // a subject may see. The predicate is RelationsFor(objectType): the relation that
 // gates a single-object read of that type.
 //
-// # Why not ListObjects (this was the bug)
+// # Why not an enumeration (this was the bug, and the enumeration is now gone)
 //
-// Every iam read that filtered by visibility used to ask OpenFGA "enumerate ALL
-// objects of this type the subject may see" (`ListObjects`) and then matched the
-// resource against that set — read-by-id via membership, List via an
+// Every iam read that filtered by visibility USED TO ask the external relations
+// engine "enumerate ALL objects of this type the subject may see" and then match
+// the resource against that set — read-by-id via membership, List via an
 // `id = ANY(...)` push-down.
 //
-// OpenFGA bounds `ListObjects` SERVER-side (`OPENFGA_LIST_OBJECTS_MAX_RESULTS`,
-// default 1000) and exposes NO continuation token, so the enumeration silently
-// returns an arbitrary 1000-id prefix. The bound applies to the TYPE IN THE
-// STORE (cluster-wide), not to the tenant: on a long-lived store (the live stand
-// already holds 3693 `iam_access_binding` tuples) a tenant's own resource falls
-// outside the prefix and becomes PERMANENTLY invisible — Get → 403/404, List →
-// absent — while the DB row exists, the grant exists, and mutations (which ask a
-// DIRECT per-object question) keep working. Asking for a larger `max_results`
-// does not help: that argument is only a CLIENT-side trim of an already-cut
-// response, so requesting more can never widen the answer.
+// The engine bounded that enumeration SERVER-side (default 1000) and exposed NO
+// continuation token, so it silently returned an arbitrary 1000-id prefix. The
+// bound applied to the TYPE IN THE STORE (cluster-wide), not to the tenant: on a
+// long-lived store a tenant's own resource fell outside the prefix and became
+// PERMANENTLY invisible — Get → 403/404, List → absent — while the DB row existed,
+// the grant existed, and mutations (which ask a DIRECT per-object question) kept
+// working. Asking for a larger cap did not help: that argument was only a
+// CLIENT-side trim of an already-cut response.
+//
+// Обе стороны этого разбора — история. Движок снят стадией S6 (эпик #747), а его
+// перечисление снято с контракта тем же изменением: продолжения у ответа не было
+// by construction, и остаток оставался недостижимым при живых правах. Разбор
+// оставлен, потому что ФОРМА ВОПРОСА, к которой он привёл, и есть предмет этого
+// пакета: спрашивать «видит ли субъект ЭТОТ объект», а не «перечисли вселенную».
 //
 // The cure is not a bigger cap (it is external, and finite either way) but a
 // different SHAPE of question: instead of "enumerate the universe and look for
@@ -130,10 +134,11 @@ func RelationsFor(objectType string) []string {
 //
 // # What a page costs on this path, and what this bound does not do
 //
-// It bounds DEPTH, not COUNT. Every question is an HTTP round-trip to the relation
-// store, which runs in its own pod: iam holds the OpenFGA client in-process, but
-// the store is across the network, so "in-process client" says nothing about the
-// price of asking. A page pays len(RelationsFor(objectType)) questions for every
+// It bounds DEPTH, not COUNT. Каждый вопрос — читающая транзакция к базе службы.
+// Со снятием движка (стадия S6) сетевого перехода на этом пути больше нет, и
+// прежний довод «клиент в процессе, а хранилище за сетью» истёк вместе с
+// хранилищем; цена вопроса от этого не исчезла, а сменила природу — теперь это
+// запрос к своей базе. A page pays len(RelationsFor(objectType)) questions for every
 // object the first relation does not resolve, so a contract-sized page
 // (validate.MaxPageSize = 1000) costs up to 1000 round-trips on the types gated by a
 // single relation — and up to 2000 on `iam_role`, the one type that still asks two.
@@ -163,22 +168,27 @@ func RelationsFor(objectType string) []string {
 // DefaultParallelism has to know which path the number above describes.
 const DefaultParallelism = 16
 
-// MaxBatchChecksPerRequest — how many objects one request to the relation store
-// may ask about.
+// MaxBatchChecksPerRequest — how many objects one question about a page may name.
 //
-// This is the STORE's ceiling, not ours, and the two are easy to confuse. iam
-// publishes its own `AuthorizeService.BatchCheck` bounded at 100, and that number
-// governs how large a page a SIBLING service may hand to iam. The relation store
-// behind iam enforces its own, lower bound and refuses an over-cap request
-// outright — a `validation_error`, never a trim — so splitting a page against the
-// published 100 would make every partition a refusal rather than a faster page.
+// It USED TO BE the store's ceiling rather than ours, and the distinction decided
+// the number: the external relations engine refused an over-cap request outright —
+// a `validation_error`, never a trim — so a partition wider than its bound turned
+// every page into a refusal instead of a faster page. The bound was read off the
+// deployed build rather than assumed: 51 checks were refused by name, 50 were
+// answered.
 //
-// Read off the deployed build (openfga/openfga:v1.14.0) rather than assumed: a
-// request of 51 is answered `batchCheck received 51 checks, the maximum allowed
-// is 50`, a request of 50 is answered 200. The bound is a server flag, so a
-// deployment MAY raise it; splitting against the default is correct at any
-// setting at or above it, and a deployment that LOWERS it gets a loud refusal
-// that fails the page closed, not a quietly short answer.
+// That engine is gone. The verdict is computed by the relational form in iam's own
+// database, one statement per partition, and nothing outside refuses a wider one.
+// So the number stopped being a foreign boundary and became OUR partition size: the
+// unit a page is split into, and the unit BatchParallelism counts in flight. It is
+// kept where it stood because the page arithmetic below is asserted against it
+// (TestVisibleSet_BatchedWorstCasePageCost) — not because anything still enforces
+// it. Moving it is now a cost decision about one statement, and it belongs with a
+// fresh measurement, not with this comment.
+//
+// iam still publishes its own `AuthorizeService.BatchCheck` bounded at 100. That is
+// a CONTRACT, not a store limit, and it governs how large a batch a SIBLING service
+// may hand to iam — a different number for a different reason.
 const MaxBatchChecksPerRequest = 50
 
 // BatchParallelism bounds how many partitions of one page are in flight.
@@ -200,9 +210,9 @@ const BatchParallelism = 8
 // BatchObjectChecker — OPTIONAL capability of an ObjectChecker: answer ONE
 // relation question about MANY objects in a single request.
 //
-// Declared here as a narrow port and satisfied by the OpenFGA adapter, so this
-// package keeps knowing nothing about the store — the same leaf discipline as
-// ObjectChecker and pagePreparer.
+// Declared here as a narrow port and satisfied by the decision door, so this
+// package keeps knowing nothing about where the answer comes from — the same leaf
+// discipline as ObjectChecker.
 //
 // Unlike pagePreparer this capability is NOT best-effort: it decides. An
 // implementation must return one verdict per object, in the order the objects
@@ -215,33 +225,27 @@ type BatchObjectChecker interface {
 }
 
 // ObjectChecker — narrow port: ONE direct per-object relation question.
-// Satisfied by clients.RelationQueries (and by *clients.OpenFGAHTTPClient).
+// Satisfied by clients.RelationQueries (and by the decision door behind it).
 //
 // The port is declared here rather than imported so this package stays a leaf
-// (it must not depend on the OpenFGA adapter) — the same discipline as
+// (it must not depend on the adapter that answers) — the same discipline as
 // authzguard.RelationChecker.
 type ObjectChecker interface {
 	CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (allowed bool, err error)
 }
 
-// pagePreparer — OPTIONAL capability of an ObjectChecker: prepare, once, whatever the
-// per-object questions of a whole page would otherwise prepare row by row.
+// ПОДГОТОВКИ СТРАНИЦЫ ЗДЕСЬ БОЛЬШЕ НЕТ — предмета не осталось.
 //
-// It is declared here as a narrow port and satisfied elsewhere, so this package keeps
-// knowing nothing about what is being prepared. The contract is deliberately weak, and
-// that is what makes it safe to call blind:
+// Порт объявлял НЕОБЯЗАТЕЛЬНУЮ подготовку: пообъектному вопросу мог понадобиться
+// факт о месте объекта в иерархии, и его разрешение построчно делало стоимость
+// страницы растущей с её размером. Подготовка грела эти факты на всю страницу
+// сразу, чтобы стоимость осталась плоской.
 //
-//   - it returns a context, never an error. A preparation that fails must return the
-//     context it was given, so the per-object path runs exactly as it would have — the
-//     capability can cost speed, never an answer;
-//   - it must not decide anything. Nothing here reads its result; the per-object question
-//     is still the only thing that decides.
-//
-// Absence is invisible to correctness and visible to cost, so cost is where it is
-// asserted (the implementor's page-cost measurement), not here.
-type pagePreparer interface {
-	PrefetchStructural(ctx context.Context, objectType string, ids []string) context.Context
-}
+// Факты грелись ради ВНЕШНЕГО движка, который знал только доехавшее до него
+// очередью. Реляционная форма читает те же закоммиченные строки первым же
+// вопросом, а страницу отвечает ОДНОЙ читающей транзакцией (`AllowedMany`), —
+// то есть стоимость страницы принадлежит запросу by construction, и греть
+// нечего.
 
 // Visible reports whether `subject` may read `<objectType>:<id>`, evaluated as a
 // direct per-object question over RelationsFor(objectType).
@@ -296,20 +300,6 @@ func VisibleSet(ctx context.Context, chk ObjectChecker, subject, objectType stri
 	}
 	if len(pending) == 0 {
 		return out, nil
-	}
-
-	// One preparation for the whole page, if the checker has one to offer. The
-	// per-object question may need a fact about the object's place in the hierarchy;
-	// resolving that per row makes the page cost grow with the page, and page size is
-	// part of the contract up to 1000 while narrowing it to fit a budget is forbidden.
-	// Asking here — the one place that knows the whole page — keeps that cost flat.
-	//
-	// OPTIONAL and best-effort by contract (see the port's doc): a checker without the
-	// capability, or a preparation that fails, returns a context the per-object path
-	// works with unchanged. So this can cost speed and never an answer, and this package
-	// stays a leaf that knows nothing about where those facts come from.
-	if p, ok := chk.(pagePreparer); ok {
-		ctx = p.PrefetchStructural(ctx, objectType, pending)
 	}
 
 	// One request per partition when the checker can answer that way. This is the

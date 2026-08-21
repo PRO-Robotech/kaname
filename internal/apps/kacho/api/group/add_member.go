@@ -110,11 +110,12 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 			}
 			// Co-commit the FGA `group:<gid>#member` userset member-tuple INTENT in
 			// the SAME writer-tx (запрет #10). Without it a GROUP-subject
-			// AccessBinding's `@group:<gid>#member` userset resolves to EMPTY in
-			// OpenFGA — members get no real access and ExpandAccess finds no members
-			// (the bug this guards). The live fga_outbox drainer applies it at-least-once +
-			// idempotently; rollback of this tx discards both the membership row and
-			// the tuple intent (no orphan). Object type is `group` (the userset type
+			// AccessBinding's `@group:<gid>#member` userset resolves to EMPTY —
+			// members get no real access and ExpandAccess finds no members (the bug
+			// this guards). The journal row becomes a direct fact by trigger, in the
+			// same commit, so the intent needs no delivery of its own; rollback of this
+			// tx discards both the membership row and the tuple intent (no orphan).
+			// Object type is `group` (the userset type
 			// the binding points at), NOT iam_group (group's object-scope type).
 			if err := w.EmitFGARelationWrite(ctx, []service.RelationTuple{memberFGATuple(m)}); err != nil {
 				return err

@@ -4,16 +4,38 @@
 package service_account
 
 // list_scope_test.go — единая модель видимости (паритет с account/list_vlist_union).
-// ListServiceAccountsUseCase фильтрует через UNION FGA viewer ∪ v_list на
-// iam_service_account:
+// ListServiceAccountsUseCase фильтрует страницу ПООБЪЕКТНЫМ вопросом о том
+// отношении, которым гейтится одиночное чтение этого же типа:
 //
-//	visible(iam_service_account) = ListObjects(subj,"viewer","iam_service_account")
-//	                             ∪ ListObjects(subj,"v_list","iam_service_account")
+//	видна(iam_service_account:<id>) = Check(субъект, "v_get", "iam_service_account:"+<id>)
+//
+// Предикат объявлен ровно один раз — `authzfilter.RelationsFor(…)`, — поэтому
+// страница не может разойтись с чтением по id.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТО ЗДЕСЬ СТОЯЛО И ПОЧЕМУ ЭТО ПЕРЕСТАЛО ОПИСЫВАТЬ ДЕЙСТВИТЕЛЬНОСТЬ
+//
+// Прежняя редакция объявляла предикат ОБЪЕДИНЕНИЕМ двух перечислений внешнего
+// движка:
+//
+//	ListObjects(subj,"viewer",…) ∪ ListObjects(subj,"v_list",…)
+//
+// Ложным стало и то, и другое. Перечисления объектов нет: движок снят (стадия S6),
+// и `clients.RelationQueries` его не несёт вовсе. Объединения тоже нет: ярус
+// (`viewer`) и объектный грант-селектор (`v_list`) страницу НЕ открывают — иначе
+// вызывающий получал бы строку, которую его же Get не отдаст. Это утверждает
+// проба в этом же файле (TestListServiceAccounts_PageMembershipRequiresReadRelation),
+// то есть заголовок противоречил собственному тексту ниже.
+//
+// Что остаётся верным и ради чего абзац не выкинут: ПРИЧИНА снятия перечисления.
+// Оно имело серверный предел и не имело продолжения, поэтому строка сверх предела
+// становилась своему владельцу невидимой НАВСЕГДА при живых правах — разбор в
+// package doc `internal/authzfilter`.
 //
 // Прежняя membership-over-show модель (любой член аккаунта видел ВСЕ SA аккаунта)
-// устранена: видны только SA с per-object viewer/v_list-грантом. Инварианты:
-// anonymous → empty (до FGA); FGA-ошибка → Unavailable (fail-closed); cluster-admin/
-// operator покрыты веткой viewer (system_viewer floor).
+// устранена: видны только SA с per-object грантом. Инварианты: anonymous → empty
+// (до единого вопроса о доступе); отказ формы → Unavailable (fail-closed);
+// cluster-admin/operator покрыты полом system_viewer.
 
 import (
 	"context"
@@ -96,7 +118,12 @@ func fgaObjectID(object string) string {
 	return object
 }
 
-// saUnionFGAStub — relation-aware FGA ListObjects stub (viewer vs v_list).
+// saUnionFGAStub — дублёр clients.RelationQueries, отвечающий по отношению.
+//
+// Имя несёт «Union» по историческим причинам и НЕ описывает предикат: страница
+// судится одним отношением (`v_get`). Идентификатор оставлен, потому что его
+// держит соседний файл пакета (list_pagination_order_test.go); ложным было
+// УТВЕРЖДЕНИЕ в комментарии, и правится оно, а не имя.
 type saUnionFGAStub struct {
 	clients.RelationQueries
 	mu    sync.Mutex // the per-object Check port is called concurrently
@@ -116,23 +143,26 @@ func (s *saUnionFGAStub) set(relation, subject string, ids []string) {
 	s.idsBy[relation][subject] = ids
 }
 
-func (s *saUnionFGAStub) ListObjects(_ context.Context, subject, relation, _ string,
-	_ map[string]any, _ int) ([]string, error) {
+// asked — сколько вопросов о доступе задано ВСЕГО, по всем отношениям.
+//
+// Считается отдельно от `calls`, и это не удобство. Пробы «спросили ли вообще»
+// раньше смотрели в `calls["viewer"]` — счётчик отношения, которым страница НЕ
+// судится (предикат членства — `v_get`). У такого счётчика нет ПРОИЗВОДИТЕЛЯ:
+// ноль в нём истинен при любом поведении use-case'а, в том числе при полностью
+// снятом коротком замыкании. Сумма по всем отношениям краснеет на первом же
+// заданном вопросе.
+func (s *saUnionFGAStub) asked() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls[relation]++
-	if s.err != nil {
-		return nil, s.err
+	n := 0
+	for _, c := range s.calls {
+		n += c
 	}
-	if m := s.idsBy[relation]; m != nil {
-		return m[subject], nil
-	}
-	return nil, nil
+	return n
 }
 
-// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
-// of enumerating (internal/authzfilter), answering from the SAME (relation,
-// subject) id-sets, so these tests' fixtures and intent are unchanged.
+// CheckWithContext — пообъектный вопрос, который use-case и задаёт, отвечающий из
+// тех же наборов (отношение, субъект): фикстуры и намерение проб не менялись.
 func (s *saUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
 	_ map[string]any) (bool, error) {
 	s.mu.Lock()
@@ -218,7 +248,7 @@ func TestListServiceAccounts_AnonymousEmpty(t *testing.T) {
 	out, _, err := uc.Execute(context.Background(), reposa.ListFilter{AccountID: scopeAcctA})
 	require.NoError(t, err)
 	assert.Empty(t, out)
-	assert.Zero(t, fga.calls["viewer"], "anonymous short-circuits before FGA")
+	assert.Zero(t, fga.asked(), "anonymous замыкается ДО единого вопроса о доступе")
 }
 
 // Не-переданная личность (край не передал заголовки `x-kacho-principal-*` →
@@ -242,16 +272,19 @@ func TestListServiceAccounts_SystemBootstrapFallback_FailClosed(t *testing.T) {
 	out, _, err := uc.Execute(ctx, reposa.ListFilter{AccountID: scopeAcctA})
 	require.NoError(t, err)
 	assert.Empty(t, out, "system/bootstrap fallback → anonymous → empty (fail-closed)")
-	assert.Zero(t, fga.calls["viewer"], "short-circuits before FGA")
+	assert.Zero(t, fga.asked(), "замыкается ДО единого вопроса о доступе")
 }
 
-// T3.3 — FGA-ошибка на любой relation → Unavailable (fail-closed, INV-7).
+// T3.3 — форма не ответила на любом отношении → Unavailable (fail-closed, INV-7).
+//
+// «Не смог спросить» и «доступа нет» — разные миры: вернув пустую страницу,
+// use-case выдал бы недоступность своей базы за законный отказ.
 func TestListServiceAccounts_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := &scopeSARepo{sas: []domain.ServiceAccount{
 		{ID: "sva0000000000000xxxx", AccountID: scopeAcctA},
 	}}
 	fga := newSAUnionFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	fga.err = stderrors.New("реляционная форма не ответила: соединение закрыто")
 	uc := NewListServiceAccountsUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser(scopeUserID), reposa.ListFilter{AccountID: scopeAcctA})
 	require.Error(t, err)
@@ -261,18 +294,22 @@ func TestListServiceAccounts_FGAUnavailable_FailClosed(t *testing.T) {
 	require.Equal(t, codes.Unavailable, st.Code())
 }
 
-// BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
-// answers from, so a verdict cannot depend on which door the filter chose.
+// BatchCheckWithContext — батчевая дверь к ТОМУ ЖЕ оракулу, из которого отвечает
+// CheckWithContext, чтобы вердикт не зависел от того, какую дверь выбрал фильтр.
 //
-// It is not optional politeness: authzfilter takes its batched path whenever the
-// checker offers this method, so a stub that omitted it would leave every test in
-// this file exercising a code path production does not take. It refuses an
-// over-cap partition the way the relation store refuses one — an error, never a
-// trim — so the stub is never more permissive than the thing it stands in for.
+// Это не вежливость: authzfilter выбирает батчевый путь всякий раз, когда дублёр
+// несёт этот метод, — дублёр без него оставил бы каждую пробу файла на пути,
+// которым продукт не ходит.
+//
+// Отказ на партии крупнее authzfilter.MaxBatchChecksPerRequest держит дублёра от
+// СНИСХОДИТЕЛЬНОСТИ к объявлению, за которое он стоит: это тот размер партии,
+// который authzfilter объявляет и по которому режет страницу. Фильтр, переставший
+// соблюдать собственное объявление, краснеет здесь, а не меняет форму запроса
+// молча. Ошибка, а не усечение: короткий ответ неотличим от страницы отказов.
 func (s *saUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
 	objects []string, condCtx map[string]any) ([]bool, error) {
 	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
-		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+		return nil, fmt.Errorf("партия из %d объектов крупнее объявленного размера %d",
 			len(objects), authzfilter.MaxBatchChecksPerRequest)
 	}
 	out := make([]bool, len(objects))

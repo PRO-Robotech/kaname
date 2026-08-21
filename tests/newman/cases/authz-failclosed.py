@@ -47,7 +47,7 @@ CASES.append(Case(
     priority="P0",
     steps=[
         Step(
-            name="any-authz-gated-rpc-during-openfga-outage",
+            name="any-authz-gated-rpc-during-verdict-source-outage",
             method="GET",
             path="/iam/v1/accounts/{{accountAId}}",
             auth="jwtAccountAdminA",
@@ -124,7 +124,7 @@ CASES.append(Case(
     priority="P0",
     steps=[
         Step(
-            name=f"list-{slug}-during-openfga-outage",
+            name=f"list-{slug}-during-verdict-source-outage",
             method="GET",
             path=path,
             auth="jwtAccountAdminA",

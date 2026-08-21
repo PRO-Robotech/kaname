@@ -81,16 +81,15 @@ sequenceDiagram
     participant Guard as authzguard
     participant FGAGate as Grant authority check
     participant DB as Postgres
-    participant Out as fga_outbox
+    participant Out as fga_outbox (журнал намерений)
     participant Sub as subject_change_outbox
-    participant Drainer as fga_outbox drainer
-    participant FGA as OpenFGA
+    participant Drainer as subject_change drainer
     participant GW as api-gateway cache
 
     Caller->>IAM: Create AccessBinding<br/>{subject=user:usr_alice, role=rol_viewer, resource=project:prj_..}
     IAM->>Guard: RequireAuthenticated
     IAM->>IAM: domain.Validate
-    IAM->>FGAGate: requireGrantAuthority(resource_type, resource_id)<br/>FGA Check (admin) на scope
+    IAM->>FGAGate: requireGrantAuthority(resource_type, resource_id)<br/>проверка admin на области
     alt caller не admin scope
         FGAGate-->>Caller: PermissionDenied
     end
@@ -100,26 +99,22 @@ sequenceDiagram
     Note over DB: Strict-create: дубль активного гранта →<br/>partial UNIQUE access_bindings_active_grant_uniq → 23505 → ErrAlreadyExists
     DB-->>IAM: row (acb_...)
     IAM->>IAM: authzmap.PermissionsToRelations(role.permissions) → relations
-    IAM->>Out: INSERT fga_outbox (per relation: (subject, relation, resource))
-    IAM->>Sub: INSERT subject_change_outbox (subject_id для cache invalidate)
-    IAM->>DB: COMMIT (atomic emit-in-tx)
+    IAM->>Out: INSERT fga_outbox (по отношению: (subject, relation, resource))
+    Out->>DB: триггер журнала: строка → relation_fact
+    IAM->>Sub: INSERT subject_change_outbox (subject_id для сброса кэша)
+    IAM->>DB: COMMIT (всё одной транзакцией)
     IAM-->>Caller: Operation (done=true, response=AccessBinding)
 
-    par async fga drainer
-        DB-->>Drainer: NOTIFY
-        Drainer->>FGA: WriteTuples
-        FGA-->>Drainer: 200
-        Drainer->>DB: DELETE fga_outbox row
-    and async subject_change drainer
-        Drainer->>GW: InternalAuthzCache.InvalidateSubject(subject_id)
-    end
+    Note over DB,GW: право действует с COMMIT; асинхронен только сброс кэша края
+    DB-->>Drainer: NOTIFY kacho_iam_subject_outbox_added
+    Drainer->>GW: InternalAuthzCache.InvalidateSubject(subject_id)
 
     Note over Caller,GW: ── Subsequent Check ──
     Caller->>GW: API call с JWT (subject=usr_alice)
     GW->>GW: cache miss (invalidated)
     GW->>IAM: InternalIAMService.Check (user, action, resource)
-    IAM->>FGA: Check tuple
-    FGA-->>IAM: allowed=true
+    IAM->>DB: вердикт реляционной формы
+    DB-->>IAM: allowed=true
     IAM-->>GW: ALLOW
     GW-->>Caller: 200 (call passes)
 ```
@@ -132,18 +127,18 @@ sequenceDiagram
     participant Admin
     participant IAM
     participant DB
-    participant Out as fga_outbox
-    participant FGA as OpenFGA via drainer
+    participant Out as fga_outbox (журнал намерений)
 
     Admin->>IAM: Delete AccessBinding {acb_id}
     IAM->>IAM: requireGrantAuthority (same as Create)
     IAM->>DB: BEGIN
     IAM->>DB: SELECT FOR UPDATE access_bindings WHERE id=$acb_id
     IAM->>DB: UPDATE status='REVOKED', revoked_at=NOW(), revoked_by=$who
-    IAM->>Out: INSERT fga_outbox (delete-tuples per relation)
+    IAM->>Out: INSERT fga_outbox (снятие отношения по каждому)
+    Out->>DB: триггер журнала: снятие → relation_fact
     IAM->>DB: COMMIT
     IAM-->>Admin: Operation done=true
-    Note over DB,FGA: drainer удалит tuples из OpenFGA async
+    Note over DB,Out: отзыв действует с COMMIT — очереди наружу нет
 ```
 
 ## API surface
@@ -172,16 +167,14 @@ sequenceDiagram
 
 ## Конфигурация
 
-Обе настройки живут ТОЛЬКО в окружении: секции `extapi` конфигурационный файл
-сервиса не разбирает, и одноимённые ключи профиля не читал никто.
+> [!note] До стадии S6 здесь стояли две переменные окружения внешнего движка
+> Прежняя редакция называла адрес движка и идентификатор его хранилища и оговаривала,
+> что без второго выдача создаётся, а кортежи копятся в журнале до перезапуска.
+> Ни переменных, ни этого состояния больше нет: право действует с фиксации, и
+> «выдача создана, но не применена» невыразимо by construction.
 
-| Env var                              | Default | Описание                       |
-|--------------------------------------|---------|--------------------------------|
-| `KACHO_IAM_OPENFGA_STORE_ID`         | —       | OpenFGA store id (required для FGA-emit). |
-| `KACHO_IAM_OPENFGA_ENDPOINT`         | `kacho-umbrella-openfga:8080` | OpenFGA HTTP endpoint. |
-
-Если store_id не задан — Create продолжает работать, но FGA-tuples
-накапливаются в `fga_outbox` до restart'а с FGA configured.
+Отдельной настройки у выдачи нет — она пишется той же базой, что и остальное
+состояние службы.
 
 ## Как пользоваться
 
@@ -269,12 +262,17 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 # psql:
 make -C deploy psql SVC=iam
 # > SELECT subject_type, subject_id, role_id, resource_type, resource_id, status FROM kacho_iam.access_bindings LIMIT 20;
-# > SELECT * FROM kacho_iam.fga_outbox LIMIT 10;     -- pending tuples
+# > SELECT * FROM kacho_iam.fga_outbox LIMIT 10;      -- журнал намерений
+# > SELECT * FROM kacho_iam.relation_fact LIMIT 10;    -- проекция журнала
 # > SELECT * FROM kacho_iam.subject_change_outbox LIMIT 10;
 
-# Integration: idempotency + atomic emit-in-tx + subject_change emit + FGA symmetric.
+# Пробы привязки целиком — БЕЗ фильтра `-run`.
+#
+# Здесь стоял фильтр из пяти имён, ни одно из которых в дереве не существует
+# (предикат: `grep -rl 'func TestAccessBindingFGAOutbox' --include='*_test.go' services/iam`
+# → пусто). Такая команда выходит УСПЕХОМ, не исполнив ни одной пробы, — то есть
+# читалась как зелёный прогон и им не была.
 go test -short -count=1 -timeout 120s \
-  -run "TestAccessBinding|TestAccessBindingFGAOutbox|TestAccessBindingSubjectChange|TestAccessBindingIdempotent|TestAccessBindingFGASymmetric" \
   ./services/iam/internal/apps/kacho/api/access_binding/ ./services/iam/internal/repo/kacho/pg/
 ```
 
@@ -295,12 +293,14 @@ go test -short -count=1 -timeout 120s \
   `access_bindings_resource_ck` — **регулярное выражение** `^[a-z][a-z0-9_]*$` либо `*`,
   не перечень допустимых типов; `access_bindings_subject_ck`;
   `access_bindings_revoked_consistency_ck`; `access_bindings_scope_ck` (миграция 0005).
-- **Grant authority:** `requireGrantAuthority` → FGA Check (admin) на scope.
+- **Grant authority:** `requireGrantAuthority` → проверка отношения `admin` на области.
   Bootstrap-bypass через owner_user_id check на Account (см. `create.go`).
-- **FGA emit-in-tx:** через `AccessBindingsW().EmitRelationWrite(ctx, …)` внутри writer-tx;
-  tuples приходят из `authzmap.PermissionsToRelations(role.permissions)`.
+- **Эмиссия намерения в той же транзакции:** через
+  `AccessBindingsW().EmitRelationWrite(ctx, …)` внутри writer-tx; отношения приходят из
+  `authzmap.PermissionsToRelations(role.permissions)`. Триггер журнала складывает из
+  строк прямой факт там же.
 - **Subject-change emit:** `subject_change_outbox` row для invalidate
-  api-gateway authz cache на subject_id (см. [`29-openfga-check.md`](29-openfga-check.md)).
+  api-gateway authz cache на subject_id (см. [`29-relational-verdict.md`](29-relational-verdict.md)).
 - **Anti-leak guards:** ListBySubject анонимно → ничего не вернет; см.
   `list_by_subject_anti_leak_test.go`.
 
@@ -311,19 +311,22 @@ go test -short -count=1 -timeout 120s \
   (повтор видит `ALREADY_EXISTS`, не скрытый upsert).
 - **resource_id не валидируется** — kacho-iam не знает про конкретные id
   VPC/Compute ресурсов. Dangling-ref переживается (Check на удаленном
-  ресурсе вернет `allowed=false` если ресурса нет в OpenFGA).
+  ресурсе даёт `allowed=false`: прямого факта о нём в `relation_fact` нет).
 - **Re-grant после revoke** — partial UNIQUE `access_bindings_active_grant_uniq`
   скоупится `WHERE revoked_at IS NULL`, поэтому после Delete (status=REVOKED,
   `revoked_at` set) повторный Create той же 5-tuple проходит и дает НОВЫЙ id.
   Активный дубль (`revoked_at IS NULL`) → 23505 → `ErrAlreadyExists`.
-- **Grant cascade через FGA** — не моментальный: между Create commit и
-  drain'ом fga_outbox есть окно ~ms-секунда, в течение которого Check
-  может вернуть `allowed=false`. SLA пропагации — sub-second.
+- **Выдача действует с фиксации.** До стадии S6 здесь было окно между `COMMIT` и
+  вывозом строки журнала во внешний движок, в котором проверка отвечала
+  `allowed=false`. Окна нет: прямой факт складывается той же транзакцией, а
+  движка, до которого надо было доехать, не существует. Отстать может **кэш
+  края** (сброс идёт очередью `subject_change_outbox`), и это отдельный предмет:
+  вызов мимо кэша видит выдачу сразу.
 
 ## Связанные компоненты
 
 - [`07-role.md`](07-role.md) — role_id ссылается сюда.
-- [`29-openfga-check.md`](29-openfga-check.md) — FGA propagation chain.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — FGA propagation chain.
 
 ## Ссылки на код
 

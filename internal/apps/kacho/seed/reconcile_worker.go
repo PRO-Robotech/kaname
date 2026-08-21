@@ -226,10 +226,10 @@ func (w *ReconcileWorker) sweep(ctx context.Context) {
 // concurrent pass over the same binding serialises in the database in either order.
 //
 // This bounds the window; it does not remove it. Removing it means putting the term
-// ON the tuple, as a condition OpenFGA evaluates per request — the model already
-// declares `condition non_expired(current_time, valid_until)` and no relation
-// references it, so that is a model change (a new authorization-model id and a
-// rollout) and is deliberately not made here.
+// ON the tuple, as a condition evaluated per request — the model already declares
+// `condition non_expired(current_time, valid_until)` and no relation references it,
+// so that is a model change (a new model id and a rollout) plus a predicate in the
+// form's condition set, and is deliberately not made here.
 func (w *ReconcileWorker) runExpiry(ctx context.Context) {
 	tick := time.NewTicker(w.sweepIvl)
 	defer tick.Stop()

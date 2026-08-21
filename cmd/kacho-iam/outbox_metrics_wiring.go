@@ -52,27 +52,17 @@ import (
 // написанный по одной, читался одинаково на любой.
 const outboxMetricsInterval = 15 * time.Second
 
-// runFGAOutboxMetrics — скан очереди tuple'ов, сводно и по направлению.
+// ЗДЕСЬ БЫЛ СКАН ОЧЕРЕДИ КОРТЕЖЕЙ — у него больше нет предмета.
 //
-// Порог отравления берётся из той же конфигурации, что исполняет дренаж, а не
-// повторяется числом: это одна величина, и разойдись эти два места, гейдж
-// отравленных считал бы не то, что дренаж отравляет. Имя таблицы, наоборот,
-// названо КОНСТАНТОЙ, а не полем чужой структуры: гейт
-// repohygiene.TestEveryDrainedOutboxIsObserved резолвит координату очереди
-// разбором исходника, и адрес, вычисляемый в рантайме, для него неотличим от
-// отсутствующего. Это та же константа, что стоит в конфигурации дренажа, —
-// расхождению взяться неоткуда.
-func runFGAOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec outboxmetrics.Recorder, logger *slog.Logger) {
-	collector := outboxmetrics.NewCollector(pool, rec, outboxmetrics.CollectorConfig{
-		Table:       fgaOutboxTable,
-		MaxAttempts: fgaOutboxDrainerConfig().MaxAttempts,
-		Interval:    outboxMetricsInterval,
-		Directions:  outboxmetrics.TupleOutboxDirections(),
-	})
-	collector.Run(ctx, func(err error) {
-		logger.Warn("fga outbox metrics scan failed", "table", fgaOutboxTable, "err", err)
-	})
-}
+// Он мерил ДОСТАВКУ: возраст самой старой неотправленной строки и число
+// отравленных. Обе величины имеют смысл, только пока у журнала есть потребитель,
+// который строки отправляет. Потребителя нет: прямой факт складывается из строки
+// журнала триггером, в той же транзакции, что и сама мутация, — то есть «доставка»
+// стала тождеством коммита.
+//
+// Оставленный скан отвечал бы РАСТУЩИМ возрастом на исправной службе: строки
+// перестали помечаться отправленными не из-за сбоя, а потому, что отправлять их
+// некуда. Тревога, которая звонит всегда, — это тревога, которую отключают первой.
 
 // runSubjectChangeOutboxMetrics — скан очереди инвалидаций кэша вердиктов.
 func runSubjectChangeOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec outboxmetrics.Recorder, logger *slog.Logger) {

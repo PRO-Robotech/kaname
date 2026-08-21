@@ -4,21 +4,40 @@
 package group
 
 // list_scope_test.go — единая модель видимости GroupService.List (паритет с
-// account/project/service_account/role List). Результат фильтруется через UNION
-// FGA-отношений на iam_group:
+// account/project/service_account/role List). Страница фильтруется ПООБЪЕКТНЫМ
+// вопросом о том отношении, которым гейтится одиночное чтение этого же типа:
 //
-//	visible(iam_group) = ListObjects(subj,"viewer","iam_group")
-//	                   ∪ ListObjects(subj,"v_list","iam_group")
+//	видна(iam_group:<id>) = Check(субъект, "v_get", "iam_group:"+<id>)
 //
-//   - ветка viewer — группы, на которые принципал держит viewer-tier;
-//   - ветка v_list — группы, выданные ТОЛЬКО `iam.group.{get,list}` через
-//     names/labels-селектор (object-only `iam_group:<id> # v_list @ subj`,
-//     see-in-selector-without-content).
+// Предикат объявлен ровно один раз — `authzfilter.RelationsFor("iam_group")`, —
+// и именно поэтому страница не может разойтись с чтением по id.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТО ЗДЕСЬ СТОЯЛО И ПОЧЕМУ ЭТО ПЕРЕСТАЛО ОПИСЫВАТЬ ДЕЙСТВИТЕЛЬНОСТЬ
+//
+// Прежняя редакция объявляла предикат ОБЪЕДИНЕНИЕМ двух перечислений внешнего
+// движка:
+//
+//	ListObjects(subj,"viewer","iam_group") ∪ ListObjects(subj,"v_list","iam_group")
+//
+// Ложным стало и то, и другое. Перечисления нет: движок снят (стадия S6), и
+// `clients.RelationQueries` перечисления объектов не несёт вовсе — есть вопрос об
+// объекте, вопрос о странице объектов и перечисление СУБЪЕКТОВ. Объединения тоже
+// нет: ярус (`viewer`) и объектный грант-селектор (`v_list`) страницу НЕ
+// открывают, иначе вызывающий получал бы строку, которую его же Get не отдаст.
+// Это утверждает проба в этом же файле (TestListGroups_PageMembershipRequiresReadRelation)
+// — то есть заголовок противоречил собственному тексту ниже.
+//
+// Что остаётся верным и ради чего абзац не выкинут: ПРИЧИНА, по которой
+// перечисление снято. Оно имело серверный предел и не имело продолжения, поэтому
+// строка сверх предела становилась своему владельцу невидимой НАВСЕГДА при живых
+// правах — разбор в package doc `internal/authzfilter`.
 //
 // Устраняет over-show: прежде List возвращал ВСЕ группы аккаунта любому держателю
-// account#v_list (account-tier не каскадит в iam_group viewer/v_list — DIRECT-only).
-// Инварианты: anonymous → empty (до FGA); не-forwarded principal (system/bootstrap
-// fallback) → тоже empty (fail-closed); FGA-ошибка → Unavailable (fail-closed).
+// account#v_list (account-tier не каскадит в iam_group — DIRECT-only).
+// Инварианты: anonymous → empty (до единого вопроса о доступе); не-forwarded
+// principal (system/bootstrap fallback) → тоже empty (fail-closed); отказ формы,
+// отвечающей на вопрос о доступе, → Unavailable (fail-closed).
 
 import (
 	"context"
@@ -109,7 +128,13 @@ func fgaObjectID(object string) string {
 	return object
 }
 
-// groupUnionFGAStub — relation-aware FGA ListObjects stub (viewer vs v_list).
+// groupUnionFGAStub — дублёр clients.RelationQueries, отвечающий по отношению.
+//
+// Имя несёт «Union» по историческим причинам и НЕ описывает предикат: страница
+// судится одним отношением (`v_get`), а объединения ярусов больше нет — см.
+// заголовок файла. Идентификатор оставлен, потому что его держит соседний файл
+// пакета (list_pagination_order_test.go); ложным было УТВЕРЖДЕНИЕ в комментарии,
+// и правится оно, а не имя.
 type groupUnionFGAStub struct {
 	clients.RelationQueries
 	mu    sync.Mutex // the per-object Check port is called concurrently
@@ -129,26 +154,26 @@ func (s *groupUnionFGAStub) set(relation, subject string, ids []string) {
 	s.idsBy[relation][subject] = ids
 }
 
-func (s *groupUnionFGAStub) ListObjects(_ context.Context, subject, relation, objectType string,
-	_ map[string]any, _ int) ([]string, error) {
+// asked — сколько вопросов о доступе задано ВСЕГО, по всем отношениям.
+//
+// Считается отдельно от `calls`, и это не удобство. Пробы «спросили ли вообще»
+// раньше смотрели в `calls["viewer"]` — счётчик отношения, которым страница НЕ
+// судится (предикат членства для iam_group — `v_get`). У такого счётчика нет
+// ПРОИЗВОДИТЕЛЯ: ноль в нём истинен при любом поведении use-case'а, в том числе
+// при полностью снятом коротком замыкании. Сумма по всем отношениям краснеет на
+// первом же заданном вопросе.
+func (s *groupUnionFGAStub) asked() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls[relation]++
-	if objectType != "iam_group" {
-		return nil, stderrors.New("unexpected FGA object type: " + objectType)
+	n := 0
+	for _, c := range s.calls {
+		n += c
 	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	if m := s.idsBy[relation]; m != nil {
-		return m[subject], nil
-	}
-	return nil, nil
+	return n
 }
 
-// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
-// of enumerating (internal/authzfilter), answering from the SAME (relation,
-// subject) id-sets, so these tests' fixtures and intent are unchanged.
+// CheckWithContext — пообъектный вопрос, который use-case и задаёт, отвечающий из
+// тех же наборов (отношение, субъект): фикстуры и намерение проб не менялись.
 func (s *groupUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
 	_ map[string]any) (bool, error) {
 	s.mu.Lock()
@@ -253,16 +278,19 @@ func TestListGroups_AnonymousEmpty(t *testing.T) {
 	out, _, err := uc.Execute(context.Background(), repogroup.ListFilter{AccountID: grpScopeAcct})
 	require.NoError(t, err)
 	assert.Empty(t, out)
-	assert.Zero(t, fga.calls["viewer"], "anonymous short-circuits before FGA")
+	assert.Zero(t, fga.asked(), "anonymous замыкается ДО единого вопроса о доступе")
 }
 
-// FGA-ошибка на любой relation → Unavailable (fail-closed, никогда partial).
+// Форма не ответила на любом отношении → Unavailable (fail-closed, никогда partial).
+//
+// «Не смог спросить» и «доступа нет» — разные миры: вернув пустую страницу,
+// use-case выдал бы недоступность своей базы за законный отказ.
 func TestListGroups_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := &scopeGroupRepo{groups: []domain.Group{
 		{ID: "grp0000000000000aaaa", AccountID: grpScopeAcct},
 	}}
 	fga := newGroupUnionFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	fga.err = stderrors.New("реляционная форма не ответила: соединение закрыто")
 	uc := NewListGroupsUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxGrpUser(grpScopeUser), repogroup.ListFilter{AccountID: grpScopeAcct})
 	require.Error(t, err)
@@ -287,21 +315,27 @@ func TestListGroups_SystemBootstrapFallback_FailClosed(t *testing.T) {
 	out, _, err := uc.Execute(ctx, repogroup.ListFilter{AccountID: grpScopeAcct})
 	require.NoError(t, err)
 	assert.Empty(t, out, "system/bootstrap fallback → anonymous → empty (fail-closed)")
-	assert.Zero(t, fga.calls["viewer"], "short-circuits before FGA")
+	assert.Zero(t, fga.asked(), "замыкается ДО единого вопроса о доступе")
 }
 
-// BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
-// answers from, so a verdict cannot depend on which door the filter chose.
+// BatchCheckWithContext — батчевая дверь к ТОМУ ЖЕ оракулу, из которого отвечает
+// CheckWithContext, чтобы вердикт не зависел от того, какую дверь выбрал фильтр.
 //
-// It is not optional politeness: authzfilter takes its batched path whenever the
-// checker offers this method, so a stub that omitted it would leave every test in
-// this file exercising a code path production does not take. It refuses an
-// over-cap partition the way the relation store refuses one — an error, never a
-// trim — so the stub is never more permissive than the thing it stands in for.
+// Это не вежливость: authzfilter выбирает батчевый путь всякий раз, когда дублёр
+// несёт этот метод, — дублёр без него оставил бы каждую пробу файла на пути,
+// которым продукт не ходит.
+//
+// Отказ на партии крупнее authzfilter.MaxBatchChecksPerRequest держит дублёра от
+// СНИСХОДИТЕЛЬНОСТИ к объявлению, за которое он стоит: это тот размер партии,
+// который authzfilter объявляет и по которому режет страницу. Фильтр, переставший
+// соблюдать собственное объявление, краснеет здесь, а не меняет форму запроса
+// молча. Ошибка, а не усечение: короткий ответ неотличим от страницы отказов, а
+// страница молчаливых отказов — ровно тот дефект вечной невидимости, против
+// которого написан этот файл.
 func (s *groupUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
 	objects []string, condCtx map[string]any) ([]bool, error) {
 	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
-		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+		return nil, fmt.Errorf("партия из %d объектов крупнее объявленного размера %d",
 			len(objects), authzfilter.MaxBatchChecksPerRequest)
 	}
 	out := make([]bool, len(objects))

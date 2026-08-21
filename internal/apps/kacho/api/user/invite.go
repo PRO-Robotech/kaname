@@ -59,7 +59,7 @@ type InviteUserInput struct {
 // materialize the per-object access of every binding whose selector matches the
 // invite-flow's freshly-created iam-native objects (the project-scoped
 // AccessBinding + a brand-new invitee user), right after the invite tx commits.
-// Under the flat OpenFGA model the `from <scope>` ACCESS cascade on these leaf
+// Under the flat rights model the `from <scope>` ACCESS cascade on these leaf
 // types is gone, so the owner/account-admin per-object tuple is materialized
 // per-object; the sync call closes the GET-after-create race the async drain would
 // otherwise lose. Implemented by reconcile.Reconciler. nil-safe (the co-committed
@@ -406,6 +406,17 @@ func (uc *InviteUserUseCase) doInvite(
 				ins, abErr := w.AccessBindingsW().Insert(ctx, ab)
 				if abErr != nil {
 					return inviteTxResult{}, abErr
+				}
+				// Состав субъектов выдачи ОБЯЗАН быть записан вместе с ней.
+				// Форма вердикта заходит в выдачи с пары «субъект + область»
+				// через дочернюю таблицу: выдача без неё невидима вердикту
+				// целиком — право записано, читается списками и не действует.
+				// Отличить это состояние от «права не выдавали» нечем, поэтому
+				// оно и прожило незамеченным, пока право вычислял внешний
+				// движок: ему кортежи писались другим путём.
+				if serr := w.AccessBindingsW().InsertSubjects(ctx, ins.ID,
+					[]domain.Subject{{Type: domain.SubjectTypeUser, ID: subjectID}}); serr != nil {
+					return inviteTxResult{}, serr
 				}
 				out.createdAB = ins
 				out.haveAB = true

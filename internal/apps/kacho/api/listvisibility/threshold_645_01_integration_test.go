@@ -52,6 +52,13 @@ type thresholdPlan struct {
 
 func planFor(t *testing.T, e *env, s surface) thresholdPlan {
 	t.Helper()
+	// РОЛЬ-НОСИТЕЛЬ ВЫДАЧИ ЗАВОДИТСЯ ДО ПЕРЕПИСИ ПОЛА, и это не порядок ради
+	// порядка. Право выражено выдачей, выдача несёт роль, а роль — САМА ОБЪЕКТ
+	// поверхности `role`, и притом системный: `is_system` минует фильтр, то есть
+	// попадает в ответ каждому вызывающему. Заведи её позже — и она окажется в
+	// ответе, но не в переписи пола, а проба объявит продукт сломанным на строке,
+	// которую сама же и создала.
+	e.probeRole(t, s.fgaType, verbOf(s.pageRelation))
 	floor := floorOf(t, e, s)
 	ps := probePageSize
 	if need := int32(len(floor)) + 1; need > ps {

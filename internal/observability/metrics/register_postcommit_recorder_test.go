@@ -47,10 +47,16 @@ func TestRegisterPostCommitRecorder_RunsAndFailuresAreBothLive(t *testing.T) {
 	reg := NewRegistry()
 	rec := reg.NewRegisterPostCommitRecorder()
 
+	// Шаги берутся ИЗ ЗАКРЫТОГО НАБОРА (RegisterPostCommitSteps). Здесь стояли
+	// `tuple_write`/`tuple_delete` — шаги записи и снятия кортежей у внешнего
+	// движка прав. Они пережили свой предмет дважды: движка нет, и в объявленном
+	// наборе их тоже не было — то есть последнее утверждение файла («клетка
+	// закрытого набора существует до первого наблюдения») спрашивало про клетку,
+	// которой набор не объявлял, и краснело бы на любом верном коллекторе.
 	rec.ObserveRegisterPostCommit("forward_additive", "ok")
 	rec.ObserveRegisterPostCommit("forward_additive", "ok")
 	rec.ObserveRegisterPostCommit("forward_guarded", "error")
-	rec.ObserveRegisterPostCommit("tuple_write", "ok")
+	rec.ObserveRegisterPostCommit("residual_read", "ok")
 
 	const name = "kacho_iam_register_postcommit_steps_total"
 
@@ -63,7 +69,7 @@ func TestRegisterPostCommitRecorder_RunsAndFailuresAreBothLive(t *testing.T) {
 	require.True(t, ok, "a FAILED post-commit step must be counted, not only logged")
 	require.Equal(t, 1.0, v)
 
-	v, ok = labelledCounter(t, reg, name, map[string]string{"step": "tuple_write", "outcome": "ok"})
+	v, ok = labelledCounter(t, reg, name, map[string]string{"step": "residual_read", "outcome": "ok"})
 	require.True(t, ok)
 	require.Equal(t, 1.0, v)
 
@@ -76,7 +82,7 @@ func TestRegisterPostCommitRecorder_RunsAndFailuresAreBothLive(t *testing.T) {
 	// которой считаются запуски, а не только отказы. Ноль — не фабрикация: он
 	// утверждает «клетка существует, и в неё ни разу не попадали», что и требуется
 	// от наблюдаемости ветки, написанной, но ни разу не исполненной.
-	v, ok = labelledCounter(t, reg, name, map[string]string{"step": "tuple_delete", "outcome": "error"})
+	v, ok = labelledCounter(t, reg, name, map[string]string{"step": "residual_withdraw", "outcome": "error"})
 	require.True(t, ok, "клетка закрытого набора обязана существовать до первого наблюдения")
 	require.Zero(t, v, "необнаблюдённая клетка стоит в нуле")
 

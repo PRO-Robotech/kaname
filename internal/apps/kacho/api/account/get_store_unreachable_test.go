@@ -34,16 +34,23 @@ type errFGA struct{ err error }
 func (s *errFGA) Check(context.Context, string, string, string) (bool, error) {
 	return false, s.err
 }
-func (s *errFGA) WriteTuples(context.Context, []clients.RelationTuple) error  { return nil }
-func (s *errFGA) DeleteTuples(context.Context, []clients.RelationTuple) error { return nil }
 
+// The write side of this fake is gone, and its absence is the point. It carried
+// WriteTuples/DeleteTuples because clients.RelationStore used to declare them — a
+// port onto someone else's storage. There is nowhere to write any more: the state
+// an answer is folded from is this service's OWN journal (`kacho_iam.fga_outbox`),
+// and the commit that changes a grant is the same commit that writes it. Methods
+// standing for a port method that no longer exists have no caller and no producer:
+// they cannot be exercised by anything, so they can never fail, and leaving them
+// would make this fake look like it stands for a wider surface than it does.
 var _ clients.RelationStore = (*errFGA)(nil)
 
 // TestGetAccount_RelationStoreUnreachable_IsUnavailableNotNotFound — the caller
 // must be told the decision could not be made, not that the account is missing.
 func TestGetAccount_RelationStoreUnreachable_IsUnavailableNotNotFound(t *testing.T) {
 	repo := &authzAcctRepo{ownerUserID: authzOwnerID}
-	uc := NewGetAccountUseCase(repo).WithRelationStore(&errFGA{err: errors.New("dial openfga: connection refused")})
+	uc := NewGetAccountUseCase(repo).WithRelationStore(
+		&errFGA{err: errors.New("relation form did not answer: connection refused")})
 
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: authzOwnerID})

@@ -3,199 +3,222 @@
 
 package authzmap_test
 
+// account_owner_structural_test.go — исход и структура уточнения «Владелец —
+// СТРУКТУРНЫЙ источник прав на СВОЁМ аккаунте» (.claude/rules/security.md,
+// 2026-07-27).
+//
+// Аккаунт — собственная область пользователя, и заводится он самообслуживанием:
+// свежеаутентифицированный человек создаёт свой аккаунт сам. Значит удаление
+// обязано быть таким же надёжным, как создание, — а оно таким не было. Право
+// удаления приезжало ПРИВЯЗКОЙ роли владельца, материализуемой на объект
+// реконсайлером; пока конвейер не догнал, только что созданный аккаунт нельзя
+// было удалить единственному человеку, которому он принадлежит. У администратора
+// облака право при этом каскадное и работает всегда — асимметрия без основания:
+// и то и другое суть «власть, которая не вправе зависеть от очереди».
+//
+// Модель показывала пробел и с другой стороны: `account.admin` выводится
+// `or owner`, то есть владелец И ЕСТЬ администратор аккаунта, — тогда как глаголы
+// уровня администратора не читали вовсе (`v_delete: […] or super_admin`). Быть
+// администратором собственного аккаунта не давало ничего.
+//
+// ПОЧЕМУ `owner` НАПРЯМУЮ, А НЕ «пусть глаголы читают уровень администратора».
+// Провести глаголы через `admin` было бы более широкой правкой и она неверна:
+// `account.admin` принимает и ПРЯМЫХ субъектов (`[user, service_account,
+// group#member]`), то есть ДЕЛЕГИРОВАННОГО администратора аккаунта. Он тогда
+// сносил бы сам объект аккаунта, что записанная картина запрещает дословно —
+// «администратор аккаунта — каскадом внутрь аккаунта, но не на сам аккаунт
+// (делегированный управляющий не сносит тенантность — это остаётся за владельцем
+// и облаком)». TestAccountOwner_VerbsReadOwnerNotTheAdminTier держит это
+// структурно: позднейшее `or admin` в тех строках прошло бы каждую разрешающую
+// проверку ниже и тихо вручило бы делегированному управляющему сам аккаунт.
+//
+// ГДЕ БЕРЁТСЯ ИСХОД. Прежде поведенческая половина грузила заготовку модели из
+// карты чарта в поднятый контейнером движок отношений. Ни движка, ни карты, ни
+// подчарта в дереве нет; исход теперь считает форма вердикта поверх собственной
+// базы iam, а вывод отношений она берёт из той же канонической модели, которую
+// разбирает структурная половина этого файла. Утверждения не сужены: план
+// `account.v_*`, скомпилированный из модели, даёт ровно прямой факт, `owner` на
+// самом объекте и `system_admin` на кластере — и НЕ даёт `admin`.
+
 import (
 	"context"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
-
-// account_owner_structural_test.go — behavioural + structural lock for the owner
-// refinement "Владелец — СТРУКТУРНЫЙ источник прав на СВОЁМ аккаунте"
-// (.claude/rules/security.md, 2026-07-27).
-//
-// An account is the user's own area and it is created by self-service: a freshly
-// authenticated person creates his account himself. Deletion therefore has to be
-// as reliable as creation — and it was not. The right to delete arrived with the
-// owner ROLE BINDING, materialized per object by the reconciler out of the
-// fga_outbox; until that pipeline caught up, the account the user had just
-// created could not be deleted by the only person who owns it. The cloud
-// administrator, by contrast, has held a cascading right since the three-tier
-// change — an asymmetry with no justification: both are "authority that must not
-// depend on a queue".
-//
-// The model made the gap visible from the other side too: `account.admin` derives
-// `or owner`, so the owner IS an account administrator — while the verbs read no
-// administrator tier at all (`v_delete: […] or super_admin`). Being an
-// administrator of one's own account granted nothing.
-//
-// WHY `owner` DIRECTLY AND NOT "make the verbs read the admin tier".
-// Routing the verbs through `admin` would have been the wider fix and it is the
-// wrong one: `account.admin` also accepts DIRECT subjects
-// (`[user, service_account, group#member]`), i.e. the DELEGATED account
-// administrator. He would then delete the account object itself, which the
-// recorded picture forbids in as many words — "администратор аккаунта — каскадом
-// внутрь аккаунта, но не на сам аккаунт (делегированный управляющий не сносит
-// тенантность — это остаётся за владельцем и облаком)". The tenancy is torn down
-// by whoever created it, and by the cloud. So the source is `owner`, and
-// TestAccountOwner_VerbsReadOwnerNotTheAdminTier keeps it that way structurally —
-// a later `or admin` on those lines would pass every allow-side check below while
-// silently handing the delegated manager the account itself.
-//
-// The behavioural checks run against the DEPLOYED artifact — the
-// openfga-bootstrap ConfigMap `model.json` block, which is what the bootstrap Job
-// POSTs to OpenFGA — loaded into a real OpenFGA container. Reading the DSL alone
-// would only prove the shape of the source file.
 
 const (
-	aoAccountA = "account:acc-aoownera"
-	aoAccountB = "account:acc-aoownerb"
-	aoProjectA = "project:prj-aoownera"
-	aoBindingA = "iam_access_binding:abn-aoownera"
-	aoCluster  = "cluster:cluster_kacho_root"
+	aoAccA = "acc-aoownera"
+	aoAccB = "acc-aoownerb"
+	aoPrjA = "prj-aoownera"
+	aoAbnA = "abn-aoownera"
 
-	aoOwnerA    = "user:usr-aoownera"   // created account A, holds account:A#owner
-	aoOwnerB    = "user:usr-aoownerb"   // created account B — a peer tenant
-	aoDelegAdmA = "user:usr-aodelegadm" // DELEGATED account administrator of A (not the owner)
-	aoStranger  = "user:usr-aostranger" // no tuple anywhere
+	aoOwnerA    = "user:usr-aoownera"   // создал аккаунт A, держит account:A#owner
+	aoOwnerB    = "user:usr-aoownerb"   // создал аккаунт B — соседний арендатор
+	aoDelegAdmA = "user:usr-aodelegadm" // ДЕЛЕГИРОВАННЫЙ администратор A (не владелец)
+	aoStranger  = "user:usr-aostranger" // ни одной строки нигде
 )
 
-// aoVerbs — the verb relations the `account` type declares, read from the same
-// per-type table the emitter uses rather than re-listed here. A literal cannot
-// follow its subject: this one named `v_create`, which the account type no longer
-// declares (creating an account is not an operation ON an account), and every
-// assertion below would have gone on asserting a relation the model had dropped.
+var (
+	aoAccAObj = saObject{"account", aoAccA}
+	aoAccBObj = saObject{"account", aoAccB}
+	aoPrjAObj = saObject{"project", aoPrjA}
+	aoAbnAObj = saObject{"iam_access_binding", aoAbnA}
+)
+
+// aoVerbs — глагольные отношения, которые объявляет тип `account`, прочитанные
+// из той же по-типовой таблицы, которой пользуется эмиттер. Литерал не может
+// следовать за своим предметом: здесь стоял `v_create`, которого тип `account`
+// больше не объявляет (создание аккаунта — не операция НАД аккаунтом), и каждое
+// утверждение ниже продолжало бы требовать отношение, снятое с модели.
 var aoVerbs = authzmap.VerbRelationsOfType("account")
 
-func aoCheck(t *testing.T, h *fgatest.Harness, subject, relation, object string) bool {
+// aoSeedFreshAccount кладёт РОВНО то, что со-коммитит `Account.Create` в своей
+// транзакции (apps/kacho/api/account/create.go::ownerTuples), и НИЧЕГО больше:
+//
+//	user:<owner> #owner @ account:<A>  — самовыдача владельца.
+//
+// Указатель аккаунта на кластер здесь НЕ пишется: цепь областей выводит его из
+// схемы (accounts × clusters). Ни одной глагольной строки на аккаунте, ни
+// привязки роли владельца — это выход реконсайлера, и весь смысл в том, что
+// владелец не обязан его ждать.
+func aoSeedFreshAccount(t *testing.T, ctx context.Context, tx pgx.Tx, account, owner string) {
 	t.Helper()
-	ok, err := h.Client.CheckWithContextConsistent(context.Background(), subject, relation, object, nil)
-	require.NoError(t, err, "Check(%s, %s, %s)", subject, relation, object)
-	return ok
+	ownerID := strings.TrimPrefix(owner, "user:")
+	saExec(t, ctx, tx,
+		`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
+		account, "account-"+account, ownerID)
+	saUser(t, ctx, tx, ownerID, account)
+	saPointer(t, ctx, tx, "account", account, "owner", owner)
 }
 
-// aoSeedFreshAccount writes EXACTLY the tuples account.Create co-commits in the
-// writer-tx (apps/kacho/api/account/create.go::ownerTuples) and NOTHING else:
-//
-//	user:<owner>            # owner   @ account:<A>   — the owner self-grant
-//	cluster:cluster_kacho_root # cluster @ account:<A> — the SEC-L cluster pointer
-//
-// No v_* tuple on the account, no owner-AccessBinding membership — that is the
-// reconciler's output, and the whole point is that the owner must not wait for it.
-func aoSeedFreshAccount(t *testing.T, h *fgatest.Harness, owner, account string) {
-	t.Helper()
-	h.Write(t, owner, "owner", account)
-	h.Write(t, aoCluster, "cluster", account)
-}
-
-// TestAccountOwner_DeletesFreshAccountBeforeAnyMaterialization is the change
-// itself, at the observable level: the owner creates his account and deletes it
-// IMMEDIATELY, with the materialization pipeline having produced nothing at all.
-// Before the refinement this is a denial (the account's verbs read only direct
-// usersets and the cluster tier); after it, it resolves by construction.
+// TestAccountOwner_DeletesFreshAccountBeforeAnyMaterialization — сама правка на
+// наблюдаемом уровне: владелец создаёт аккаунт и удаляет его НЕМЕДЛЕННО, при
+// том что конвейер материализации не произвёл ещё ничего. До уточнения это
+// отказ (глаголы аккаунта читали лишь прямые множества и кластерный уровень),
+// после — разрешение by construction.
 func TestAccountOwner_DeletesFreshAccountBeforeAnyMaterialization(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	aoSeedFreshAccount(t, h, aoOwnerA, aoAccountA)
+	withIAMTx(t, func(ctx context.Context, tx pgx.Tx) {
+		aoSeedFreshAccount(t, ctx, tx, aoAccA, aoOwnerA)
 
-	require.Truef(t, aoCheck(t, h, aoOwnerA, "v_delete", aoAccountA),
-		"the owner of a FRESHLY created account must be able to delete it with NOTHING "+
-			"materialized — the account is created by self-service, so tearing it down cannot "+
-			"depend on the reconciler having drained the owner binding first")
+		require.Truef(t, saAllows(t, ctx, tx, aoOwnerA, "v_delete", aoAccAObj),
+			"владелец ТОЛЬКО ЧТО созданного аккаунта обязан суметь удалить его при НУЛЕВОЙ "+
+				"материализации — аккаунт заводится самообслуживанием, поэтому его снос не "+
+				"вправе зависеть от того, дренировал ли реконсайлер привязку владельца")
 
-	for _, v := range aoVerbs {
-		require.Truef(t, aoCheck(t, h, aoOwnerA, v, aoAccountA),
-			"the owner must resolve %s on his own account object without materialization", v)
-	}
-
-	// The tiers the permission catalog gates on already derived from `owner`
-	// (`define admin: … or owner`) — pinned so the refinement cannot be read as
-	// replacing that.
-	for _, rel := range []string{"viewer", "editor", "admin"} {
-		require.Truef(t, aoCheck(t, h, aoOwnerA, rel, aoAccountA),
-			"the owner must still resolve tier %s on his own account", rel)
-	}
-}
-
-// TestAccountOwner_ScopeIsExactlyHisOwnAccount is the half that matters more than
-// the change: everything the refinement must NOT hand out. The delegated account
-// administrator manages what is INSIDE the account and must not delete the account
-// itself; a peer tenant's owner reaches nothing here; a subject with no tuple
-// reaches nothing anywhere.
-func TestAccountOwner_ScopeIsExactlyHisOwnAccount(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	aoSeedFreshAccount(t, h, aoOwnerA, aoAccountA)
-	aoSeedFreshAccount(t, h, aoOwnerB, aoAccountB)
-
-	// Contents of account A, wired by the structural pointers production emits.
-	h.Write(t, aoAccountA, "account", aoProjectA)
-	h.Write(t, aoCluster, "cluster", aoProjectA)
-	h.Write(t, aoProjectA, "project", aoBindingA)
-
-	// A DELEGATED account administrator: a direct `admin` tuple, no ownership.
-	h.Write(t, aoDelegAdmA, "admin", aoAccountA)
-
-	// (1) He does NOT reach the account OBJECT — the tenancy is not his to tear
-	//     down. This is exactly what routing the verbs through the `admin` tier
-	//     would have broken.
-	for _, v := range aoVerbs {
-		require.Falsef(t, aoCheck(t, h, aoDelegAdmA, v, aoAccountA),
-			"a DELEGATED account administrator must NOT resolve %s on the account object "+
-				"itself — his authority runs WITHIN the account, the account is its boundary", v)
-	}
-
-	// (2) …while his cascade INWARDS is untouched (the three-tier change stands).
-	for _, v := range aoVerbs {
-		require.Truef(t, aoCheck(t, h, aoDelegAdmA, v, aoProjectA),
-			"the delegated account administrator must still resolve %s inside his account "+
-				"(project) — the refinement must not narrow the level-3 cascade", v)
-		require.Truef(t, aoCheck(t, h, aoDelegAdmA, v, aoBindingA),
-			"the delegated account administrator must still resolve %s on a grant inside "+
-				"his account", v)
-	}
-
-	// (3) The owner of ANOTHER account is an ordinary stranger here — `owner` is a
-	//     per-object relation, it does not travel between accounts.
-	for _, v := range aoVerbs {
-		require.Falsef(t, aoCheck(t, h, aoOwnerB, v, aoAccountA),
-			"the owner of account B must NOT resolve %s on account A", v)
-		require.Falsef(t, aoCheck(t, h, aoOwnerA, v, aoAccountB),
-			"the owner of account A must NOT resolve %s on account B", v)
-		require.Falsef(t, aoCheck(t, h, aoOwnerB, v, aoProjectA),
-			"the owner of account B must NOT resolve %s inside account A", v)
-	}
-	for _, rel := range []string{"viewer", "editor", "admin"} {
-		require.Falsef(t, aoCheck(t, h, aoOwnerB, rel, aoAccountA),
-			"the owner of account B must NOT resolve tier %s on account A", rel)
-	}
-
-	// (4) An ordinary tenant with no tuple at all reaches nothing.
-	for _, obj := range []string{aoAccountA, aoProjectA, aoBindingA} {
 		for _, v := range aoVerbs {
-			require.Falsef(t, aoCheck(t, h, aoStranger, v, obj),
-				"a subject with no tuple must not resolve %s on %s", v, obj)
+			require.Truef(t, saAllows(t, ctx, tx, aoOwnerA, v, aoAccAObj),
+				"владелец обязан разрешать %s на своём объекте аккаунта без материализации", v)
 		}
-	}
 
-	// (5) Ownership stays an identity fact: the refinement makes `owner` a SOURCE
-	//     of verbs, it must not make anyone an owner.
-	require.False(t, aoCheck(t, h, aoDelegAdmA, "owner", aoAccountA),
-		"a delegated account administrator does not become the owner")
+		// Уровни, на которые гейтит каталог прав, уже выводились из `owner`
+		// (`define admin: … or owner`) — закреплено, чтобы уточнение не читалось
+		// как их замена.
+		for _, rel := range saTiers {
+			require.Truef(t, saAllows(t, ctx, tx, aoOwnerA, rel, aoAccAObj),
+				"владелец обязан по-прежнему разрешать уровень %s на своём аккаунте", rel)
+		}
+	})
 }
 
-// TestAccountOwner_VerbsReadOwnerNotTheAdminTier is the structural half, read off
-// the canonical DSL — the deliberate choice between the two possible fixes, made
-// unmaintainable to reverse by accident.
+// TestAccountOwner_ScopeIsExactlyHisOwnAccount — половина, которая важнее самой
+// правки: всё, чего уточнение раздавать НЕ ДОЛЖНО. Делегированный администратор
+// аккаунта управляет тем, что ВНУТРИ, и не сносит сам аккаунт; владелец
+// соседнего арендатора не достаёт сюда ничего; субъект без единой строки не
+// достаёт нигде ничего.
+func TestAccountOwner_ScopeIsExactlyHisOwnAccount(t *testing.T) {
+	withIAMTx(t, func(ctx context.Context, tx pgx.Tx) {
+		aoSeedFreshAccount(t, ctx, tx, aoAccA, aoOwnerA)
+		aoSeedFreshAccount(t, ctx, tx, aoAccB, aoOwnerB)
+
+		// Содержимое аккаунта A. Проект указывает на аккаунт через журнал, как
+		// его туда кладёт создание проекта; привязка — своей парой колонок.
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, 'project-a')`,
+			aoPrjA, aoAccA)
+		saPointer(t, ctx, tx, "project", aoPrjA, "account", "account:"+aoAccA)
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.roles (id, account_id, name, permissions)
+			 VALUES ('rol-aoinert', $1, 'inert', '["iam.project.*.get"]'::jsonb)`, aoAccA)
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.access_bindings
+			   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
+			 VALUES ($1, 'user', $2, 'rol-aoinert', 'project', $3, 'ACTIVE')`,
+			aoAbnA, strings.TrimPrefix(aoOwnerA, "user:"), aoPrjA)
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+			 VALUES ($1, 'user', $2)`, aoAbnA, strings.TrimPrefix(aoOwnerA, "user:"))
+
+		// ДЕЛЕГИРОВАННЫЙ администратор аккаунта: прямое отношение `admin`, без владения.
+		saUser(t, ctx, tx, strings.TrimPrefix(aoDelegAdmA, "user:"), aoAccA)
+		saPointer(t, ctx, tx, "account", aoAccA, "admin", aoDelegAdmA)
+
+		// (1) Он НЕ достаёт сам ОБЪЕКТ аккаунта — тенантность не его, чтобы её
+		//     сносить. Ровно это сломала бы проводка глаголов через уровень `admin`.
+		for _, v := range aoVerbs {
+			require.Falsef(t, saAllows(t, ctx, tx, aoDelegAdmA, v, aoAccAObj),
+				"ДЕЛЕГИРОВАННЫЙ администратор аккаунта не вправе разрешать %s на самом объекте "+
+					"аккаунта — его власть идёт ВНУТРИ аккаунта, аккаунт есть её граница", v)
+		}
+
+		// (2) …тогда как его каскад ВНУТРЬ не тронут (правка трёх уровней стоит).
+		for _, v := range saVerbsOf(t, aoPrjAObj) {
+			require.Truef(t, saAllows(t, ctx, tx, aoDelegAdmA, v, aoPrjAObj),
+				"делегированный администратор аккаунта обязан по-прежнему разрешать %s внутри "+
+					"своего аккаунта (проект) — уточнение не вправе сузить каскад уровня 3", v)
+		}
+		for _, v := range saVerbsOf(t, aoAbnAObj) {
+			require.Truef(t, saAllows(t, ctx, tx, aoDelegAdmA, v, aoAbnAObj),
+				"делегированный администратор аккаунта обязан по-прежнему разрешать %s на "+
+					"выдаче внутри своего аккаунта", v)
+		}
+
+		// (3) Владелец ДРУГОГО аккаунта здесь обычный посторонний — `owner`
+		//     пообъектное отношение, между аккаунтами оно не путешествует.
+		for _, v := range aoVerbs {
+			require.Falsef(t, saAllows(t, ctx, tx, aoOwnerB, v, aoAccAObj),
+				"владелец аккаунта B не вправе разрешать %s на аккаунте A", v)
+			require.Falsef(t, saAllows(t, ctx, tx, aoOwnerA, v, aoAccBObj),
+				"владелец аккаунта A не вправе разрешать %s на аккаунте B", v)
+		}
+		for _, v := range saVerbsOf(t, aoPrjAObj) {
+			require.Falsef(t, saAllows(t, ctx, tx, aoOwnerB, v, aoPrjAObj),
+				"владелец аккаунта B не вправе разрешать %s внутри аккаунта A", v)
+		}
+		for _, rel := range saTiers {
+			require.Falsef(t, saAllows(t, ctx, tx, aoOwnerB, rel, aoAccAObj),
+				"владелец аккаунта B не вправе разрешать уровень %s на аккаунте A", rel)
+		}
+
+		// (4) Обычный арендатор без единой строки не достаёт ничего.
+		for _, o := range []saObject{aoAccAObj, aoPrjAObj, aoAbnAObj} {
+			for _, v := range saVerbsOf(t, o) {
+				require.Falsef(t, saAllows(t, ctx, tx, aoStranger, v, o),
+					"субъект без единой строки не вправе разрешать %s на %s:%s", v, o.Type, o.ID)
+			}
+		}
+
+		// (5) Владение остаётся фактом личности: уточнение делает `owner`
+		//     ИСТОЧНИКОМ глаголов и не вправе делать кого-либо владельцем.
+		require.False(t, saAllows(t, ctx, tx, aoDelegAdmA, "owner", aoAccAObj),
+			"делегированный администратор аккаунта не становится владельцем")
+	})
+}
+
+// TestAccountOwner_VerbsReadOwnerNotTheAdminTier — структурная половина,
+// прочитанная с канонической модели: осознанный выбор между двумя возможными
+// правками, сделанный неудобным для случайного отката.
 //
-// Every verb on `account` must derive from `owner` (that is the refinement) and
-// its disjuncts must be exactly {owner, super_admin} — never `admin`. `or admin`
-// there would keep every allow-side check above green while silently granting the
-// DELEGATED account administrator the account object itself, contradicting
-// "администратор аккаунта — … не на сам аккаунт".
+// Каждый глагол на `account` обязан выводиться из `owner` (в этом уточнение), а
+// его дизъюнкты обязаны быть ровно {owner, super_admin} — никогда `admin`.
+// `or admin` там оставил бы каждую разрешающую проверку выше зелёной и тихо
+// выдал бы ДЕЛЕГИРОВАННОМУ администратору сам объект аккаунта, противореча
+// «администратор аккаунта — … не на сам аккаунт».
 func TestAccountOwner_VerbsReadOwnerNotTheAdminTier(t *testing.T) {
 	body := typeBody(t, modelDSL(t), "account")
 
@@ -226,10 +249,11 @@ func TestAccountOwner_VerbsReadOwnerNotTheAdminTier(t *testing.T) {
 	}
 }
 
-// TestAccountOwner_RefinementIsConfinedToTheAccountType — the refinement is about
-// the account object alone. `project` (and everything below it) stays flat: its
-// verbs may derive from `super_admin` and nothing else, so no tier of its own and
-// no ownership notion can creep in one type at a time.
+// TestAccountOwner_RefinementIsConfinedToTheAccountType — уточнение касается
+// объекта аккаунта и только его. `project` (и всё ниже) остаётся плоским: его
+// глаголы вправе выводиться из `super_admin` и ни из чего больше, поэтому ни
+// собственный уровень, ни понятие владения не могут просочиться туда по одному
+// типу за раз.
 func TestAccountOwner_RefinementIsConfinedToTheAccountType(t *testing.T) {
 	body := typeBody(t, modelDSL(t), "project")
 

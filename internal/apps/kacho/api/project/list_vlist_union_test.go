@@ -15,6 +15,13 @@
 // that sentence is true and irrelevant to the first: List returns the same Project
 // message Get does, so a row on the page IS the project's own contents, and the tier
 // holder was handed a project its own Get refused. Asserted in both directions below.
+//
+// Both halves of that union were spelled as enumerations of the type ("give me every
+// project this subject may see"). That door is gone with the external relation engine
+// (stage S6) and clients.RelationQueries carries no method that enumerates objects —
+// the reason being that the enumeration was capped server-side with no continuation
+// token, so past that population a tenant's own row became permanently invisible while
+// the row and the grant both existed.
 
 package project
 
@@ -37,21 +44,28 @@ import (
 	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
 )
 
-// ───────────── relation-aware FGA stub ──────────────────────────────────────
+// ───────────── relation-aware stub ──────────────────────────────────────────
 
+// projUnionFGAStub — stub clients.RelationQueries, keyed by relation so a test can
+// grant one relation and assert what the page does with it.
+//
+// The name says "Union" for historical reasons and does NOT describe the predicate:
+// the page is judged by ONE relation, `v_get` (see the file header). Renaming a live
+// stub is churn; what was false lived in the comments, and that is what is corrected.
+//
+// It carried a per-relation call counter that nothing in this file ever read. It was
+// written by an enumeration door which no longer exists, and by the per-object door,
+// and consulted by neither — a counter nobody reads states nothing, so it is removed
+// rather than left looking like evidence.
 type projUnionFGAStub struct {
 	clients.RelationQueries
 	mu    sync.Mutex                     // the per-object Check port is called concurrently
 	idsBy map[string]map[string][]string // [relation][subject] = ids
 	err   error
-	calls map[string]int
 }
 
 func newProjUnionFGAStub() *projUnionFGAStub {
-	return &projUnionFGAStub{
-		idsBy: map[string]map[string][]string{},
-		calls: map[string]int{},
-	}
+	return &projUnionFGAStub{idsBy: map[string]map[string][]string{}}
 }
 
 func (s *projUnionFGAStub) set(relation, subject string, ids []string) {
@@ -61,28 +75,14 @@ func (s *projUnionFGAStub) set(relation, subject string, ids []string) {
 	s.idsBy[relation][subject] = ids
 }
 
-func (s *projUnionFGAStub) ListObjects(ctx context.Context, subject, relation, objectType string,
-	condCtx map[string]any, maxResults int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls[relation]++
-	if s.err != nil {
-		return nil, s.err
-	}
-	if m := s.idsBy[relation]; m != nil {
-		return m[subject], nil
-	}
-	return nil, nil
-}
-
-// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
-// of enumerating (internal/authzfilter), answering from the SAME (relation,
-// subject) id-sets, so these tests' fixtures and intent are unchanged.
+// CheckWithContext — the DIRECT per-object question the use-case asks
+// (internal/authzfilter), answering from the seeded (relation, subject) id-sets, so
+// these tests' fixtures and intent are unchanged by the removal of the enumeration
+// door.
 func (s *projUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
 	_ map[string]any) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls[relation]++
 	if s.err != nil {
 		return false, s.err
 	}
@@ -211,14 +211,17 @@ func TestListProjects_ServiceAccountFilteredByTheSameRelation(t *testing.T) {
 	}
 }
 
-// P7-F — fail-closed: FGA error on either relation → Unavailable.
+// P7-F — fail-closed: a question that could not be answered → Unavailable.
+//
+// "Could not ask" and "not allowed" are different worlds: a page returned here would
+// pass a database that did not answer off as a lawful denial.
 func TestListProjects_P7_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := newListFakeRepo()
 	seedAccount(repo, "acc-other", "usr-other")
 	seedProject(repo, "prj-a", "acc-other")
 
 	fga := newProjUnionFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	fga.err = stderrors.New("relation form did not answer: connection closed")
 
 	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
 
@@ -228,7 +231,7 @@ func TestListProjects_P7_FGAUnavailable_FailClosed(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok, "want grpc status; got %v", err)
 	require.Equal(t, codes.Unavailable, st.Code(),
-		"FGA outage on either relation → UNAVAILABLE fail-closed (INV-7 under union)")
+		"an unanswered question → UNAVAILABLE fail-closed (INV-7)")
 }
 
 // projIDs / ctxSAProj — local helpers (the SEC-L test file owns the user ctx
@@ -250,13 +253,18 @@ func ctxSAProj(said string) context.Context {
 //
 // It is not optional politeness: authzfilter takes its batched path whenever the
 // checker offers this method, so a stub that omitted it would leave every test in
-// this file exercising a code path production does not take. It refuses an
-// over-cap partition the way the relation store refuses one — an error, never a
-// trim — so the stub is never more permissive than the thing it stands in for.
+// this file exercising a code path production does not take.
+//
+// The refusal above authzfilter.MaxBatchChecksPerRequest keeps the stub from being
+// SLACKER than the declaration it stands behind: that constant is the partition size
+// authzfilter itself declares and splits a page against, so a filter that stopped
+// honouring its own declaration goes red here instead of quietly changing the shape
+// of the request. An error, never a trim — a short answer is indistinguishable from
+// a page of denials.
 func (s *projUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
 	objects []string, condCtx map[string]any) ([]bool, error) {
 	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
-		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+		return nil, fmt.Errorf("batch of %d objects exceeds the declared partition size %d",
 			len(objects), authzfilter.MaxBatchChecksPerRequest)
 	}
 	out := make([]bool, len(objects))

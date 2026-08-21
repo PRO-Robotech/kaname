@@ -39,13 +39,12 @@ func captureErrorLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// handlerWithUnavailableBackend — сервис без FGA-порта: его Check возвращает
-// типизированный «бэкенд недоступен», то есть ровно тот путь, на котором хендлер
-// ПИШЕТ запись. Никаких моков сверх необходимого.
+// handlerWithUnavailableBackend — сервис БЕЗ источника вердикта: его Check
+// возвращает типизированный «бэкенд недоступен», то есть ровно тот путь, на
+// котором хендлер ПИШЕТ запись. Никаких дублёров сверх необходимого.
 func handlerWithUnavailableBackend() *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: nil,
-		ModelID:   "test-model",
 	})
 	return NewHandler(svc, NewWhoAmIUseCase(nil, nil))
 }

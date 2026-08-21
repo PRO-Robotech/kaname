@@ -63,7 +63,7 @@ func labelsFromProto(m map[string]string) domain.Labels {
 	return out
 }
 
-// fgaBindingObjectType — the OpenFGA object type of an AccessBinding.
+// fgaBindingObjectType — the rights-model object type of an AccessBinding.
 const fgaBindingObjectType = "iam_access_binding"
 
 // bindingVisibleToCaller answers the DIRECT per-object question "may the ctx
@@ -73,10 +73,10 @@ const fgaBindingObjectType = "iam_access_binding"
 //
 // Two independent things changed here, both already applied. Shape: this
 // replaces the previous "enumerate every visible binding, then look for this id
-// in the result", because OpenFGA caps ListObjects server-side at
-// OPENFGA_LIST_OBJECTS_MAX_RESULTS (default 1000) with no continuation token, so
-// past that population a caller's OWN granted binding fell outside the returned
-// prefix and Get answered 403 forever. Predicate: this used to ask the
+// in the result", because the external relations engine capped that enumeration
+// server-side (default 1000) with no continuation token, so past that population a
+// caller's OWN granted binding fell outside the returned prefix and Get answered 403
+// forever. The engine is gone; the SHAPE is what mattered and it stays. Predicate: this used to ask the
 // `viewer ∪ v_list` union (D-6 label-selectable binding visibility); the union
 // was dropped because tier and verb relations are deliberately decoupled, so it
 // diverged from the read gate in both directions. See the internal/authzfilter

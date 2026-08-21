@@ -6,9 +6,13 @@ package seed_test
 // bootstrap_admin_integration_test.go — Bug B integration tests for
 // seed.RunBootstrapAdmin against a real Postgres (testcontainers).
 //
-// The cluster-admin (`system_admin@cluster_kacho_root`) tuple MUST reach
-// OpenFGA via the transactional fga_outbox — never a raw SQL seed that
-// bypasses the drainer. These tests prove RunBootstrapAdmin:
+// The cluster-admin (`system_admin@cluster_kacho_root`) tuple MUST be stated
+// through the transactional journal `kacho_iam.fga_outbox` — never by a raw SQL
+// seed that goes around it. Stage S6 removed the external engine that used to
+// consume that journal; the journal itself remains, and a database trigger folds
+// each row into `kacho_iam.relation_fact`, which is what a verdict is read from.
+// So the requirement did not weaken when the consumer changed — it is now the ONLY
+// way the grant becomes an answer. These tests prove RunBootstrapAdmin:
 //
 //   1. user present   → cluster_admin_grant + fga_outbox(fga.tuple.write) row
 //      committed atomically, payload = {object:"cluster:cluster_kacho_root",
@@ -98,7 +102,8 @@ func TestRunBootstrapAdmin_UserPresent_EmitsFGAOutboxTuple(t *testing.T) {
 	assert.NotEmpty(t, res.GrantID)
 	require.NotEmpty(t, res.FGAOutboxID, "must enqueue an fga_outbox row")
 
-	// The fga_outbox row carries the system_admin@cluster tuple for the drainer.
+	// The journal row carries the system_admin@cluster tuple; the trigger on that
+	// table folds it into `kacho_iam.relation_fact` in this very transaction.
 	var eventType string
 	var payload []byte
 	require.NoError(t, pool.QueryRow(ctx,

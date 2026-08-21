@@ -1,9 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// Package authzguard — minimal per-use-case authz guard for kacho-iam,
-// covering the gap until a full OpenFGA interceptor (permission_map–based)
-// replaces these inline checks.
+// Package authzguard — minimal per-use-case guard for kacho-iam. It answers
+// "did the caller name itself?", never "is the caller allowed": the per-RPC
+// authorization Check is made against the rights model, at the edge and in the
+// interceptor chain.
 //
 // Use-cases call RequireAuthenticated(ctx) in the first sync step, BEFORE
 // creating an Operation. If principal-type == "anonymous" (or missing) →
@@ -11,9 +12,10 @@
 // it is only used by backend-internal paths and tests, which bypass guards
 // via WithPrincipal directly.
 //
-// This is a transitional guard layer until the full OpenFGA interceptor with
-// permission_map is in place; once that lands, these checks collapse into a
-// single Check call.
+// The layer was written as transitional, "until a permission_map interceptor
+// lands". That interceptor exists and gates every RPC on both listeners, so what
+// remains here is deliberately narrower: an authentication floor at the first sync
+// step of a use-case, not a second opinion about rights.
 package authzguard
 
 import (

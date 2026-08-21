@@ -17,13 +17,15 @@ import (
 )
 
 // fakeChecker — a per-object oracle over an explicit "<relation>|<object>" set.
-// Thread-safe: VisibleSet fans out, and the production port (the OpenFGA client)
-// is likewise called concurrently.
+// Thread-safe: VisibleSet fans out, and the production port (authzcascade.Client
+// over the service's own relational form) is likewise called concurrently.
 type fakeChecker struct {
 	granted map[string]bool
 	err     error
-	// sleep — artificial per-Check latency (models a loaded OpenFGA), so a test
-	// can observe fan-out depth rather than guess at it.
+	// sleep — artificial per-Check latency (models a loaded store of any kind), so a
+	// test can observe fan-out depth rather than guess at it. The latency is a
+	// property of the SHAPE — one question per object — and survived the store moving
+	// from another pod into this service's own database: it got smaller, not zero.
 	sleep time.Duration
 
 	mu     sync.Mutex
@@ -124,16 +126,17 @@ func TestVisible_ViewerVListUnion(t *testing.T) {
 	})
 }
 
-// Fail-closed: a Check error is propagated, never collapsed into a deny — an FGA
-// outage must surface as UNAVAILABLE, not as a silent permanent 404.
+// Fail-closed: a Check error is propagated, never collapsed into a deny — a question
+// that could not be answered must surface as UNAVAILABLE, not as a silent permanent
+// 404. "Could not ask" and "not allowed" are different worlds.
 func TestVisible_CheckError_Propagates(t *testing.T) {
-	boom := errors.New("openfga check: status 503")
+	boom := errors.New("relation form did not answer: connection closed")
 	f := newFakeChecker()
 	f.err = boom
 
 	ok, err := Visible(context.Background(), f, "user:u1", "iam_role", "r1")
 	assert.False(t, ok)
-	assert.ErrorIs(t, err, boom, "an FGA error must propagate, not read as a deny")
+	assert.ErrorIs(t, err, boom, "an unanswered question must propagate, not read as a deny")
 }
 
 // Degraded wiring is a deny, not a panic and not an allow.
@@ -194,7 +197,7 @@ func TestVisibleSet_EmptyInputs(t *testing.T) {
 // partially-resolved set is never returned — it would under-report silently,
 // which is the exact failure mode this package exists to remove.
 func TestVisibleSet_OneErrorFailsTheWholePage(t *testing.T) {
-	boom := errors.New("openfga check: status 503")
+	boom := errors.New("relation form did not answer: connection closed")
 	f := newFakeChecker("viewer|acc:a1")
 	f.err = boom
 

@@ -20,7 +20,7 @@ Readiness/liveness — TCP-проба на `:9090`.
 
 **Симптомы:**
 - API calls (через api-gateway) возвращают `UNAVAILABLE`/`PERMISSION_DENIED` массово.
-- Рост `fga_outbox` backlog ИЛИ OpenFGA недоступна.
+- Postgres `kacho_iam` недоступен или деградирует.
 
 **Быстрая диагностика:**
 
@@ -28,76 +28,107 @@ Readiness/liveness — TCP-проба на `:9090`.
 # Pod alive?
 kubectl -n kacho get pod -l app=kacho-iam
 
-# OpenFGA reachable? (default endpoint — KACHO_IAM_OPENFGA_ENDPOINT)
-kubectl -n kacho exec deploy/kacho-iam -- curl -sf http://kacho-umbrella-openfga:8080/healthz
-
 # DB reachable? (от корня репозитория)
 make -C deploy psql SVC=iam   # либо nc -zv <db-host> 5432
 
-# fga_outbox растет (pending = sent_at IS NULL)?
+# subject_change_outbox растет (pending = sent_at IS NULL)?
 kubectl -n kacho exec deploy/postgres -- \
   psql -c "SELECT count(*) FROM kacho_iam.fga_outbox WHERE sent_at IS NULL;"
 
 # Логи последние 5min.
-kubectl -n kacho logs -l app=kacho-iam --since=5m | grep -E "ERROR|FATAL|fga|openfga"
+kubectl -n kacho logs -l app=kacho-iam --since=5m | grep -E "ERROR|FATAL|authz|verdict"
 ```
 
 **Действия:**
 
-1. **OpenFGA down** → `kubectl rollout restart deploy/kacho-umbrella-openfga`.
-   `kacho-iam` сам переподключится (HTTP-клиент с retry).
-2. **DB down** → escalate DBA. `kacho-iam` падает fail-closed (мутации
-   возвращают `UNAVAILABLE`).
+1. **DB down** → escalate DBA. Это **полный отказ авторизации**: вердикт
+   складывается той же базой, поэтому недоступность `kacho_iam` означает
+   fail-closed по всем доменам, а не только по мутациям iam. Разбор и цена —
+   [`../architecture/failure-domains.md`](../architecture/failure-domains.md).
+2. **Реплика для чтения отстаёт** → вердикт читает master; проверить, не
+   переключён ли пул на реплику.
 3. **kacho-iam OOM/crash** → `kubectl rollout restart deploy/kacho-iam`;
    проверить memory limits.
-4. **fga_outbox backlog огромный** (>10k pending) — см. раздел про drainer ниже:
+4. **subject_change_outbox backlog огромный** (>10k pending) — см. раздел ниже:
    drainer все подтянет, но grant→Check propagation временно нарушена.
 
 **Escalation:** SRE on-call → IAM team.
 
-## P2 — fga_outbox drainer отстает
+## P2 — выдача есть, доступа нет
 
-AccessBinding-гранты транслируются в OpenFGA-tuples через `fga_outbox`-drainer
-внутри той же writer-tx. Drainer — NOTIFY-driven (канал `kacho_iam_fga_outbox`)
-с poll-catch-up. Отставание означает, что свежий grant уже в IAM-DB, но в FGA
-tuple еще не записан → `Check` отдает stale-decision.
+> [!note] До стадии S6 этот раздел назывался «дренаж журнала отстаёт» — предмета нет
+> Прежняя редакция описывала отставание вывоза строк журнала во внешний движок:
+> «грант уже в базе iam, но кортеж ещё не записан в движок». Ни движка, ни вывоза
+> не существует — прямой факт складывается **той же транзакцией**, что и выдача,
+> поэтому состояние «выдано, но не применено» невыразимо by construction.
+>
+> Симптом при этом остался и приходит теперь из двух других мест. Раздел переписан
+> под них.
 
-**Симптомы:**
-- Пользователь получил grant, но `Check` отдает `deny` (доступ «не появился»).
-- Растет число pending-строк в `fga_outbox`.
+**Симптом:** пользователь получил выдачу, а вызов по-прежнему отвергается.
 
-**Диагностика:**
+### Причина 1 — отстал кэш края (частая, самоисправляющаяся)
+
+api-gateway кэширует срез прав субъекта; сброс идёт очередью
+`kacho_iam.subject_change_outbox` (канал `kacho_iam_subject_outbox_added`) плюс
+запасной опрос раз в 30 с. Пока сброс не доехал, край отвечает по старому срезу.
 
 ```bash
 # Сколько pending и насколько стара самая старая.
 kubectl -n kacho exec deploy/postgres -- psql -c "
-SELECT count(*)                        AS pending,
-       now() - min(created_at)         AS oldest_pending_age,
-       max(last_error)                 AS last_error
-FROM kacho_iam.fga_outbox
+SELECT count(*)                AS pending,
+       now() - min(created_at) AS oldest_pending_age,
+       max(last_error)         AS last_error
+FROM kacho_iam.subject_change_outbox
 WHERE sent_at IS NULL;
 "
 
-# Ошибки apply в логах.
-kubectl -n kacho logs -l app=kacho-iam --since=10m | grep -E "fga_outbox|fga.apply"
+# Ошибки применения в логах.
+kubectl -n kacho logs -l app=kacho-iam --since=10m | grep -E "subject_change"
 ```
 
 **Действия:**
 
-1. **OpenFGA down/slow** → причина чаще всего тут (apply пишет в FGA).
-   Восстановить OpenFGA (см. P1) — drainer догонит автоматически.
-2. **`last_error` повторяется** (например невалидный tuple-type) → проверить
-   FGA-модель против регистрируемых типов; строка с непустым `last_error`
-   ретраится по `attempt_count`.
-3. **Drainer завис** (NOTIFY пропущен) → принудительно разбудить:
+1. **Проверить, что дело в кэше** — спросить iam напрямую, минуя край:
+   `AuthorizeService.Check` по внутреннему слушателю. Отвечает `allowed=true` —
+   значит право есть и отстал именно кэш.
+2. **Дренаж завис** (пропущен `NOTIFY`) → разбудить:
    ```bash
-   kubectl -n kacho exec deploy/postgres -- psql -c "NOTIFY kacho_iam_fga_outbox;"
+   kubectl -n kacho exec deploy/postgres -- psql -c "NOTIFY kacho_iam_subject_outbox_added;"
    ```
-   Если не помогает — `kubectl rollout restart deploy/kacho-iam` (drainer
-   переустановит `LISTEN` и сделает poll-catch-up на старте).
+   Не помогает — `kubectl rollout restart deploy/kacho-iam` (дренаж переустановит
+   `LISTEN` и догонит опросом на старте).
+3. **Край недоступен для сброса** → `last_error` повторяется; проверить
+   internal-порт api-gateway и mTLS-ребро.
 
-Детали grant→tuple-цепочки — [`28-relationhook.md`](28-relationhook.md); latency-бюджет
-Check — [`29-openfga-check.md`](29-openfga-check.md).
+### Причина 2 — намерение не стало фактом (редкая, не самоисправляющаяся)
+
+Право не появляется и при обращении мимо кэша. Тогда сверяются журнал и его
+проекция:
+
+```bash
+kubectl -n kacho exec deploy/postgres -- psql -c "
+-- намерение записано?
+SELECT id, event_type, payload, created_at
+  FROM kacho_iam.fga_outbox
+ WHERE payload::text LIKE '%<subject_id>%'
+ ORDER BY id DESC LIMIT 10;
+-- факт сложился?
+SELECT * FROM kacho_iam.relation_fact
+ WHERE subject = 'user:<subject_id>' LIMIT 20;
+"
+```
+
+| Что видно | Что это значит | Что делать |
+|---|---|---|
+| строки нет ни в журнале, ни в проекции | намерение не эмитировано | чинить производителя (use-case выдачи), не проекцию |
+| строка в журнале есть, в проекции нет | дефект триггера проекции | escalate IAM team; предмет — миграция `0098_relation_fact_follows_the_journal.sql` |
+| обе строки есть, доступа нет | вопрос не к факту: смотреть выдачу роли, метки, членство | разбор — `AuthorizeService.ExpandRelations` на этом ресурсе |
+
+`ExpandRelations` отвечает **плоским перечнем оснований** — из чего право
+складывается сейчас. Пустой перечень при живой выдаче означает, что план вывода
+не связал роль с глаголом: сверять `role_verb` и модель прав.
+
 
 ## P2 — Ory Hydra / Kratos hooks недоступны
 
@@ -231,7 +262,7 @@ ORDER BY granted_at DESC;
    последнего админа отвергаются (`FailedPrecondition`) — это защита от
    полной потери cluster-admin.
 3. Все вызовы требуют verified client-cert (mTLS) и проходят in-handler
-   ReBAC-Check + acr-floor; «достучаться без сертификата» по `:9091` нельзя.
+   проверка отношения + acr-floor; «достучаться без сертификата» по `:9091` нельзя.
 
 ## P3 — audit_outbox растет без consumer'а
 
@@ -270,8 +301,8 @@ kubectl -n kacho exec deploy/kacho-iam -- curl -s http://localhost:9095/metrics 
 # Решения authz (rate/итог) — деградация видна по росту deny.
 kubectl -n kacho exec deploy/kacho-iam -- curl -s http://localhost:9095/metrics | grep kacho_iam_authz_check_decisions_total
 
-# Принудительно разбудить fga_outbox drainer.
-kubectl -n kacho exec deploy/postgres -- psql -c "NOTIFY kacho_iam_fga_outbox;"
+# Принудительно разбудить дренаж сброса кэша края.
+kubectl -n kacho exec deploy/postgres -- psql -c "NOTIFY kacho_iam_subject_outbox_added;"
 
 # Graceful restart Deployment.
 kubectl rollout restart deploy/kacho-iam -n kacho
@@ -284,7 +315,8 @@ kubectl rollout status  deploy/kacho-iam -n kacho --timeout=120s
 - **НЕ редактировать примененную миграцию** — только новая миграция.
 - **НЕ менять `permissions` system-роли** — id пересчитается, все
   AccessBinding'и со ссылкой на роль сломаются.
-- **НЕ disable'ить OpenFGA «для починки»** — это полный outage authz.
+- **НЕ трогать `relation_fact` руками** — это проекция журнала, а не источник:
+  правка переживёт до первой же перезаписи и разойдётся с журналом молча.
 - **НЕ публиковать `Internal*`-сервисы на external endpoint** — cluster-admin /
   session-revocations / fgaproxy живут только на `:9091`.
 
@@ -292,5 +324,5 @@ kubectl rollout status  deploy/kacho-iam -n kacho --timeout=120s
 
 - [`32-observability.md`](32-observability.md) — где смотреть metrics/logs.
 - [`31-deployment.md`](31-deployment.md) — env vars / secrets / listener-порты.
-- [`28-relationhook.md`](28-relationhook.md) — grant → FGA-tuple цепочка (fga_outbox).
-- [`29-openfga-check.md`](29-openfga-check.md) — Check latency budget (sub-second).
+- [`29-relational-verdict.md`](29-relational-verdict.md) — путь «выдал → действует» и бюджет задержки.
+- [`../architecture/failure-domains.md`](../architecture/failure-domains.md) — что означает отказ базы.

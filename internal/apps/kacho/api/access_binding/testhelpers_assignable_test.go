@@ -41,9 +41,12 @@ type allowRelationStore struct{}
 func (allowRelationStore) Check(context.Context, string, string, string) (bool, error) {
 	return true, nil
 }
-func (allowRelationStore) WriteTuples(context.Context, []clients.RelationTuple) error  { return nil }
-func (allowRelationStore) DeleteTuples(context.Context, []clients.RelationTuple) error { return nil }
 
+// The write side is gone with the port method it stood for: clients.RelationStore
+// declared WriteTuples/DeleteTuples while it was a port onto someone else's storage,
+// and stage S6 left it with the question alone. Methods standing for a port method
+// that no longer exists have no caller, so nothing can exercise them and nothing they
+// might assert could ever go red — they only make this stub look wider than it is.
 var _ clients.RelationStore = allowRelationStore{}
 
 // setupTestDB hands the calling test its OWN database, with kacho_iam on the
@@ -53,8 +56,13 @@ var _ clients.RelationStore = allowRelationStore{}
 // every call — 32 callers, 32 containers, ~254s before a single assertion. The
 // database now comes from the one container this test binary owns (wired in
 // testmain_pgtest_test.go), cloned from a template migrated once — see
-// internal/pgtest for why a clone is the same isolation a separate container
-// gave. The OpenFGA containers this package also starts are unaffected.
+// internal/pgtest for why a clone is the same isolation a separate container gave.
+//
+// The sentence that used to end this paragraph — "the OpenFGA containers this package
+// also starts are unaffected" — is dropped: this package starts none. It stopped
+// starting them when the external relation engine was removed (stage S6), and a note
+// about a container nobody starts sends the next reader looking for a cost that is
+// not there.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
 	return appendSearchPathOptions(pgtest.NewDB(t))

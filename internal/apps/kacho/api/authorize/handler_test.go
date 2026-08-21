@@ -16,50 +16,48 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// stubFGA — minimal RelationQueries mock for handler tests.
+// stubVerdict — дублёр ИСТОЧНИКА ВЕРДИКТА (`service.Authorizer`) для проб транспорта.
+//
+// Поверхность — ровно та, что объявляет порт после снятия внешнего движка: вопрос
+// об объекте, перечисление субъектов страницей, основания права, уже имеющиеся
+// отношения субъекта. Ни перечисления объектов, ни чтения кортежей, ни сведений о
+// хранилище здесь нет — их нет и у настоящего.
 //
 // Mutex-guarded: BatchCheck resolves its items concurrently, so a fixture safe
 // only for a sequential caller reports its OWN unsafety under -race as if it were
 // the handler's.
-type stubFGA struct {
+type stubVerdict struct {
 	check bool
 
 	mu sync.Mutex
 	// relations records every relation seen. Under a concurrent batch this is
 	// COMPLETION order, not request order, so it answers "which relations reached
-	// the store" and must NOT carry a per-item ordering assertion. The ordering
-	// that is contractual is the order of RESPONSES, asserted from the response
-	// itself in TestHandler_BatchCheck_OrderPreserved.
-	//
-	// A `lastRelation` field stood here recording the most recent relation "so
-	// tests can assert the resolved/override relation reached FGA". No test ever
-	// read it, and a concurrent batch makes "most recent" mean an arbitrary item,
-	// so it is removed rather than left as a field whose doc describes a use it
-	// does not have.
+	// the verdict source" and must NOT carry a per-item ordering assertion. The
+	// ordering that is contractual is the order of RESPONSES, asserted from the
+	// response itself in TestHandler_BatchCheck_OrderPreserved.
 	relations []string
 }
 
-func (s *stubFGA) CheckWithContext(ctx context.Context, subject, relation, object string, ctxMap map[string]any) (bool, error) {
+func (s *stubVerdict) CheckWithContext(_ context.Context, _, relation, _ string, _ map[string]any) (bool, error) {
 	s.mu.Lock()
 	s.relations = append(s.relations, relation)
 	s.mu.Unlock()
 	return s.check, nil
 }
-func (s *stubFGA) ListObjects(ctx context.Context, subject, relation, objectType string, ctxMap map[string]any, max int) ([]string, error) {
-	return []string{"x", "y"}, nil
-}
-func (s *stubFGA) ListSubjects(ctx context.Context, objectType, objectID, relation string, ps int, pt string) ([]string, string, error) {
+
+func (s *stubVerdict) ListSubjects(_ context.Context, _, _, _ string, _ int, _ string) ([]string, string, error) {
 	return []string{"user:a", "user:b"}, "", nil
 }
-func (s *stubFGA) Expand(ctx context.Context, objectType, objectID, relation string) (*clients.ExpandTree, error) {
-	return &clients.ExpandTree{Leaves: []string{"user:a"}}, nil
+
+func (s *stubVerdict) Sources(_ context.Context, _, _, _ string) ([]string, error) {
+	return []string{"user:a"}, nil
 }
-func (s *stubFGA) ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error) {
-	return nil, "", nil
+
+func (s *stubVerdict) DirectRelations(_ context.Context, _, _, _ string, _ int) ([]string, error) {
+	return nil, nil
 }
 
 func newHandler(check bool) *Handler {
@@ -74,13 +72,12 @@ func newHandler(check bool) *Handler {
 // transport-shaping tests on the production-posture path rather than the
 // insecure-stand opt-out.
 
-// newHandlerWithStub returns the handler plus the underlying stubFGA so tests
-// can inspect which relation reached the FGA Check.
-func newHandlerWithStub(check bool) (*Handler, *stubFGA) {
-	stub := &stubFGA{check: check}
+// newHandlerWithStub returns the handler plus the underlying stubVerdict so tests
+// can inspect which relation reached the verdict source.
+func newHandlerWithStub(check bool) (*Handler, *stubVerdict) {
+	stub := &stubVerdict{check: check}
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: stub,
-		ModelID:   "test-model",
 	})
 	// whoAmI is required by the handler; tests that don't exercise WhoAmI pass
 	// a use-case with nil deps — its Execute() returns Unavailable via the
@@ -100,9 +97,6 @@ func TestHandler_Check_AllowedHappyPath(t *testing.T) {
 	}
 	if !resp.Allowed {
 		t.Errorf("expected allowed")
-	}
-	if resp.AuthorizationModelId != "test-model" {
-		t.Errorf("model id echo: %q", resp.AuthorizationModelId)
 	}
 	if resp.CheckedAt == nil {
 		t.Errorf("expected CheckedAt timestamp")
@@ -153,7 +147,7 @@ func TestHandler_BatchCheck_OrderPreserved(t *testing.T) {
 // single Check. The catalog override (e.g. admin-only RPC mapped to
 // system_admin) must NOT be silently dropped on the batch path. Here the verb
 // "list" would derive `viewer`, but the explicit override is "system_admin";
-// the FGA Check MUST be invoked with "system_admin", proving the override was
+// the verdict source MUST be asked about "system_admin", proving the override was
 // forwarded (and not the auto-derived viewer, which would slip admin gating).
 func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 	h, stub := newHandlerWithStub(true)
@@ -171,21 +165,10 @@ func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if len(stub.relations) != 1 {
-		t.Fatalf("expected exactly 1 FGA Check; got %v", stub.relations)
+		t.Fatalf("expected exactly 1 verdict query; got %v", stub.relations)
 	}
 	if stub.relations[0] != "system_admin" {
-		t.Errorf("BatchCheck must forward required_relation to FGA; got relation %q (override dropped → derived viewer)", stub.relations[0])
-	}
-}
-
-func TestHandler_ListObjects_InvalidAction(t *testing.T) {
-	h := newHandler(true)
-	_, err := h.ListObjects(moduleCertCtx(), &iamv1.ListObjectsRequest{
-		Subject: "user:x", ResourceType: "y", Action: "bogus",
-	})
-	st, _ := status.FromError(err)
-	if st.Code() != codes.InvalidArgument {
-		t.Errorf("expected InvalidArgument; got %v: %s", st.Code(), st.Message())
+		t.Errorf("BatchCheck must forward required_relation; got relation %q (override dropped → derived viewer)", stub.relations[0])
 	}
 }
 
@@ -210,53 +193,49 @@ func TestHandler_ListSubjects_Filter(t *testing.T) {
 	}
 }
 
-// fgaSecret — sensitive OpenFGA transport detail (store id, backend endpoint)
-// a failing backend call could embed. It must NEVER reach the client-facing
-// gRPC status message (CWE-209: information exposure through error message).
-const fgaSecret = "openfga-store-id=01ABCDEF backend=http://fga.internal:8080"
+// backendSecret — чувствительная деталь ХРАНИЛИЩА, которую отказавший вызов может
+// нести в тексте ошибки (адрес, имя базы, пользователь). Она НИКОГДА не должна
+// попасть в клиентское сообщение gRPC-статуса (CWE-209).
+//
+// Со снятием внешнего движка предмет проверки не изменился, изменился только
+// источник текста: теперь под вердиктом лежит СВОЯ база, и её сообщение об отказе
+// несёт координаты подключения ровно так же, как прежде их нёс адрес движка.
+const backendSecret = "host=pg.internal:5432 user=kacho_iam db=kacho_iam"
 
-// errFGA — an Authorizer stub whose query methods fail with a backend error
-// carrying fgaSecret, to prove the handler collapses the raw text to a fixed,
-// schema-free message instead of forwarding err.Error() verbatim.
-type errFGA struct{ stubFGA }
+// errVerdict — дублёр источника вердикта, чьи запросы падают ошибкой с
+// backendSecret: доказывает, что край сводит сырой текст к фиксированному
+// сообщению, а не пересылает `err.Error()` дословно.
+type errVerdict struct{ stubVerdict }
 
-func (e *errFGA) CheckWithContext(context.Context, string, string, string, map[string]any) (bool, error) {
-	return false, stderrors.New(fgaSecret)
+func (e *errVerdict) CheckWithContext(context.Context, string, string, string, map[string]any) (bool, error) {
+	return false, stderrors.New(backendSecret)
 }
-func (e *errFGA) ListObjects(context.Context, string, string, string, map[string]any, int) ([]string, error) {
-	return nil, stderrors.New(fgaSecret)
+
+func (e *errVerdict) ListSubjects(context.Context, string, string, string, int, string) ([]string, string, error) {
+	return nil, "", stderrors.New(backendSecret)
 }
-func (e *errFGA) ListSubjects(context.Context, string, string, string, int, string) ([]string, string, error) {
-	return nil, "", stderrors.New(fgaSecret)
-}
-func (e *errFGA) Expand(context.Context, string, string, string) (*clients.ExpandTree, error) {
-	return nil, stderrors.New(fgaSecret)
+
+func (e *errVerdict) Sources(context.Context, string, string, string) ([]string, error) {
+	return nil, stderrors.New(backendSecret)
 }
 
 func newHandlerWithAuthorizer(a service.Authorizer) *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: a,
-		ModelID:   "test-model",
 	})
 	return NewHandler(svc, NewWhoAmIUseCase(nil, nil))
 }
 
-// TestHandler_Authorize_RedactsBackendError — a failing OpenFGA backend call
-// must surface as codes.Unavailable with the FIXED text "authorization backend
-// unavailable"; the raw wrapped backend detail (store id / endpoint) must never
-// appear in the client-facing message.
+// TestHandler_Authorize_RedactsBackendError — отказавший вызов к источнику
+// вердикта обязан выйти наружу как codes.Unavailable с ФИКСИРОВАННЫМ текстом
+// "authorization backend unavailable"; сырая деталь подключения не должна
+// появиться в клиентском сообщении никогда.
 func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
-	h := newHandlerWithAuthorizer(&errFGA{})
+	h := newHandlerWithAuthorizer(&errVerdict{})
 	cases := []struct {
 		name string
 		call func() error
 	}{
-		{"ListObjects", func() error {
-			_, err := h.ListObjects(moduleCertCtx(), &iamv1.ListObjectsRequest{
-				Subject: "user:x", ResourceType: "y", Action: "x.x.list",
-			})
-			return err
-		}},
 		{"ListSubjects", func() error {
 			_, err := h.ListSubjects(moduleCertCtx(), &iamv1.ListSubjectsRequest{
 				Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Action: "x.x.list",
@@ -280,7 +259,7 @@ func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
 			if st.Code() != codes.Unavailable {
 				t.Errorf("code = %v; want Unavailable", st.Code())
 			}
-			if strings.Contains(st.Message(), fgaSecret) {
+			if strings.Contains(st.Message(), backendSecret) {
 				t.Errorf("LEAK: client message %q contains raw backend detail", st.Message())
 			}
 			if st.Message() != "authorization backend unavailable" {
@@ -290,14 +269,14 @@ func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
 	}
 }
 
-// TestHandler_BatchCheck_RedactsBackendUnavailable — when the FGA backend is
+// TestHandler_BatchCheck_RedactsBackendUnavailable — when the verdict source is
 // unavailable mid-batch, the failing check must surface as codes.Unavailable
 // with the FIXED "authorization backend unavailable" text (mirroring the
 // standalone Check sibling), NOT as a per-item Allowed=false whose deny_reason
-// echoes the raw transport error (store id / endpoint leak) nor as a misleading
-// permanent Internal/PermissionDenied.
+// echoes the raw transport error nor as a misleading permanent
+// Internal/PermissionDenied.
 func TestHandler_BatchCheck_RedactsBackendUnavailable(t *testing.T) {
-	h := newHandlerWithAuthorizer(&errFGA{})
+	h := newHandlerWithAuthorizer(&errVerdict{})
 	resp, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
 			{Subject: "user:x", Resource: &iamv1.ResourceRef{Type: "y", Id: "1"}, Action: "x.x.list"},
@@ -310,7 +289,7 @@ func TestHandler_BatchCheck_RedactsBackendUnavailable(t *testing.T) {
 	if st.Code() != codes.Unavailable {
 		t.Errorf("code = %v; want Unavailable (retryable, fail-closed)", st.Code())
 	}
-	if strings.Contains(st.Message(), fgaSecret) {
+	if strings.Contains(st.Message(), backendSecret) {
 		t.Errorf("LEAK: client message %q contains raw backend detail", st.Message())
 	}
 	if st.Message() != "authorization backend unavailable" {

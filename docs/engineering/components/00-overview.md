@@ -17,15 +17,19 @@
 - **Group** — набор субъектов (User / ServiceAccount) для group-grant.
 - **Role** — набор permission'ов формата `<module>.<resource>.<verb>`; system-роли
   (seed с детерминированными id) + custom-роли per-Account.
-- **AccessBinding** — грант `(subject) ↔ role ↔ (resource)`; runtime-эффект гранта
-  материализуется в OpenFGA через `fga_outbox`.
+- **AccessBinding** — грант `(subject) ↔ role ↔ (resource)`; действует с момента
+  фиксации: намерение об отношении пишется в журнал `fga_outbox` той же транзакцией,
+  и триггер журнала тут же складывает из него прямой факт.
 
 **Плоскость авторизации** (живет поверх ресурсной модели):
 
-- **OpenFGA ReBAC** — единый decision-движок. Каждый AccessBinding-грант
-  транслируется в FGA-tuple'ы; проверка прав — OpenFGA Check.
-- **AuthorizeService** (public PDP) — sync-проверка решений: `Check` / `BatchCheck` /
-  `ListObjects` / `ListSubjects` / `ExpandRelations` / `WhoAmI`.
+- **Реляционная форма** (`internal/repo/kacho/pg/relverdict`) — единственный источник
+  решения. Вердикт складывается запросом к собственной базе `kacho_iam` из четырёх
+  источников: прямой факт, выдача роли на область, выдача по меткам, членство в группе.
+  Вывод отношений компилируется из модели прав (`internal/authzplan`). Внешнего движка
+  отношений нет — см. [`29-relational-verdict.md`](29-relational-verdict.md).
+- **AuthorizeService** (публичный) — sync-проверка решений: `Check` / `BatchCheck` /
+  `ListSubjects` / `ExpandRelations` / `WhoAmI`.
 - **InternalIAMService.Check** — authz-gate, который каждый control-plane сервис
   (`kacho-vpc`, `kacho-compute`, `kacho-nlb`, `kacho-geo`) зовет перед мутацией.
 - **PermissionCatalogService** — грантуемая таксономия `<module>.<resource>.<verb>`
@@ -45,8 +49,9 @@
 
 - хранит идентичности, проекты, роли, гранты;
 - проводит мутации как async-операции (LRO) с polling-контрактом;
-- авторизует запросы (OpenFGA Check + Conditions CEL);
-- синхронизирует гранты в OpenFGA через `fga_outbox` drainer внутри writer-tx;
+- авторизует запросы (вердикт реляционной формы + условия);
+- записывает намерение об отношении в журнал `fga_outbox` внутри writer-tx, откуда
+  триггер складывает прямой факт;
 - обслуживает AuthN-хуки Ory и выдает SA-ключи.
 
 **Что НЕ делает:**
@@ -55,8 +60,8 @@
 - не управляет паролями пользователей — Ory Kratos;
 - не хранит OAuth `client_secret` в plaintext — Hydra хранит, kacho-iam отдает один раз
   и redact'ит;
-- не пишет в OpenFGA синхронно из request-path — пишет в `fga_outbox`, async drainer
-  применяет.
+- не выносит решение о доступе за пределы своей базы — вердикт складывается там же,
+  где лежат выдачи, одной транзакцией с ними.
 
 ## Топология процесса
 
@@ -75,7 +80,6 @@ flowchart LR
         metrics[":9095 HTTP<br/>Prometheus /metrics"]
 
         lro[(LRO operations worker<br/>+ orphan-reconciler)]
-        fgaDr[(fga_outbox drainer)]
         subjDr[(subject_change drainer)]
         bootDr[(bootstrap-admin reconciler)]
         rsab[(binding reconciler-worker)]
@@ -91,7 +95,6 @@ flowchart LR
     Hydra[Ory Hydra] -- token / refresh hook --> hooks
     Kratos[Ory Kratos] -- provision hook --> hooks
 
-    fgaDr -- WriteTuples --> OpenFGA[(OpenFGA store)]
     subjDr -- InvalidateSubject --> APIGW
 
     iam --- Postgres[("Postgres<br/>schema kacho_iam")]
@@ -101,8 +104,6 @@ flowchart LR
 
 - **LRO operations worker** — гоняет async-мутации к терминалу; orphan-reconciler
   закрывает осиротевшие `done=false`-операции умершего процесса по committed-реальности.
-- **fga_outbox drainer** — слушает `kacho_iam_fga_outbox` через LISTEN/NOTIFY и
-  применяет owner/grant-tuple'ы в OpenFGA (идемпотентно, с backoff и poison-обработкой).
 - **subject_change drainer** — пушит инвалидацию authz-кеша на api-gateway
   (`InvalidateSubject`) при изменении грантов субъекта.
 - **bootstrap-admin reconciler** — выдает `system_admin@cluster` пользователю из
@@ -138,7 +139,6 @@ C4Context
     Person(admin, "Cluster admin / oncall", "Через internal-tooling")
     System_Ext(kratos, "Ory Kratos", "Identity / login")
     System_Ext(hydra, "Ory Hydra", "OAuth2 / OIDC tokens, SA keys")
-    System_Ext(openfga, "OpenFGA", "ReBAC store")
 
     System_Boundary(kacho, "Kachō cluster") {
         System(apigw, "kacho-api-gateway", "Edge REST/gRPC, JWT")
@@ -158,30 +158,31 @@ C4Context
     Rel(kratos, iam, "provision hook")
     Rel(hydra, iam, "token / refresh hook")
     Rel(iam, hydra, "OAuth2 client (SA key issue)")
-    Rel(iam, openfga, "Check / WriteTuples (через drainer)")
     Rel(iam, pg, "pgxpool (master + read-replica)")
 ```
 
 ## Плоскость авторизации (как принимается решение)
 
 1. **Грант** — `AccessBindingService.Create` пишет 5-tuple в `kacho_iam` И в той же
-   транзакции кладет FGA-tuple в `fga_outbox` (transactional outbox, без dual-write).
-2. **Синхронизация** — `fga_outbox` drainer применяет tuple в OpenFGA (sub-second через
-   LISTEN/NOTIFY). Параллельно `subject_change` drainer инвалидирует authz-кеш gateway.
+   транзакции кладёт намерение об отношении в журнал `fga_outbox`. Триггер журнала
+   складывает из строки прямой факт **в той же транзакции**, поэтому «закоммичено» и
+   «действует» совпадают.
+2. **Сброс кэша края** — `subject_change` drainer инвалидирует authz-кеш api-gateway.
+   Это единственная оставшаяся очередь на этом пути, и она про кэш, а не про право.
 3. **Проверка** — на каждом RPC:
-   - публичный путь: api-gateway зовет `AuthorizeService.Check` (PDP);
+   - публичный путь: api-gateway зовёт `AuthorizeService.Check`;
    - peer-путь: `kacho-vpc` / `kacho-compute` / `kacho-nlb` / `kacho-geo` зовут
      `InternalIAMService.Check` перед мутацией (mTLS, fail-closed).
-   - Оба упираются в один OpenFGA Check над материализованными tuple'ами.
-4. **Условие на кортеже** — модель прав объявляет условия (`mfa_fresh` и другие),
-   и OpenFGA вычисляет их на каждом Check по контексту запроса. Ключ условия
+   - Оба упираются в один вердикт реляционной формы над строками `kacho_iam`.
+4. **Условие на выдаче** — модель прав объявляет условия (`mfa_fresh` и другие), и форма
+   вычисляет их на каждой проверке по контексту запроса, собранному на крае. Ключ условия
    задаёт сервер; тенантской поверхности управления условиями нет.
-5. **Owner-tuple'ы** — consumer-сервисы регистрируют владение своими ресурсами через
-   `InternalIAMService.RegisterResource` / `UnregisterResource` (fgaproxy): модули не
-   ходят в OpenFGA напрямую, only через iam.
+5. **Владение чужими ресурсами** — consumer-сервисы регистрируют его через
+   `InternalIAMService.RegisterResource` / `UnregisterResource`: модуль пишет намерение
+   не сам, а через iam.
 
 Детали — [`19-authorize.md`](19-authorize.md), [`21-internal-iam.md`](21-internal-iam.md),
-[`29-openfga-check.md`](29-openfga-check.md).
+[`29-relational-verdict.md`](29-relational-verdict.md).
 
 ## Внутренняя структура (Clean Architecture)
 
@@ -195,7 +196,7 @@ apps/kacho/
   seed/              # system-role seed, bootstrap-admin, backfill/verify, workers.
 repo/kacho/          # Reader/Writer port-interfaces (CQRS).
 repo/kacho/pg/       # pgxpool + dto-mapping. Реализует Reader/Writer.
-clients/             # peer-clients (OpenFGA, Hydra).
+clients/             # peer-clients (Hydra, api-gateway authz-cache).
 handler/             # тонкий gRPC transport (operation handler).
 handler/iamhooks/    # HTTP-хуки Ory (token / refresh / provision) + health.
 authzguard/          # caller-policy + anti-anonymous + viewer/acr-floor интерсепторы.
@@ -215,20 +216,18 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `GroupService`                  | CRUD Group + member-операции                           |
 | `:9090`   | `RoleService`                   | CRUD Role (system seed + custom)                       |
 | `:9090`   | `AccessBindingService`          | Create / Delete (immutable)                            |
-| `:9090`   | `AuthorizeService`              | public PDP: Check / BatchCheck / ListObjects / ListSubjects |
+| `:9090`   | `AuthorizeService`              | Check / BatchCheck / ListSubjects / ExpandRelations / WhoAmI |
 | `:9090`   | `PermissionCatalogService`      | грантуемая таксономия прав                              |
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |
-| `:9091`   | `InternalAuthorizeService`      | admin authz (write/read tuples)                        |
-| `:9091`   | `AuthorizeService`              | тот же PDP-handler для peer list-filter (ListObjects)  |
+| `:9091`   | `AuthorizeService`              | тот же обработчик для peer-проверок по mTLS-ребру      |
 | `:9091`   | `InternalClusterService`        | cluster-admin grants (time-bombed / permanent)         |
 | `:9091`   | `InternalUserService`           | `UpsertFromIdentity` (mirror identity)                 |
 | `:9091`   | `InternalOperationsService`     | cluster-wide admin operations feed                     |
 | `:9091`   | `InternalSessionRevocationsService` | logout / force-logout + hot-path IsRevoked         |
 
-`AuthorizeService` дополнительно зарегистрирован на internal-listener: тот же PDP-handler
-переиспользуется consumer-сервисами для per-object list-filter (`ListObjects`) поверх
-уже-установленного mTLS-ребра `:9091`. Это не нарушает internal-vs-external (запрет #6):
+`AuthorizeService` дополнительно зарегистрирован на internal-listener: тот же обработчик
+переиспользуется сервисами платформы поверх уже установленного mTLS-ребра `:9091`. Это не нарушает internal-vs-external (запрет #6):
 запрещено публиковать `Internal.*` на external endpoint, а обратное — публичный сервис,
 дополнительно доступный на cluster-internal listener, — штатный service→service-паттерн.
 
@@ -242,8 +241,6 @@ sequenceDiagram
     participant GW as api-gateway
     participant IAM as kacho-iam :9090
     participant DB as Postgres
-    participant Drainer as fga_outbox drainer
-    participant OFGA as OpenFGA
 
     Cli->>GW: POST /iam/v1/accounts<br/>Authorization: Bearer <JWT>
     GW->>GW: Validate JWT (Hydra JWKS)
@@ -251,15 +248,9 @@ sequenceDiagram
     GW->>IAM: gRPC AccountService.Create<br/>+ x-kacho-principal-* metadata
     IAM->>IAM: PrincipalExtract + AntiAnonymous guard
     IAM->>IAM: domain.Account.Validate()
-    IAM->>DB: BEGIN; INSERT accounts; INSERT operations; INSERT fga_outbox; COMMIT
+    IAM->>DB: BEGIN; INSERT accounts; INSERT operations; INSERT fga_outbox<br/>(триггер: fga_outbox → relation_fact); COMMIT
     IAM-->>GW: Operation (done=false, id="iop_..")
     GW-->>Cli: 200 {operationId}
-
-    Note over Drainer,OFGA: async (sub-second via LISTEN/NOTIFY)
-    DB-->>Drainer: NOTIFY kacho_iam_fga_outbox
-    Drainer->>DB: SELECT ... FOR UPDATE SKIP LOCKED
-    Drainer->>OFGA: WriteTuples (account owner)
-    Drainer->>DB: DELETE fga_outbox row
 
     Note over IAM,DB: async (LRO worker)
     IAM->>DB: UPDATE operations SET done=true, response=Account
@@ -290,7 +281,6 @@ sequenceDiagram
 **Runtime-зависимости (peer):**
 
 - Postgres 16 — schema `kacho_iam`.
-- OpenFGA — ReBAC store (authz Check + tuple-write через drainer).
 - Ory Hydra — OAuth2/OIDC tokens, backing-клиенты ServiceAccount, SA-ключи.
 - Ory Kratos — identity / login (provision-хук).
 - api-gateway — edge JWT-валидация и REST-проекция.
@@ -299,10 +289,8 @@ sequenceDiagram
 
 - Конкретный ресурс → [`01-account.md`](01-account.md) … [`10-operations.md`](10-operations.md).
 - Authz-плоскость → [`19-authorize.md`](19-authorize.md),
-  [`20-internal-authorize.md`](20-internal-authorize.md),
   [`21-internal-iam.md`](21-internal-iam.md),
-  [`28-relationhook.md`](28-relationhook.md),
-  [`29-openfga-check.md`](29-openfga-check.md).
+  [`29-relational-verdict.md`](29-relational-verdict.md).
 - Conditions (CEL ABAC) — Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - Production deploy / эксплуатация → [`31-deployment.md`](31-deployment.md),
   [`32-observability.md`](32-observability.md), [`33-runbook.md`](33-runbook.md).

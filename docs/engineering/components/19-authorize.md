@@ -1,102 +1,142 @@
-# 19. AuthorizeService (Public Check)
+# 19. AuthorizeService (публичная проверка доступа)
 
 ## Назначение
 
-**Public AuthorizeService** — synchronous, high-throughput, cache-friendly
-endpoint, через который любой клиент (UI / CLI / другие сервисы) может
-проверить «может ли subject X выполнить action A над resource R?».
+**AuthorizeService** — синхронный endpoint, через который любой клиент (UI / CLI /
+другие сервисы) спрашивает «может ли субъект X выполнить действие A над ресурсом
+R?».
 
-Это **request-time** authorization (policy-simulation API: проверка решения
-без выполнения действия). Реальные kacho-vpc / kacho-compute /
-kacho-loadbalancer вызывают на per-RPC gate НЕ его, а
+Это **проверка в момент запроса** без выполнения действия. Сервисы платформы
+(`kacho-vpc`, `kacho-compute`, `kacho-nlb`) на пер-RPC гейте зовут не его, а
 `InternalIAMService.Check` (см. [`21-internal-iam.md`](21-internal-iam.md));
-AuthorizeService — для явных tenant-facing запросов (UI permission-preview,
-SDK `auth_simulate`-хелперы).
+`AuthorizeService` — для явных обращений арендатора: предпросмотр прав в консоли,
+вспомогательные вызовы SDK.
 
-Под капотом — pipeline:
+Путь ответа:
 
-1. **action → relation** — verb-fold (`get`/`list` → `viewer`,
-   `create`/`update` → `editor`, `delete` → `admin`) либо явный
-   `required_relation`-override (`authzmap`).
-2. **OpenFGA Check** — REBAC tuple resolution + Conditional tuples (CEL)
-   вдоль resolution-path. Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
+1. **действие → отношение** — свёртка глагола (`get`/`list` → `viewer`,
+   `create`/`update` → `editor`, `delete` → `admin`) либо явное поле
+   `required_relation` (`internal/authzmap`).
+2. **вердикт реляционной формы** — запрос к собственной базе `kacho_iam`: прямой
+   факт ∪ выдача роли на область ∪ выдача по меткам ∪ членство в группе. Разбор —
+   [`29-relational-verdict.md`](29-relational-verdict.md).
 
-FGA — единственный policy-gate; deny возвращает `deny_reasons` (какие
-conditions не прошли).
-
-**Use-cases:**
-- UI: «show only resources, на которых caller может Read».
-- Сторонняя интеграция: «может ли SA `sva_ci` Deploy на этот project?».
-- Pre-flight check перед более дорогой операцией.
+Отказ возвращает `deny_reasons` — короткий упорядоченный перечень причин.
 
 **Ограничения:**
-- Sync (нет Operation envelope) — read-only RPC.
-- Fail-closed: OpenFGA недоступен → Unavailable.
-- ListObjects **не гейтится** — переключателя, который бы его выключал, в коде нет
-  (см. предупреждение ниже).
+- синхронный, только чтение (конверта `Operation` нет);
+- fail-closed: база `kacho_iam` недоступна → `UNAVAILABLE`, никогда «разрешено»
+  (см. [`../architecture/failure-domains.md`](../architecture/failure-domains.md)).
 
-## API surface
-
-### Public gRPC (порт 9090) — AuthorizeService
-
-| RPC               | Sync/Async | Описание                                                          |
-|-------------------|------------|-------------------------------------------------------------------|
-| `Check`           | sync       | Bool allow/deny + `deny_reasons`.                                |
-| `BatchCheck`      | sync       | До 100 проверок в одном RPC; per-item результат в порядке запроса. |
-| `ListObjects`     | sync       | Объекты типа T, на которых subject имеет relation R. Включён безусловно. `page_token` отвергается (продолжения нет), `wildcard_grant` сервером не заполняется. |
-| `ListSubjects`    | sync       | Inverse: все subjects с action на ресурсе (admin-UI «who can access»). |
-| `ExpandRelations` | sync       | Zanzibar userset-tree для (resource, relation) — audit/explain.   |
-| `WhoAmI`          | sync       | Identity + permission-snapshot caller'а (UI bootstrap).           |
-
-> [!warning] Здесь стоял переключатель `KACHO_AUTHZ_LISTOBJECTS` — его никто не читает
-> Перепись 2026-08-11: имя встречается в дереве **четыре** раза, и ни одно вхождение не
-> является чтением. Два — комментарий контракта (`authorize_service.proto` и его
-> сгенерированное зеркало в `pkg/api`), одно — значение в профиле dev-развёртывания
-> (`deploy/helm/umbrella/values.dev.yaml`), одно — было здесь. Читателей в Go — **ноль**
-> (предикат: `grep -rn AUTHZ_LISTOBJECTS --include='*.go' services/ gateway/ pkg/ | grep -v pkg/api`
-> → пусто). `Handler.ListObjects` вызывает use-case безусловно, ветки `Unimplemented` в нём нет.
+> [!note] До стадии S6 решение принимал внешний движок отношений — его нет
+> Прежняя редакция описывала вторым шагом обращение к внешнему движку и
+> перечисляла его переменные окружения, его сроки, его отказы. Движка нет: ни
+> клиента, ни хранилища, ни очереди к нему. Вопрос решается запросом к своей же
+> базе, поэтому «движок недоступен» перестало быть отдельной причиной отказа, а
+> сроки и адреса движка сняты вместе с ним.
 >
-> Прежняя редакция объявляла RPC **выключенным по умолчанию**. Это худшее направление ошибки:
-> доступная поверхность описывалась как закрытая. Три места говорили одно и то же (эта глава,
-> страница арендатора, комментарий контракта) — и ни одно из них не было кодом.
->
-> Осталось предметом **вне этой главы**, потому что это не документация: (а) ручка в профиле
-> развёртывания, которую никто не читает, — принято-и-проигнорировано на уровне настройки;
-> (б) комментарий в `.proto` правится вместе с перегенерацией `pkg/api`, то есть отдельным
-> изменением.
+> Здесь же стояли два утверждения, снятых вместе со своим предметом: глагол
+> `ListObjects` (снят с контракта, см. ниже) и предупреждение о переключателе
+> `KACHO_AUTHZ_LISTOBJECTS`, у которого не было читателей. Предупреждению больше
+> нечего предупреждать: нет ни глагола, ни ручки.
 
+## Поверхность
 
-### Request shape
+### Публичный gRPC (порт 9090)
+
+| RPC | Синхронность | Описание |
+|---|---|---|
+| `Check` | sync | разрешено/нет + `deny_reasons` |
+| `BatchCheck` | sync | до 100 проверок одним вызовом; результат по каждой в порядке запроса |
+| `ListSubjects` | sync | обратный вопрос: кто имеет право на этом ресурсе |
+| `ExpandRelations` | sync | из чего складывается право — плоский перечень оснований |
+| `WhoAmI` | sync | личность вызывающего + срез прав (загрузка консоли) |
+
+**`ListObjects` снят с контракта** (стадия S6). Глагол существовал ради
+перечисления объектов внешним движком: движок отвечал на него собственным
+обходом своего хранилища, у ответа был жёсткий серверный предел и не было
+продолжения. Реляционная форма перечисляет доступное **страницей своей базы** —
+это внутренний путь списочных обработчиков, а не отдельный публичный глагол.
+Номер и имя в контракте зарезервированы; маршрута края
+`/iam/v1/authorize:listObjects` больше нет.
+
+### Форма запроса и ответа
 
 ```protobuf
 message AuthorizeCheckRequest {
   string subject = 1;                  // "user:usr_alice"
   ResourceRef resource = 2;            // {type:"project", id:"prj_yyy"}
   string action = 3;                   // "compute.instance.create"
-  google.protobuf.Struct context = 4;  // {acr_value, amr_claims, mfa_at, client_ip, device_attestation, ...}
-  string trace_id = 5;                 // correlation id
-  string required_relation = 6;        // explicit FGA relation override
+  google.protobuf.Struct context = 4;  // {acr_value, amr_claims, mfa_at, client_ip, ...}
+  string trace_id = 5;                 // корреляция
+  string required_relation = 6;        // явное отношение вместо свёртки глагола
 }
 message AuthorizeCheckResponse {
   bool allowed = 1;
   repeated string deny_reasons = 2;    // ["mfa_fresh: acr=2 (need 3)"] | ["no path"]
-  string authorization_model_id = 3;   // pinned model id (forensics)
+  reserved 3;                          // authorization_model_id — снято, см. ниже
+  reserved "authorization_model_id";
   google.protobuf.Timestamp checked_at = 4;
 }
 ```
 
-### REST mapping
+**`authorization_model_id` снято с контракта, номер и имя зарезервированы.** Поле
+несло версию модели, которую **внешний движок** чеканил для копии, лежавшей в его
+собственном хранилище. Движка нет, значит такую версию никто не чеканит и
+заполнить поле нечем — оно отвечало бы каждому вызывающему постоянной пустой
+строкой. Сама **модель прав никуда не делась**: она остаётся источником, из
+которого выводится реляционная форма. Не стало версии хранилища, которого нет.
 
-| HTTP | Path                                | gRPC mapping                       |
-|------|-------------------------------------|------------------------------------|
-| POST | `/iam/v1/authorize:check`           | `AuthorizeService.Check`           |
-| POST | `/iam/v1/authorize:batchCheck`      | `AuthorizeService.BatchCheck`      |
-| POST | `/iam/v1/authorize:listObjects`     | `AuthorizeService.ListObjects`     |
-| POST | `/iam/v1/authorize:listSubjects`    | `AuthorizeService.ListSubjects`    |
+### Отображение в REST
+
+| HTTP | Путь | gRPC |
+|---|---|---|
+| POST | `/iam/v1/authorize:check` | `AuthorizeService.Check` |
+| POST | `/iam/v1/authorize:batchCheck` | `AuthorizeService.BatchCheck` |
+| POST | `/iam/v1/authorize:listSubjects` | `AuthorizeService.ListSubjects` |
 | POST | `/iam/v1/authorize:expandRelations` | `AuthorizeService.ExpandRelations` |
-| GET  | `/iam/v1/me`                        | `AuthorizeService.WhoAmI`          |
+| GET | `/iam/v1/me` | `AuthorizeService.WhoAmI` |
 
-## Sequence diagram — Check pipeline
+## `ExpandRelations` — ответ ОДНОУРОВНЕВЫЙ
+
+```protobuf
+message ExpandRelationsRequest {
+  ResourceRef resource = 1;
+  string relation = 2;
+  reserved 3;                 // max_depth — снято
+  reserved "max_depth";
+}
+
+message UsersetTree {
+  repeated string leaves = 1; // субъекты, у которых отношение разрешается
+  reserved 2, 3;              // computed, tuple_to_userset — снято
+  reserved "computed", "tuple_to_userset";
+  bool truncated = 4;         // перечень усечён серверным пределом
+}
+```
+
+Перечень оснований **плоский, ровно один уровень, рёбер нет** — потому что таков
+**источник**: основание права в реляционной форме есть плоская запись (прямой
+факт · выдача роли · выдача по меткам · членство в группе). У плоской записи не
+бывает глубины, спускаться не во что, и ограничивать нечего.
+
+Отсюда два снятия, и оба — следствие формы источника, а **не урезание
+возможности**:
+
+- **графовые рёбра** (`computed`, `tuple_to_userset`) описывали спуск в
+  под-множества графа. Ни одно из них нечем заполнить: записи, из которой такое
+  ребро выводилось бы, не существует. Номера и имена зарезервированы, сообщения
+  `ComputedUsersetEdge` и `TupleToUsersetEdge` сняты — заводить их под теми же
+  именами нельзя;
+- **`max_depth`** ограничивал глубину спуска, пока ответ был деревом. Глубина для
+  одноуровневого ответа не определена, и поле не читал бы никто. Принять число,
+  на которое сервер не смотрит, значило бы обещать ручку, которой нет, — поэтому
+  оно снято, а не игнорируется молча.
+
+Имя типа `UsersetTree` осталось историческим: менять его значило бы ломать форму
+на проводе ради названия. Форма — перечень, не дерево.
+
+## Диаграмма — путь проверки
 
 ```mermaid
 sequenceDiagram
@@ -104,32 +144,33 @@ sequenceDiagram
     participant Cli
     participant GW as api-gateway
     participant IAM as AuthorizeService
-    participant FGA as OpenFGA
+    participant DB as Postgres kacho_iam
 
-    Cli->>GW: POST /iam/v1/authorize:check<br/>{subject, resource, action, context}
+    Cli->>GW: POST /iam/v1/authorize:check {subject, resource, action, context}
     GW->>IAM: gRPC Check
-    IAM->>IAM: action → required FGA relation<br/>(verb-fold / required_relation override)
-    IAM->>FGA: Check(subject, relation, resource_object, context)
-    Note over FGA: ReBAC tuple resolution +<br/>Conditional tuples (CEL) вдоль пути
-    FGA-->>IAM: allowed=true|false
-    IAM-->>GW: AuthorizeCheckResponse{allowed, deny_reasons, authorization_model_id}
+    IAM->>IAM: действие → отношение (свёртка глагола / required_relation)
+    IAM->>IAM: отношение → план вывода (authzplan, из модели прав)
+    IAM->>DB: реляционная форма: факт ∪ выдача ∪ метки ∪ членство
+    Note over DB: цепь областей поднимается по resource_parent_edge
+    DB-->>IAM: allowed = true | false
+    IAM-->>GW: AuthorizeCheckResponse{allowed, deny_reasons, checked_at}
     GW-->>Cli: 200 {allowed:true}
 ```
 
-## Конфигурация
+## Настройка
 
-| Env var                                 | Default                       | Описание                                  |
-|-----------------------------------------|-------------------------------|-------------------------------------------|
-| `KACHO_IAM_OPENFGA_ENDPOINT`            | `kacho-umbrella-openfga:8080` | URL OpenFGA HTTP.                         |
-| `KACHO_IAM_OPENFGA_STORE_ID`            | —                             | Store id. Без него Check → Unavailable.   |
-| `KACHO_IAM_OPENFGA_MODEL_ID`            | —                             | Model id (опционально pin).               |
-| `KACHO_IAM_FGA_CHECK_TIMEOUT_MS`        | 200                           | Per-Check timeout.                        |
-| `KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS` | 1000                          | ListObjects timeout.                      |
+Отдельных переменных окружения у проверки доступа **нет**. Вердикт складывается
+той же базой, что и остальные чтения службы, и берёт её из общей настройки
+подключения (`KACHO_IAM_DB_*`). Переменные внешнего движка —
+`KACHO_IAM_OPENFGA_ENDPOINT`, `KACHO_IAM_OPENFGA_STORE_ID`,
+`KACHO_IAM_OPENFGA_MODEL_ID`, `KACHO_IAM_FGA_CHECK_TIMEOUT_MS`,
+`KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS`, `KACHO_IAM_FGA_WRITE_TIMEOUT_MS` — сняты
+вместе с движком: у них не осталось читателя.
 
 ## Как пользоваться
 
 ```bash
-# Check.
+# Проверка.
 curl -X POST http://localhost:18080/iam/v1/authorize:check \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -138,46 +179,40 @@ curl -X POST http://localhost:18080/iam/v1/authorize:check \
     "action":"compute.instance.create",
     "context":{"mfa_at":"2026-05-25T10:00:00Z","client_ip":"10.0.0.1"}
   }'
-# → {allowed:true, deny_reasons:[], authorization_model_id:"01HXXXX..."}
+# → {"allowed":true, "deny_reasons":[], "checked_at":"2026-05-25T10:00:01Z"}
 
-# ListObjects (если включено).
-curl -X POST http://localhost:18080/iam/v1/authorize:listObjects \
+# Из чего складывается право (плоский перечень оснований).
+curl -X POST http://localhost:18080/iam/v1/authorize:expandRelations \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "subject":"user:usr_alice",
-    "resource_type":"project",
-    "action":"iam.project.get"
-  }'
-# → {resource_ids:["prj_a","prj_b",...]}
+  -d '{"resource":{"type":"project","id":"prj_yyy"},"relation":"viewer"}'
+# → {"tree":{"leaves":["user:usr_alice","group:grp_ops#member"],"truncated":false}}
 ```
 
 ### Типичные ошибки
 
-| Сценарий                          | gRPC code             | HTTP | Текст                                          |
-|-----------------------------------|------------------------|------|------------------------------------------------|
-| OpenFGA недоступен                | `UNAVAILABLE`          | 503  | `openfga client error: connection refused`     |
-| Action не найден в map            | `INVALID_ARGUMENT`     | 400  | `Illegal argument action: unknown`             |
-| Subject пустой                    | `INVALID_ARGUMENT`     | 400  | `Illegal argument subject: required`           |
-| ListObjects отключен              | `UNIMPLEMENTED`        | 501  | `ListObjects not enabled`                      |
+| Сценарий | gRPC-код | HTTP | Текст |
+|---|---|---|---|
+| база `kacho_iam` недоступна | `UNAVAILABLE` | 503 | фиксированный текст, без деталей драйвера |
+| действие не найдено в каталоге | `INVALID_ARGUMENT` | 400 | `Illegal argument action: unknown` |
+| субъект пуст | `INVALID_ARGUMENT` | 400 | `Illegal argument subject: required` |
 
 ## Подробности реализации
 
-- **Service:** `internal/service/authorize_service.go`.
-- **Handler:** `internal/apps/kacho/api/authorize/handler.go`.
-- **OpenFGA client:** `internal/clients/openfga_client.go` + extensions
-  (`openfga_check.go`, `openfga_list.go`).
-- **authzmap:** `internal/authzmap/permissions_to_relations.go` +
-  verb-fold relation resolution.
+- **служба:** `internal/service/authorize_service.go`
+- **обработчик:** `internal/apps/kacho/api/authorize/handler.go`
+- **реляционная форма:** `internal/repo/kacho/pg/relverdict/`
+- **план вывода из модели:** `internal/authzplan/`
+- **свёртка глагола:** `internal/authzmap/permissions_to_relations.go`
 
 ## Связанные компоненты
 
-- [`20-internal-authorize.md`](20-internal-authorize.md) — peer-call FGA writer.
-- [`21-internal-iam.md`](21-internal-iam.md) — backend сервисы зовут internal-вариант.
-- [`29-openfga-check.md`](29-openfga-check.md) — propagation chain.
+- [`21-internal-iam.md`](21-internal-iam.md) — сервисы платформы зовут внутренний вариант.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — как складывается вердикт.
+- [`../architecture/failure-domains.md`](../architecture/failure-domains.md) — домены отказа.
 
 ## Ссылки на код
 
 - `internal/service/authorize_service.go`
 - `internal/apps/kacho/api/authorize/handler.go`
-- `internal/clients/openfga_*.go`
-- `internal/authzmap/`
+- `internal/repo/kacho/pg/relverdict/`
+- `internal/authzmap/`, `internal/authzplan/`

@@ -30,7 +30,6 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/pkg/observability"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
 	"github.com/PRO-Robotech/kacho/pkg/servicehost"
@@ -134,25 +133,13 @@ func runServe(cfg config.Config) error {
 	// kachoRepo is shared by all per-resource use-cases.
 	kachoRepo := kachopg.New(pool, slavePool)
 
-	// Authorization backend — selected by KACHO_IAM_AUTHZ_PROVIDER (default
-	// "openfga"). buildRelationStore returns the provider-neutral
-	// clients.RelationStore port; an unknown provider fails closed (no silent
-	// fallback). The real client is always used (no stub fallback — запрет #11).
-	// store-id is provisioned at runtime by the openfga-bootstrap-job; until
-	// then the client fails closed (see buildOpenFGAClient).
-	relationStore, err := buildRelationStore(authzProvider(), logger)
-	if err != nil {
-		return fmt.Errorf("authz provider: %w", err)
-	}
-	// Recover the concrete OpenFGA client at this single composition point:
-	// buildServices + the fga_outbox applier need per-operation field access
-	// that the abstract port does not expose. The "openfga" provider is the
-	// only adapter today, so the assertion always holds; a future provider
-	// would adjust this wiring alongside its adapter.
-	openfgaClient, ok := relationStore.(*clients.OpenFGAHTTPClient)
-	if !ok {
-		return fmt.Errorf("authz provider: relation store %T is not wired into the composition root", relationStore)
-	}
+	// ВЫБОРА ПОСТАВЩИКА РЕШЕНИЯ О ДОСТУПЕ ЗДЕСЬ БОЛЬШЕ НЕТ.
+	//
+	// Он существовал, пока решение принимал внешний движок отношений: переменная
+	// окружения выбирала адаптер, адаптер поднимался клиентом, клиент восстанавливался
+	// конкретным типом ради полей, которых нет у порта. Ничего этого не осталось —
+	// решение вычисляет реляционная форма в базе самой службы, и собирается она там же,
+	// где всё остальное, что читает эту базу (см. buildServices).
 
 	// Prometheus registry — owns the /metrics collectors. Created once and
 	// shared by the metrics HTTP listener, the gRPC server interceptors (both
@@ -173,12 +160,6 @@ func runServe(cfg config.Config) error {
 	// pool="replica" и есть честный ответ на «есть ли отдельный пул чтений».
 	metricsReg.RegisterPoolStats("primary", pool)
 	metricsReg.RegisterPoolStats("replica", slavePool)
-
-	// Наблюдатель обращений к хранилищу прав. Разбор — у самой функции
-	// (newAuthzStoreObserver); здесь только провязка, и она обязана быть: поле
-	// Observe, объявленное и никем не заполненное, — мёртвый наблюдатель,
-	// снаружи неотличимый от работающего.
-	openfgaClient.Observe = newAuthzStoreObserver(metricsReg, logger)
 
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
 	// поднимаем его dispatcher ДО приема трафика. Без этого default-registry держит
@@ -210,7 +191,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("secret backstop: %w", err)
 	}
 
-	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, openfgaClient, metricsReg, cfg, logger)
+	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, metricsReg, cfg, logger)
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
@@ -303,7 +284,7 @@ func runServe(cfg config.Config) error {
 	// а не чужим Check). Production-posture гейт обязан утверждать на этом
 	// наблюдаемом факте, а не на хранимом конфиге (см. observability.BootPosture).
 	observability.LogBootPosture(logger,
-		bootPosture(cfg, mtlsCfg, openfgaClient != nil && openfgaClient.Endpoint != ""))
+		bootPosture(cfg, mtlsCfg, svcs.ownGates.FormReachable()))
 
 	// Per-RPC CALLER policy for the internal listener (audit C1/C3/H3/M1). iam
 	// does NOT re-ReBAC the end user here — the api-gateway is the platform's
@@ -335,7 +316,7 @@ func runServe(cfg config.Config) error {
 	// ReadFloorRPCs it requires the CALLER MODULE-SA (derived from the verified
 	// mTLS SAN, same derivation as the fga-proxy gate) to hold the coarse cluster
 	// relation `system_viewer@cluster:cluster_kacho_root`, via the SAME
-	// RelationChecker port (openfgaClient) used by RelationWriteGate / iam.Check.
+	// RelationChecker port (the decision door) used by RelationWriteGate / iam.Check.
 	// Default-OFF: dev/newman (prod=false) → NO-OP pass-through (newman stand
 	// byte-identical). Prod fail-closed: no verified SAN → PermissionDenied;
 	// FGA backend error → Unavailable. EXEMPT (NOT in ReadFloorRPCs): the PDP
@@ -400,7 +381,7 @@ func runServe(cfg config.Config) error {
 
 	// Anti-anonymous guard перед мутирующими RPC: минимальная защита от
 	// анонимного создания Account/Project/AccessBinding/Group/SA/Role
-	// в дополнение к OpenFGA Check via AuthorizeService.
+	// в дополнение к вопросу о доступе через AuthorizeService.
 	//
 	// Порядок: метрики (оборачивают всё) → recovery → личность вызывающего
 	// (identityUnary: сертификат, затем переданная личность от разрешённого
@@ -595,7 +576,7 @@ func runServe(cfg config.Config) error {
 		Mode:    surfaceMode,
 		Logger:  logger,
 		Addr:    addrAxis(hooksAddr, "KACHO_IAM_HOOKS_HTTP_ADDR не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
-		Handler: buildHooksMux(pool, kachoRepo, opsRepo, openfgaClient, metricsReg, cfg, logger),
+		Handler: buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates, metricsReg, cfg, logger),
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
 			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
@@ -849,56 +830,14 @@ func runServe(cfg config.Config) error {
 	}
 	// Enterprise SSO (SCIM + SAML) is not served by this listener set.
 
-	// fga_outbox drainer. Watches kacho_iam.fga_outbox via LISTEN/NOTIFY
-	// (channel `kacho_iam_fga_outbox` set up by migration 0001_initial.sql), drains
-	// pending tuples at startup, and applies each row to OpenFGA via
-	// clients.NewFGAApplier (Write/Delete tuples; idempotent on 400-already-
-	// exists / 400-cannot-delete; retry on 5xx; poison on validation_error).
-	// The drainer always runs. It does NOT depend on the store id being provisioned:
-	// before the openfga-bootstrap Job writes KACHO_IAM_OPENFGA_STORE_ID the client
-	// fails closed (ErrNotConfigured), the applier retries, and rows stay unsent —
-	// which is the intended first-boot state, not a reason to refuse to start (#654).
-	fgaDrainerLogger := logger.With(slog.String("component", "fga_outbox_drainer"))
-	fgaDrainer, derr := drainer.New[clients.FGAOutboxEvent](
-		pool,
-		fgaOutboxDrainerConfig(),
-		clients.DecodeFGAOutboxEvent,
-		clients.NewFGAApplier(svcs.relationStore),
-		fgaDrainerLogger,
-		drainer.WithWedgeObserver[clients.FGAOutboxEvent](func(partition string, age time.Duration) {
-			fgaDrainerLogger.Warn("fga_outbox partition wedged (head-of-line)",
-				slog.String("partition", partition),
-				slog.Duration("oldest_unsent_age", age))
-		}),
-	)
-	if derr != nil {
-		_ = listener.Close()
-		_ = internalListener.Close()
-		return fmt.Errorf("fga_outbox drainer init: %w", derr)
-	}
-	tasks = append(tasks, func() (err error) {
-		// Dead drainer must not leave the pod silently serving: a fatal exit (or a
-		// panic in Run) is escalated to a full shutdown so the deployment restarts
-		// instead of accepting writes whose owner-tuples never reach OpenFGA.
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("fga_outbox drainer panicked", "panic", r)
-				err = fmt.Errorf("fga_outbox drainer panic: %v", r)
-			}
-			if err != nil {
-				triggerShutdown()
-			}
-		}()
-		logger.Info("kacho-iam fga_outbox drainer starting",
-			"table", "kacho_iam.fga_outbox",
-			"channel", "kacho_iam_fga_outbox")
-		if rerr := fgaDrainer.Run(ctx); rerr != nil {
-			logger.Error("fga_outbox drainer exited with error", "err", rerr)
-			return fmt.Errorf("fga_outbox drainer: %w", rerr)
-		}
-		logger.Info("kacho-iam fga_outbox drainer stopped cleanly")
-		return nil
-	})
+	// ДРЕНАЖА ЖУРНАЛА НАМЕРЕНИЙ ЗДЕСЬ НЕТ — снят вместе с адресатом.
+	//
+	// Он читал `kacho_iam.fga_outbox` и применял каждую строку к внешнему движку
+	// отношений. Движка нет; журнал ОСТАЁТСЯ и остаётся не «на всякий случай»:
+	// прямой факт, из которого форма собирает вердикт, складывается ИЗ ЭТОГО ЖУРНАЛА
+	// триггером (миграция 0098). Снять журнал вместе с дренажом значило бы обесточить
+	// источник собственного вердикта — и обесточить тихо: таблица осталась бы на
+	// месте, запросы продолжили бы исполняться, а ответы поехали бы в сторону отказа.
 
 	// subject_change_outbox push-drainer. Drains kacho_iam.subject_change_outbox
 	// via the corelib generic Drainer[T] → InternalAuthzCacheService.InvalidateSubject
@@ -946,16 +885,9 @@ func runServe(cfg config.Config) error {
 		runProviderCompensationMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
-	// Состояние двух остальных очередей сервиса. Дренаж у обеих был поднят, а
-	// скана состояния не было ни у одной: «в очереди лежит N строк, старейшей M
-	// секунд» не производил никто, и застрявшая очередь молчала ровно так же, как
-	// пустая. Для очереди tuple'ов дополнительно снимается разложение по
-	// направлению — иначе полностью мёртвое снятие прав неотличимо от «снимать
-	// было нечего» (см. outbox_metrics_wiring.go).
-	tasks = append(tasks, func() error {
-		runFGAOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
-		return nil
-	})
+	// Состояние очереди инвалидаций. Скана её состояния не было: «в очереди лежит N
+	// строк, старейшей M секунд» не производил никто, и застрявшая очередь молчала
+	// ровно так же, как пустая.
 	tasks = append(tasks, func() error {
 		runSubjectChangeOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
@@ -970,29 +902,15 @@ func runServe(cfg config.Config) error {
 		runAuditOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
-	// Возврат отравленных строк очереди tuple'ов в работу. Дренаж травит отказ
-	// владельца прав как постоянный — верно, повтор идентичного запроса пройти не
-	// может, — но без возврата отравленная строка не берётся НИКОГДА, и любой
-	// временный рассинхрон (модель приехала позже строки) становится бессрочной
-	// потерей права. Триггер — смена версии модели, а не таймер: см.
-	// fga_outbox_redrive_backstop.go.
-	if openfgaClient != nil && openfgaClient.Endpoint != "" {
-		if rerr := startFGAOutboxRedrive(ctx, pool, openfgaClient.LatestAuthorizationModelID, logger); rerr != nil {
-			return fmt.Errorf("fga_outbox redrive backstop: %w", rerr)
-		}
-	} else {
-		// Названо вслух: без клиента наблюдать смену модели нечем, значит
-		// возврата НЕТ. Молчание здесь читалось бы как «механизм работает».
-		logger.Warn("fga_outbox poison redrive NOT started: no OpenFGA endpoint; " +
-			"a poisoned tuple intent will stay poisoned until an operator acts")
-	}
+	// ВОЗВРАТА ОТРАВЛЕННЫХ СТРОК тоже нет, и это следствие, а не упущение: травил
+	// строки дренаж, отказом владельца прав. Дренажа нет — травить некому.
 
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_kacho_root` to
 	// the user identified by KACHO_IAM_BOOTSTRAP_ROOT_EMAIL and enqueues the
-	// FGA tuple into the transactional fga_outbox (drained above). The user
-	// row is mirrored only on first login / fixture upsert — which races
-	// startup — so a one-shot call would skip and the cluster-admin tuple
-	// would never reach OpenFGA (Bug B). The reconciler re-runs until the
+	// FGA tuple into the transactional fga_outbox, out of which a trigger folds the
+	// direct fact in the same commit. The user row is mirrored only on first login /
+	// fixture upsert — which races startup — so a one-shot call would skip and the
+	// cluster-admin tuple would never be written at all (Bug B). The reconciler re-runs until the
 	// grant commits; it is non-fatal by contract (best-effort startup
 	// convenience, never a hard gate). No-op when the env is unset.
 	bootstrapEmail := os.Getenv("KACHO_IAM_BOOTSTRAP_ROOT_EMAIL")
@@ -1067,7 +985,7 @@ func runServe(cfg config.Config) error {
 		// enforcement relation the catalog gates on, not merely that the ledger is
 		// non-empty (the Design-A class-of-bug blind spot). nil-safe (degraded FGA →
 		// non-fatal skip).
-		WithRelationChecker(openfgaClient)
+		WithRelationChecker(svcs.ownGates)
 	// Разовая уборка выдач, чья область УЖЕ УДАЛЕНА (#810, продолжение #792).
 	//
 	// ПОЧЕМУ ПЕРЕД ПОДМЁТКОЙ РЕКОНСАЙЛА, А НЕ ПОСЛЕ. Подмётка обходит КАЖДУЮ

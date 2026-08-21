@@ -29,9 +29,9 @@ package user
 //
 // Поэтому:
 //
-//   - TestIntegration_IdentityTuplesAreRemovedFromTheModel — ИСХОД: настоящий
-//     движок прав, кортежи пишутся в форме СОЗДАНИЯ, снимаются списком УДАЛЕНИЯ,
-//     и движок опрашивается о результате. Два разных производителя формы по обе
+//   - TestIntegration_IdentityTuplesAreRemovedFromTheModel — ИСХОД: настоящая
+//     база iam, кортежи пишутся в форме СОЗДАНИЯ, снимаются списком УДАЛЕНИЯ, и
+//     СОСТОЯНИЕ опрашивается о результате. Два разных производителя формы по обе
 //     стороны — если они разойдутся, снятие станет no-op и проба покраснеет;
 //   - TestDeleteUser_EmitsIdentityTupleDeletesInTx — МЕСТО: намерение уходит в
 //     ТОЙ ЖЕ транзакции, что и снятие строки, а не «потом» и не best-effort.
@@ -42,14 +42,17 @@ package user
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
 )
 
 // identityTuplesOfCreation — форма, которую пишет путь СОЗДАНИЯ
@@ -74,56 +77,102 @@ func toClientTuples(in []service.RelationTuple) []clients.RelationTuple {
 	return out
 }
 
+// journalWrite кладёт строку намерения ЗАПИСИ и утверждает, что проекция её
+// приняла. Утверждение несущее: без него «кортеж есть» было бы неотличимо от
+// «фикстура ничего не посеяла».
+func journalWrite(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tp clients.RelationTuple) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+		VALUES ('fga.tuple.write',
+		        jsonb_build_object('user', $1::text, 'relation', $2::text, 'object', $3::text),
+		        now())`, tp.User, tp.Relation, tp.Object)
+	require.NoErrorf(t, err, "журнал: запись %+v", tp)
+}
+
+// journalDelete кладёт строку намерения СНЯТИЯ — ровно ту форму, которую эмитит
+// путь удаления. Отказ проекции здесь и есть «принимающая сторона формы не
+// приняла»: намерение, которого она не принимает, неотличимо от неэмитированного.
+func journalDelete(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tuples []clients.RelationTuple) {
+	t.Helper()
+	for _, tp := range tuples {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+			VALUES ('fga.tuple.delete',
+			        jsonb_build_object('user', $1::text, 'relation', $2::text, 'object', $3::text),
+			        now())`, tp.User, tp.Relation, tp.Object)
+		require.NoErrorf(t, err,
+			"проекция обязана ПРИНЯТЬ форму снятия %+v: намерение, которого принимающая "+
+				"сторона не принимает, не отличимо от неэмитированного", tp)
+	}
+}
+
+// factHeld — держится ли этот прямой факт состоянием прямо сейчас.
+func factHeld(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tp clients.RelationTuple) bool {
+	t.Helper()
+	objectType, objectID, ok := strings.Cut(tp.Object, ":")
+	require.Truef(t, ok, "объект %q не разбирается как «тип:идентификатор»", tp.Object)
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*)::int FROM kacho_iam.relation_fact
+		 WHERE object_type = $1 AND object_id = $2 AND relation = $3 AND subject = $4`,
+		objectType, objectID, tp.Relation, tp.User).Scan(&n))
+	return n > 0
+}
+
 func TestIntegration_IdentityTuplesAreRemovedFromTheModel(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
+		t.Skip("нужна живая база (-short)")
 	}
 	ctx := context.Background()
-	h := fgatest.New(t)
+	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
+	require.NoError(t, err, "пул")
+	t.Cleanup(pool.Close)
 
 	const (
 		userID    = "usr00000000000tupl1"
 		accountID = "acc00000000000tupl1"
 	)
 
-	// ── форма СОЗДАНИЯ: кортежи объекта личности лежат в движке ──────────────
-	for _, tp := range identityTuplesOfCreation(userID, accountID) {
-		h.Write(t, tp.User, tp.Relation, tp.Object)
+	// ── форма СОЗДАНИЯ: кортежи объекта личности лежат в состоянии ───────────
+	created := identityTuplesOfCreation(userID, accountID)
+	for _, tp := range created {
+		journalWrite(t, ctx, pool, tp)
 	}
 
 	// Положительный контроль. Без него «кортежей нет» было бы истинно и на
-	// пустом хранилище, то есть утверждение ниже не значило бы ничего.
-	selfOK, err := h.Client.Check(ctx, "user:"+userID, "subject", "iam_user:"+userID)
-	require.NoError(t, err)
-	require.True(t, selfOK, "ПРЕДПОСЫЛКА: самокортеж обязан лежать в движке до снятия")
+	// пустом состоянии, то есть утверждение ниже не значило бы ничего.
+	for _, tp := range created {
+		require.Truef(t, factHeld(t, ctx, pool, tp),
+			"ПРЕДПОСЫЛКА: кортеж %+v обязан лежать в состоянии до снятия", tp)
+	}
 
 	// ── снятие: применяем ровно тот список, который эмитит путь удаления ─────
 	deletes := identityTuplesForRemoval(domain.UserID(userID), accountID)
 	require.NotEmpty(t, deletes,
 		"список снятия пуст — тогда удаление ничего не снимает, а проба ниже зеленеет вхолостую")
-	require.NoError(t, h.Client.DeleteTuples(ctx, toClientTuples(deletes)),
-		"движок обязан ПРИНЯТЬ форму снятия: намерение, которого принимающая сторона "+
-			"не принимает, не отличимо от неэмитированного")
+	journalDelete(t, ctx, pool, toClientTuples(deletes))
 
 	// ── исход: кортежей больше нет ───────────────────────────────────────────
-	selfOK, err = h.Client.Check(ctx, "user:"+userID, "subject", "iam_user:"+userID)
-	require.NoError(t, err)
-	require.False(t, selfOK,
+	require.False(t, factHeld(t, ctx, pool, clients.RelationTuple{
+		User: "user:" + userID, Relation: "subject", Object: "iam_user:" + userID}),
 		"самокортеж снятого человека обязан исчезнуть из модели — иначе о человеке, "+
 			"которого нет, продолжают утверждать")
 
-	acctOK, err := h.Client.Check(ctx, "account:"+accountID, "account", "iam_user:"+userID)
-	require.NoError(t, err)
-	require.False(t, acctOK,
+	require.False(t, factHeld(t, ctx, pool, clients.RelationTuple{
+		User: "account:" + accountID, Relation: "account", Object: "iam_user:" + userID}),
 		"указатель принадлежности обязан исчезнуть: от него выводится административный "+
 			"уровень, и переживать своего носителя он не вправе")
 
 	// ── повторное снятие идемпотентно ────────────────────────────────────────
 	// Дренаж доставляет как минимум однажды, поэтому повтор — штатный путь, а не
 	// исключительный.
-	require.NoError(t, h.Client.DeleteTuples(ctx, toClientTuples(deletes)),
-		"повторное снятие уже снятого обязано быть безобидным: дренаж at-least-once, "+
-			"и вторая доставка не должна отравлять строку")
+	journalDelete(t, ctx, pool, toClientTuples(deletes))
+	for _, tp := range created {
+		require.Falsef(t, factHeld(t, ctx, pool, tp),
+			"повторное снятие уже снятого обязано быть безобидным: дренаж at-least-once, "+
+				"и вторая доставка не должна ни воскрешать кортеж %+v, ни отравлять строку", tp)
+	}
 }
 
 // TestDeleteUser_EmitsIdentityTupleDeletesInTx — намерение уходит В ТОЙ ЖЕ

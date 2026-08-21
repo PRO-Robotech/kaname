@@ -3,26 +3,40 @@
 
 package access_binding
 
-// fga_symmetric_test.go — symmetric FGA grant/revoke regression test.
+// fga_symmetric_test.go — symmetric grant/revoke regression test.
 //
-// Contract: the production path enqueues tuples via EmitRelationWrite /
-// EmitRelationDelete in the writer-tx (drainer applies async). Both Create and
-// Delete emit identical tuple sets so that grant and revoke are byte-symmetric.
+// Contract: the production path states tuples via EmitRelationWrite /
+// EmitRelationDelete IN THE WRITER-TX. Both Create and Delete state identical tuple
+// sets, so grant and revoke are byte-symmetric — a revoke that removed a different
+// set than the grant added would leave access behind or strip access it never gave.
 //
-// The fake repo's EmitRelationWrite/EmitRelationDelete capture the async
-// fga_outbox set. Create's sync FGA path runs through the reconciler (unwired in
-// this unit harness), so the recordingFGA's WriteTuples stays empty. Delete, by
-// contrast, applies the SAME persisted emitted-set to OpenFGA synchronously after
-// commit (relations.DeleteTuples) — revoke ≈ grant latency — so the recordingFGA's
-// DeleteTuples now mirrors the async revoke set (asserted symmetric below).
+// # What "in the writer-tx" now means, and why this file lost its second half
 //
-// The test does NOT use testcontainers (no Postgres required). It wires
-// in-memory fakes for the Repository and operations.Repo, exercises the full
-// Create→Delete round-trip through both use-cases, and asserts:
+// The journal `kacho_iam.fga_outbox` used to be an at-least-once queue toward an
+// EXTERNAL relation engine, drained asynchronously. Because that drain lagged, the
+// use-cases additionally removed the same set from the engine SYNCHRONOUSLY after
+// commit, through clients.RelationStore.DeleteTuples, and this file asserted both
+// halves.
 //
-//  1. Create emits ≥2 tuples (role-relation + hierarchy for project-scoped).
-//  2. Delete emits exactly the same set (grant is fully revoked).
-//  3. For account-scoped binding: Create emits 1 tuple, Delete emits 1 tuple.
+// Stage S6 removed the engine. The journal stayed and changed role: a database
+// trigger (`relation_fact_follows_journal`, migrations 0098/0100) folds every journal
+// row into `kacho_iam.relation_fact` — the table a verdict is read from — IN THE SAME
+// TRANSACTION as the INSERT. So the revoke is effective at commit, which is earlier
+// and stricter than "synchronously, just after commit"; and the port through which
+// the second half was asserted no longer carries DeleteTuples at all.
+//
+// Keeping those assertions would have made them true by construction of the fake's
+// own type: with no method to call, "the set was not removed" could never go red for
+// a product reason. They are dropped, the reason is written here rather than deleted,
+// and what remains is the half that has a producer — the set stated in the writer-tx.
+//
+// The test does NOT use testcontainers (no Postgres required). It wires in-memory
+// fakes for the Repository and operations.Repo, exercises the full Create→Delete
+// round-trip through both use-cases, and asserts:
+//
+//  1. Create states ≥2 tuples (role-relation + hierarchy for project-scoped).
+//  2. Delete states exactly the same set (grant is fully revoked).
+//  3. For an account-scoped binding: Create states 1 tuple, Delete states 1 tuple.
 
 import (
 	"context"
@@ -56,10 +70,10 @@ import (
 // ─── Symmetric FGA grant/revoke ────────────────────────────────────────────
 
 // TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet asserts the
-// fga_outbox emit-in-tx contract — the tuple set emitted by Create
-// (EmitRelationWrite) is byte-identical to the tuple set emitted by Delete
-// (EmitRelationDelete). Drainer then applies them to OpenFGA asynchronously
-// (covered by fga_applier integration tests).
+// emit-in-tx contract — the tuple set stated by Create (EmitRelationWrite) is
+// byte-identical to the set stated by Delete (EmitRelationDelete). The projection
+// of those rows into the fact table a verdict is read from is exercised against a
+// real Postgres by the relverdict integration suite.
 func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	const (
 		roleID     = "rol_viewer_test_001"
@@ -74,7 +88,7 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	perms := domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.list"}
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, roleName, perms)
 	opsRepo := newFakeOpsRepo()
-	fga := newRecordingFGA() // still wired via WithRelationStore for backwards-compat surface
+	fga := newRecordingFGA() // wired via WithRelationStore: the READ side (grant-authority)
 
 	// Context with the account owner as principal → passes requireGrantAuthority.
 	ctx := newOwnerContext(ownerID)
@@ -99,23 +113,17 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	defer cancel()
 	require.NoError(t, operations.Wait(waitCtx), "async Create worker must complete")
 
-	// fga_outbox emits captured via the writer-iface fake, NOT via
-	// recordingFGA (which is no longer called sync).
+	// Journal rows captured via the writer-iface fake.
 	writtenTuples := repo.drainFGAWritten()
 	require.GreaterOrEqual(t, len(writtenTuples), 2,
-		"Create must emit ≥2 fga_outbox tuples (role-relation + hierarchy)")
-
-	// Sanity-check: sync path NOT invoked — recordingFGA's WriteTuples must
-	// have received nothing.
-	require.Empty(t, fga.drainWritten(),
-		"sync u.fga.WriteTuples MUST NOT be called (post-commit Warn pattern removed)")
+		"Create must state ≥2 journal tuples (role-relation + hierarchy)")
 
 	// Verify role-relation tuple.
 	assert.Contains(t, writtenTuples, ab_repo.RelationTuple{
 		User:     "user:" + subjectID,
 		Relation: "viewer",
 		Object:   "project:" + resourceID,
-	}, "Create must emit the role-relation tuple to fga_outbox")
+	}, "Create must state the role-relation tuple in the journal")
 
 	// Verify hierarchy tuple (required for Get/Delete authz cascade).
 	abID := repo.lastInsertedID()
@@ -124,7 +132,7 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 		User:     "project:" + resourceID,
 		Relation: "project",
 		Object:   "iam_access_binding:" + string(abID),
-	}, "Create must emit the hierarchy tuple to fga_outbox")
+	}, "Create must state the hierarchy tuple in the journal")
 
 	// ── Delete ────────────────────────────────────────────────────────────────
 	deleteUC := NewDeleteAccessBindingUseCase(repo, opsRepo).
@@ -142,31 +150,18 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	deletedTuples := repo.drainFGADeleted()
 
 	require.Equal(t, len(writtenTuples), len(deletedTuples),
-		"Delete must emit the same number of fga_outbox tuples as Create did")
+		"Delete must state the same number of journal tuples as Create did")
 
 	for _, w := range writtenTuples {
 		assert.Contains(t, deletedTuples, w,
-			"Delete must emit revoke tuple {User:%q Relation:%q Object:%q}",
+			"Delete must state revoke tuple {User:%q Relation:%q Object:%q}",
 			w.User, w.Relation, w.Object)
-	}
-
-	// Synchronous revoke (revoke ≈ grant latency): doDelete applies the SAME
-	// persisted emitted-set to OpenFGA synchronously after commit (relations.
-	// DeleteTuples), so the deny is observable at Operation-done. The async
-	// EmitRelationDelete + drainer remain the at-least-once idempotent backstop.
-	syncDeleted := fga.drainDeleted()
-	require.Equal(t, len(writtenTuples), len(syncDeleted),
-		"Delete must SYNCHRONOUSLY remove the same tuple set Create granted")
-	for _, w := range writtenTuples {
-		assert.Contains(t, syncDeleted,
-			clients.RelationTuple{User: w.User, Relation: w.Relation, Object: w.Object},
-			"sync revoke must remove tuple {User:%q Relation:%q Object:%q}", w.User, w.Relation, w.Object)
 	}
 }
 
 // TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple —
-// account-scoped bindings emit the role-relation tuple PLUS the
-// `account`-parent hierarchy tuple to fga_outbox, so the FGA model's
+// account-scoped bindings state the role-relation tuple PLUS the
+// `account`-parent hierarchy tuple in the journal, so the model's
 // `viewer from account` cascade makes the binding object readable by the
 // account owner (Get/List/Delete). Without the hierarchy tuple every
 // account-scoped binding 403'd on read (newman-e2e iam-access-binding cascade).
@@ -197,7 +192,7 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
 		RoleID:       domain.RoleID(roleID),
-		ResourceType: "account", // account anchor — emits its own `account`-parent pointer
+		ResourceType: "account", // account anchor — states its own `account`-parent pointer
 		ResourceID:   resID,
 	}
 	_, err := createUC.Execute(ctx, binding)
@@ -213,12 +208,12 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 		User:     "user:" + subjectID,
 		Relation: "admin",
 		Object:   "account:" + resID,
-	}, "must emit the role-relation tuple")
+	}, "must state the role-relation tuple")
 	assert.Contains(t, written, ab_repo.RelationTuple{
 		User:     "account:" + resID,
 		Relation: "account",
 		Object:   "iam_access_binding:" + string(repo.lastInsertedID()),
-	}, "must emit the account-parent hierarchy tuple (cascade readability)")
+	}, "must state the account-parent hierarchy tuple (cascade readability)")
 
 	deleteUC := NewDeleteAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
 	subjectCtx := newOwnerContext(subjectID)
@@ -229,66 +224,38 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 	require.NoError(t, operations.Wait(waitCtx2))
 
 	deleted := repo.drainFGADeleted()
-	require.Equal(t, written, deleted, "Delete must emit the same single tuple Create emitted")
-
-	// Create's sync FGA write goes through the reconciler (unwired here) — the
-	// recordingFGA's WriteTuples stays empty. Delete, however, removes the same
-	// persisted emitted-set from OpenFGA synchronously (relations.DeleteTuples) so
-	// the deny is observable at Operation-done (revoke ≈ grant latency).
-	require.Empty(t, fga.drainWritten(), "sync FGA write must not be called at Create")
-	syncDeleted := fga.drainDeleted()
-	require.Len(t, syncDeleted, len(written),
-		"Delete must SYNCHRONOUSLY remove the same set Create granted")
-	for _, w := range written {
-		assert.Contains(t, syncDeleted,
-			clients.RelationTuple{User: w.User, Relation: w.Relation, Object: w.Object},
-			"sync revoke must remove tuple {User:%q Relation:%q Object:%q}", w.User, w.Relation, w.Object)
-	}
+	require.Equal(t, written, deleted, "Delete must state the same single tuple Create stated")
 }
 
-// ─── recording FGA client ────────────────────────────────────────────────────
+// ─── relation-store stub ─────────────────────────────────────────────────────
 
-type recordingFGA struct {
-	mu      sync.Mutex
-	written []clients.RelationTuple
-	deleted []clients.RelationTuple
-}
+// recordingFGA — clients.RelationStore for the READ side of these use-cases:
+// requireGrantAuthority asks it whether the caller may hand out this grant, and it
+// answers yes so a fixture can get past that gate and reach the subject under test.
+//
+// # It no longer records anything, and the name is a debt this change did not pay
+//
+// It carried WriteTuples/DeleteTuples with the sets they were handed, because
+// clients.RelationStore declared them: the port stood for someone ELSE'S storage,
+// and a revoke reached that storage through it. Stage S6 removed the external
+// engine; the port kept only the question (Check). There is nowhere to write any
+// more — a grant becomes an answer by the SAME COMMIT that records it (journal →
+// trigger `relation_fact_follows_journal` → `relation_fact`).
+//
+// The recording side is removed rather than left in place. A method standing for a
+// port method that no longer exists has no caller: nothing can exercise it, so
+// nothing asserted about it can ever go red for a product reason, and a fake that
+// offers it looks like it stands for a wider surface than it does.
+//
+// The NAME stays because eight files of this package name this type or its
+// constructor and they are not this change's subject; renaming it here would edit
+// them. What was false was what the type DID, and that is what is corrected —
+// with the mismatch written down rather than left for the next reader to discover.
+type recordingFGA struct{}
 
 func newRecordingFGA() *recordingFGA { return &recordingFGA{} }
 
 func (r *recordingFGA) Check(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
-
-func (r *recordingFGA) WriteTuples(_ context.Context, tuples []clients.RelationTuple) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.written = append(r.written, tuples...)
-	return nil
-}
-
-func (r *recordingFGA) DeleteTuples(_ context.Context, tuples []clients.RelationTuple) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.deleted = append(r.deleted, tuples...)
-	return nil
-}
-
-func (r *recordingFGA) drainWritten() []clients.RelationTuple {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]clients.RelationTuple, len(r.written))
-	copy(out, r.written)
-	r.written = nil
-	return out
-}
-
-func (r *recordingFGA) drainDeleted() []clients.RelationTuple {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]clients.RelationTuple, len(r.deleted))
-	copy(out, r.deleted)
-	r.deleted = nil
-	return out
-}
 
 var _ clients.RelationStore = (*recordingFGA)(nil)
 
@@ -308,8 +275,8 @@ type abFakeRepo struct {
 	// whole-role anchor collapse. Empty ⇒ legacy permission-only role.
 	roleRules domain.Rules
 	ab        *domain.AccessBinding // last inserted
-	// Captured fga_outbox emit-in-tx tuples (mirror what
-	// drainer would apply to OpenFGA).
+	// Captured journal (`kacho_iam.fga_outbox`) emit-in-tx tuples — the rows a
+	// trigger folds into `kacho_iam.relation_fact` inside the same transaction.
 	fgaWritten []ab_repo.RelationTuple
 	fgaDeleted []ab_repo.RelationTuple
 	// Captured audit_outbox compliance events emitted in the writer-tx.
@@ -368,7 +335,7 @@ type abFakeRepo struct {
 	// (not a re-derive from the mutable role). Set semantics on the tuple
 	// (dedupe), but INSERTION ORDER is preserved on read-back: the real pg repo
 	// returns a deterministic `ORDER BY relation, object, fga_user` and the
-	// symmetric-revoke contract is set-based (drainer applies a set to OpenFGA),
+	// symmetric-revoke contract is set-based (the journal's projection applies a set),
 	// yet TestFGASymmetric asserts byte-equality of the write-set vs the
 	// delete-set. Insertion order makes SelectEmittedTuples deterministic AND
 	// equal to the order EmitRelationWrite captured (create.go feeds the SAME
@@ -377,8 +344,9 @@ type abFakeRepo struct {
 	// `map[tuple]struct{}` iterates in random order ⇒ require.Equal flakes/fails.
 	emittedTuples map[domain.AccessBindingID]*orderedTupleSet
 	// claimedByOthers — the tuples some OTHER *ACTIVE* binding also recorded in its
-	// own ledger row (the emitted-tuple ledger is keyed per binding, an OpenFGA
-	// tuple is not refcounted). Backs the fake
+	// own ledger row (the emitted-tuple ledger is keyed per binding, while the
+	// materialized fact is one row per (object, relation, subject) and is NOT
+	// refcounted). Backs the fake
 	// SelectTuplesClaimedByOtherActiveBindings probe; seeded per test via
 	// seedTuplesClaimedByOtherActiveBindings. Empty ⇒ nothing else claims anything.
 	claimedByOthers []ab_repo.RelationTuple
@@ -394,6 +362,15 @@ func (r *abFakeRepo) recordTxOp(op string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.txOps = append(r.txOps, op)
+}
+
+// resetTxOpTrace drops the marks recorded so far, so a probe whose subject is ONE
+// transaction is not reading another one's. Without it a fixture that grants before
+// it revokes cannot tell the two transactions apart in a single flat trace.
+func (r *abFakeRepo) resetTxOpTrace() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.txOps = nil
 }
 
 // txOpTrace returns a copy of the recorded writer-tx port-call order.
@@ -577,6 +554,15 @@ func (w *abFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserToke
 }
 func (w *abFakeWriter) AdvisoryXactLock(_ context.Context, key string) error {
 	w.repo.recordTxOp("advisory_xact_lock:" + key)
+	return nil
+}
+
+// Commit closes the writer-tx and marks the trace, so a probe can tell what was
+// stated INSIDE the transaction from what happened after it. abFakeReader.Commit is
+// shadowed deliberately: the reader's commit is not the boundary anything here is
+// about.
+func (w *abFakeWriter) Commit(_ context.Context) error {
+	w.repo.recordTxOp("commit")
 	return nil
 }
 
@@ -917,7 +903,17 @@ func (w *fakeABWtr) EmitRelationWrite(_ context.Context, tuples []ab_repo.Relati
 	return nil
 }
 
+// EmitRelationDelete also leaves a mark in the writer-tx trace.
+//
+// The mark is what lets a probe assert WHEN the revoke set is stated, and "when" is
+// the whole property now: the trigger on the journal applies the row to the fact
+// table inside the same transaction, so a set stated BEFORE the commit is denied
+// AT the commit — whereas a set stated after it would be a second, separate write
+// that could be lost between the two. Without the mark the ordering is invisible to
+// every probe in this package, and a move of the emit out of the transaction would
+// keep every set-equality assertion green.
 func (w *fakeABWtr) EmitRelationDelete(_ context.Context, tuples []ab_repo.RelationTuple) error {
+	w.repo.recordTxOp("emit_relation_delete")
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
 	w.repo.fgaDeleted = append(w.repo.fgaDeleted, tuples...)

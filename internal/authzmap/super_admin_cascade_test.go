@@ -3,305 +3,505 @@
 
 package authzmap_test
 
+// super_admin_cascade_test.go — исход директивы владельца «Три уровня
+// супер-доступа — КАСКАДОМ, ниже — плоско по выдаче» (.claude/rules/security.md).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТО ЗДЕСЬ ПРОВЕРЯЕТСЯ
+//
+// Модель — плоский индекс: доступ арендатора материализуется выдачей на объект.
+// Для арендных ролей это так и остаётся. Для трёх верхних уровней — намеренно
+// НЕТ, потому что материализация ломает ровно тот сценарий, ради которого они
+// существуют: при отставшем или сломанном конвейере человек, обязанный всё
+// починить, сам оказывается без прав. Эти три разрешаются в момент вопроса:
+//
+//  1. администратор облака — cluster:cluster_kacho_root#system_admin, достаёт до всего;
+//  2. учётка первичной установки — то же отношение (её сеет старт), то есть тот
+//     же источник; отдельного носителя нет;
+//  3. администратор аккаунта — account:<id>#admin, достаёт ВНУТРЬ своего аккаунта.
+//
+// Инцидент, который здесь заперт (2026-07-26): каждый глагол на
+// iam_access_binding был прямым множеством без единого `or`, поэтому
+// администратор кластера видел все выдачи, а снять мог только свои — 652 отказа
+// против 32 успехов за прогон. По-человечески: сотрудник выдал коллеге доступ и
+// уволился, отозвать некому.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ГДЕ БЕРЁТСЯ ИСХОД (изменилось при снятии внешнего движка отношений)
+//
+// Прежде эти пробы поднимали движок контейнером, грузили в него заготовку модели
+// из карты чарта и спрашивали его. Ни движка, ни карты, ни подчарта в дереве
+// нет. Исход теперь считает форма вердикта поверх СОБСТВЕННОЙ базы iam
+// (`internal/repo/kacho/pg/relverdict`), а вывод отношений она берёт из той же
+// модели, что разбирают структурные пробы этого пакета.
+//
+// Утверждения при этом НЕ ослаблены. План вывода, скомпилированный из модели,
+// даёт для листового глагола ровно те источники, которые директива и называет, —
+// прямой факт на объекте, `admin`/`owner` на аккаунте-предке и `system_admin` на
+// кластере, — и НЕ даёт собственного `admin` проекта. Поэтому каждое «достаёт» и
+// каждое «не достаёт» ниже проверяется тем же вопросом, каким его задаёт продукт.
+//
+// Ни одна проба не кладёт глагольную строку на целевой объект: всякое разрешение
+// ниже обязано прийти каскадом, всякий отказ — пережить каскад.
+
 import (
 	"context"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/fgatest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 )
 
-// super_admin_cascade_test.go — behavioural lock for the owner directive
-// "Три уровня супер-доступа — КАСКАДОМ, ниже — плоско по выдаче"
-// (.claude/rules/security.md).
-//
-// The model is a FLAT INDEX: access is materialized per-object by the iam
-// reconciler. That stays true for TENANT roles. It is deliberately NOT true for
-// the three top levels, because materializing them breaks the exact scenario they
-// exist for: with a lagging or broken drainer the person who has to fix
-// everything is himself locked out. Those three resolve at request time:
-//
-//	1. cloud administrator  — cluster:cluster_kacho_root#system_admin, cascades onto everything;
-//	2. bootstrap identity   — the same relation (migration 0058 / bootstrap reconciler
-//	                          seed it on cluster:cluster_kacho_root), so it is covered
-//	                          by the same disjunct — no separate carrier;
-//	3. account administrator — account:<id>#admin, cascades WITHIN its own account only.
-//
-// The incident this locks (2026-07-26): every verb on iam_access_binding was a
-// direct userset with no `or`, so a cluster administrator could see every grant
-// but revoke only his own — 652 denials against 32 allows in one run. Practically:
-// an employee grants a colleague access and leaves → the administrator cannot
-// revoke, and the only way out is editing the database by hand.
-//
-// The checks below run against the DEPLOYED artifact — the openfga-bootstrap
-// ConfigMap `model.json` block, which is what the bootstrap Job actually POSTs to
-// OpenFGA — loaded into a real OpenFGA container. Reading the DSL would only
-// prove the shape of the source file; this proves the thing that is enforced.
-//
-// Nothing here writes a v_*/tier tuple on the target object: every allow below
-// must come from the cascade alone, and every deny must survive the cascade.
-
+// Мир каскада. Идентификаторы короткие и говорящие: в тексте отказа они и есть
+// адрес.
 const (
-	saCluster   = "cluster:cluster_kacho_root"
-	saAccountA  = "account:acc-sacascadea"
-	saAccountB  = "account:acc-sacascadeb"
-	saProjectA  = "project:prj-sacascadea"
-	saProjectB  = "project:prj-sacascadeb"
-	saBindingA  = "iam_access_binding:abn-sacascadea"
-	saBindingB  = "iam_access_binding:abn-sacascadeb"
-	saNetworkA  = "vpc_network:net-sacascadea"
-	saVolumeA   = "storage_volume:vol-sacascadea"
-	saUserA     = "iam_user:usr-sacascadea"
-	saGroupA    = "iam_group:grp-sacascadea"
-	saRegistryA = "registry_registry:reg-sacascadea"
-	saRepoA     = "registry_repository:reg-sacascadea/app"
-	saLbA       = "nlb_network_load_balancer:nlb-sacascadea"
+	saClusterID = "cluster_kacho_root"
 
-	subjCloudAdmin  = "user:usr-sacloudadmin" // level 1 — cluster#system_admin
-	subjBootstrapSA = "service_account:sva-sabootstrap"
-	subjAccAdminA   = "user:usr-saaccadmina" // level 3 — account A#admin
-	subjAccOwnerA   = "user:usr-saaccownera" // level 3 via account A#owner
-	subjProjAdminA  = "user:usr-saprojadmina"
-	subjStranger    = "user:usr-sastranger"
+	saAccA = "acc-cascadea"
+	saAccB = "acc-cascadeb"
+	saPrjA = "prj-cascadea"
+	saPrjB = "prj-cascadeb"
+
+	saBindingA = "abn-cascadea"
+	saBindingB = "abn-cascadeb"
+
+	saNetworkA  = "net-cascadea"
+	saVolumeA   = "vol-cascadea"
+	saSnapshotA = "snp-cascadea"
+	saImageA    = "img-cascadea"
+	saLbA       = "nlb-cascadea"
+	saListenerA = "lst-cascadea"
+	saRegistryA = "reg-cascadea"
+	saRepoA     = "reg-cascadea/app"
+	saUserA     = "usr-cascadetarget"
+	saGroupA    = "grp-cascadea"
+
+	// Владельцы СТРОК аккаунтов: колонка владельца обязательна, а субъектами
+	// проб эти двое не являются.
+	saOwnerRowA = "usr-cascaderowa"
+	saOwnerRowB = "usr-cascaderowb"
+
+	subjCloudAdmin  = "user:usr-cascadecloud"           // уровень 1
+	subjBootstrapSA = "service_account:sva-cascadeboot" // уровень 2 — то же отношение
+	subjAccAdminA   = "user:usr-cascadeaccadmin"        // уровень 3 — admin на аккаунте A
+	subjAccOwnerA   = "user:usr-cascadeaccowner"        // уровень 3 — через owner
+	subjProjAdminA  = "user:usr-cascadeprojadmin"       // НЕ уровень: администратор проекта
+	subjStranger    = "user:usr-cascadestranger"        // ни одной строки нигде
 )
 
-// saVerbsOf — the verb relations THIS object's type declares, read from the same
-// per-type table the emitter uses.
+// saObject — объект мира: тип модели прав и его идентификатор.
+type saObject struct {
+	Type string
+	ID   string
+}
+
+var (
+	saAccountAObj = saObject{"account", saAccA}
+	saAccountBObj = saObject{"account", saAccB}
+	saProjectAObj = saObject{"project", saPrjA}
+	saProjectBObj = saObject{"project", saPrjB}
+	saBindingAObj = saObject{"iam_access_binding", saBindingA}
+	saBindingBObj = saObject{"iam_access_binding", saBindingB}
+	saNetworkAObj = saObject{"vpc_network", saNetworkA}
+	saVolumeAObj  = saObject{"storage_volume", saVolumeA}
+	saSnapshotObj = saObject{"storage_snapshot", saSnapshotA}
+	saImageObj    = saObject{"storage_image", saImageA}
+	saLbAObj      = saObject{"nlb_network_load_balancer", saLbA}
+	saListenerObj = saObject{"nlb_listener", saListenerA}
+	saRegistryObj = saObject{"registry_registry", saRegistryA}
+	saRepoObj     = saObject{"registry_repository", saRepoA}
+	saUserAObj    = saObject{"iam_user", saUserA}
+	saGroupAObj   = saObject{"iam_group", saGroupA}
+)
+
+// saVerbsOf — глагольные отношения, которые объявляет ТИП ЭТОГО объекта,
+// прочитанные из той же по-типовой таблицы, которой пользуется эмиттер.
 //
-// Here stood a five-name literal introduced as "the closed CRUD verb set every
-// verb-bearing type declares". That sentence stopped being true twice: once when
-// `nlb_target_group` took two membership verbs the literal never mentioned (so the
-// cascade over them was asserted nowhere), and again when `v_create` was withdrawn
-// from every type but `registry_registry` (so the literal named a relation most of
-// these objects no longer have). A duplicated set cannot follow its subject —
-// deriving it is what makes the cascade assertion exhaustive by construction.
-func saVerbsOf(t *testing.T, object string) []string {
+// Здесь стоял литерал из пяти имён, введённый как «закрытый CRUD-набор, который
+// объявляет каждый глаголоносный тип». Это утверждение переставало быть верным
+// дважды: когда `nlb_target_group` взял два глагола членства, которых литерал не
+// называл, и когда `v_create` был снят со всех типов, кроме `registry_registry`.
+// Дублированный набор не может следовать за своим предметом — вывод набора и
+// делает утверждение о каскаде исчерпывающим by construction.
+func saVerbsOf(t *testing.T, o saObject) []string {
 	t.Helper()
-	typ, _, ok := strings.Cut(object, ":")
-	require.Truef(t, ok, "object %q is not `<type>:<id>`", object)
-	verbs := authzmap.VerbRelationsOfType(typ)
-	require.NotEmptyf(t, verbs, "type %q declares no verb relation — the cascade assertion "+
-		"over it would be vacuous", typ)
+	verbs := authzmap.VerbRelationsOfType(o.Type)
+	require.NotEmptyf(t, verbs, "тип %q не объявляет ни одного глагольного отношения — "+
+		"утверждение о каскаде над ним было бы бессодержательным", o.Type)
 	return verbs
 }
 
-// seedSuperAdminWorld builds the two-account hierarchy the directive talks about,
-// using ONLY the structural parent-pointer tuples that production actually emits
-// (account/create.go, project/create.go, access_binding/tuples.go, the module
-// fgaregister/fgaintent emitters and registry fga_intent) plus the three
-// top-level grants. No per-object v_*/tier tuple is written anywhere.
-func seedSuperAdminWorld(t *testing.T, h *fgatest.Harness) {
+// saTiers — уровневые отношения, на которые гейтит каталог прав. Каскад,
+// покрывший только глаголы, оставил бы эти RPC отказанными.
+var saTiers = []string{"viewer", "editor", "admin"}
+
+// ── харнесс ──────────────────────────────────────────────────────────────────
+
+// withIAMTx — база iam этой пробы и одна ОТКАТЫВАЕМАЯ транзакция поверх неё.
+//
+// Транзакция, а не просто база: ссылка «аккаунт ↔ его владелец» круговая и
+// разрешается отложенным внешним ключом, который проверяется на COMMIT'е, — то
+// есть посев законен ровно внутри незакоммиченной транзакции. Ровно так же сеет
+// свои пробы и сама форма вердикта.
+func withIAMTx(t *testing.T, fn func(ctx context.Context, tx pgx.Tx)) {
 	t.Helper()
-
-	// Structural hierarchy: cluster ▶ account ▶ project ▶ resource.
-	h.Write(t, saCluster, "cluster", saAccountA)
-	h.Write(t, saCluster, "cluster", saAccountB)
-	h.Write(t, saAccountA, "account", saProjectA)
-	h.Write(t, saAccountB, "account", saProjectB)
-	h.Write(t, saCluster, "cluster", saProjectA)
-	h.Write(t, saCluster, "cluster", saProjectB)
-
-	// AccessBinding carries exactly ONE parent-pointer, named after its own scope
-	// (access_binding/tuples.go::hierarchyParentTuple) — project-scoped here, which
-	// is the common case and the one the incident hit.
-	h.Write(t, saProjectA, "project", saBindingA)
-	h.Write(t, saProjectB, "project", saBindingB)
-
-	// Leaf resources, as their owning modules register them.
-	h.Write(t, saProjectA, "project", saNetworkA)  // vpc fgaregister
-	h.Write(t, saProjectA, "project", saVolumeA)   // storage fgaregister
-	h.Write(t, saProjectA, "project", saLbA)       // nlb fga_intent
-	h.Write(t, saProjectA, "project", saRegistryA) // registry fga_intent
-	h.Write(t, saRegistryA, "parent", saRepoA)     // repo is a child of its registry
-	h.Write(t, saAccountA, "account", saUserA)     // iam: указатель на предка
-	h.Write(t, saAccountA, "account", saGroupA)    //
-
-	// Level 1 + 2 — cloud administrator and the bootstrap identity share one
-	// relation (migration 0058 seeds system_admin for the bootstrap SA).
-	h.Write(t, subjCloudAdmin, "system_admin", saCluster)
-	h.Write(t, subjBootstrapSA, "system_admin", saCluster)
-
-	// Level 3 — account administrator of account A only, plus an account owner
-	// (account.admin derives `or owner`, so the owner is an account administrator).
-	h.Write(t, subjAccAdminA, "admin", saAccountA)
-	h.Write(t, subjAccOwnerA, "owner", saAccountA)
-
-	// NOT a super level: a project administrator. Project scope and below stay
-	// flat — this subject is the anti-over-grant probe.
-	h.Write(t, subjProjAdminA, "admin", saProjectA)
+	if testing.Short() {
+		t.Skip("нужна живая база (-short)")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
+	require.NoError(t, err, "пул")
+	t.Cleanup(pool.Close)
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err, "транзакция")
+	defer func() { _ = tx.Rollback(ctx) }()
+	fn(ctx, tx)
 }
 
-func saCheck(t *testing.T, h *fgatest.Harness, subject, relation, object string) bool {
+func withCascadeWorld(t *testing.T, fn func(ctx context.Context, tx pgx.Tx)) {
 	t.Helper()
-	ok, err := h.Client.CheckWithContextConsistent(context.Background(), subject, relation, object, nil)
-	require.NoError(t, err, "Check(%s, %s, %s)", subject, relation, object)
-	return ok
+	withIAMTx(t, func(ctx context.Context, tx pgx.Tx) {
+		seedSuperAdminWorld(t, ctx, tx)
+		fn(ctx, tx)
+	})
 }
 
-// TestSuperAdminCascade_CloudAdminRevokesForeignBinding is the incident itself, at
-// the observable level: the cloud administrator deletes a grant he did not create,
-// in an account he holds no per-object tuple in. Before the cascade this is a
-// denial (all five verbs on iam_access_binding were direct usersets without a
-// single `or`); after it, it resolves.
+func saExec(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, args ...any) {
+	t.Helper()
+	_, err := tx.Exec(ctx, sql, args...)
+	require.NoErrorf(t, err, "посев (%s)", sql)
+}
+
+// saUser кладёт настоящую строку пользователя. Настоящую, а не имя в кортеже:
+// страж вставки выдачи проверяет существование субъекта, и фикстура, его
+// обошедшая, была бы снисходительнее продукта.
+func saUser(t *testing.T, ctx context.Context, tx pgx.Tx, id, account string) {
+	t.Helper()
+	saExec(t, ctx, tx,
+		`INSERT INTO kacho_iam.users (id, external_id, email, account_id, invite_status)
+		 VALUES ($1, $2, $3, $4, 'ACTIVE')`,
+		id, "ext-"+id, id+"@kacho.local", account)
+}
+
+// saPointer кладёт отношение ЧЕРЕЗ ЖУРНАЛ — тем же путём, каким его кладёт
+// продукт: строка намерения, из которой триггер складывает прямой факт.
+// Фикстура, пишущая состояние в обход журнала, строила бы факт, которого
+// продукт произвести не может.
+func saPointer(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectID, relation, subject string) {
+	t.Helper()
+	saExec(t, ctx, tx,
+		`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+		 VALUES ('fga.tuple.write',
+		         jsonb_build_object('user', $1::text, 'relation', $2::text,
+		                            'object', $3::text || ':' || $4::text),
+		         now())`,
+		subject, relation, objectType, objectID)
+	var landed int
+	require.NoError(t, tx.QueryRow(ctx,
+		`SELECT count(*)::int FROM kacho_iam.relation_fact
+		  WHERE object_type = $1 AND object_id = $2 AND relation = $3 AND subject = $4`,
+		objectType, objectID, relation, subject).Scan(&landed), "перепись проекции журнала")
+	require.Equalf(t, 1, landed,
+		"строка журнала %s:%s --%s--> %s не спроецировалась в прямой факт: фикстура ничего "+
+			"не посеяла, и проба судила бы пустое состояние", objectType, objectID, relation, subject)
+}
+
+// saEdge кладёт присланное владельцем ресурса звено цепи областей — ровно то,
+// что шлёт регистрация ресурса у владельца прав.
+func saEdge(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectID, parentType, parentID string) {
+	t.Helper()
+	saExec(t, ctx, tx,
+		`INSERT INTO kacho_iam.resource_parent_edge
+		   (object_type, object_id, parent_type, parent_id, depth)
+		 VALUES ($1, $2, $3, $4, 1)`, objectType, objectID, parentType, parentID)
+}
+
+// seedSuperAdminWorld строит двухаккаунтную иерархию, о которой говорит
+// директива, — и НИ ОДНОЙ глагольной строки на целевых объектах.
+//
+// Цепь областей набирается тем же способом, каким её набирает продукт: чужие
+// ресурсы шлют звено сами, предок ПРОЕКТА берётся из проекции журнала, предок
+// АККАУНТА и предки пяти собственных типов iam выводятся представлением из
+// схемы — поэтому пользователю, группе и привязке звено здесь не пишется, оно
+// следует из их собственных строк.
+func seedSuperAdminWorld(t *testing.T, ctx context.Context, tx pgx.Tx) {
+	t.Helper()
+
+	// Аккаунты и владельцы их строк. Порядок несущий: аккаунт вставляется первым
+	// и ссылается на ещё не существующего владельца — ключ отложенный.
+	for _, p := range [][2]string{{saAccA, saOwnerRowA}, {saAccB, saOwnerRowB}} {
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
+			p[0], "account-"+p[0], p[1])
+		saUser(t, ctx, tx, p[1], p[0])
+	}
+
+	// Субъекты проб.
+	for _, s := range []string{subjCloudAdmin, subjAccAdminA, subjAccOwnerA, subjProjAdminA} {
+		saUser(t, ctx, tx, strings.TrimPrefix(s, "user:"), saAccA)
+	}
+	saExec(t, ctx, tx,
+		`INSERT INTO kacho_iam.service_accounts (id, account_id, name, enabled)
+		 VALUES ($1, $2, 'bootstrap', true)`,
+		strings.TrimPrefix(subjBootstrapSA, "service_account:"), saAccA)
+
+	// Цели внутри аккаунта A. Их звено цепи выводится представлением из их же
+	// колонки account_id — писать его руками значило бы завести второй источник.
+	saUser(t, ctx, tx, saUserA, saAccA)
+	saExec(t, ctx, tx,
+		`INSERT INTO kacho_iam.groups (id, account_id, name) VALUES ($1, $2, 'devs')`,
+		saGroupA, saAccA)
+
+	// Проекты. Указатель на аккаунт — В ЖУРНАЛ: его туда со-коммитит создание
+	// проекта, и оттуда же его берёт цепь областей.
+	for _, p := range [][2]string{{saPrjA, saAccA}, {saPrjB, saAccB}} {
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, $3)`,
+			p[0], p[1], "project-"+p[0])
+		saPointer(t, ctx, tx, "project", p[0], "account", "account:"+p[1])
+	}
+
+	// Привязки — как ОБЪЕКТЫ проб (то, что администратор облака обязан снять), а
+	// не как выдачи: роль под ними не несёт проекции глаголов (`role_verb`),
+	// поэтому прав они не дают никому. Область привязки и есть её звено цепи —
+	// оно выводится представлением из пары колонок её строки.
+	//
+	// Роль заводится СВОЯ В КАЖДОМ аккаунте, и это не оформление: продукт
+	// отвергает привязку роли одного аккаунта в области другого
+	// (`role … is not assignable on project:…`). Фикстура, обошедшая это одной
+	// общей ролью, была бы снисходительнее продукта — и красное на посеве
+	// показало это прежде, чем проба успела что-либо утверждать.
+	for _, r := range [][3]string{
+		{"rol-cascadeinerta", saAccA, saOwnerRowA},
+		{"rol-cascadeinertb", saAccB, saOwnerRowB},
+	} {
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.roles (id, account_id, name, permissions)
+			 VALUES ($1, $2, $3, '["iam.project.*.get"]'::jsonb)`, r[0], r[1], "inert_"+strings.ReplaceAll(r[1], "-", "_"))
+	}
+	for _, b := range [][4]string{
+		{saBindingA, saPrjA, "rol-cascadeinerta", saOwnerRowA},
+		{saBindingB, saPrjB, "rol-cascadeinertb", saOwnerRowB},
+	} {
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.access_bindings
+			   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
+			 VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+			b[0], b[3], b[2], b[1])
+		saExec(t, ctx, tx,
+			`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+			 VALUES ($1, 'user', $2)`, b[0], b[3])
+	}
+
+	// Листья аккаунта A — так, как их регистрируют их собственные модули.
+	saEdge(t, ctx, tx, "vpc_network", saNetworkA, "project", saPrjA)
+	saEdge(t, ctx, tx, "storage_volume", saVolumeA, "project", saPrjA)
+	saEdge(t, ctx, tx, "storage_snapshot", saSnapshotA, "project", saPrjA)
+	saEdge(t, ctx, tx, "storage_image", saImageA, "project", saPrjA)
+	saEdge(t, ctx, tx, "nlb_network_load_balancer", saLbA, "project", saPrjA)
+	saEdge(t, ctx, tx, "nlb_listener", saListenerA, "project", saPrjA)
+	saEdge(t, ctx, tx, "registry_registry", saRegistryA, "project", saPrjA)
+	saEdge(t, ctx, tx, "registry_repository", saRepoA, "registry_registry", saRegistryA)
+
+	// Уровни 1 и 2 — один источник: отношение администратора облака на кластере.
+	saPointer(t, ctx, tx, "cluster", saClusterID, "system_admin", subjCloudAdmin)
+	saPointer(t, ctx, tx, "cluster", saClusterID, "system_admin", subjBootstrapSA)
+
+	// Уровень 3 — только в аккаунте A: администратор и владелец.
+	saPointer(t, ctx, tx, "account", saAccA, "admin", subjAccAdminA)
+	saPointer(t, ctx, tx, "account", saAccA, "owner", subjAccOwnerA)
+
+	// НЕ уровень: администратор проекта. Проект и ниже остаются плоскими — это
+	// проба на превышение выдачи.
+	saPointer(t, ctx, tx, "project", saPrjA, "admin", subjProjAdminA)
+}
+
+// saAsk — вопрос о доступе В ТОЙ ЖЕ ФОРМЕ, в какой его задаёт продукт.
+//
+// Ошибка формы означает «ответа нет» и разбирается отдельно от отказа: вернув на
+// неё `Deny`, проба выдала бы незнание за законный отказ — и деньевые
+// утверждения ниже зеленели бы на сломанном запросе.
+func saAsk(t *testing.T, ctx context.Context, tx pgx.Tx, subject, relation string, o saObject) relverdict.Verdict {
+	t.Helper()
+	got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
+		Subject: subject, ObjectType: o.Type, ObjectID: o.ID, Relation: relation,
+	})
+	require.NoErrorf(t, err, "вопрос %s о %s:%s субъектом %s", relation, o.Type, o.ID, subject)
+	return got
+}
+
+func saAllows(t *testing.T, ctx context.Context, tx pgx.Tx, subject, relation string, o saObject) bool {
+	t.Helper()
+	return saAsk(t, ctx, tx, subject, relation, o) == relverdict.Allow
+}
+
+// ── пробы ────────────────────────────────────────────────────────────────────
+
+// TestSuperAdminCascade_CloudAdminRevokesForeignBinding — сам инцидент на
+// наблюдаемом уровне: администратор облака снимает выдачу, которую не делал, в
+// аккаунте, где у него нет ни одной строки на объекте.
 func TestSuperAdminCascade_CloudAdminRevokesForeignBinding(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	seedSuperAdminWorld(t, h)
+	withCascadeWorld(t, func(ctx context.Context, tx pgx.Tx) {
+		require.Truef(t, saAllows(t, ctx, tx, subjCloudAdmin, "v_delete", saBindingAObj),
+			"администратор облака обязан снять чужую выдачу (iam_access_binding v_delete) — "+
+				"это инцидент 2026-07-26: 652 отказа против 32 успехов, сотрудник уволился, "+
+				"а доступ его коллеги отозвать некому")
 
-	require.Truef(t, saCheck(t, h, subjCloudAdmin, "v_delete", saBindingA),
-		"the cloud administrator must be able to revoke a grant he did not create "+
-			"(iam_access_binding v_delete) — this is the 2026-07-26 incident: 652 denials "+
-			"against 32 allows, an employee leaves and his colleague's access cannot be revoked")
+		for _, v := range saVerbsOf(t, saBindingAObj) {
+			require.Truef(t, saAllows(t, ctx, tx, subjCloudAdmin, v, saBindingAObj),
+				"администратор облака обязан разрешать %s на чужой выдаче", v)
+			require.Truef(t, saAllows(t, ctx, tx, subjBootstrapSA, v, saBindingAObj),
+				"учётка первичной установки обязана разрешать %s внутри облака", v)
+		}
 
-	for _, v := range saVerbsOf(t, saBindingA) {
-		require.Truef(t, saCheck(t, h, subjCloudAdmin, v, saBindingA),
-			"cloud administrator must resolve %s on a foreign binding", v)
-		require.Truef(t, saCheck(t, h, subjBootstrapSA, v, saBindingA),
-			"the bootstrap identity must resolve %s within the cloud", v)
-	}
-
-	// The account administrator revokes inside his own account — and only there.
-	require.True(t, saCheck(t, h, subjAccAdminA, "v_delete", saBindingA),
-		"the account administrator must be able to revoke a grant inside his own account")
-	require.True(t, saCheck(t, h, subjAccOwnerA, "v_delete", saBindingA),
-		"the account owner is an account administrator (account.admin derives `or owner`)")
+		require.True(t, saAllows(t, ctx, tx, subjAccAdminA, "v_delete", saBindingAObj),
+			"администратор аккаунта обязан снимать выдачу внутри своего аккаунта")
+		require.True(t, saAllows(t, ctx, tx, subjAccOwnerA, "v_delete", saBindingAObj),
+			"владелец аккаунта — его администратор (account.admin выводится `or owner`)")
+	})
 }
 
-// TestSuperAdminCascade_ReachesEveryVerbBearingType — the cascade is only worth
-// something if it covers the whole surface, not the one type the incident hit.
-// Every verb-bearing type is reached over the structural pointer it really
-// declares: project-anchored leaves over `project`, iam resources over `account`,
-// the repository over `parent` (it has no project pointer of its own).
+// TestSuperAdminCascade_ReachesEveryVerbBearingType — каскад стоит чего-то,
+// только если покрывает всю поверхность, а не тот один тип, на котором инцидент
+// заметили. Каждый тип достаётся по тому указателю, который он реально
+// объявляет: листья проекта — через проект, собственные объекты iam — через
+// аккаунт, репозиторий — через свой реестр (проектного указателя у него нет).
 func TestSuperAdminCascade_ReachesEveryVerbBearingType(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	seedSuperAdminWorld(t, h)
-
-	objects := []string{
-		saProjectA, saNetworkA, saVolumeA, saLbA, saRegistryA, saRepoA,
-		saBindingA, saUserA, saGroupA,
-	}
-	for _, obj := range objects {
-		for _, v := range saVerbsOf(t, obj) {
-			require.Truef(t, saCheck(t, h, subjCloudAdmin, v, obj),
-				"cloud administrator must resolve %s on %s", v, obj)
-			require.Truef(t, saCheck(t, h, subjAccAdminA, v, obj),
-				"account A administrator must resolve %s on %s (inside his own account)", v, obj)
+	withCascadeWorld(t, func(ctx context.Context, tx pgx.Tx) {
+		objects := []saObject{
+			saProjectAObj, saNetworkAObj, saVolumeAObj, saSnapshotObj, saImageObj,
+			saLbAObj, saListenerObj, saRegistryObj, saRepoObj, saBindingAObj,
+			saUserAObj, saGroupAObj,
 		}
-		// The permission catalog gates 101 of its entries on the tier relations
-		// (editor 60 / viewer 40 / admin 1), not on v_* — a cascade that only
-		// covered the verbs would leave those RPCs denied.
-		for _, rel := range []string{"viewer", "editor", "admin"} {
-			require.Truef(t, saCheck(t, h, subjCloudAdmin, rel, obj),
-				"cloud administrator must resolve tier %s on %s", rel, obj)
+		for _, o := range objects {
+			for _, v := range saVerbsOf(t, o) {
+				require.Truef(t, saAllows(t, ctx, tx, subjCloudAdmin, v, o),
+					"администратор облака обязан разрешать %s на %s:%s", v, o.Type, o.ID)
+				require.Truef(t, saAllows(t, ctx, tx, subjAccAdminA, v, o),
+					"администратор аккаунта A обязан разрешать %s на %s:%s (внутри своего аккаунта)",
+					v, o.Type, o.ID)
+			}
+			for _, rel := range saTiers {
+				require.Truef(t, saAllows(t, ctx, tx, subjCloudAdmin, rel, o),
+					"администратор облака обязан разрешать уровень %s на %s:%s", rel, o.Type, o.ID)
+			}
 		}
-	}
 
-	// The account object itself: the cloud administrator manages accounts.
-	for _, v := range saVerbsOf(t, saAccountA) {
-		require.Truef(t, saCheck(t, h, subjCloudAdmin, v, saAccountA),
-			"cloud administrator must resolve %s on the account object", v)
-	}
+		// Сам объект аккаунта: аккаунтами управляет администратор облака.
+		for _, v := range saVerbsOf(t, saAccountAObj) {
+			require.Truef(t, saAllows(t, ctx, tx, subjCloudAdmin, v, saAccountAObj),
+				"администратор облака обязан разрешать %s на объекте аккаунта", v)
+		}
+	})
 }
 
-// TestSuperAdminCascade_DoesNotLeakBelowThreeLevels is the regression that matters
-// more than the change: the cascade must stop at the account. A project
-// administrator is an ordinary tenant — his access to the contents of his project
-// stays MATERIALIZED per object, never derived. If this ever goes green by
-// derivation, the anti-over-grant boundary recorded in data-integrity.md is gone
-// (the editor role co-materializes delete on object rights but deliberately NOT on
-// hierarchy scopes).
+// TestSuperAdminCascade_DoesNotLeakBelowThreeLevels — регрессия, которая важнее
+// самой правки: каскад обязан остановиться на аккаунте. Администратор ПРОЕКТА —
+// обычный арендатор, его доступ к содержимому своего проекта остаётся
+// материализованным выдачей, а не выведенным. Позеленей это по выводу — граница
+// превышения выдачи, записанная в data-integrity.md, исчезнет.
 func TestSuperAdminCascade_DoesNotLeakBelowThreeLevels(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	seedSuperAdminWorld(t, h)
+	withCascadeWorld(t, func(ctx context.Context, tx pgx.Tx) {
+		contents := []saObject{
+			saNetworkAObj, saVolumeAObj, saSnapshotObj, saImageObj, saLbAObj,
+			saListenerObj, saRegistryObj, saRepoObj, saBindingAObj,
+		}
+		for _, o := range contents {
+			for _, v := range saVerbsOf(t, o) {
+				require.Falsef(t, saAllows(t, ctx, tx, subjProjAdminA, v, o),
+					"администратор ПРОЕКТА не вправе достать %s на %s:%s выводом — проект и "+
+						"ниже остаются плоскими, доступ материализуется выдачей на объект",
+					v, o.Type, o.ID)
+			}
+			for _, rel := range saTiers {
+				require.Falsef(t, saAllows(t, ctx, tx, subjProjAdminA, rel, o),
+					"администратор ПРОЕКТА не вправе достать уровень %s на %s:%s выводом",
+					rel, o.Type, o.ID)
+			}
+		}
 
-	contents := []string{saNetworkA, saVolumeA, saLbA, saRegistryA, saRepoA, saBindingA}
-	for _, obj := range contents {
-		for _, v := range saVerbsOf(t, obj) {
-			require.Falsef(t, saCheck(t, h, subjProjAdminA, v, obj),
-				"a PROJECT administrator must NOT reach %s on %s by derivation — project "+
-					"scope and below stay flat, access is materialized per object", v, obj)
+		// И обычный арендатор без единой строки не достаёт ничего. Положительный
+		// контроль стоит в пробах выше: без него «ничего не достаёт» зеленело бы
+		// и на форме, которая не находит вообще ничего.
+		for _, o := range append(contents, saAccountAObj, saProjectAObj, saUserAObj, saGroupAObj) {
+			for _, v := range saVerbsOf(t, o) {
+				require.Falsef(t, saAllows(t, ctx, tx, subjStranger, v, o),
+					"субъект без единой строки не вправе разрешать %s на %s:%s", v, o.Type, o.ID)
+			}
 		}
-		for _, rel := range []string{"viewer", "editor", "admin"} {
-			require.Falsef(t, saCheck(t, h, subjProjAdminA, rel, obj),
-				"a PROJECT administrator must NOT reach tier %s on %s by derivation", rel, obj)
-		}
-	}
-
-	// And an ordinary tenant with nothing at all reaches nothing at all.
-	for _, obj := range append(contents, saAccountA, saProjectA, saUserA, saGroupA) {
-		for _, v := range saVerbsOf(t, obj) {
-			require.Falsef(t, saCheck(t, h, subjStranger, v, obj),
-				"a subject with no tuple must not resolve %s on %s", v, obj)
-		}
-	}
+	})
 }
 
-// TestSuperAdminCascade_StopsAtTheAccountBoundary — level 3 is bounded by its own
-// account. Otherwise the cascade would hand one tenant's administrator the whole
-// cloud, which is the opposite of what it is for.
+// TestSuperAdminCascade_StopsAtTheAccountBoundary — уровень 3 ограничен своим
+// аккаунтом. Иначе каскад вручил бы администратору одного арендатора всё облако,
+// то есть ровно обратное тому, ради чего он заведён.
 func TestSuperAdminCascade_StopsAtTheAccountBoundary(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	seedSuperAdminWorld(t, h)
-
-	foreign := []string{saAccountB, saProjectB, saBindingB}
-	for _, obj := range foreign {
-		for _, v := range saVerbsOf(t, obj) {
-			require.Falsef(t, saCheck(t, h, subjAccAdminA, v, obj),
-				"the administrator of account A must NOT reach %s on %s in account B", v, obj)
-			require.Falsef(t, saCheck(t, h, subjAccOwnerA, v, obj),
-				"the owner of account A must NOT reach %s on %s in account B", v, obj)
+	withCascadeWorld(t, func(ctx context.Context, tx pgx.Tx) {
+		foreign := []saObject{saAccountBObj, saProjectBObj, saBindingBObj}
+		for _, o := range foreign {
+			for _, v := range saVerbsOf(t, o) {
+				require.Falsef(t, saAllows(t, ctx, tx, subjAccAdminA, v, o),
+					"администратор аккаунта A не вправе достать %s на %s:%s в аккаунте B", v, o.Type, o.ID)
+				require.Falsef(t, saAllows(t, ctx, tx, subjAccOwnerA, v, o),
+					"владелец аккаунта A не вправе достать %s на %s:%s в аккаунте B", v, o.Type, o.ID)
+			}
+			for _, rel := range saTiers {
+				require.Falsef(t, saAllows(t, ctx, tx, subjAccAdminA, rel, o),
+					"администратор аккаунта A не вправе достать уровень %s на %s:%s в аккаунте B",
+					rel, o.Type, o.ID)
+			}
 		}
-		for _, rel := range []string{"viewer", "editor", "admin"} {
-			require.Falsef(t, saCheck(t, h, subjAccAdminA, rel, obj),
-				"the administrator of account A must NOT reach tier %s on %s in account B", rel, obj)
+
+		// Уровни 1-2 облачные by construction — аккаунт B тоже их.
+		for _, v := range saVerbsOf(t, saBindingBObj) {
+			require.Truef(t, saAllows(t, ctx, tx, subjCloudAdmin, v, saBindingBObj),
+				"администратор облака перешагивает аккаунты — %s на выдаче в аккаунте B", v)
 		}
-	}
 
-	// Levels 1-2 are cloud-wide by construction — account B is theirs too.
-	for _, v := range saVerbsOf(t, saBindingB) {
-		require.Truef(t, saCheck(t, h, subjCloudAdmin, v, saBindingB),
-			"the cloud administrator spans accounts — %s on a binding in account B", v)
-	}
-
-	// The account administrator does NOT gain the account OBJECT's own verbs: his
-	// authority is "everything WITHIN the account", and the account object is the
-	// boundary of that scope, not something inside it. Only levels 1-2 reach it.
-	require.False(t, saCheck(t, h, subjAccAdminA, "v_delete", saAccountA),
-		"the account administrator must not delete the account object itself — the "+
-			"cascade runs WITHIN the account, the account is its boundary")
+		// Администратор аккаунта НЕ получает собственных глаголов объекта
+		// аккаунта: его власть — «всё ВНУТРИ аккаунта», а сам аккаунт есть
+		// граница этой области, а не то, что внутри неё. Достают только уровни 1-2.
+		require.False(t, saAllows(t, ctx, tx, subjAccAdminA, "v_delete", saAccountAObj),
+			"администратор аккаунта не вправе снести сам объект аккаунта — каскад идёт "+
+				"ВНУТРЬ аккаунта, аккаунт — его граница")
+	})
 }
 
-// TestSuperAdminCascade_DoesNotTouchNonCrudRelations — the cascade covers the CRUD
-// surface (the five verbs and the three tiers the permission catalog gates on) and
-// nothing else. The relations excluded here are deliberate least-privilege
-// contracts that a "can do everything" reading would quietly dissolve:
-// announce_writer belongs to the data plane alone, fga_writer to the proxy,
-// member is a membership fact, owner is an identity fact.
+// TestSuperAdminCascade_DoesNotTouchNonCrudRelations — каскад покрывает
+// поверхность CRUD (глаголы и три уровня, на которые гейтит каталог прав) и
+// НИЧЕГО больше. Исключённые здесь отношения — намеренные контракты наименьших
+// прав, которые прочтение «может всё» тихо растворило бы: announce_writer
+// принадлежит одной лишь плоскости данных, member — факт членства, owner — факт
+// личности.
 func TestSuperAdminCascade_DoesNotTouchNonCrudRelations(t *testing.T) {
-	h := fgatest.NewFromModelJSON(t, readConfigMapModelJSON(t))
-	seedSuperAdminWorld(t, h)
-
-	require.False(t, saCheck(t, h, subjCloudAdmin, "announce_writer", saLbA),
-		"announce_writer is the data plane's alone — no human principal may forge "+
-			"announce state, not even a cloud administrator")
-	require.False(t, saCheck(t, h, subjCloudAdmin, "member", saGroupA),
-		"membership is a fact about a subject, not a permission — the cascade must not "+
-			"make the cloud administrator a member of every group")
-	require.False(t, saCheck(t, h, subjCloudAdmin, "owner", saRegistryA),
-		"ownership is an identity fact — the cascade must not rewrite who owns a resource")
-	require.False(t, saCheck(t, h, subjAccAdminA, "owner", saRegistryA),
-		"ownership is an identity fact — an account administrator does not become owner")
+	withCascadeWorld(t, func(ctx context.Context, tx pgx.Tx) {
+		require.False(t, saAllows(t, ctx, tx, subjCloudAdmin, "announce_writer", saLbAObj),
+			"announce_writer принадлежит плоскости данных — состояние объявления не вправе "+
+				"подделать ни один человеческий принципал, включая администратора облака")
+		require.False(t, saAllows(t, ctx, tx, subjCloudAdmin, "member", saGroupAObj),
+			"членство — факт о субъекте, а не право: каскад не вправе сделать администратора "+
+				"облака членом каждой группы")
+		require.False(t, saAllows(t, ctx, tx, subjCloudAdmin, "owner", saRegistryObj),
+			"владение — факт личности: каскад не вправе переписать, кто владеет ресурсом")
+		require.False(t, saAllows(t, ctx, tx, subjAccAdminA, "owner", saRegistryObj),
+			"владение — факт личности: администратор аккаунта не становится владельцем")
+	})
 }
 
-// TestSuperAdminCascade_ProjectIsNotACascadeSource is the structural half of the
-// leak proof, read off the canonical DSL: `project`'s cascade source must be its
-// ACCOUNT and the CLUSTER — never its own `admin`. A single `or admin` slipped into
-// that line would silently turn every project administrator into a super
-// administrator over his project's contents, and the behavioural test above would
-// still pass for the allow cases while quietly losing its deny cases.
+// TestSuperAdminCascade_ProjectIsNotACascadeSource — структурная половина
+// доказательства утечки, прочитанная с канонической модели: источник каскада у
+// `project` — его АККАУНТ и КЛАСТЕР, никогда не собственный `admin`. Одиночное
+// `or admin`, просочившееся в эту строку, тихо превратило бы каждого
+// администратора проекта в супер-администратора над содержимым его проекта, а
+// поведенческая проба выше осталась бы зелёной по разрешающим случаям, молча
+// потеряв деньевые.
 func TestSuperAdminCascade_ProjectIsNotACascadeSource(t *testing.T) {
 	dsl := modelDSL(t)
 
@@ -315,11 +515,10 @@ func TestSuperAdminCascade_ProjectIsNotACascadeSource(t *testing.T) {
 	require.Contains(t, rhs, "from cluster",
 		"project's cascade must come from the cluster (levels 1-2)")
 
-	// Every disjunct must be a derivation over a parent pointer — `<rel> from
-	// account|cluster`. A bare `admin` / `editor` / `viewer` / `[…]` disjunct would
-	// be the project's OWN tier, which is exactly the leak this forbids: it would
-	// silently promote every project administrator to a super administrator over
-	// his project's contents, and the allow-side behavioural checks would still pass.
+	// Каждый дизъюнкт обязан быть выводом по указателю на предка — `<rel> from
+	// account|cluster`. Голый `admin` / `editor` / `viewer` / `[…]` был бы
+	// СОБСТВЕННЫМ уровнем проекта, то есть ровно той утечкой, которую это
+	// запрещает.
 	overParent := regexp.MustCompile(`^\w+ from (account|cluster)$`)
 	for _, d := range strings.Split(rhs, " or ") {
 		d = strings.TrimSpace(d)
@@ -329,9 +528,9 @@ func TestSuperAdminCascade_ProjectIsNotACascadeSource(t *testing.T) {
 				"boundary, data-integrity.md). full rhs: %q", d, rhs)
 	}
 
-	// Symmetrically: every leaf type cascades from its PARENT's super_admin, so it
-	// inherits the same exclusion. A leaf reading `admin from project` instead
-	// would re-open the leak one type at a time.
+	// Симметрично: каждый листовой тип каскадит от super_admin СВОЕГО предка и
+	// потому наследует то же исключение. Лист, читающий `admin from project`,
+	// открыл бы утечку заново по одному типу за раз.
 	for _, leaf := range []string{
 		"vpc_network", "vpc_subnet", "compute_instance", "storage_volume",
 		"nlb_network_load_balancer", "nlb_listener", "registry_registry",

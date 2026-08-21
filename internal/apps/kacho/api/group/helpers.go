@@ -21,7 +21,7 @@ import (
 //
 //	user|service_account:<member_id>  →  member  →  group:<group_id>
 //
-// This is the tuple OpenFGA needs to resolve a GROUP-subject AccessBinding's
+// This is the tuple the rights model needs to resolve a GROUP-subject AccessBinding's
 // `<obj>#<rel>@group:<gid>#member` userset (access_binding/tuples.go subjectRef
 // emits `group:<id>#member`) into the concrete member principal. AddMember
 // co-commits it (write), RemoveMember co-commits its symmetric delete.

@@ -11,8 +11,9 @@ package pg_test
 //   - Insert AccessBinding(resource_type='cluster', resource_id=ClusterSingletonID,
 //     role_id=<roles/admin>) succeeds and lands in kacho_iam.access_bindings.
 //   - The atomic emit-in-tx flow produces an fga_outbox row with relation
-//     'system_admin' (NOT 'admin' -- cluster's direct-FGA-relation is
-//     system_admin per the OpenFGA model in openfga-model-stub-configmap.yaml).
+//     'system_admin' (NOT 'admin' -- прямое отношение кластера называется
+//     system_admin; словарь отношений объявлен формой прав, а не чартом: чарта
+//     с образцом модели в дереве больше нет, он снят вместе с движком).
 //   - Insert AccessBinding(resource_type='cluster', resource_id != ClusterSingletonID)
 //     does NOT panic at the SQL layer -- the use-case layer rejects via Validate(),
 //     but if a caller bypasses Validate the row CAN technically land. This test

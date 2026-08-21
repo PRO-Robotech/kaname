@@ -11,11 +11,20 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // mockRelations — minimal Authorizer for unit tests.
+//
+// ПОВЕРХНОСТЬ СУЗИЛАСЬ ВМЕСТЕ С ПОРТОМ. Дублёр отвечал на вопросы чужого
+// хранилища кортежей: перечисление объектов, разворот графа, чтение кортежей
+// фильтром. Ни одного из них у решающей стороны больше нет — остались четыре
+// вопроса, которые задают РЕШЕНИЮ: вердикт, кто держит отношение, из чего право
+// складывается и какие отношения субъект уже держит на объекте.
+//
+// Дублёр обязан отвечать РОВНО на них: лишний метод здесь означал бы, что проба
+// держит поверхность, которой у настоящего нет, и снятие следующего метода порта
+// прошло бы мимо неё молча.
 //
 // The counters and captures are mutex-guarded because BatchCheck resolves its
 // items concurrently: a fixture that is only safe for a sequential caller cannot
@@ -35,19 +44,18 @@ type mockRelations struct {
 	checkResp    bool
 	checkErr     error
 	checkCalls   int
-	listResp     []string
-	listErr      error
 	subjectsResp []string
 	subjectsNext string
 	subjectsErr  error
-	expandResp   *clients.ExpandTree
-	expandErr    error
-	// readResp — tuples returned by ReadTuples (used to build rich
-	// deny_reasons on Check deny). Caller mutates per-test.
-	readResp []clients.ConditionalTuple
-	readErr  error
-	// lastCondCtx — captures the CEL condition-context the last Check/ListObjects
-	// passed to FGA, so a test can assert the server sanitised it (no forged
+	sourcesResp  []string
+	sourcesErr   error
+	// directResp — отношения, которые субъект УЖЕ держит на объекте; из них
+	// собирается хвост текста отказа. Прежде на этот вопрос отвечало чтение
+	// кортежей у движка; читатель и единица те же, источник другой.
+	directResp []string
+	directErr  error
+	// lastCondCtx — captures the condition-context the last Check passed to the
+	// relation store, so a test can assert the server sanitised it (no forged
 	// principal/connection attributes; server-forced current_time / trusted acr).
 	lastCondCtx map[string]any
 }
@@ -59,26 +67,24 @@ func (m *mockRelations) CheckWithContext(ctx context.Context, subject, relation,
 	m.mu.Unlock()
 	return m.checkResp, m.checkErr
 }
-func (m *mockRelations) ListObjects(ctx context.Context, subject, relation, objectType string, condCtx map[string]any, maxResults int) ([]string, error) {
-	m.mu.Lock()
-	m.lastCondCtx = condCtx
-	m.mu.Unlock()
-	return m.listResp, m.listErr
-}
 func (m *mockRelations) ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error) {
 	return m.subjectsResp, m.subjectsNext, m.subjectsErr
 }
-func (m *mockRelations) Expand(ctx context.Context, objectType, objectID, relation string) (*clients.ExpandTree, error) {
-	return m.expandResp, m.expandErr
+func (m *mockRelations) Sources(ctx context.Context, objectType, objectID, relation string) ([]string, error) {
+	return m.sourcesResp, m.sourcesErr
 }
-func (m *mockRelations) ReadTuples(ctx context.Context, subjectFilter, relationFilter, objectFilter string, pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error) {
-	return m.readResp, "", m.readErr
+func (m *mockRelations) DirectRelations(ctx context.Context, subject, objectType, objectID string, limit int) ([]string, error) {
+	return m.directResp, m.directErr
 }
 
-func TestAuthorize_Check_AllowsWhenFGAAllowsAndOPAEmpty(t *testing.T) {
+// Здесь стояло ещё одно утверждение — что ответ эхом возвращает идентификатор
+// версии модели прав. Утверждать его нечем и не о чем: версия принадлежала
+// внешнему движку, и снято всё — поле контракта, поле результата и настройка, из
+// которой значение бралось. Закреплять пробой то, чего никто не пишет и не
+// читает, значило бы приколотить мёртвое поле.
+func TestAuthorize_Check_AllowsWhenTheRelationStoreAllows(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{checkResp: true},
-		ModelID:   "model-test-1",
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_alice",
@@ -91,18 +97,15 @@ func TestAuthorize_Check_AllowsWhenFGAAllowsAndOPAEmpty(t *testing.T) {
 	if !res.Allowed {
 		t.Fatalf("expected allowed; deny=%v", res.DenyReasons)
 	}
-	if res.AuthorizationModelID != "model-test-1" {
-		t.Errorf("expected model id echo; got %q", res.AuthorizationModelID)
-	}
 }
 
-// TestAuthorize_Check_DeniesNoPathFromFGA — caller has NO direct relations
+// TestAuthorize_Check_DeniesNoPath — caller has NO direct relations
 // on the object → deny_reason states subject lacks the needed relation +
 // reports "no direct relations granted". (Previously a flat "no path" string;
 // rich-deny format ships in item-4 / KAC-WhoAmI.)
-func TestAuthorize_Check_DeniesNoPathFromFGA(t *testing.T) {
+func TestAuthorize_Check_DeniesNoPath(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations: &mockRelations{checkResp: false /* no readResp -> no relations */},
+		Relations: &mockRelations{checkResp: false /* no directResp -> no relations */},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_bob",
@@ -141,13 +144,12 @@ func TestAuthorize_Check_RichDenyIncludesCurrentRelations(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{
 			checkResp: false,
-			readResp: []clients.ConditionalTuple{
-				{User: "user:usr_alice", Relation: "viewer", Object: "vpc_network:vpcn_x"},
-				// Duplicate relation should be deduplicated.
-				{User: "user:usr_alice", Relation: "viewer", Object: "vpc_network:vpcn_x"},
-				// Different relation should be preserved.
-				{User: "user:usr_alice", Relation: "member", Object: "vpc_network:vpcn_x"},
-			},
+			// Отношения, которые субъект уже держит на объекте. Дедупликация —
+			// свойство ОТВЕЧАЮЩЕЙ стороны (`DirectRelations` отдаёт множество
+			// имён), поэтому дублировать их здесь нечего: прежняя редакция
+			// подавала два одинаковых кортежа и проверяла, что переходник их
+			// схлопнет, — переходника больше нет.
+			directResp: []string{"viewer", "member"},
 		},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
@@ -181,15 +183,19 @@ func TestAuthorize_Check_RichDenyIncludesCurrentRelations(t *testing.T) {
 	}
 }
 
-// TestAuthorize_Check_RichDenyReadTuplesFailureFallsBackCleanly — when
-// FGA ReadTuples fails (network blip), the deny decision is unchanged and
-// the deny_reason falls back to the "no direct relations granted" tail.
-// (ReadTuples is diagnostics; never affects the allow/deny verdict.)
-func TestAuthorize_Check_RichDenyReadTuplesFailureFallsBackCleanly(t *testing.T) {
+// TestAuthorize_Check_RichDenyDirectRelationsFailureFallsBackCleanly — когда
+// вопрос «а что у субъекта уже есть» не отвечен, отказ остаётся отказом, а хвост
+// текста сваливается на "no direct relations granted".
+//
+// Это ДИАГНОСТИКА, и она не вправе испортить ответ: решение уже принято. Прежде
+// на этот вопрос отвечало чтение кортежей у внешнего движка, теперь — своя
+// таблица; свойство от смены источника не изменилось, и именно поэтому проба
+// осталась, сменив только то, чей отказ она подставляет.
+func TestAuthorize_Check_RichDenyDirectRelationsFailureFallsBackCleanly(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{
 			checkResp: false,
-			readErr:   errors.New("transport reset"),
+			directErr: errors.New("read timeout"),
 		},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
@@ -214,10 +220,8 @@ func TestAuthorize_Check_RichDenyReadTuplesFailureFallsBackCleanly(t *testing.T)
 func TestAuthorize_CheckRelation_RichDenyAlso(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{
-			checkResp: false,
-			readResp: []clients.ConditionalTuple{
-				{User: "user:usr_dave", Relation: "viewer", Object: "cluster:cluster_kacho_root"},
-			},
+			checkResp:  false,
+			directResp: []string{"viewer"},
 		},
 	})
 	res, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
@@ -288,24 +292,33 @@ func TestAuthorize_BatchCheck_PerItemFailureDoesNotAbort(t *testing.T) {
 	}
 }
 
-// TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak — a transient
-// FGA-transport failure (the inner err carries the OpenFGA endpoint+store id,
-// like a *url.Error `Post "http://fga:8080/stores/<id>/check": dial tcp ...`)
-// must NOT be collapsed into a per-item deny_reason: that (a) leaks infra
-// topology onto a user-facing surface and (b) mis-signals a transient outage as
-// a permanent deny. BatchCheck must mirror the standalone Check sibling and fail
-// the whole batch with iamerr.ErrUnavailable (handler → retryable gRPC
-// Unavailable, empty responses), never surfacing the raw text as a deny_reason.
+// TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak — «спросить не
+// удалось» НЕ схлопывается в пообъектный отказ.
+//
+// Схлопывание стоило бы двух разных вещей сразу: (а) текст отказа хранилища
+// уезжает на поверхность, которую видит арендатор, (б) временная недоступность
+// подаётся как ПОСТОЯННЫЙ отказ, то есть 403 вместо повторяемого 503. Пачка
+// обязана вести себя как одиночная проверка — упасть целиком с сигнальной
+// ошибкой iamerr.ErrUnavailable.
+//
+// ФИКСТУРА ПЕРЕПИСАНА ПОД НЫНЕШНЮЮ ОТВЕЧАЮЩУЮ СТОРОНУ. Здесь стоял ответ
+// HTTP-транспорта внешнего движка прав — адрес и идентификатор чужого хранилища.
+// Такого текста не бывает: отвечает своя база, и утечка, которой этот файл
+// стережёт, выглядит теперь как строка подключения pgx — узел, порт, учётка, имя
+// базы (`security.md` §Hardening-инвариант 1 называет ровно её). Правдоподобная
+// фикстура прячет дефект, который сама же и кормит, поэтому подставляется та
+// форма, которую производит настоящий отказ.
 func TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak(t *testing.T) {
-	const fgaTransportLeak = `Post "http://fga.internal:8080/stores/01ABC/check": dial tcp 10.0.0.5:8080: connect: connection refused`
+	const storeTransportLeak = "failed to connect to host=kacho-iam-pg.kacho.svc user=kacho_iam " +
+		"database=kacho_iam: dial error (dial tcp 10.0.0.5:5432: connect: connection refused)"
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations: &mockRelations{checkErr: errors.New(fgaTransportLeak)},
+		Relations: &mockRelations{checkErr: errors.New(storeTransportLeak)},
 	})
 	results, err := svc.BatchCheck(context.Background(), []CheckRequest{
 		{Subject: "user:usr_alice", Resource: ResourceRef{Type: "x", ID: "1"}, Action: "x.x.list"},
 	})
 	if err == nil {
-		t.Fatalf("expected whole-batch failure on FGA-unavailable; got results=%v err=nil", results)
+		t.Fatalf("ждали отказа ВСЕЙ пачки на недоступном хранилище; got results=%v err=nil", results)
 	}
 	if !errors.Is(err, iamerr.ErrUnavailable) {
 		t.Errorf("expected ErrUnavailable sentinel (retryable, fail-closed); got %v", err)
@@ -315,8 +328,8 @@ func TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak(t *testing.T) {
 	}
 	for _, r := range results {
 		for _, dr := range r.DenyReasons {
-			if strings.Contains(dr, "fga.internal") || strings.Contains(dr, "10.0.0.5") {
-				t.Errorf("LEAK: deny_reason surfaces FGA transport detail: %q", dr)
+			if strings.Contains(dr, "kacho-iam-pg") || strings.Contains(dr, "10.0.0.5") {
+				t.Errorf("УТЕЧКА: текст отказа несёт координаты хранилища: %q", dr)
 			}
 		}
 	}
@@ -333,23 +346,7 @@ func TestAuthorize_BatchCheck_TooLarge(t *testing.T) {
 	}
 }
 
-func TestAuthorize_ListObjects(t *testing.T) {
-	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations: &mockRelations{listResp: []string{"vpcn_a", "vpcn_b"}},
-	})
-	res, err := svc.ListObjects(context.Background(), ListObjectsRequest{
-		Subject: "user:x", ResourceType: "vpc_network", Action: "vpc.networks.list",
-		MaxResults: 100,
-	})
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(res.ResourceIDs) != 2 {
-		t.Fatalf("expected 2 ids; got %v", res.ResourceIDs)
-	}
-}
-
-func TestAuthorize_FGAUnavailable_ReturnsUnavailable(t *testing.T) {
+func TestAuthorize_RelationStoreUnavailable_ReturnsUnavailable(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{checkErr: errors.New("connection refused")},
 	})
@@ -404,12 +401,12 @@ func TestResolveActionToRelation(t *testing.T) {
 }
 
 // TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject — M2: a subject
-// the FGA backend would happily allow at `viewer` (checkResp:true) must STILL
+// the relation store would happily allow at `viewer` (checkResp:true) must STILL
 // be denied for an unknown verb, because the verb does not resolve to a known
 // relation. Fail-closed: an unrecognised (possibly mutating) action is never
 // silently downgraded to the viewer relation.
 func TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject(t *testing.T) {
-	mock := &mockRelations{checkResp: true} // FGA would ALLOW viewer
+	mock := &mockRelations{checkResp: true} // the relation store would ALLOW viewer
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: mock})
 	res, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_readonly",
@@ -423,7 +420,7 @@ func TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject(t *testing.T) {
 		t.Fatalf("expected DENIED for unknown verb (over-permissive viewer mapping); got allowed")
 	}
 	if mock.checkCalls != 0 {
-		t.Errorf("unknown verb must short-circuit BEFORE the FGA Check; got %d calls", mock.checkCalls)
+		t.Errorf("unknown verb must short-circuit BEFORE the per-object question; got %d calls", mock.checkCalls)
 	}
 	if len(res.DenyReasons) == 0 {
 		t.Fatalf("expected a deny_reason explaining the unresolved action")
@@ -447,16 +444,15 @@ func TestAuthorize_Check_KnownMutatingVerb_StillMaps(t *testing.T) {
 		t.Fatalf("known mutating verb must still resolve and allow; deny=%v", res.DenyReasons)
 	}
 	if mock.checkCalls != 1 {
-		t.Errorf("known verb must reach the FGA Check exactly once; got %d", mock.checkCalls)
+		t.Errorf("known verb must reach the per-object question exactly once; got %d", mock.checkCalls)
 	}
 }
 
-// ── CheckRelation — FGA-native gate ──────────────────────────────────────
+// ── CheckRelation — relation-native gate ─────────────────────────────────
 
-func TestAuthorize_CheckRelation_AllowsWhenFGAAllowsAndOPAEmpty(t *testing.T) {
+func TestAuthorize_CheckRelation_AllowsWhenTheRelationStoreAllows(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{checkResp: true},
-		ModelID:   "model-test-1",
 	})
 	res, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 		Subject:  "user:usr_alice",
@@ -469,14 +465,11 @@ func TestAuthorize_CheckRelation_AllowsWhenFGAAllowsAndOPAEmpty(t *testing.T) {
 	if !res.Allowed {
 		t.Fatalf("expected allowed; deny=%v", res.DenyReasons)
 	}
-	if res.AuthorizationModelID != "model-test-1" {
-		t.Errorf("expected model id echo; got %q", res.AuthorizationModelID)
-	}
 }
 
-func TestAuthorize_CheckRelation_DeniesNoPathFromFGA(t *testing.T) {
+func TestAuthorize_CheckRelation_DeniesNoPath(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
-		Relations: &mockRelations{checkResp: false /* no readResp -> rich-deny falls back */},
+		Relations: &mockRelations{checkResp: false /* no directResp -> rich-deny falls back */},
 	})
 	res, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 		Subject:  "user:usr_bob",
@@ -523,7 +516,7 @@ func TestAuthorize_CheckRelation_RejectsMissingFields(t *testing.T) {
 	}
 }
 
-func TestAuthorize_CheckRelation_FGAUnavailableWhenNoClient(t *testing.T) {
+func TestAuthorize_CheckRelation_UnavailableWhenNoRelationStore(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{})
 	_, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 		Subject: "user:u", Relation: "viewer", Object: "vpc_network:e",
@@ -539,7 +532,7 @@ func TestAuthorize_CheckRelation_FGAUnavailableWhenNoClient(t *testing.T) {
 	}
 }
 
-func TestAuthorize_CheckRelation_FGAErrorIsUnavailable(t *testing.T) {
+func TestAuthorize_CheckRelation_StoreErrorIsUnavailable(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{checkErr: errors.New("openfga check: status 503")},
 	})

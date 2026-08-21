@@ -25,10 +25,13 @@ import (
 // the two properties of that fan-out:
 //
 //  1. the fan-out stays bounded (never goroutine-per-id — a 1000-id page must not
-//     put 1000 requests on the OpenFGA client at once; the client pools
-//     clients.fgaMaxIdleConnsPerHost = 256 idle connections per host, sized for a
-//     fan-out of this order, so an unbounded burst would outrun the pool and thrash
-//     connections rather than go faster);
+//     put 1000 questions in flight at once). This used to be argued from a named
+//     connection-pool size on the HTTP client for the external engine; that client
+//     is gone (stage S6) and so is the constant, so the argument is restated from
+//     what remains and is not weaker for it: every question is a query, the pool it
+//     contends for is now the service's own database pool, and an unbounded burst
+//     exhausts a bounded pool whatever is on the other side of it. Naming a number
+//     that no longer exists would have been a reason nobody could check;
 //  2. a max-size page still resolves in bounded-parallel waves, not sequentially.
 //
 // What this test does NOT establish is what a page COSTS. It measures a MIXED page

@@ -10,9 +10,10 @@
 // — the caller falls back to the scope-anchor.
 //
 // Extending this table requires declaring the type in the canonical
-// authorization model `proto/kacho/cloud/iam/v1/fga_model.fga` in lockstep, and
-// regenerating the openfga-bootstrap ConfigMap from it (`make
-// openfga-model-json` in deploy/). The unconditional drift-gate
+// authorization model `proto/kacho/cloud/iam/v1/fga_model.fga` in lockstep. There is
+// nothing left to regenerate from it: the model used to be shipped to an external
+// engine as a ConfigMap, and that engine, its bootstrap chart and the build target
+// that rendered the model are all gone. The unconditional drift-gate
 // (fga_model_drift_test.go) fails the build on any divergence, in either
 // direction. The table is intentionally a closed enumeration: an unknown pair
 // must NOT silently land as an arbitrary FGA type.
@@ -52,14 +53,14 @@ import (
 	"strings"
 )
 
-// ObjectType returns the OpenFGA object_type for (module, resource).
+// ObjectType returns the rights-model object_type for (module, resource).
 // ok=false when the pair is not in the closed table.
 func ObjectType(module, resource string) (string, bool) {
 	o, ok := objectTypes[module+"."+resource]
 	return o, ok
 }
 
-// FGAObjectType resolves the OpenFGA object_type for a dotted closed-table key
+// FGAObjectType resolves the rights-model object_type for a dotted closed-table key
 // ("vpc.securityGroup" → "vpc_security_group", "iam.account" → "account"). It is
 // the single canonical dotted→FGA-type mapping (SplitObjectType on the FIRST dot,
 // then ObjectType over the closed table) shared by every FGA-object derivation —
@@ -124,7 +125,7 @@ func SplitObjectType(typ string) (module, resource string, ok bool) {
 	return typ[:i], typ[i+1:], true
 }
 
-// DottedType maps an OpenFGA object_type (e.g. "compute_instance") back to the
+// DottedType maps a rights-model object_type (e.g. "compute_instance") back to the
 // dotted closed-table key (e.g. "compute.instance") used by role_rule_selectors
 // and resource_mirror.object_type. ok=false when the FGA type is not in the
 // closed table — callers may then fall back to the FGA type verbatim (the mirror
@@ -165,9 +166,12 @@ var dottedByFGAType = func() map[string]string {
 //
 // This is the single source of truth the FGA emitter consults before writing a
 // per-verb `v_<verb>` tuple or a type-scoped `scope_grant` linking tuple:
-// emitting either on a tier-only type is a dangling-relation write that OpenFGA
-// rejects → drainer.ErrPermanent → poisoned fga_outbox → partial-grant desync
-// (the #177 fail-open class). The set is kept in lockstep with fga_model.fga;
+// emitting either on a tier-only type writes a relation the model does not declare
+// on that type. The external engine refused such a write outright, and the refusal
+// travelled the whole way — permanent error, poisoned journal row, partial-grant
+// desync. That refusal went away with the engine, which makes this closed set the
+// thing that keeps emitter and model in step. The set is kept in lockstep with
+// fga_model.fga;
 // the CI drift-gate (authzmap/fga_model_drift_test.go) fails the build if this
 // set ever diverges from the model.
 func TypeHasVerbRelations(fgaType string) bool {

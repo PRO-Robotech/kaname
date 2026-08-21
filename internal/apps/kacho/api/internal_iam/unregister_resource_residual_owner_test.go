@@ -5,7 +5,7 @@ package internal_iam
 
 // unregister_resource_residual_owner_test.go — снятие проверяется ИСХОДОМ: после отзыва
 // доступа не должно БЫТЬ. Не «событие эмитировано», не «метод вызван», не «строка
-// отправлена» — именно «модель отвечает DENY».
+// отправлена» — именно «форма отвечает DENY».
 //
 // Почему проба именно такой формы. Регистрация ресурса пишет ТРИ вида отношения, а не
 // два: указатель объекта на его проект, per-object глаголы (их выводит реконсайлер из
@@ -14,16 +14,21 @@ package internal_iam
 //
 // Дефект невидим для любого утверждения вида «вызвали»: намерение эмитируется,
 // доезжает, помечается отправленным, ошибок ноль. Замер на стенде (2026-08-04): из
-// 180 снятых регистраций реестра `owner` пережил снятие в 180 случаях из 180, и модель
-// на удалённом объекте отвечала на `v_delete` — allowed. Поэтому проба ниже держит
-// СОСТОЯНИЕ хранилища и спрашивает его так же, как спросил бы enforcement, а не считает
-// вызовы.
+// 180 снятых регистраций реестра `owner` пережил снятие в 180 случаях из 180, и на
+// удалённом объекте `v_delete` отвечал allowed. Поэтому проба ниже держит СОСТОЯНИЕ
+// прямых фактов и спрашивает его так же, как спросил бы enforcement, а не считает вызовы.
 //
-// Модель (proto/kacho/cloud/iam/v1/fga_model.fga) выводит все пять глаголов из `owner`:
+// ЧТО ИЗМЕНИЛОСЬ СО СНЯТИЕМ ВНЕШНЕГО ДВИЖКА — и почему проба от этого только точнее.
 //
-//	define v_delete: [user, service_account, group#member] or owner or super_admin
+// Прежде дублёр играл ЧУЖОЕ хранилище, в которое отдельный применитель складывал
+// кортежи после коммита. Применителя больше нет, и ускорять нечего: намерение,
+// положенное строкой журнала (`kacho_iam.fga_outbox`) в ту же транзакцию, порождает
+// прямой факт (`kacho_iam.relation_fact`) ТРИГГЕРОМ — в обе стороны, в момент коммита.
+// Поэтому дублёр ниже моделирует именно это: журнал копит намерения на транзакции, а
+// прямые факты меняются при `Commit`. Ни одного звена, которого нет у настоящего.
 //
-// поэтому уцелевший `owner` — это не мусорная строка, а действующий полный доступ.
+// Форма выводит все пять глаголов из `owner`, поэтому уцелевший `owner` — это не
+// мусорная строка, а действующий полный доступ.
 
 import (
 	"context"
@@ -37,61 +42,56 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// fakeTupleStore — хранилище отношений, а не журнал вызовов. Оно отвечает на вопрос
-// «есть ли сейчас доступ», и именно этим отличает применённое снятие от эмитированного.
-type fakeTupleStore struct {
+// factStore — ПРЯМЫЕ ФАКТЫ, а не журнал вызовов. Он отвечает на вопрос «есть ли сейчас
+// доступ», и именно этим отличает применённое снятие от эмитированного.
+type factStore struct {
 	mu sync.Mutex
-	// tuples — текущее содержимое хранилища.
-	tuples []service.RelationTuple
-	// additive — инъекция дефекта: снятие принимается и НИЧЕГО не удаляет. Ровно то
-	// поведение, на котором зеленеют утверждения «вызвали».
+	// facts — текущее содержимое таблицы прямых фактов.
+	facts []service.RelationTuple
+	// additive — инъекция дефекта: намерение снятия принимается и НИЧЕГО не убирает.
+	// Ровно то поведение, на котором зеленеют утверждения «эмитировали».
 	additive bool
 	readErr  error
-	delErr   error
 }
 
-func (s *fakeTupleStore) WriteTuples(_ context.Context, t []service.RelationTuple) error {
+// applyWrite / applyDelete — то, что делает триггер в момент коммита.
+func (s *factStore) applyWrite(tuples []service.RelationTuple) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, want := range t {
+	for _, want := range tuples {
 		if !s.hasLocked(want) {
-			s.tuples = append(s.tuples, want)
+			s.facts = append(s.facts, want)
 		}
 	}
-	return nil
 }
 
-func (s *fakeTupleStore) DeleteTuples(_ context.Context, t []service.RelationTuple) error {
+func (s *factStore) applyDelete(tuples []service.RelationTuple) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.delErr != nil {
-		return s.delErr
-	}
 	if s.additive {
-		// Инъекция: вызов принят, исход не наступил.
-		return nil
+		// Инъекция: намерение принято, исход не наступил.
+		return
 	}
-	for _, drop := range t {
-		kept := s.tuples[:0]
-		for _, have := range s.tuples {
+	for _, drop := range tuples {
+		kept := s.facts[:0]
+		for _, have := range s.facts {
 			if have != drop {
 				kept = append(kept, have)
 			}
 		}
-		s.tuples = kept
+		s.facts = kept
 	}
-	return nil
 }
 
-// ObjectTuples — что СЕЙЧАС стоит на объекте.
-func (s *fakeTupleStore) ObjectTuples(_ context.Context, object string) ([]service.RelationTuple, error) {
+// ObjectTuples — что СЕЙЧАС стоит на объекте (порт читателя остатка).
+func (s *factStore) ObjectTuples(_ context.Context, object string) ([]service.RelationTuple, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.readErr != nil {
 		return nil, s.readErr
 	}
 	var out []service.RelationTuple
-	for _, t := range s.tuples {
+	for _, t := range s.facts {
 		if t.Object == object {
 			out = append(out, t)
 		}
@@ -99,8 +99,8 @@ func (s *fakeTupleStore) ObjectTuples(_ context.Context, object string) ([]servi
 	return out, nil
 }
 
-func (s *fakeTupleStore) hasLocked(want service.RelationTuple) bool {
-	for _, have := range s.tuples {
+func (s *factStore) hasLocked(want service.RelationTuple) bool {
+	for _, have := range s.facts {
 		if have == want {
 			return true
 		}
@@ -108,16 +108,16 @@ func (s *fakeTupleStore) hasLocked(want service.RelationTuple) bool {
 	return false
 }
 
-// resolveVerb — минимальный резолвер правила модели «глагол выводится из owner».
+// resolveVerb — минимальный резолвер правила формы «глагол выводится из owner».
 // Отвечает на тот же вопрос, что enforcement: есть ли у субъекта глагол на объекте.
-func (s *fakeTupleStore) resolveVerb(subject, verb, object string) bool {
+func (s *factStore) resolveVerb(subject, verb, object string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, t := range s.tuples {
+	for _, t := range s.facts {
 		if t.Object != object || t.User != subject {
 			continue
 		}
-		// Прямой глагол ИЛИ вывод из owner — обе ветви правила модели.
+		// Прямой глагол ИЛИ вывод из owner — обе ветви правила формы.
 		if t.Relation == verb || t.Relation == "owner" {
 			return true
 		}
@@ -125,11 +125,52 @@ func (s *fakeTupleStore) resolveVerb(subject, verb, object string) bool {
 	return false
 }
 
-func newRegUCWithStore(t *testing.T, s *fakeTupleStore) (*RegisterResourceUseCase, *smTxBeginner) {
+// factTx — транзакция, копящая намерения журнала и применяющая их ТРИГГЕРОМ на коммите.
+// Откат не применяет ничего: несостоявшаяся транзакция не порождает фактов.
+type factTx struct {
+	store     *factStore
+	committed bool
+	writes    []service.RelationTuple
+	deletes   []service.RelationTuple
+}
+
+func (t *factTx) Commit(context.Context) error {
+	t.committed = true
+	t.store.applyWrite(t.writes)
+	t.store.applyDelete(t.deletes)
+	return nil
+}
+
+func (t *factTx) Rollback(context.Context) error { return nil }
+
+type factTxBeginner struct {
+	store *factStore
+	tx    *factTx
+}
+
+func (b *factTxBeginner) Begin(context.Context) (service.Tx, error) {
+	b.tx = &factTx{store: b.store}
+	return b.tx, nil
+}
+
+// journalEmitter — порт журнала намерений. Он ничего не применяет сам: применение —
+// свойство коммита, как и в базе.
+type journalEmitter struct{}
+
+func (journalEmitter) EmitWriteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+	tx.(*factTx).writes = append(tx.(*factTx).writes, tuples...)
+	return nil
+}
+
+func (journalEmitter) EmitDeleteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+	tx.(*factTx).deletes = append(tx.(*factTx).deletes, tuples...)
+	return nil
+}
+
+func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
-	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb).
-		WithTupleApplier(s, nil).
+	txb := &factTxBeginner{store: s}
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb).
 		WithResidualTupleReader(s)
 	return uc, txb
 }
@@ -148,7 +189,7 @@ func registerRegistryWithOwner(t *testing.T, uc *RegisterResourceUseCase, object
 
 // TestUnregisterResource_OwnerAccessIsActuallyGoneAfterWithdrawal — ГЛАВНАЯ проба.
 //
-// Утверждает ИСХОД: после снятия регистрации объекта модель отвечает DENY владельцу.
+// Утверждает ИСХОД: после снятия регистрации объекта форма отвечает DENY владельцу.
 // Положительный контроль в первой половине не даёт отрицанию зеленеть на всём сломанном:
 // если бы доступа не было и ДО снятия, вторая половина ничего бы не проверяла.
 //
@@ -161,7 +202,7 @@ func TestUnregisterResource_OwnerAccessIsActuallyGoneAfterWithdrawal(t *testing.
 		owner  = "service_account:sva_creator"
 		proj   = "project:prj_home"
 	)
-	store := &fakeTupleStore{}
+	store := &factStore{}
 	uc, _ := newRegUCWithStore(t, store)
 
 	registerRegistryWithOwner(t, uc, object, proj, owner)
@@ -184,17 +225,17 @@ func TestUnregisterResource_OwnerAccessIsActuallyGoneAfterWithdrawal(t *testing.
 // TestUnregisterResource_ProbeCatchesAdditiveWithdrawal — доказательство, что проба выше
 // РАЗЛИЧАЕТ, а не зеленеет по построению.
 //
-// Инъекция: хранилище принимает снятие и ничего не удаляет — канонический «аддитивный»
-// путь. Все утверждения вида «вызвали / эмитировали / отправили» на нём остаются
-// зелёными; утверждение об ИСХОДЕ обязано покраснеть. Здесь мы фиксируем именно это:
-// при аддитивном поведении доступ СОХРАНЯЕТСЯ, значит главная проба на нём падает.
+// Инъекция: журнал принимает намерение снятия, а прямой факт не убирается — канонический
+// «аддитивный» путь. Все утверждения вида «вызвали / эмитировали / отправили» на нём
+// остаются зелёными; утверждение об ИСХОДЕ обязано покраснеть. Здесь мы фиксируем именно
+// это: при аддитивном поведении доступ СОХРАНЯЕТСЯ, значит главная проба на нём падает.
 func TestUnregisterResource_ProbeCatchesAdditiveWithdrawal(t *testing.T) {
 	const (
 		object = "registry_registry:reg_doomed"
 		owner  = "service_account:sva_creator"
 		proj   = "project:prj_home"
 	)
-	store := &fakeTupleStore{additive: true}
+	store := &factStore{additive: true}
 	uc, _ := newRegUCWithStore(t, store)
 
 	registerRegistryWithOwner(t, uc, object, proj, owner)
@@ -218,7 +259,7 @@ func TestUnregisterResource_WithdrawsThePublicReadGrantOfATornDownObject(t *test
 		object = "registry_repository:reg_x/app"
 		proj   = "registry_registry:reg_x"
 	)
-	store := &fakeTupleStore{}
+	store := &factStore{}
 	uc, _ := newRegUCWithStore(t, store)
 
 	require.NoError(t, uc.Register(context.Background(), &regReq{
@@ -249,7 +290,7 @@ func TestUnregisterResource_PureGrantWithdrawal_LeavesTheLivingObjectIntact(t *t
 		owner  = "service_account:sva_creator"
 		parent = "registry_registry:reg_x"
 	)
-	store := &fakeTupleStore{}
+	store := &factStore{}
 	uc, _ := newRegUCWithStore(t, store)
 
 	require.NoError(t, uc.Register(context.Background(), &regReq{
@@ -281,7 +322,7 @@ func TestUnregisterResource_PureGrantWithdrawal_LeavesTheLivingObjectIntact(t *t
 // потребителя, повтор идемпотентен, поэтому отказ — правильный исход: он будет
 // переспрошен. Классификация — временный отказ (Unavailable), а не отказ в правах.
 func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
-	store := &fakeTupleStore{readErr: errors.New("store unreachable")}
+	store := &factStore{readErr: errors.New("store unreachable")}
 	uc, _ := newRegUCWithStore(t, store)
 
 	err := uc.Unregister(context.Background(), &unregReq{
@@ -292,10 +333,12 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 }
 
 // TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour — непровязанный
-// читатель остатка оставляет прежний путь (очередь), но не ломает снятие.
+// читатель остатка оставляет прежний путь (снимается только названное намерение), но не
+// ломает снятие.
 func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
-	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb) // без WithResidualTupleReader
+	store := &factStore{}
+	txb := &factTxBeginner{store: store}
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
 	}))

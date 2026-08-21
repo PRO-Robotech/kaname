@@ -6,7 +6,7 @@ package pg_test
 // reconcile_owner_iam_content_integration_test.go — rbac-contract-a-fix
 // (forward-materialization of iam-NATIVE content under the owner `*.*` binding).
 //
-// Regression: the flat OpenFGA model (Contract-A) removed all `<rel> from account`
+// Regression: плоская форма прав (Contract-A) removed all `<rel> from account`
 // ACCESS cascades on iam leaf types (iam_role / iam_group / iam_service_account /
 // iam_user / iam_access_binding). The inert hierarchy parent-pointer tuple each iam
 // Create still emitted (`account:<acc>#account@iam_role:<id>`) grants nobody anything

@@ -261,7 +261,7 @@ go test -short -count=1 -timeout 120s \
 
 - [`../architecture/explicit-rbac-model.md`](../architecture/explicit-rbac-model.md) — как rules грантов разворачиваются в доступ.
 - [`08-access-binding.md`](08-access-binding.md) — bindings ссылаются на role_id.
-- [`29-openfga-check.md`](29-openfga-check.md) — FGA relations выводятся из rules.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — FGA relations выводятся из rules.
 - [`19-authorize.md`](19-authorize.md) — runtime check.
 
 ## Ссылки на код

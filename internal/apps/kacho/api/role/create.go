@@ -29,7 +29,7 @@ import (
 
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
 // materialize the per-object access of every binding whose selector matches the
-// freshly-created iam_role, right after Create commits. The flat OpenFGA model
+// freshly-created iam_role, right after Create commits. The flat rights model
 // dropped the `<rel> from account` ACCESS cascade on iam_role, so the owner's /
 // account-admin's per-object tuple is materialized per-object; the sync call
 // closes the GET-after-create race the async drain would otherwise lose.
@@ -206,7 +206,7 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 				return domain.Role{}, aerr
 			}
 			// FGA role→account hierarchy parent-pointer intent co-committed in the
-			// SAME writer-tx (запрет #10). Under the FLAT OpenFGA model (Contract-A)
+			// SAME writer-tx (запрет #10). Under the FLAT rights model (Contract-A)
 			// this `account:<acc>#account@iam_role:<id>` pointer no longer grants
 			// access by itself — the `<rel> from account` ACCESS cascade on iam_role
 			// was removed. It is retained as the hierarchy/ownership lineage edge; the

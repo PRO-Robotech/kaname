@@ -83,8 +83,8 @@ type ObjectReconciler interface {
 type UpdateAccountUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
-	// Optional OpenFGA client for the defense-in-depth scope-relation
-	// authority check. When nil, the guard falls back to owner-only
+	// Optional door to the rights decision, used by the defense-in-depth
+	// scope-relation authority check. When nil, the guard falls back to owner-only
 	// (fail-closed).
 	relations clients.RelationStore
 	// Optional post-commit per-object materializer (same port the create-path uses).

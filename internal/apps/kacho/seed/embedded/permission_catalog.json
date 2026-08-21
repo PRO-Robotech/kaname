@@ -744,17 +744,6 @@
     "scope_filtered": true
   },
   {
-    "fqn": "kacho.cloud.iam.v1.AuthorizeService/ListObjects",
-    "permission": "iam.authorize.listObjects",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    },
-    "required_acr_min": "1",
-    "scope_filtered": true
-  },
-  {
     "fqn": "kacho.cloud.iam.v1.AuthorizeService/ListSubjects",
     "permission": "iam.authorize.listSubjects",
     "required_relation": "",
@@ -862,33 +851,6 @@
       "from_request_field": "group_id"
     },
     "required_acr_min": "1"
-  },
-  {
-    "fqn": "kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
-    "fqn": "kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
-  },
-  {
-    "fqn": "kacho.cloud.iam.v1.InternalAuthorizeService/ReloadModel",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken",

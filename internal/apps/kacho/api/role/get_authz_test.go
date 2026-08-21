@@ -16,14 +16,21 @@ package role
 // Fix (custom roles are tenant-secret, system roles are the catalog floor):
 //   - SYSTEM role (is_system=true) → served to every authenticated caller
 //     (catalog floor; deterministic seed ids, not tenant-secret) — exempt.
-//   - CUSTOM role (is_system=false) → per-object enforce via the SAME FGA
-//     ListObjects(subject,"viewer","iam_role") set that drives List (read==enforce,
-//     single source of truth). The `viewer` tier cascades from the account
-//     tier so a role's creator / account-admin resolves their own roles; id ∉ set
-//     → NOT_FOUND "Role <id> not found" (NOT PERMISSION_DENIED — no existence
-//     leak). Foreign-account custom → same.
-//   - Fail-closed: a nil FGA port or an FGA error on a custom-role Get → Unavailable
-//     (never a body leak).
+//   - CUSTOM role (is_system=false) → per-object enforce through the SAME function
+//     that filters a List page (resolveVisibleRoleIDs), asked DIRECTLY about the one
+//     role being read: read==enforce, single source of truth. The `viewer` tier
+//     cascades from the account tier so a role's creator / account-admin resolves
+//     their own roles; not resolved → NOT_FOUND "Role <id> not found" (NOT
+//     PERMISSION_DENIED — no existence leak). Foreign-account custom → same.
+//   - Fail-closed: a nil relation port, or a question that could not be answered on
+//     a custom-role Get → Unavailable (never a body leak). "Could not ask" and
+//     "not allowed" are different worlds.
+//
+// The set used to be named as an enumeration of the whole type. That door was
+// removed with the external relation engine in stage S6 (clients.RelationQueries
+// carries no method that enumerates objects) — and the reason it was removed is why
+// this file matters: the enumeration was capped server-side with no continuation
+// token, so past that population a granted role answered NOT_FOUND permanently.
 //
 // read==enforce invariant: {role : Get(role) success} == {role : role ∈ List}
 // for custom roles (system roles → both always succeed). The parity test below
@@ -63,7 +70,7 @@ func TestGetRole_D1_SystemRole_ServedToAll(t *testing.T) {
 	require.NoError(t, err, "system role is the catalog floor — served to every authenticated caller")
 	require.True(t, got.IsSystem)
 	require.Len(t, got.Rules, 1, "system role body (rules[]) returned as usual")
-	require.Equal(t, 0, fga.calls, "system role Get must NOT consult FGA (exempt catalog floor)")
+	require.Equal(t, 0, fga.calls, "system role Get must NOT ask the model at all (exempt catalog floor)")
 }
 
 // granted custom: a custom role the caller has v_list on → served with body.
@@ -181,7 +188,7 @@ func TestGetRole_D1_FGAUnavailable_FailClosed(t *testing.T) {
 		Rules:     domain.Rules{{Module: "vpc", Resources: []string{"subnet"}, Verbs: []string{"get"}}},
 	}
 	fga := newRoleFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	fga.err = stderrors.New("relation form did not answer: connection closed")
 
 	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst1"))
@@ -189,11 +196,11 @@ func TestGetRole_D1_FGAUnavailable_FailClosed(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok, "want grpc status; got %v", err)
 	require.Equal(t, codes.Unavailable, st.Code(),
-		"FGA outage on custom Get → UNAVAILABLE fail-closed (no body leak)")
+		"unanswered question on a custom Get → UNAVAILABLE fail-closed (no body leak)")
 	require.Empty(t, got.Rules, "fail-closed must not leak rules[]")
 }
 
-// nil FGA port on a CUSTOM-role Get → fail-closed Unavailable.
+// nil relation port on a CUSTOM-role Get → fail-closed Unavailable.
 func TestGetRole_D1_NilFGA_CustomFailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	repo.roles["rol0000000000000cst1"] = domain.Role{
@@ -203,7 +210,7 @@ func TestGetRole_D1_NilFGA_CustomFailClosed(t *testing.T) {
 	uc := NewGetRoleUseCase(repo) // NO WithRelationStore
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst1"))
 	st, _ := status.FromError(err)
-	require.Equal(t, codes.Unavailable, st.Code(), "nil FGA port on custom Get → fail-closed Unavailable")
+	require.Equal(t, codes.Unavailable, st.Code(), "nil relation port on custom Get → fail-closed Unavailable")
 }
 
 // malformed id → INVALID_ARGUMENT first (before any repo/FGA work). Unchanged
@@ -216,7 +223,7 @@ func TestGetRole_D1_MalformedID_InvalidArgFirst(t *testing.T) {
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("not-a-role"))
 	st, _ := status.FromError(err)
 	require.Equal(t, codes.InvalidArgument, st.Code(), "malformed id → InvalidArgument first")
-	require.Equal(t, 0, fga.calls, "malformed id rejected before any FGA call")
+	require.Equal(t, 0, fga.calls, "malformed id rejected before a single question is asked")
 }
 
 // read==enforce parity: for the SAME subject, the set of custom roles

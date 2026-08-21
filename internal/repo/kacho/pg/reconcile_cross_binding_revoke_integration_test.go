@@ -7,11 +7,11 @@ package pg_test
 // revoke (Design-B flat-authz verb-bearing). The emitted-tuple ledger PK is
 // (binding_id, fga_user, relation, object) — keyed PER BINDING (migration 0024).
 // The same subject can hold TWO different bindings (two roles) that each
-// materialize the IDENTICAL FGA tuple on the SAME object — e.g. role-T (label
+// materialize the IDENTICAL tuple on the SAME object — e.g. role-T (label
 // treska) and role-O (label okun), both `[get,list]` on vpc.network, on a network
-// that at different times carries either label. OpenFGA tuples are NOT
-// refcounted: one `(sa, v_list, vpc_network:N)` tuple exists regardless of how
-// many bindings claim it.
+// that at different times carries either label. Сам ФАКТ отношения НЕ счётный:
+// одна запись `(sa, v_list, vpc_network:N)` существует независимо от того, сколько
+// выдач на неё претендует.
 //
 // THE BUG (label-revoke-vpc T31-LBLREVOKE-VPC-NETWORK-CHANGE-01 chg-both-post-allow):
 // on a label swap treska→okun, ReconcileObject reconciles BOTH bindings in one

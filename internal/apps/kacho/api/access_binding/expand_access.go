@@ -8,8 +8,9 @@ package access_binding
 // effective-principal audit gap — a binding on a GROUP subject (or a rules-model
 // scope_grant grant) otherwise only shows "group G" / nothing, not its members.
 //
-// Mechanism — OpenFGA `ListUsers` (graph-traversing). Earlier this use-case did a
-// flat filtered-Read of (object, relation) plus a hand-rolled group#member walk.
+// Mechanism — a graph-traversing `ListUsers` over the rights model. Earlier this
+// use-case did a flat filtered-Read of (object, relation) plus a hand-rolled
+// group#member walk.
 // A flat Read sees ONLY literal tuples on the EXACT (object, relation) node — it
 // does NOT traverse the authorization graph, so every rules-model grant that
 // reaches the queried relation through INDIRECTION resolved to EMPTY:
@@ -19,9 +20,10 @@ package access_binding
 //     on the `scope_grant:…` object, never on the queried object's relation.
 //   - group#member usersets (incl. nested groups).
 // `ListUsers` natively traverses all three and returns the concrete grantees with
-// groups already expanded (the FGA server bounds the walk — no client-side
-// cycle-guard / depth / paging needed). We restrict `user_filters` to the
-// concrete principal types so usersets/wildcards never appear in the result.
+// groups already expanded (the decision door walks the form's pages to exhaustion
+// under an explicit page bound, so no cycle-guard or depth counter is needed here).
+// We restrict `user_filters` to the concrete principal types so usersets and
+// wildcards never appear in the result.
 
 import (
 	"context"
@@ -60,13 +62,16 @@ var expandUserTypes = []string{"user", "service_account"}
 // PrincipalLister — narrow port: resolve the CONCRETE principals (FGA-prefixed
 // "user:…" / "service_account:…") that hold object+relation, traversing the full
 // authorization graph (computed usersets + scope_grant indirection + group
-// memberships). Implemented by the OpenFGA client's ListUsers.
+// memberships). Implemented by the decision door over the relational form.
 //
-// The second result is the STORE's truncation signal — the grant store bounds
-// its own answer and offers no continuation, so whether the set is a prefix is a
-// fact only the store's reply carries. It belongs to the port because the
-// use-case has no other way to learn it: measuring the returned length against
-// anything the use-case itself chose cannot detect a cut made upstream.
+// The second result is the SOURCE's truncation signal — whether the answer is a
+// prefix is a fact only the source's reply can carry, because measuring the
+// returned length against anything the use-case itself chose cannot detect a cut
+// made upstream. It USED TO BE produced: the external engine bounded its own answer
+// and offered no continuation. The form does not produce it — its enumeration is
+// paged and continuable, so an incomplete answer that cannot be asked further does
+// not arise — and it reads false. That false is HONEST, not a stub, and the field
+// stays because the caller reads it and because the next source may truncate again.
 type PrincipalLister interface {
 	ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) (principals []string, storeTruncated bool, err error)
 }

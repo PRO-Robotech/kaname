@@ -296,11 +296,12 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 	// matches, but it NEVER proved a wildcard `*.*` system-role rule is actually
 	// MATERIALIZABLE as a tuple (the rules path could fail-closed-SKIP every `*.*`
 	// → tier VALUE correct in the parity map yet ZERO FGA tuples emitted → empty
-	// grant → total access loss). The emitter (access_binding.rulesBindingTuples) is unexported in
-	// another package, so the byte-exact emit proof lives there
-	// (scope_grant_tuples_test.go::TestRulesBindingTuples_WildcardSystemRole_* and
-	// scope_grant_fga_integration_test.go::TestIntegration_Wildcard201_* against a
-	// real OpenFGA). Here — over the ACTUAL re-seeded roles — assert the
+	// grant → total access loss). Сам сборщик кортежей неэкспортирован и живёт в
+	// другом пакете (`access_binding.buildBindingTuples`), поэтому побайтовое
+	// доказательство эмиссии принадлежит ему, а не этому файлу. Прежде здесь стояли
+	// координаты двух проб, доказывавших это против ЖИВОГО движка; обе сняты вместе
+	// с движком, и воспроизводить их имена значило бы посылать читателя в пустоту.
+	// Here — над ФАКТИЧЕСКИ пересеянными ролями — assert the
 	// materializability INVARIANT the emitter relies on: every seeded `*.*` rule has
 	// a resolvable tier (non-empty) AND is the full-wildcard shape (no
 	// resource_names / match_labels), so the tier-tuple path applies. A `*.*` role

@@ -76,22 +76,11 @@ func (s *abQueriesStub) set(relation, subject string, ids []string) {
 	s.idsBy[relation][subject] = ids
 }
 
-func (s *abQueriesStub) ListObjects(_ context.Context, subject, relation, objType string,
-	_ map[string]any, _ int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.n++
-	if objType != "iam_access_binding" {
-		return nil, nil
-	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	if m := s.idsBy[relation]; m != nil {
-		return m[subject], nil
-	}
-	return nil, nil
-}
+// Метод перечисления объектов снят вместе со своим RPC: порт его больше не
+// объявляет, и продукт этим путём не ходит. Дублёр, сохранивший способность,
+// которой нет у настоящего, ШИРЕ предмета — он предлагает путь, по которому
+// проверяемый код пойти не может, и первое же утверждение о нём стало бы
+// утверждением о том, чего не бывает.
 
 // CheckWithContext — the DIRECT per-object oracle, answering from the SAME
 // (relation, subject) id-sets ListObjects returns.

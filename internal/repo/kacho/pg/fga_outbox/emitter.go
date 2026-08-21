@@ -8,23 +8,26 @@
 //
 // Background
 //
-//	Earlier every FGA tuple mutation in kacho-iam ran via a post-commit sync
-//	call to RelationStore.WriteTuples/DeleteTuples (a non-fatal Warn on
-//	failure). JIT auto-grant skipped FGA entirely. JIT pending Approve called
-//	EmitSubjectErasure (CAEP deletion). BreakGlass.ApproveB never wrote
-//	cluster_admin_grants. The cumulative effect — OpenFGA was NOT a reliable
-//	source of authz truth.
+//	Раньше каждая мутация отношения шла пост-коммитным синхронным вызовом в
+//	чужое хранилище (незаметный Warn на отказе), а часть путей не писала туда
+//	вовсе. Совокупный эффект: состояние прав НЕ было надёжным источником истины.
 //
-//	All FGA mutations are now unified behind the `fga_outbox` table that
-//	powers `bootstrap_admin.go` and the drainer (clients/fga_applier.go).
-//	Each grant/revoke emits N rows into `kacho_iam.fga_outbox` in the SAME
-//	pgx.Tx as the domain state-change. The drainer asynchronously applies
-//	them to OpenFGA (with retry + idempotency). Rollback of the caller tx
-//	⇒ no orphan outbox row.
+//	Все мутации сведены к этому журналу: выдача и отзыв кладут N строк в
+//	`kacho_iam.fga_outbox` в ТОЙ ЖЕ pgx.Tx, что и доменное изменение. Откат
+//	транзакции вызывающего ⇒ ни одной осиротевшей строки.
 //
-//	Per ban #10 — within-service refs/invariants live on
-//	DB-level: tx-commit is the atomicity primitive, not "INSERT then call
-//	OpenFGA sync then hope".
+//	ЧТО ИЗМЕНИЛОСЬ СО СНЯТИЕМ ДВИЖКА (стадия S6, эпик #747). Потребителя у
+//	журнала было двое: дренаж, применявший строки к внешнему хранилищу, и
+//	триггер, складывающий из них ПРЯМОЙ ФАКТ (`relation_fact`, миграция 0098).
+//	Первого больше нет — применять некуда; второй остался и стал единственным.
+//
+//	Следствие названо прямо, потому что оно меняет срок: строка журнала теперь
+//	действует С КОММИТА, а не «когда доедет». `sent_at` и счётчик попыток при
+//	этом никем не двигаются — доставки не существует; переименование журнала,
+//	чьё имя называет снятый движок, — предмет отдельной задачи (§7 приёмки).
+//
+//	Per ban #10 — within-service refs/invariants live on DB-level: tx-commit is
+//	the atomicity primitive, not "INSERT then call the store and hope".
 //
 // Schema of `kacho_iam.fga_outbox` (table and NOTIFY trigger — migration
 // `0001_initial.sql`; the ordering partition key — `0067_fga_outbox_tuple_key_partition.sql`):
@@ -127,7 +130,7 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 // object, carrying that subject's WHOLE relation set on it.
 //
 // WHY THE ROW IS THE SET AND NOT THE TUPLE. The drainer applies one row per call,
-// so the row is the unit that reaches OpenFGA atomically. With a row per tuple the
+// so the row is the unit that lands atomically. With a row per tuple the
 // subject's verb set arrived one relation at a time — and between the first arrival
 // and the last, the subject could read its own freshly created resource but not
 // change or delete it. Observed on a stand: read allowed at t, update refused 50 ms
@@ -190,9 +193,11 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	// ОДИН стейтмент на все строки вместо одного на строку. Порядок строк сохраняется:
 	// `unnest` в FROM выдаёт элементы в порядке массива, поэтому возрастающие id
 	// назначаются в том же порядке, в каком вызывающий перечислил кортежи, — а на
-	// порядке id держится поголовный FIFO партиции у claim'а дренажа (выдача и отзыв
-	// одного ключа НЕ коммутативны). Прежняя поштучная вставка давала ровно тот же
-	// порядок, только за N обращений к серверу вместо одного.
+	// порядке id держится проекция журнала в прямой факт: выдача и отзыв одного
+	// ключа НЕ коммутативны, и перестановка двух строк одного набора дала бы
+	// пережившее отзыв право. Прежде тем же порядком держался и поголовный FIFO
+	// партиции у клейма дренажа; дренажа больше нет (стадия S6), а требование к
+	// порядку осталось — сменился только тот, кто на него опирается.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
 		 SELECT $1, p::jsonb, now() FROM unnest($2::text[]) AS p`,
@@ -217,7 +222,7 @@ type grantGroup struct {
 //
 // Order matters twice over: the INSERT assigns ascending ids in slice order, and
 // per-partition FIFO — which is what keeps a revoke behind the grant it supersedes
-// — rests on those ids. De-duplication matters because OpenFGA rejects a request
+// — rests on those ids. De-duplication matters because the store rejected a request
 // naming the same tuple twice (cannot_allow_duplicate_tuples_in_one_request), and a
 // caller that legitimately derives one tuple from two rules would otherwise turn a
 // whole grant into a permanent poison.

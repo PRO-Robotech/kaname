@@ -63,9 +63,6 @@ func (s *stubFGA) Check(_ context.Context, subject, relation, object string) (bo
 	return ok, nil
 }
 
-func (s *stubFGA) WriteTuples(context.Context, []clients.RelationTuple) error  { return nil }
-func (s *stubFGA) DeleteTuples(context.Context, []clients.RelationTuple) error { return nil }
-
 var _ clients.RelationStore = (*stubFGA)(nil)
 
 // authzProjRepo — fake Repo that stubs Projects().Get + Accounts().Get so the

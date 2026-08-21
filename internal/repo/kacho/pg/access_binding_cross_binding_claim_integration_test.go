@@ -7,11 +7,12 @@ package pg_test
 // cross-binding survivor probe (SelectTuplesClaimedByOtherActiveBindings).
 //
 // WHY IT EXISTS. The emitted-tuple ledger is keyed PER BINDING (binding_id,
-// fga_user, relation, object) while an OpenFGA tuple is NOT refcounted: two
-// bindings of the SAME subject on the SAME scope hold TWO ledger rows for ONE live
-// tuple. A teardown that replays its own ledger set verbatim therefore deletes
-// access another ACTIVE binding still grants (silent access-loss, self-sustaining —
-// the ledger is read as the mirror of OpenFGA, so no reconcile pass re-writes it).
+// fga_user, relation, object), а сам ФАКТ отношения не счётный: его ключ —
+// (объект, отношение, субъект), без выдачи. Две выдачи ОДНОМУ субъекту на ОДНУ
+// область держат ДВЕ строки ведомости на ОДИН живой факт. Снос, дословно
+// повторяющий свою ведомость, поэтому снимает доступ, который другая ДЕЙСТВУЮЩАЯ
+// выдача продолжает давать (тихая потеря доступа, самоподдерживающаяся — ведомость
+// читают как зеркало фактов, поэтому ни один проход реконсайлера её не перепишет).
 // Delete/Revoke subtract this probe's result, so a shared tuple dies only with its
 // LAST ACTIVE claimant.
 //

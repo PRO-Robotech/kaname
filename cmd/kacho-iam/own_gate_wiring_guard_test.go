@@ -1,72 +1,107 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// own_gate_wiring_guard_test.go — the refusal to start, exercised in both directions.
+// own_gate_wiring_guard_test.go — отказ в старте, исполненный в ОБЕ стороны.
 //
-// The guard it covers exists because losing a piece of the wiring is silent: iam's own gates
-// would keep answering, from delivered relations only, and disagree with the gate the
-// api-gateway asks about the same subject and the same object. Nothing else in the process
-// would say so.
+// Страж существует потому, что потеря куска провязки ТИХАЯ: служба поднимется,
+// станет Ready и не ответит ни на один вопрос о доступе — а снаружи это выглядит
+// исправной службой. Ничто другое в процессе об этом не скажет.
 //
-// A guard nobody can exercise is one nobody knows works, so this asserts both directions —
-// the complete wiring passes, and each missing piece produces a complaint that NAMES what is
-// missing. The message text is checked because it is what an operator sees when the stand will
-// not come up; a refusal that does not say what to fix cannot be acted on.
-
+// Страж, которого никто не может исполнить, — это страж, про который никто не
+// знает, работает ли он. Поэтому здесь утверждаются обе стороны: полная провязка
+// проходит, а недостающий кусок даёт жалобу, КОТОРАЯ НАЗЫВАЕТ недостающее. Текст
+// жалобы проверяется намеренно — это то, что видит оператор, когда стенд не
+// поднимается, и отказ, не сказавший что чинить, исполнить нельзя (текст отказа
+// оператору выведен из-под запрета на operational-детали, `security.md`).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// УСЛОВИЕ ЗДЕСЬ ОДНО, А БЫЛО ЧЕТЫРЕ — И ЭТО НЕ ОСЛАБЛЕНИЕ
+//
+// Три снятых условия были условиями ЧУЖОГО транспорта: второй шанс поверх
+// доехавших очередью кортежей, страничное чтение структурных фактов и
+// предъявление решения сравнителю форм. Ни у одного из трёх больше нет ПРЕДМЕТА —
+// решение принимает реляционная форма своей базой, и то, чем её дополняли, она
+// читает первым же вопросом. Проба, продолжавшая их утверждать, утверждала бы о
+// несуществующем.
+//
+// Оставшееся условие — что двери есть чем отвечать: дверь без формы возвращает
+// ОШИБКУ на каждый вопрос (`authzcascade.ErrFormNotWired`), а не отказ.
 package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/verdictsource"
 )
 
-// openSnapshot — a snapshot opener that is never called. The guard asks only whether one is
-// present, and nothing here reads a row.
-func openSnapshot(context.Context) (authzcascade.StructuralSnapshot, error) { return nil, nil }
+// askerNeverAsked — форма, которую страж НЕ спрашивает.
+//
+// Страж выясняет ровно одно: ЕСТЬ ли у двери чем отвечать. Ни одной строки здесь
+// не читается, поэтому дублёр не отвечает «да» — он отвечает ОШИБКОЙ на любой
+// вопрос. Дублёр, молча возвращающий «разрешено», был бы снисходительнее
+// настоящего и сделал бы невидимым как раз тот случай, ради которого страж
+// заведён: обращение к форме там, где обращения быть не должно, прошло бы молча.
+type askerNeverAsked struct{ t *testing.T }
+
+func (a askerNeverAsked) fail(method string) error {
+	a.t.Helper()
+	a.t.Fatalf("страж провязки спросил форму (%s) — он обязан лишь установить, что она ЕСТЬ", method)
+	return nil
+}
+
+func (a askerNeverAsked) Allowed(context.Context, string, string, string, string, map[string]any) (bool, error) {
+	return false, a.fail("Allowed")
+}
+
+func (a askerNeverAsked) AllowedMany(context.Context, string, string, []string, string, map[string]any) ([]bool, error) {
+	return nil, a.fail("AllowedMany")
+}
+
+func (a askerNeverAsked) SubjectsPage(context.Context, string, string, string, string, int) ([]string, string, error) {
+	return nil, "", a.fail("SubjectsPage")
+}
+
+func (a askerNeverAsked) Sources(context.Context, string, string, string) ([]string, error) {
+	return nil, a.fail("Sources")
+}
+
+func (a askerNeverAsked) DirectRelations(context.Context, string, string, string, int) ([]string, error) {
+	return nil, a.fail("DirectRelations")
+}
 
 func TestOwnGateWiringGuard(t *testing.T) {
-	transport := &clients.OpenFGAHTTPClient{Endpoint: "127.0.0.1:1", StoreID: "s"}
-	complete := authzcascade.New(nil).WithBatch(authzcascade.BatchSourceFunc(openSnapshot))
-	// Сравнитель с nil-формой: страж спрашивает лишь, ПРОВЯЗАН ли он, и ни одной
-	// строки здесь не читается. Настоящий тип, а не дублёр, — иначе проба
-	// утверждала бы о значении, которого композиционный корень не собирает.
-	comparator := shadowverdict.New(nil, nil)
-
+	// Положительная сторона: то, что собирает композиционный корень
+	// (`authzcascade.Wrap(<форма>)`), обязано удовлетворять СВОЕМУ ЖЕ стражу.
+	// Иначе страж либо неверен, либо недостижим, а снаружи эти два состояния
+	// выглядят одинаково.
 	require.Empty(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, complete).WithComparator(comparator), complete, verdictsource.Switchboard{}, true),
-		"the wiring the composition root builds must satisfy its own guard — otherwise the "+
-			"guard is either wrong or unreachable, and both look identical from outside")
+		ownGateWiringComplaint(authzcascade.Wrap(askerNeverAsked{t})),
+		"провязка, которую строит композиционный корень, обязана проходить свой же страж")
 
-	// Piece one missing: the gates would answer from delivered relations only.
-	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, nil).WithComparator(comparator), complete, verdictsource.Switchboard{}, true),
-		"delivered relations only",
-		"a relation store without a fact source must be refused, and the refusal must say why")
+	// Отрицательная сторона: формы нет — КАЖДЫЙ вопрос о доступе вернул бы
+	// ошибку, а служба была бы Ready. Отказ обязан состояться И НАЗВАТЬ предмет.
+	complaint := ownGateWiringComplaint(authzcascade.Wrap(nil))
+	require.NotEmpty(t, complaint,
+		"дверь без формы обязана быть отвергнута: служба поднялась бы, не решая ничего")
+	for _, want := range []string{"источник вердикта о доступе не провязан", "ошибку, а не ответ"} {
+		require.Contains(t, complaint, want,
+			"отказ обязан назвать оператору, ЧТО не провязано и чем это грозит; "+
+				"отказ, не сказавший что чинить, исполнить нельзя")
+	}
 
-	// Piece two missing: correct answers, at a cost a contract-sized page cannot pay.
-	noBatch := authzcascade.New(nil)
-	require.False(t, noBatch.BatchReachable(), "premise: this resolver cannot batch")
-	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, noBatch).WithComparator(comparator), noBatch, verdictsource.Switchboard{}, true),
-		"one object at a time",
-		"a resolver without the page read must be refused, and the refusal must name the cost")
+	// Дверь, которой нет вовсе, — тот же исход, а не паника: страж читается ДО
+	// того, как что-либо собрано, и обязан пережить вход, который в боевой
+	// посадке не встречается.
+	require.NotEmpty(t, ownGateWiringComplaint(nil),
+		"отсутствующая дверь обязана давать жалобу, а не падение стража")
 
-	// Piece three missing: РЕШЕНИЯ УХОДЯТ ДВИЖКУ НЕ ПРЕДЪЯВЛЕННЫМИ СРАВНЕНИЮ.
-	//
-	// Это отказ не про корректность ответа — ответ остаётся прежним, — а про
-	// НАБЛЮДАЕМОСТЬ перед переключением источника вердикта. Без сравнения обе
-	// формы живы, расходятся молча, и первое, что об этом скажет, — арендатор.
-	// Провязка в пустоту выглядит исполненной, поэтому её и проверяет отказ в
-	// старте, а не память ревьюера.
-	require.Contains(t,
-		ownGateWiringComplaint(authzcascade.Wrap(transport, complete), complete, verdictsource.Switchboard{}, true),
-		"не предъявляя их сравнению",
-		"обёртка без сравнения обязана быть отвергнута, и отказ обязан назвать, чего не хватает")
+	// Жалоба — рантайм-диагностика ОПЕРАТОРУ, а не текст для арендатора: она
+	// называет ручку, которую надо починить, и не несёт ни строки подключения,
+	// ни имени субъекта.
+	require.False(t, strings.Contains(complaint, "://"),
+		"жалоба не несёт строку подключения — оператор чинит настройку, а не читает её значение")
 }

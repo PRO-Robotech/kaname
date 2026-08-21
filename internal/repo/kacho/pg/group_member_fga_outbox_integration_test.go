@@ -7,8 +7,8 @@ package pg_test
 // fga_outbox co-commit for GROUP MEMBERSHIP (the E-31 / group-based-authz bug).
 //
 // The bug: AddMember persisted ONLY the kacho_iam.group_members row and emitted
-// NO FGA `group:<gid>#member` userset tuple, so a binding on a GROUP subject
-// resolved to no concrete members in OpenFGA. These tests pin the atomic emit
+// NO `group:<gid>#member` userset intent, so a binding on a GROUP subject resolved
+// to no concrete members at all. These tests pin the atomic emit
 // contract the AddMember/RemoveMember use-cases now rely on:
 //
 //   GM-O1  AddMember's group_members DML + the FGA member-tuple INTENT

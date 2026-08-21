@@ -14,10 +14,11 @@ kacho-loadbalancer) общаются с kacho-iam:
   AuthorizeService.Check, но с Cascade fast-path и principal-prop).
 - `ListPermissions` — catalog-mode listing (все permissions из IAM-domain).
 - `PollSubjectChanges(since_id, limit)` — для api-gateway authz-cache
-  invalidation poll (см. [`29-openfga-check.md`](29-openfga-check.md)).
+  invalidation poll (см. [`29-relational-verdict.md`](29-relational-verdict.md)).
 - `RegisterResource` / `UnregisterResource` — постановка и снятие иерархического
-  указателя для ресурса чужого сервиса; намерение ложится в журнал
-  `kacho_iam.fga_outbox`, дренаж применяет.
+  указателя для ресурса чужого сервиса. Намерение ложится строкой журнала
+  `kacho_iam.fga_outbox`, и триггер журнала складывает из неё прямой факт **в той же
+  транзакции**: дренажа наружу нет — применять не к чему и некому.
 
 **Use-cases:**
 - api-gateway: validate JWT → LookupSubject → resolve principal → propagate to backend.
@@ -84,7 +85,7 @@ sequenceDiagram
     participant IAM as InternalIAMService.Check :9091
     participant Auth as AuthorizeService
     participant Cascade as cluster_admin_grants fast-path
-    participant FGA as OpenFGA
+    participant Form as реляционная форма (kacho_iam)
     participant OPA
 
     VPC->>IAM: Check {subject:user:usr_alice, action:"vpc.network.create", resource:project/prj_yyy}
@@ -93,8 +94,8 @@ sequenceDiagram
     alt ClusterAdminGrant ACTIVE
         Cascade-->>Auth: ALLOW
     else not cluster admin
-        Auth->>FGA: Check(user, creator, project)
-        FGA-->>Auth: allowed=true
+        Auth->>Form: вердикт: факт ∪ выдача ∪ метки ∪ членство
+        Form-->>Auth: allowed=true
         Auth->>OPA: guardrails deny eval
         OPA-->>Auth: false (no deny)
     end
@@ -111,21 +112,20 @@ sequenceDiagram
     participant VPC as kacho-vpc Network.Create
     participant DB_VPC
     participant IAM as InternalIAMService :9091
-    participant OB as kacho_iam.fga_outbox
-    participant FGA as OpenFGA
+    participant DB as Postgres kacho_iam
 
     VPC->>DB_VPC: INSERT vpc_networks → vpn_xxx
     VPC->>IAM: RegisterResource {subject:user:usr_alice, object:vpc_network:vpn_xxx, ...}
-    IAM->>OB: INSERT намерение (writer-tx)
+    IAM->>DB: INSERT fga_outbox (user:usr_alice, creator, vpc_network:vpn_xxx)
+    DB->>DB: триггер журнала: строка → relation_fact (та же транзакция)
     IAM-->>VPC: OK
-    OB->>FGA: дренаж применяет кортёж
-    Note over VPC: доступ материализуется в ограниченном окне;<br/>Operation.done его НЕ ждёт (ban #9)
+    Note over VPC: «записал» и «действует» совпадают — очереди наружу нет
 ```
 
 ## Конфигурация
 
-Использует те же OpenFGA env vars, что и AuthorizeService
-(см. [`19-authorize.md`](19-authorize.md)).
+Своих переменных окружения у службы нет: вердикт и запись намерения идут в ту же базу,
+что и остальное состояние (см. [`19-authorize.md`](19-authorize.md) §Настройка).
 
 ## Как пользоваться
 
@@ -161,9 +161,10 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 - **Check delegation:** narrow port `authorizer` over `*service.AuthorizeService`.
 - **PollSubjectChanges:** narrow port `subjectChanger` over `*service.SubjectChangeService`.
 - **Порты обработчика:** `Authorizer`, `subjectChanger`, `relationWriteGate`,
-  `resourceRegistrar`, `roleCompiledReader`. Порта ЗАПИСИ в движок среди них нет:
+  `resourceRegistrar`, `roleCompiledReader`. Отдельного порта ЗАПИСИ среди них нет:
   `relationWriter` снят вместе с `WriteCreatorTuple` (#788) намеренно — тип без него
-  нельзя переоткрыть одной строкой вызова.
+  нельзя переоткрыть одной строкой вызова. Запись идёт через `resourceRegistrar`,
+  который кладёт строку журнала в собственной транзакции.
 - **Auth-interceptor:** реализован на стороне api-gateway (валидация JWT +
   propagation principal в backend).
 
@@ -171,22 +172,24 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 
 - **gRPC-direct, не restmux** — иначе loop через api-gateway.
 - **LookupSubject — hot-path** — рекомендуется api-gateway cache на ~30s.
-- **Указатель материализуется eventually** — `RegisterResource` кладёт намерение в
-  журнал, применяет дренаж; `Operation.done` видимости кортежа НЕ ждёт (ban #9).
-  Не доехавший указатель восстанавливает реконсайлер, а не ручная запись в движок:
-  прямой путь снят вместе с `WriteTuples` (#788) — см. [`28-relationhook.md`](28-relationhook.md).
+- **Указатель действует С КОММИТА, а не «когда доедет»** — `RegisterResource` кладёт
+  намерение строкой журнала, и триггер складывает из неё прямой факт в той же
+  транзакции. Вердикт о доступе читает ту же строку, поэтому «принято» означает
+  «закоммичено», а не «поставлено в очередь»; окна материализации у этого пути нет,
+  и ban #9 к нему неприменим — гейтить нечего.
+  Ручной дописи указателя не существует: прямой путь снят вместе с `WriteTuples`
+  (#788), а внешнего хранилища, мимо которого можно было бы писать, больше нет.
 - **Check без principal context** — caller обязан передать subject параметром.
 
 ## Связанные компоненты
 
 - [`03-user.md`](03-user.md) — User mirror.
 - [`19-authorize.md`](19-authorize.md) — Public Check.
-- [`28-relationhook.md`](28-relationhook.md) — как iam пишет родительский указатель своим ресурсам.
-- [`29-openfga-check.md`](29-openfga-check.md) — subject_change push chain.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — родительский указатель, журнал намерений и сброс кэша края.
 
 ## Ссылки на код
 
 - `internal/apps/kacho/api/internal_iam/handler.go`, `lookup_subject.go`,
   `register_resource.go`, `force_logout.go`, `get_role_compiled.go`
 - `internal/service/authorize_service.go`, `subject_change_service.go`
-- `internal/clients/openfga_client.go`
+- `internal/repo/kacho/pg/creator_tuple_writer.go`, `internal/repo/kacho/pg/relverdict/`

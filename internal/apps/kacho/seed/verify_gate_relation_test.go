@@ -10,13 +10,19 @@ package seed
 // is non-empty) — the blind spot that let the Design-A class-of-bug through
 // (a tuple was materialized, but the relation it resolved did NOT satisfy the
 // enforcement-relation the catalog gates on). The extended gate runs, for every
-// active binding's required-relation check, a REAL FGA Check(subject,
+// active binding's required-relation check, a REAL Check(subject,
 // required_relation, object) and gates the cutover ONLY when 100% are ALLOW.
 //
-// This unit test drives the gate through a fake RelationChecker + store; the
-// real-OpenFGA proof is in the pg integration test.
+// This unit test drives the gate through a fake RelationChecker + store. The proof
+// against a real store is the relational form's own integration suite
+// (repo/kacho/pg/relverdict, run against Postgres): stage S6 removed the external
+// engine, so "a real store" means this service's own database, and naming the
+// engine here would send the next reader looking for a proof that no longer exists
+// under that name.
 //
-// RED until VerifyGate.VerifyRelationSatisfiesAction exists.
+// The trailing "RED until VerifyGate.VerifyRelationSatisfiesAction exists" is
+// dropped: it exists (seed/verify_gate.go), and a note announcing a red that is
+// green states nothing.
 
 import (
 	"context"

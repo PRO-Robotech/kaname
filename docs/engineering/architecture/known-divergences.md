@@ -127,9 +127,15 @@ lower layer, so `disable` is fine" escape hatch, matching the gRPC-listener gate
 ## 4. FGA authorization-model gates — RESOLVED (canonical DSL restored in-repo)
 
 **Convention** (hard-rule #12): security-relevant tests must be green, not
-silently skipped. The FGA model-drift gate (`internal/authzmap/fga_model_drift_test.go`)
-and the real-OpenFGA tuple-emission proof (`internal/testsupport/fgatest`) prove the
-emitter/catalog match the canonical `fga_model.fga` DSL.
+silently skipped. The model-drift gate (`internal/authzmap/fga_model_drift_test.go`)
+proves the emitter/catalog match the canonical `fga_model.fga` DSL.
+
+> Здесь назывался вторым доказательством харнесс, гонявший эмиссию кортежей против
+> НАСТОЯЩЕГО внешнего движка. Движка нет, и харнесса в дереве нет вместе с ним;
+> координата не воспроизводится, чтобы её не пошли искать. Свойство, которое он
+> доказывал — «эмитируется то, что модель принимает», — теперь держится по построению:
+> отношения выводятся из той же модели, а не пишутся в отдельное хранилище, способное
+> их отвергнуть.
 
 **What was wrong**: both resolved the canonical DSL through a sibling `kacho-proto`
 checkout or the pinned `kacho-proto` Go-module directory — neither of which exists
@@ -143,21 +149,29 @@ compute object types (`compute_host_group`, `compute_gpu_cluster`,
 and one type with no service at all (`vpc_anycast_address_pool`) were declared
 grantable and verb-bearing while the enforced model never declared them.
 
-**Resolution**: the canonical model now lives in-repo at
-`proto/kacho/cloud/iam/v1/fga_model.fga` (seeded byte-for-byte from the ConfigMap,
-so the enforced model did not change when the file was restored). It is the single
-source; the ConfigMap is GENERATED from it by `make openfga-model-json`, and
-`internal/authzmap/fga_model_configmap_identity_test.go` pins both generated blocks
-to it — the byte-identical DSL copy and, more importantly, the pre-transformed
-JSON model block the bootstrap Job actually applies. That block is not a file: it is
-generated into
-`deploy/helm/umbrella/charts/openfga-bootstrap/templates/openfga-model-stub-configmap.yaml`,
-so naming it as a standalone path (as an earlier revision did) sends the reader looking
-for something the tree does not contain. Resolution is a plain walk-up to
-the module root; **the absence of the model is now a hard failure, and there is no
-environment opt-out** (`KACHO_IAM_REQUIRE_FGA_MODEL` is gone). The gate also runs
-in the reverse direction: a type in the enforced model that no catalog knows about,
-or one that carries `v_*` outside the grantable catalog, fails the build.
+**Resolution**: the canonical model lives in-repo at
+`proto/kacho/cloud/iam/v1/fga_model.fga`. It is the single source, and the absence of
+the model is a hard failure with no environment opt-out.
+
+> [!note] Обновлено на стадии S6: копия модели переехала вместе со своим потребителем
+> До S6 второй копией модели был ConfigMap задачи подготовки хранилища внешнего движка;
+> её порождала цель сборки, а идентичность обеих копий держал отдельный тест. Ни движка,
+> ни его задачи подготовки, ни её чарта в дереве нет — вместе с ними снята и цель, и тот
+> тест. Мёртвые имена здесь не воспроизводятся координатами: цитата несуществующей цели
+> читается как исполнимая команда.
+>
+> **Второй экземпляр модели остался, и он другой** — вшитая копия
+> `services/iam/internal/authzmodel/fga_model.fga`, из которой реляционная форма
+> компилирует план вывода. Её равенство канонической держит
+> `TestEmbeddedModelIsByteIdenticalToCanonical` (`services/iam/internal/authzmodel/identity_test.go`),
+> и правится **только** канонический файл; копия порождается
+> `make -C deploy fga-model-embed`.
+>
+> Довод у гейта тот же, что и был, и он усилился: разойдясь, две копии дадут не отказ, а
+> **разные решения о доступе** — заметное по чужому доступу, а не по красному прогону.
+
+Гейт по-прежнему работает в обе стороны: тип в применяемой модели, о котором не знает ни
+один каталог, либо несущий `v_*` вне грантуемого каталога, роняет сборку.
 
 ---
 
@@ -237,7 +251,7 @@ _Reviewed 2026-07-05 (r5 security-hardening audit)._
 
 ---
 
-## 9. OpenFGA peer-client port interfaces live in the `internal/clients` adapter package, imported by the use-cases (deferred reorg)
+## 9. Relation-store port interfaces live in the `internal/clients` adapter package, imported by the use-cases (deferred reorg)
 
 **Convention** (architecture.md dependency rule): a use-case **defines** the
 narrow port-interface it needs (`<Peer>Client`), and the concrete adapter in
@@ -245,10 +259,10 @@ narrow port-interface it needs (`<Peer>Client`), and the concrete adapter in
 the reverse. `cluster/ports.go` and `service/governance_ports.go` follow this
 (ports declared in the consumer, adapters named only in doc-comments).
 
-**Divergence**: the OpenFGA peer-client ports `RelationStore` / `RelationQueries`
-(and the plain `RelationTuple` value type) are declared **inside** the adapter
-package `internal/clients` (`openfga_client.go`, `openfga_extensions.go`). ~64
-use-case files under `internal/apps/kacho/api/*` import `internal/clients` purely
+**Divergence**: the relation ports `RelationStore` / `RelationQueries` (and the
+plain `RelationTuple` value type) are declared **inside** the adapter package
+`internal/clients`. **43** use-case files under `internal/apps/kacho/api/*`
+(re-measured 2026-08-20; the earlier figure was ~64) import `internal/clients` purely
 to name their port type (`clients.RelationStore` / `clients.RelationQueries` /
 `clients.RelationTuple`), so the use-case layer compile-time-couples to the
 adapter package rather than owning its own port.
@@ -323,16 +337,17 @@ store, trivially-denying tuples): a single check answers in **3.0 ms** mean over
 17.8 / 19.3 ms) — **0.38 ms per check amortised**, and 50× fewer round-trips.
 Time figures describe that stand and that tuple set; the request count does not.
 
-**The partition size is the STORE's cap, not the published one.** iam publishes
-`AuthorizeService.BatchCheck` at 100, and that number governs how large a page a
-*sibling* may hand to iam. The store behind iam caps a request at **50**
-(`OPENFGA_MAX_CHECKS_PER_BATCH_CHECK`, default) and refuses an over-cap request
-outright — `batchCheck received 51 checks, the maximum allowed is 50`, HTTP 400,
-read off the running build rather than assumed. Splitting a page against the
-published 100 would make every partition a refusal. The two constants are declared
-on opposite sides of the boundary (`clients.fgaMaxChecksPerBatchCheck`,
-`authzfilter.MaxBatchChecksPerRequest`) and their agreement is asserted where both
-are visible.
+> [!note] До стадии S6 размер партии диктовал ПОТОЛОК ЧУЖОГО ХРАНИЛИЩА — его больше нет
+> Здесь стоял разбор: iam публикует `AuthorizeService.BatchCheck` с пределом 100, а
+> хранилище за ним отвергало запрос длиннее **50**, поэтому деление страницы по
+> опубликованному числу делало бы каждую партию отказом. Хранилища нет; предел, о
+> который разбивали страницу, исчез вместе с ним, и внешнего числа, которому обязан
+> подчиняться внутренний путь, не осталось. Опубликованные 100 остаются контрактом для
+> вызывающих.
+>
+> Замеры времени в этом разделе (`openfga/openfga:v1.14.0`, 3.0 мс на проверку, 19 мс на
+> партию из 50) описывали тот стенд и то хранилище и сегодня **не перемеряемы**: предмета
+> замера нет. Число запросов — свойство алгоритма и остаётся верным.
 
 The three conditions the earlier record said must not be traded away are held and
 each has a test: the budget belongs to the **request** (partitions are issued
@@ -363,8 +378,7 @@ round-trips** — the number this record used to be about, now living one hop aw
 Four services are on that path.
 
 Converging it means routing the loop through the same batched question
-(`clients.OpenFGAHTTPClient.BatchCheckWithContext`), which now exists and is
-wired. It is not a mechanical substitution: the per-item path also runs the
+(the batched relation question), which exists and is wired. It is not a mechanical substitution: the per-item path also runs the
 super-access cascade and a structural fallback with contextual tuples on the deny
 side, so the shape is "batch the common first question, then take the slow path
 only for the items it denied". That is a request-path change to an authorization
@@ -488,47 +502,49 @@ _Reviewed 2026-08-18 (task #645, list page is a page of the visible)._
 
 ---
 
-## 14. СНЯТО — двери в движок мимо журнала закрыты вместе со своими RPC
+## 14. СНЯТО — двери, писавшие кортёж мимо журнала, закрыты (стадия S6)
 
-**Расхождение закрыто 2026-08-20 (#788).** Здесь стояла действующая запись: два
-места писали кортёж в движок напрямую, не кладя строку журнала
-`kacho_iam.fga_outbox`, — `RelationProjector.WriteRaw` (за ним
-`InternalAuthorizeService.WriteTuples`) и `InternalIAMService.WriteCreatorTuple`.
-Кортеж, поставленный так, в проекцию `relation_fact` (инвариант миграции 0098) не
-попадал бы НИКОГДА: движок отвечает «да», своя БД — «нет».
+**Что было расхождением.** Два места писали кортёж во внешний движок отношений напрямую,
+не кладя строку журнала `kacho_iam.fga_outbox`: административный глагол записи кортежей
+внутреннего листенера и `InternalIAMService.WriteCreatorTuple`. Поставленный так кортёж
+**не попадал в проекцию `relation_fact` никогда**: движок отвечал «да», своя БД — «нет»,
+и такое расхождение разбирают в правах, а не в наполнении.
 
-**Исход — тот, что запись сама и называла терминальным: снять оба RPC.** У обеих
-дверей было ноль вызывающих (соседи давно ушли на `RegisterResource`, который
-пишет в журнал), поэтому перевод на журнал дал бы работу без выгодоприобретателя.
-Оба RPC удалены с контракта вместе со своими сообщениями; ломающее изменение
-объявлено в `proto/declared-breaks.yaml`, имена держит надгробие
-`retiredRPCSurface` в `internal/repohygiene` — оно читает контракт, стабы и обе
-копии каталога прав.
+**Чем закрыто — предметом, а не починкой каждой двери:**
 
-**Как это подтвердилось механически, а не заявлением.** Ведомость гейта
-`tools/authzenginecensus/engineplaces/journaldoor_test.go` держала обе двери
-объявленными исключениями с предикатом снятия. Как только места записи исчезли,
-прогон дал ровно две находки «вердикт без места» — послабление истекло само, — и
-только после этого записи были сняты. Замер того же прогона: мест записи в движок
-**10** в **5** файлах (было 12 в 7), объявленных исключений в Go-дереве — **0**.
+| дверь | исход | предикат |
+|---|---|---|
+| административная запись кортежей внутреннего листенера | **снята вместе с листенером**: ни RPC, ни его реализации в дереве нет | `grep -rn '\.WriteRaw(' --include='*.go' .` → **0** |
+| `InternalIAMService.WriteCreatorTuple` | **снята с контракта**: вызывающих было ноль — все пять соседей давно ушли на `RegisterResource`, который кладёт строку журнала | `grep -rn '\.WriteCreatorTuple(' --include='*.go' .` → **0** |
 
-**Что осталось и почему это отдельный предмет.** Единственное оставшееся
-исключение — не-Go: посев чарта, который ставит два кортежа одиночки-кластера ДО
-того, как журнал вообще адресуем. Оно ограничено НАБОРОМ: третий кортеж роняет
-`TestJournalDoor_BootstrapExceptionIsBoundedToItsDeclaredTuples`.
+Второй исход стоит отметить отдельно, потому что здесь сошлись две линии работы и обе
+были правы. Линия снятия движка **перевела** эту дверь на журнал — предмет RPC никуда не
+делся, изменилось то, **куда** он пишет. Линия ролевой модели независимо **пересчитала её
+вызывающих** и нашла ноль: все пять соседей давно ушли на `RegisterResource`. Из двух
+верных ходов побеждает второй — перевод двери, которую никто не открывает, даёт работу без
+выгодоприобретателя, а сама дверь остаётся мёртвой поверхностью (ban #11, LEAN). Поэтому в
+дереве осталось **снятие**, а свойство, ради которого делался перевод, живёт у
+`RegisterResource`: у вызывающего «записал» означает «закоммичено», а не «поставлено в
+очередь», потому что строка журнала и прямой факт ложатся одной транзакцией.
 
-**Как проверить на стенде.** `deploy/scripts/authz-journal-census.sh` — перепись
-«движок против журнала» в обе стороны. Замер 2026-08-20 (до снятия): в движке и не
-в журнале — **2** (оба от посева чарта), в журнале и не в движке — **0**.
+Имена обеих снятых дверей держит надгробие `retiredRPCSurface` в `internal/repohygiene` —
+оно читает контракт, стабы и обе копии каталога прав, поэтому вернуть RPC под тем же именем
+молча нельзя.
 
-**Номер раздела не переиспользуется**: на него ссылаются другие документы и задача
-#788.
+**Инвариант миграции `0098_relation_fact_follows_the_journal.sql` обеспечен по построению.**
+Он объявлял, что состояние отношений есть свёртка ОДНОГО журнала. Пока существовало второе
+хранилище, инвариант держался перечнем исключений и гейтом над ним; теперь второго
+хранилища нет, писать «мимо журнала» **некуда**, и расхождение невыразимо.
 
-_Reviewed 2026-08-20 (задача #788, двери сняты вместе с RPC)._
-
-**Чем сходиться.** Снять оба RPC — тогда исключения истекают сами, и инвариант
-0098 становится обеспечен по построению для Go-стороны; у посева чарта остаётся
-своё, ограниченное набором из двух кортежей, исключение.
+> [!note] Гейт и перепись, державшие это расхождение, сняты вместе с предметом
+> Прежняя редакция называла тестовый гейт мест записи в движок и скрипт переписи «движок
+> против журнала» на стенде, а также приводила замер (в движке и не в журнале — 2, обратно
+> — 0) и открытую задачу на снятие обоих RPC. Ни гейта, ни скрипта в дереве нет: их предмет
+> — сравнение двух хранилищ — исчез. Координаты здесь не воспроизводятся, иначе читатель
+> пойдёт прогонять то, чего нет.
+>
+> Оставшиеся два кортежа, ставившиеся посевом чарта, вопросом больше не являются: посев
+> пишет туда же, куда все.
 
 ---
 

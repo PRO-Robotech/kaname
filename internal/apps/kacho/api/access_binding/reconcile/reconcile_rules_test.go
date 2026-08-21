@@ -423,7 +423,7 @@ func TestReconcileRules_MatchLabels_PerObjectOnly_NoAnchor(t *testing.T) {
 	// the AUTHORED verbs, the v_* set from the TYPE.
 	assert.True(t, hasTuple(w, "v_get", "compute_instance:i-prod"), "v_get on matched object")
 	assert.False(t, hasTuple(w, "v_create", "compute_instance:i-prod"),
-		"v_create emitted on compute_instance, which does not declare it — a dangling tuple OpenFGA rejects")
+		"v_create emitted on compute_instance, which does not declare it — отношение, которого нет у типа, ни с одним вопросом не совпадёт")
 	assert.True(t, hasTuple(w, "editor", "compute_instance:i-prod"), "back-compat tier on matched object")
 	// NO tuple on the non-matching object, NO anchor/scope_grant.
 	for _, tup := range w {

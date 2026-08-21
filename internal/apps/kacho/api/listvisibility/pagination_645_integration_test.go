@@ -38,7 +38,7 @@ func seedInterleaved(t *testing.T, e *env, visibleCount, invisiblePerVisible int
 		}
 		p := e.seedProject(t, e.callerAcc, projectName(n))
 		n++
-		e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", p))
+		e.grantVerb(t, "user", string(e.callerUser), "project", p, "get")
 		out = append(out, p)
 	}
 	return out
@@ -60,7 +60,7 @@ func TestList645_02_APageOfTheRequestedSizeIsFull(t *testing.T) {
 	e := newEnv(t)
 	visible := seedInterleaved(t, e, 120, 3)
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 
 	got, next, err := uc.Execute(e.ctxUser(e.callerUser), repoproject.ListFilter{PageSize: 50})
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestList645_03_TokenMeansThereIsANextPageAndTheTraversalIsExact(t *testing.
 	e := newEnv(t)
 	visible := seedInterleaved(t, e, 120, 3)
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 	ctx := e.ctxUser(e.callerUser)
 
 	seen := map[string]int{}
@@ -137,7 +137,7 @@ func TestList645_19_PageSizeOne(t *testing.T) {
 	e := newEnv(t)
 	visible := seedInterleaved(t, e, 3, 4)
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 	ctx := e.ctxUser(e.callerUser)
 
 	var order []string

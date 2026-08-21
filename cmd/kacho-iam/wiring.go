@@ -26,9 +26,7 @@ import (
 	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
 	identityquotaapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/identityquota"
 	interactiveclientapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/interactive_client"
-	internalauthorizeapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_authorize"
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam/shadowverdict"
 	internaloperationsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_operations"
 	limitapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/limit"
 	permissioncatalogapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/permission_catalog"
@@ -51,7 +49,6 @@ import (
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/verdictsource"
 )
 
 // services — собранный набор бизнес-сервисов (один composition-point вместо
@@ -71,8 +68,7 @@ type services struct {
 	internalIAMHandler *internaliamapp.Handler
 
 	// AuthZ core handlers.
-	authorizeHandler         *authorizeapp.Handler
-	internalAuthorizeHandler *internalauthorizeapp.Handler
+	authorizeHandler *authorizeapp.Handler
 
 	// permissionCatalogHandler — PermissionCatalogService.ListPermissionCatalog
 	// (RBAC rules-model G): PUBLIC sync read of the backend-driven grantable
@@ -130,36 +126,16 @@ type services struct {
 	// token), NOT that authN is waived.
 	internalBootstrapTokenHandler *bootstraptoken.Handler
 
-	// relationStore — shared OpenFGA client. Always non-nil: buildOpenFGAClient
-	// returns a client whatever the environment holds.
+	// ownGates — ЗНАЧЕНИЕ, КОТОРОЕ ДЕРЖАТ СОБСТВЕННЫЕ СТРАЖИ iam: дверь решения
+	// поверх реляционной формы.
 	//
-	// It is NOT a refusal to start. On an empty KACHO_IAM_OPENFGA_STORE_ID the
-	// composition root logs a loud WARN and carries on, and the client then FAILS
-	// CLOSED — Check denies, Read/Write return ErrNotConfigured (→ UNAVAILABLE).
-	// That soft pass is deliberate and load-bearing: the store id is provisioned by
-	// the openfga-bootstrap Job, a helm `post-install,post-upgrade` hook, which runs
-	// only AFTER `helm upgrade --wait` sees the release Ready. An iam that refused to
-	// start without the id would never become Ready, the hook would never run, and
-	// the id would never be written — the first install would deadlock on itself.
+	// Выставлено наружу потому, что не все стражи собираются здесь. Потолок чтения
+	// на внутреннем слушателе собирается в `runServe`, и ему до сих пор отдавали
+	// ГОЛЫЙ транспорт — то есть решение о доступе на каждом читающем RPC
+	// внутреннего слушателя уходило мимо двери. Снаружи это выглядело исправно:
+	// страж есть, провязан, исполняется на каждом запросе.
 	//
-	// Said this plainly because the previous edition said the opposite ("composition
-	// root fails fast on missing …STORE_ID"), and a security comment that contradicts
-	// its code invites the next reader to "fix" the code to match it (#654).
-	//
-	// Reused by runServe for the fga_outbox drainer.
-	relationStore *clients.OpenFGAHTTPClient
-
-	// ownGates — ЗНАЧЕНИЕ, КОТОРОЕ ДЕРЖАТ СОБСТВЕННЫЕ СТРАЖИ iam: тот же клиент,
-	// обёрнутый вторым шансом и предъявляющий каждое решение сравнению.
-	//
-	// Выставлено наружу потому, что не все стражи собираются здесь. Потолок
-	// чтения на внутреннем слушателе собирается в `runServe`, и ему до сих пор
-	// отдавали ГОЛЫЙ транспорт — то есть решение о доступе на каждом читающем
-	// RPC внутреннего слушателя уходило движку и мимо второго шанса, и мимо
-	// сравнения. Снаружи это выглядело исправно: страж есть, провязан,
-	// исполняется на каждом запросе.
-	//
-	// Пока у `runServe` не было доступа к обёрнутому значению, «отдать стражу
+	// Пока у `runServe` не было доступа к этому значению, «отдать стражу
 	// правильное» было невыполнимо — не из-за недосмотра, а из-за раскладки.
 	// Поле закрывает именно это.
 	ownGates *authzcascade.Client
@@ -170,64 +146,40 @@ type services struct {
 // start; it is a separate function so the refusal is testable — an os.Exit inside the builder
 // can only be read, not exercised, and a guard nobody can exercise is one nobody knows works.
 //
-// Neither condition is gated on the authentication mode. Every deployed stand runs production
+// Условие ОДНО, и оно осталось от четырёх не потому, что требования ослабли, а
+// потому, что три из них были условиями ЧУЖОГО транспорта: второй шанс поверх
+// доехавших очередью кортежей, страничное чтение структурных фактов и предъявление
+// решения сравнению форм. Ни у одного из трёх больше нет предмета — решение
+// принимает форма своей базой, и то, чем её дополняли, она читает первым же
+// вопросом.
+//
+// Оставшееся условие — что двери есть чем отвечать. Дверь без формы отвечала бы
+// ОШИБКОЙ на каждый вопрос, а не отказом (см. authzcascade.ErrFormNotWired), то
+// есть служба поднялась бы и не отвечала бы ни на один вопрос о доступе. Отказ в
+// старте называет это прямо: рантайм-диагностика оператору, который иначе не
+// поймёт, почему поднявшаяся служба ничего не решает.
+//
+// NOT gated on the authentication mode. Every deployed stand runs production
 // posture, and a guard absent from the stands where anyone would notice it firing is not a
 // guard.
 //
 // The message names the knob and the consequence deliberately: it is what an operator sees
 // when the stand will not come up, and a refusal that does not say what to fix cannot be
 // acted on.
-func ownGateWiringComplaint(
-	store *authzcascade.Client, facts *authzcascade.Resolver,
-	verdictSwitch verdictsource.Switchboard, shadowCompare bool,
-) string {
-	// The second chance is a CORRECTNESS condition: without it iam's own gates answer from
-	// delivered relations only, and disagree with the gate the api-gateway asks about the
-	// same subject and the same object.
-	if !store.SecondChanceReachable() {
-		return "iam's own authorization gates would answer from delivered relations only, " +
-			"disagreeing with the gate the api-gateway asks (structural-fact resolver not " +
-			"wired into the relation store)"
+func ownGateWiringComplaint(store *authzcascade.Client) string {
+	if !store.FormReachable() {
+		return "источник вердикта о доступе не провязан: дверь решения собрана без " +
+			"реляционной формы, и КАЖДЫЙ вопрос о доступе вернул бы ошибку, а не ответ " +
+			"(проверьте строку подключения к базе службы прав)"
 	}
-	// The page read is a CONTRACT condition, and refusing to start over it is deliberate.
-	// Without it the gates stay correct and every list filter resolves one object at a time —
-	// measured at 200 primary transactions for a page of 100, while page size is part of the
-	// contract up to 1000 and narrowing it to fit a budget is forbidden. That is a broken
-	// contract at scale rather than a slow path, and it is invisible from outside until a
-	// large page arrives. A control whose absence nobody can notice is not a control.
-	if !facts.BatchReachable() {
-		return "the structural page read is not wired, so every list filter would resolve " +
-			"one object at a time and a contract-sized page would not fit its request budget"
-	}
-	// Сравнение — условие НАБЛЮДАЕМОСТИ, и отказ в старте по нему тоже намеренный.
-	//
-	// Без него ответы остаются прежними, поэтому пропажа ничем себя не выдаёт: обе
-	// формы живы, решения принимает движок, а расхождение никем не считается. Ровно
-	// в этом состоянии переключать источник вердикта потипово нельзя — страж чтения
-	// спрашивает ТИПО-НЕЗАВИСИМО, и на первом же переключённом типе один вопрос
-	// получил бы два действующих ответа. Провязка при этом выглядит исполненной:
-	// значение собрано, стражам роздано, вызовы идут.
-	if !store.ComparatorWired() {
-		return "собственные стражи iam принимали бы решения о доступе, не предъявляя их " +
-			"сравнению форм (сравнитель не провязан в значение, которое стражам выдаёт " +
-			"композиционный корень): расхождение двух форм осталось бы несчитанным, и " +
-			"переключать источник вердикта потипово в этом состоянии нельзя"
-	}
-	// Четвёртое условие — ПОЗИЦИЯ РУБИЛЬНИКА, и оно расширяет ЭТОТ страж, а не
-	// заводит второй.
-	//
-	// Второй страж об одном предмете разошёлся бы с первым: они поднимались бы
-	// в разном порядке, читали бы разные значения и однажды дали бы разные
-	// ответы на один вопрос. Здесь предмет один — «можно ли этой сборке
-	// принимать решения о доступе», — и отказ на него один.
-	if complaint := verdictSwitchComplaint(verdictSwitch, shadowCompare); complaint != "" {
-		return complaint
-	}
+	// Условия ПОЗИЦИИ РУБИЛЬНИКА здесь больше нет: рубильник переключал источник
+	// вердикта потипово, пока источников было два. Источник один — переключать
+	// нечего, и условие снято вместе со своим предметом, а не оставлено пустым.
 	return ""
 }
 
 // buildServices создает все repo'ы поверх pool и собирает бизнес-сервисы.
-// Composition root passes a fully-configured OpenFGA HTTP client — wiring
+// Composition root passes a fully-configured decision door — wiring
 // of every per-resource use-case is unconditional (no fallback stub).
 // opsRepo is the FULL corelib repo (operations.NewRepo), not the narrow
 // operations.Repo: the cluster-admin use-cases finalize their Operation
@@ -235,86 +187,28 @@ func ownGateWiringComplaint(
 // and that capability must be proven at compile time, not type-asserted here.
 func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	kachoRepo kachorepo.Repository,
-	fgaTransport *clients.OpenFGAHTTPClient,
 	metricsReg *metrics.Registry,
 	cfg config.Config, logger *slog.Logger) *services {
 	_ = slavePool // kachoRepo is built and passed in by main()
 
-	// structuralFacts — the facts the super-access cascade resolves over, read from iam's
-	// OWN committed rows (internal/authzcascade). Built on a PRIMARY-ONLY repository,
-	// deliberately: the rows it reads are ones that were just committed, which is exactly
-	// what a replica lags on, so a replica read would swap one delivery pipeline for
-	// another. WithBatch adds the page-shaped read of the same facts — measured, a page
-	// that derives them one object at a time costs a transaction per object, and page size
-	// is part of the contract up to 1000.
-	structuralRepo := kachopg.NewStructuralFactsRepo(pool)
-	structuralFacts := authzcascade.New(kachopg.New(pool, nil)).
-		WithBatch(authzcascade.BatchSourceFunc(
-			func(ctx context.Context) (authzcascade.StructuralSnapshot, error) {
-				return structuralRepo.StructuralSnapshot(ctx)
-			}))
-
-	// relationStore — THE relation value iam's own gates receive, and the reason a gate
-	// cannot ask the store without the second chance the edge gives: there is no other
-	// value here to hand it. Everything below wires this; the bare transport is used only
-	// where the subject of the question is DELIVERY itself (the boot verify gate) or where
-	// a concrete field of the client is needed.
-	// shadow — сравнитель форм. Собирается ЗДЕСЬ, до стражей, потому что его
-	// держат ДВОЕ: край (`AuthorizeService`) и обёртка, через которую решения
-	// принимают собственные стражи iam. Один экземпляр на обоих — иначе счётчики
-	// разъедутся на два перечня об одном предмете, и доля сравнённого будет
-	// считаться от разных знаменателей у края и у стражей.
+	// relationStore — ТО значение, которое получают собственные стражи iam, и
+	// причина, по которой страж не может спросить «мимо»: другого значения для него
+	// в корне нет.
 	//
-	// ФОРМА провязывается, ПОКА ИДЁТ СВЕРКА. Выключенная сверка (#763) — это
-	// сравнитель БЕЗ формы: значение живо, вызовы дёшевы, `Decides` честно
-	// отвечает «нет», и ни одного вопроса к базе теневой путь не делает.
-	// Собирать в этом случае вовсе ничего было бы нельзя: страж провязки
-	// отказал бы в старте, а он проверяет ДРУГОЙ предмет — что значение,
-	// выданное стражам, вообще способно предъявить решение сравнению.
-	//
-	// РУБИЛЬНИК читается ОТСЮДА и больше ниоткуда: тот же объект уезжает в
-	// сравнитель, в отказ старта и в самоотчёт. Тогда «страж прошёл» ⟺
-	// «источник действительно переключён» по построению.
-	verdictSwitch := cfg.AuthZ.VerdictSwitchboard()
-	var form shadowverdict.Asker
-	if cfg.AuthZ.ShadowCompare {
-		form = relverdict.NewAsker(pool)
-	}
-	// Собирается и провязывается ДВУМЯ утверждениями, а не цепочкой строителя.
-	//
-	// Причина внешняя и названа гейтом дерева: он считает носителя счётчиков
-	// «построенным прямо в аргументе», когда результат конструктора не
-	// присвоен ИМЕНИ, — а у цепочки имени присваивается результат последнего
-	// звена. Счётчики сравнителя читает коллектор наблюдаемости, поэтому запись
-	// в две строки честнее спора с гейтом: она делает связь конструктора с
-	// именем видимой разбору, ничего не меняя в поведении.
-	shadow := shadowverdict.New(form, logger)
-	shadow = shadow.WithSwitchboard(verdictSwitch)
-	relationStore := authzcascade.Wrap(fgaTransport, structuralFacts).WithComparator(shadow)
-	// Refuse to run gates that have silently gone back to waiting for a queue. Losing
-	// either half of this in a refactor would put iam's own answers back out of step with
-	// the edge's, and nothing else would say so.
+	// Форма собирается на ВЕДУЩЕМ пуле намеренно. Вопрос о доступе читает строки,
+	// закоммиченные только что — выдачу, сделанную этим же запросом, — а это ровно
+	// то, на чём отстаёт реплика: отзыв, действующий «с коммита», на реплике
+	// действовал бы «с момента, когда доехало».
+	relationStore := authzcascade.Wrap(relverdict.NewAsker(pool))
+	// Отказ в старте, а не надежда: дверь без формы отвечала бы ошибкой на каждый
+	// вопрос о доступе, и служба была бы Ready, не решая ничего.
 	//
 	// NOT conditioned on the authentication mode: every deployed stand runs production
 	// posture, and a guard absent from the stands where anyone would notice it firing is
 	// not a guard.
-	if complaint := ownGateWiringComplaint(relationStore, structuralFacts,
-		verdictSwitch, cfg.AuthZ.ShadowCompare); complaint != "" {
+	if complaint := ownGateWiringComplaint(relationStore); complaint != "" {
 		logger.Error("refusing to start: " + complaint)
 		os.Exit(1)
-	}
-
-	// САМООТЧЁТ ПОЗИЦИИ при старте.
-	//
-	// Читается рубильник, который держит СРАВНИТЕЛЬ, а не разобранная
-	// конфигурация: спрашивают «что действует», а не «что объявлено». Разница
-	// не теоретическая — именно она отличает «переключено» от «объявлено
-	// переключённым», и именно её теряет всякий самоотчёт, собранный из
-	// конфигурации второй раз.
-	if census, cerr := surveyVerdictSwitch(shadow.Switchboard()); cerr == nil {
-		logger.Info(census.String())
-	} else {
-		logger.Error("перепись рубильника источника вердикта не выполнена", "err", cerr)
 	}
 
 	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
@@ -322,18 +216,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// membership fan-out, AND the P6 Account.Create owner auto-binding
 	// materialization (C-01/C-01b). Created once here so every consumer drives the
 	// same instance.
-	rsabReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool), logger).
-		// rbac-contract-a-flat-syncfga: wire the SYNCHRONOUS direct-FGA writer so the
-		// create-path materialization applies the owner/creator per-object tuples to
-		// OpenFGA right after the reconcile writer-tx commits — closing the
-		// read-after-write race where a Check immediately after Operation-done would
-		// otherwise miss the still-undrained fga_outbox tuple (403). The durable
-		// fga_outbox enqueue + async drainer remain the at-least-once backstop (idempotent
-		// re-apply). relationStore is always non-nil here — buildOpenFGAClient returns a
-		// client whatever the environment holds; before the store id is provisioned that
-		// client fails CLOSED rather than the process refusing to start (see the field's
-		// doc on kachoServices).
-		WithSyncFGA(kachopg.NewSyncFGAWriter(relationStore, logger))
+	rsabReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool), logger)
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
 		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
@@ -402,7 +285,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler, logger)
 	userDelete := userapp.NewDeleteUserUseCase(kachoRepo, opsRepo)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kachoRepo, opsRepo).
-		WithRelationStore(relationStore, logger).
+		WithLogger(logger).
 		WithReconciler(rsabReconciler).
 		WithActivationObserver(metricsReg.InviteActivationRecorder())
 	userInvite := userapp.NewInviteUserUseCase(kachoRepo, opsRepo, relationStore).
@@ -516,12 +399,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
 		WithReconciler(rsabReconciler)
-	// abDelete — relationStore drives BOTH the grant-authority gate AND the
-	// synchronous post-commit tuple-removal: after the revoke writer-tx commits, the
-	// persisted emitted-set is removed from OpenFGA via DeleteTuples so the deny is
-	// observable at Operation-done (revoke ≈ grant latency — mirror of create's
-	// post-commit FGA materialization). The in-tx EmitRelationDelete + fga_outbox
-	// drainer remain the at-least-once idempotent backstop.
+	// abDelete — relationStore drives the grant-authority gate, and ONLY that. The
+	// post-commit tuple-removal it also used to drive is gone with the external store:
+	// the in-tx EmitRelationDelete is now the whole mechanism, because a trigger folds
+	// the journal row into the direct fact in the SAME commit. The deny is therefore
+	// observable at Operation-done by construction, not by a second write racing it.
 	abDelete := accessbindingapp.NewDeleteAccessBindingUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger)
 	// Revoke — F10 (IAM-1-28) SOFT-revoke (status ACTIVE→REVOKED, row retained for
@@ -542,8 +424,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler)
 	// D-6 (T3.3): the AB read RPCs union the existing self/granted floor with the
 	// label-selector visibility (viewer ∪ v_list on iam_access_binding). relationStore
-	// (the concrete OpenFGA client) satisfies BOTH RelationStore (Check) and
-	// RelationQueries (ListObjects); WithRelationQueries wires the ListObjects floor.
+	// (the decision door) satisfies BOTH RelationStore (Check) and RelationQueries
+	// (the contextual and paged forms); WithRelationQueries wires the per-object
+	// visibility floor.
 	abGet := accessbindingapp.NewGetAccessBindingUseCase(kachoRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
@@ -575,10 +458,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRelationStore(relationStore, logger)
 	// ListByRole audit (same grant-authority scope-filter as
 	// the other List RPCs) + ExpandAccess effective-principal audit
-	// (resolves group usersets via the OpenFGA client's ListSubjects).
+	// (resolves group usersets via the door's ListSubjects).
 	abListByRole := accessbindingapp.NewListByRoleUseCase(kachoRepo).
 		WithRelationStore(relationStore, logger)
-	// ExpandAccess: the OpenFGA client doubles as the userset expander (ListSubjects)
+	// ExpandAccess: the decision door doubles as the userset expander (ListSubjects)
 	// AND the RelationStore for the per-object grant-authority gate (В3 — a caller may
 	// expand "who can do X" only on objects they are authorized to administer, the
 	// SAME requireGrantAuthority predicate ListByScope/ListByRole enforce).
@@ -595,44 +478,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, fgaTransport, relationStore,
-		structuralFacts, shadow, metricsReg, cfg.AuthN.Mode.IsProduction(), logger)
-	// Читатель счётчиков теневого сравнения. Бандл выносит сравнитель наружу
-	// именно ради этого: сравнение намеренно ни на что не влияет, и отсюда его
-	// слепое пятно — сравнитель, которого не спросили ни разу, снаружи неотличим
-	// от согласного. Поэтому наружу идёт и число решений, и число сравнений, а не
-	// одни расхождения.
-	//
-	// Величины читаются У САМОГО сравнителя на каждом сборе: второй накопитель
-	// рядом разошёлся бы с настоящим ровно там, где расхождение не видно, — оба
-	// отвечают «ноль» на нулевом трафике.
-	//
-	// Проверка реестра — та же, что у двух провязок наблюдаемости ниже: подпись
-	// функции nil допускает, хотя процесс всегда передаёт построенный реестр.
-	// Ветка на гейт не влияет — он смотрит на вызов, а не на условие, под которым
-	// тот стоит.
-	//
-	// Свойство «читатель есть» держит гейт по дереву
-	// TestDeclaredAccumulatorsHaveANonTestReader: провязка наблюдаемости всюду
-	// необязательна и nil-безопасна, поэтому её пропажу не поймает ни компилятор,
-	// ни проба самого коллектора — она останется зелёной, считая в пустоту.
-	if metricsReg != nil {
-		metricsReg.NewShadowVerdictCollector(func() metrics.ShadowVerdictCounts {
-			counts := authzServices.shadow.Counters()
-			return metrics.ShadowVerdictCounts{
-				Decisions:            counts.Decisions,
-				Compared:             counts.Compared,
-				Diverged:             counts.Diverged,
-				Unfinished:           counts.Unfinished,
-				Unaskable:            counts.Unaskable,
-				DivergedFormWider:    counts.DivergedFormWider,
-				DivergedFormNarrower: counts.DivergedFormNarrower,
-				VerdictsForm:         counts.VerdictsForm,
-				VerdictsEngine:       counts.VerdictsEngine,
-			}
-		})
-	}
-
+	authzServices := buildAuthZServices(pool, opsRepo, kachoRepo, relationStore,
+		metricsReg, cfg.AuthN.Mode.IsProduction(), logger)
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -641,10 +488,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// INTERNAL mux; internal-only is the invariant, gRPC-direct is not.
 	lookupSubject := internaliamapp.NewLookupSubjectUseCase(kachoRepo)
 	// SEC-C — FGA-proxy: RegisterResource / UnregisterResource enqueue the
-	// owner-hierarchy tuple into kacho_iam.fga_outbox in one writer-tx (drainer
-	// applies it). Least-priv enforced via the ReBAC gate (cert-cert→SA →
-	// fga_writer@iam_fgaproxy:system); the gate's RelationChecker is the same
-	// OpenFGA Check surface (relationStore).
+	// owner-hierarchy tuple into kacho_iam.fga_outbox in one writer-tx, out of which
+	// a trigger folds the direct fact in the same commit. Least-priv enforced via the
+	// ReBAC gate (cert-cert→SA → fga_writer@iam_fgaproxy:system); the gate's
+	// RelationChecker is the same Check surface (relationStore).
 	// β (epic «Resource-scoped AccessBinding»): the same writer-tx also UPSERTs
 	// /DELETEs the kacho_iam.resource_mirror row (labels + parent-scope of the
 	// owner object) — atomic co-commit with the owner-tuple emit (ban #10 — D-β3).
@@ -666,14 +513,16 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// reports done — a create→immediate-GET resolves ALLOW without racing the async
 		// reconcile-outbox drain. nil-safe + non-fatal (the drain + sweep are the backstop).
 		WithObjectReconciler(rsabReconciler, logger).
-		// The containment pointer (object→project) is the ONE tuple this use-case owns
-		// outright: the reconciler never derives it, so nothing else can remove it
-		// promptly. Applying it directly here — in BOTH directions, after the commit —
-		// is what keeps a withdrawal from leaving the account-administrator tier with
-		// standing access to a resource that already answers 404, since that tier
-		// reaches objects THROUGH the pointer rather than through any per-object grant.
-		// nil-safe + non-fatal: the durable outbox drain remains the backstop.
-		WithTupleApplier(clients.NewHierarchyTupleApplier(relationStore), logger).
+		// УКАЗАТЕЛЬ ОБЛАСТИ БОЛЬШЕ НЕ ПРИМЕНЯЕТСЯ ВТОРЫМ ПИСАТЕЛЕМ.
+		//
+		// Он применялся напрямую в чужое хранилище — в обе стороны, после коммита, —
+		// потому что реконсайлер его не выводит, а значит никто другой не снял бы его
+		// вовремя: ярус администратора аккаунта достаёт объекты ЧЕРЕЗ этот указатель, и
+		// пережившее снятие ребро оставляло бы ему доступ к ресурсу, который уже
+		// отвечает 404.
+		//
+		// Строка журнала, положенная той же транзакцией, делает то же самое и раньше:
+		// прямой факт складывается из неё триггером в момент коммита. Догонять нечего.
 		// A teardown must take away EVERY relationship this proxy could have written on
 		// the object, not only the one the consumer was able to name. The consumer names
 		// the scope pointer because that is all it holds; the creator's own `owner` was
@@ -685,7 +534,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// The bare transport is used deliberately: this needs the STRONG object listing,
 		// and it must not travel the cascade wrapper, whose job is to widen answers to
 		// questions rather than to enumerate what is physically there.
-		WithResidualTupleReader(clients.NewResidualTupleReader(fgaTransport))
+		WithResidualTupleReader(kachopg.NewResidualTupleReader(pool))
 	// Both post-commit steps above are best-effort: they front a durable queue, so a
 	// failure costs latency and never the change. That is what makes a permanently broken
 	// one invisible — one WARN and a product that keeps working, slower, forever. The
@@ -807,7 +656,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Defense-in-depth ReBAC gate (security.md "AuthN+AuthZ ВЕЗДЕ"): the
 	// highest-blast cluster-admin RPCs must run their OWN per-RPC system_admin
 	// Check, not rely solely on the gateway caller-policy. relationStore
-	// (*clients.OpenFGAHTTPClient) satisfies authzguard.RelationChecker. nil-safe
+	// (the decision door) satisfies authzguard.RelationChecker. nil-safe
 	// fail-closed inside the use-case if ever unwired.
 	clusterGrantUC := clusterapp.NewGrantAdminUseCase(
 		clusterGrantWriter, clusterGrantReader, clusterRelEmitter, clusterTxb, opsRepo,
@@ -926,8 +775,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		internalBootstrapTokenHandler: bootstrapTokenH,
 
 		// AuthZ core.
-		authorizeHandler:         authzServices.authorize,
-		internalAuthorizeHandler: authzServices.internalAuthorize,
+		authorizeHandler: authzServices.authorize,
 
 		// RBAC rules-model G — public grantable role-rule catalog.
 		permissionCatalogHandler: permissionCatalogHandler,
@@ -938,15 +786,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// UserToken (персональные access-токены пользователя via Hydra).
 		userTokensHandler: userTokensH,
 
-		// Expose the TRANSPORT so runServe can reuse the same instance for the
-		// fga_outbox drainer wiring. The drainer writes tuples; it asks no
-		// authorization question, so it has nothing to gain from the wrapper.
-		relationStore: fgaTransport,
-
-		// И ОТДЕЛЬНО — обёрнутое значение для тех стражей, что собираются в
-		// runServe. Два поля рядом намеренно: разница между ними и есть разница
-		// между «пишет кортежи» и «принимает решение о доступе», и выбор между
-		// ними перестаёт быть догадкой на месте вызова.
+		// ЗНАЧЕНИЕ, которое держат стражи, собираемые в runServe.
 		ownGates: relationStore,
 	}
 }
@@ -1082,89 +922,38 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 
 // authzServiceBundle — handlers produced by buildAuthZServices.
 type authzServiceBundle struct {
-	authorize         *authorizeapp.Handler
-	internalAuthorize *internalauthorizeapp.Handler
+	authorize *authorizeapp.Handler
 	// authorizeSvc — raw AuthorizeService use-case, exposed so the
 	// InternalIAMService.Check gate can delegate to the SAME FGA pipeline.
 	authorizeSvc *service.AuthorizeService
-	// shadow — сравнитель форм, провязанный в тот же use-case. Вынесен наружу,
-	// чтобы у его счётчиков был читатель: «ноль расхождений» без числа решений и
-	// доли сравнённых — утверждение ни о чём.
-	shadow *shadowverdict.Comparator
 }
 
-// buildAuthZServices wires AuthorizeService + InternalAuthorizeService against a
-// fully-configured OpenFGA HTTP client.
+// buildAuthZServices собирает AuthorizeService поверх ДВЕРИ РЕШЕНИЯ.
 //
-// The FGA model is the sole policy gate: AuthorizeService does not evaluate any
-// additional guardrail overlay after the FGA Check.
-// fgaTransport is the bare client; ownGates is the value iam's own gates hold (the same
-// client, wrapped so a denied question gets the second chance the edge gives). Both are
-// passed rather than one derived here: AuthorizeService gives that second chance ITSELF and
-// asks the cheap flat cluster super-gate first, so routing it through the wrapper would make
-// a cloud administrator pay a structural read before the gate that was going to admit him.
-// The two must nevertheless never disagree, which is asserted on the observable answer in
-// service/own_gates_agree_with_edge_integration_test.go.
+// Значение одно, и это главное изменение снятия движка: край и собственные стражи
+// спрашивают ОДИН объект. Прежде их было два — голый транспорт у края и обёрнутый
+// у стражей, — и держались они порознь именно потому, что край добавлял к ответу
+// движка то, чего обёртка не добавляла. Добавлять больше нечего: цепь областей и
+// надзор администратора облака форма поднимает своим планом, поэтому «два ответа
+// на один вопрос» перестало быть возможным by construction, а не по договорённости.
 func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
-	kachoRepo kachorepo.Repository, fgaTransport *clients.OpenFGAHTTPClient,
-	ownGates *authzcascade.Client, structuralFacts *authzcascade.Resolver,
-	shadow *shadowverdict.Comparator, metricsReg *metrics.Registry,
+	kachoRepo kachorepo.Repository, ownGates *authzcascade.Client,
+	metricsReg *metrics.Registry,
 	prodMode bool, logger *slog.Logger) authzServiceBundle {
-	modelID := fgaTransport.AuthorizationModel
-	logger.Info("openfga extended client wired for AuthZ",
-		"endpoint", fgaTransport.Endpoint, "store_id", fgaTransport.StoreID, "model_id", modelID)
+	_ = opsRepo // операции здесь больше не создаются: их создавал снятый писатель кортежей
 
-	// AuthorizeService use-case. ClusterAdminChecker wires the flat cluster-admin
-	// short-circuit (RBAC explicit-model 2026 P5, D-9): the same OpenFGA client
-	// answers the single super-gate Check (cluster:…#system_admin) — when the
-	// caller is a cluster-admin, Check/CheckRelation ALLOW before the per-object
-	// resolve.
-	// StructuralFacts wires the request-time source of the super-access cascade's
-	// parent pointers (internal/authzcascade). Without it the cascade resolves only
-	// over pointers the fga_outbox drainer has already delivered, which makes the
-	// three tiers exactly as delivery-dependent as the flat index they were chosen
-	// over.
-	//
-	// It is the SAME resolver the own-gate wrapper uses — built once by the caller — so the
-	// two surfaces cannot come to derive facts from different places.
-	// Теневое сравнение формы E с движком (XC-12). Отвечает по-прежнему движок;
-	// форма E спрашивается РЯДОМ — на каждом вопросе решения о доступе, который
-	// этот use-case отвечает, и ДО обращения к движку, — и ни один её исход не
-	// меняет ответа вызывающему.
-	//
-	// Провязка здесь, а не у транспорта: сравнивать надо окончательный вердикт (к
-	// ответу движка ниже добавляются надзор администратора облака и структурный
-	// запасной путь), и одно место покрывает все вопросы, а не тот один, у чьего
-	// обработчика оказалось написано.
-	// Сравнитель приходит СОБРАННЫМ от вызывающего: тот же экземпляр держит
-	// обёртка собственных стражей. Собрать второй здесь значило бы завести две
-	// меры одного предмета — у края своя, у стражей своя, — и «доля сравнённого»
-	// перестала бы иметь один знаменатель.
+	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
+	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
+	// поэтому потиповое переключение источника его и не захватывало. Теперь он
+	// спрашивает ту же дверь: одна форма отвечает на оба вопроса.
 	authSvc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
-		Relations:           fgaTransport,
-		ModelID:             modelID,
-		ClusterAdminChecker: fgaTransport,
-		StructuralFacts:     structuralFacts,
-		Shadow:              shadow,
+		Relations:           ownGates,
+		ClusterAdminChecker: ownGates,
 	})
-	// Refuse to run a cascade that has silently gone back to waiting for a queue.
-	// The fallback needs BOTH a resolver and an Authorizer that can carry contextual
-	// tuples; losing either in a refactor would leave every tier below the cloud
-	// administrator dependent on delivery again, and nothing else would say so.
-	//
-	// NOT conditioned on the authentication mode. Every deployed stand runs production
-	// posture, and a stand that takes a different authorization path than production is
-	// the divergence that rule forbids — the guard would then be absent from the only
-	// stands where anyone would notice it firing.
-	if !authSvc.StructuralFallbackReachable() {
-		logger.Error("refusing to start: the super-access cascade would depend on outbox delivery " +
-			"(structural-fact resolver or contextual-tuple Check not wired)")
-		os.Exit(1)
-	}
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kachoRepo, ownGates)
 	// WithCallerAuthority wires the caller-authority gate (a tenant principal may
 	// only query authz decisions about itself, a resource it administers, or as a
-	// cluster-admin). The SAME OpenFGA client answers the authority Check; a
+	// cluster-admin). The SAME decision door answers the authority Check; a
 	// verified module PDP peer passes through. This gate is not a second opinion
 	// behind a narrower gateway check — the catalog entry these RPCs carry is
 	// answered by every authenticated subject, so it is the only one there is.
@@ -1188,17 +977,9 @@ func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
 		WithCallerAuthority(ownGates).
 		WithInsecureAnonymousPeer(!prodMode)
 
-	// RelationProjector — used by InternalAuthorizeService. Read-only: the
-	// service has no Operation-producing RPC since WriteTuples was retired (#788),
-	// so no operations repo is handed to it.
-	tupleReader := service.NewRelationProjector(fgaTransport)
-	internalAuthH := internalauthorizeapp.NewHandler(tupleReader, modelID)
-
 	return authzServiceBundle{
-		authorize:         authzH,
-		authorizeSvc:      authSvc,
-		internalAuthorize: internalAuthH,
-		shadow:            shadow,
+		authorize:    authzH,
+		authorizeSvc: authSvc,
 	}
 }
 

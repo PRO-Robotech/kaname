@@ -71,9 +71,7 @@ sequenceDiagram
     participant GW as api-gateway :18080
     participant IAM as kacho-iam :9090
     participant DB as Postgres (kacho_iam)
-    participant Out as fga_outbox
-    participant Drainer as fga_outbox drainer
-    participant FGA as OpenFGA
+    participant Out as fga_outbox (журнал намерений)
 
     Cli->>GW: POST /iam/v1/accounts<br/>{"name":"acme","owner_user_id":"usr_..."}
     GW->>GW: Validate Bearer JWT (Ory Hydra JWKS)
@@ -85,18 +83,13 @@ sequenceDiagram
     IAM->>DB: INSERT INTO operations (id=iop_..., principal_*, done=false)
     IAM->>DB: INSERT INTO accounts (id=acc_..., name, owner_user_id, ...)
     Note over DB: 23503 → ErrFailedPrecondition (owner_user_id не существует)<br/>23505 + accounts_name_unique → ErrAlreadyExists
-    IAM->>Out: INSERT INTO fga_outbox (user=user:usr_*, relation=owner, object=iam_account:acc_*)
+    IAM->>Out: INSERT INTO fga_outbox (user=user:usr_*, relation=owner, object=account:acc_*)
+    Out->>DB: триггер журнала: строка → relation_fact (та же транзакция)
     IAM->>DB: COMMIT
     IAM-->>GW: Operation (done=false, metadata={account_id:acc_..})
     GW-->>Cli: 200 {operationId:"iop_.."}
 
-    par async drainer
-        DB-->>Drainer: NOTIFY kacho_iam_fga_outbox
-        Drainer->>DB: SELECT ... FOR UPDATE SKIP LOCKED LIMIT 32
-        Drainer->>FGA: WriteTuples([owner-tuple])
-        FGA-->>Drainer: 200 OK
-        Drainer->>DB: DELETE FROM fga_outbox WHERE id=...
-    and async operation worker
+    par async operation worker
         IAM->>DB: SELECT account by id
         IAM->>DB: UPDATE operations SET done=true, response=Account
     end
@@ -242,10 +235,10 @@ make -C deploy logs-svc SVC=iam
   **`DEFERRABLE INITIALLY DEFERRED`** (порядок посева не важен). Следствие для маппинга
   ошибок: `23503` по этому ключу приходит из `Commit()`, а не из `INSERT`.
 - **CHECK:** `accounts_labels_valid CHECK (kacho_labels_valid(labels))`.
-- **OpenFGA tuple emit:** Create-use-case вызывает
-  `CreateAccountUseCase.WithOpenFGA(fga, logger)` — выпускает owner-tuple
-  `(user:usr_xxx, owner, iam_account:acc_xxx)` в **тот же writer-tx** через
-  `fga_outbox`. Drainer (`clients/fga_applier.go`) асинхронно применяет в OpenFGA.
+- **Намерение о владении:** Create-use-case кладёт кортеж владельца
+  `(user:usr_xxx, owner, account:acc_xxx)` в журнал `kacho_iam.fga_outbox` **в том же
+  writer-tx**; триггер журнала складывает из строки прямой факт (`relation_fact`) там же.
+  Отдельного дренажа наружу нет — владение действует с момента фиксации.
 - **Transactional semantics:** INSERT account + INSERT operations + INSERT
   fga_outbox — одна транзакция; rollback → ни одной orphan-строки.
 
@@ -273,7 +266,7 @@ make -C deploy logs-svc SVC=iam
 - [`03-user.md`](03-user.md) — User (`owner_user_id`).
 - [`07-role.md`](07-role.md) — Role (custom-роли account-scoped).
 - [`21-internal-iam.md`](21-internal-iam.md) — `UpsertFromIdentity` bootstrap path.
-- [`29-openfga-check.md`](29-openfga-check.md) — owner-tuple propagation.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — owner-tuple propagation.
 
 ## Ссылки на код
 

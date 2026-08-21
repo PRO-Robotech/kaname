@@ -10,10 +10,13 @@ package access_binding
 //     consulted);
 //   - the optional whitelist filter (subject/role/scope/scopeId) rejects an
 //     unknown key with INVALID_ARGUMENT and maps `scope` dotted→bare;
-//   - visibility is the relation that gates a single-object read (anonymous → empty, never a
-//     leak; FGA error → UNAVAILABLE), resolved PER-OBJECT over the page the repo
-//     returned (never by a server-capped ListObjects enumeration —
-//     internal/authzfilter).
+//   - visibility is the relation that gates a single-object read (anonymous → empty,
+//     never a leak; a question that could not be answered → UNAVAILABLE), resolved
+//     PER-OBJECT over the page the repo returned. It is never an enumeration of every
+//     object of the type: that door does not exist any more (stage S6), and the reason
+//     it was removed is why the order below matters — the enumeration was capped with
+//     no continuation token, so a row past that population became permanently
+//     invisible while its grant was live (internal/authzfilter).
 
 import (
 	"context"
@@ -118,8 +121,9 @@ func TestABList_IAM_1_32_VisibilityFilteredPerObject(t *testing.T) {
 	got := respIDs(resp)
 	assert.Equal(t, []string{"acb000000000000keep1"}, got, "only the binding this caller may read by id is returned")
 	// The repo page carried BOTH rows (the fake applies no visibility predicate);
-	// hide2 is dropped by the use-case's per-object check, not by the SQL. That
-	// order is the fix for the OpenFGA ListObjects cap — see internal/authzfilter.
+	// hide2 is dropped by the use-case's per-object check, not by the SQL. Reading the
+	// page first and asking about ITS rows is what replaced enumerating the type — see
+	// internal/authzfilter.
 	assert.Positive(t, fga.calls(), "visibility must be resolved per-object on the returned page")
 }
 

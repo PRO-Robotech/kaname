@@ -23,9 +23,11 @@ package access_binding
 // того же ключа». Форвард advisory-блокировку НЕ БЕРЁТ (снята 2026-08-05, см.
 // reconcile/forward.go «LOCK CHOICE»), поэтому утверждение описывало код, которого нет;
 // оставшийся разъезд назван у doRevoke и открыт как отдельная задача.
-// Post-commit the same set is removed from OpenFGA synchronously (latency-parity
-// with grant); the in-tx EmitRelationDelete + drainer remain the at-least-once
-// backstop. Because revoked rows carry revoked_at, the partial active-grant UNIQUE
+// Отзыв действует С КОММИТА: строка снятия, положенная в журнал намерений ТОЙ ЖЕ
+// writer-tx, снимает прямой факт триггером журнала. Прежде здесь был синхронный
+// пост-коммитный вызов в чужое хранилище — он закрывал окно до дренажа; хранилища
+// нет (стадия S6, эпик #747), окна нет, догоняющего пути нет.
+// Because revoked rows carry revoked_at, the partial active-grant UNIQUE
 // (access_bindings_active_grant_uniq WHERE revoked_at IS NULL) frees the slot, so
 // an identical re-grant Create afterwards is a NEW ACTIVE row (IAM-1-29).
 
@@ -34,7 +36,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -55,12 +56,11 @@ import (
 type RevokeAccessBindingUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
-	// relations — connected OpenFGA RelationStore. Used on the READ side
-	// (requireGrantAuthority) AND as the synchronous applier of the revoke:
-	// after the writer-tx commit the same persisted emitted-set is removed from
-	// OpenFGA via DeleteTuples (latency-parity with grant). Async
-	// EmitRelationDelete + drainer are the at-least-once backstop. nil-safe: when
-	// unwired, only the async path runs.
+	// relations — ДВЕРЬ РЕШЕНИЯ на READ-стороне (`requireGrantAuthority`).
+	//
+	// Синхронного снятия кортежей через неё больше нет: чужого хранилища не
+	// существует, а строка журнала снимает прямой факт в том же коммите, что и
+	// отзыв (стадия S6, эпик #747).
 	relations clients.RelationStore
 	logger    *slog.Logger
 }
@@ -69,7 +69,7 @@ func NewRevokeAccessBindingUseCase(r Repo, opsRepo operations.Repo) *RevokeAcces
 	return &RevokeAccessBindingUseCase{repo: r, opsRepo: opsRepo}
 }
 
-// WithRelationStore wires the OpenFGA RelationStore (read-side grant-authority +
+// WithRelationStore wires the decision door (read-side grant-authority;
 // synchronous revoke applier). Logger diagnoses sync-removal failures.
 func (u *RevokeAccessBindingUseCase) WithRelationStore(relations clients.RelationStore, logger *slog.Logger) *RevokeAccessBindingUseCase {
 	u.relations = relations
@@ -198,7 +198,7 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 		return nil, shared.MapRepoErr(err)
 	}
 	// CROSS-BINDING SHARED TUPLES (access-loss fix, mirror of Delete): the ledger is
-	// per-binding while an OpenFGA tuple is not refcounted, so subtract the tuples
+	// per-binding while a relation fact is not refcounted, so subtract the tuples
 	// another ACTIVE binding still claims — a soft revoke must not strip access a
 	// sibling ACTIVE binding independently grants (see revoke_set.go).
 	revokeTuples, retained, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
@@ -244,47 +244,12 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	}
 	committed = true
 
-	// Synchronous OpenFGA tuple-removal — mirror of grant's post-commit
-	// materialization, so deny is observable by the time the Operation is done.
-	// Idempotent (missing tuple ⇒ success); async EmitRelationDelete backstops.
-	// nil-safe / best-effort: the binding is already durably REVOKED.
-	if u.relations != nil && len(revokeTuples) > 0 {
-		if derr := u.syncRemoveTuples(ctx, toClientTuples(revokeTuples)); derr != nil && u.logger != nil {
-			u.logger.Warn("access_binding revoke: synchronous FGA tuple-removal failed after retries; async drain will backstop",
-				"binding_id", string(id), "tuple_count", len(revokeTuples), "err", derr)
-		}
-	}
+	// Синхронного удаления кортежей из движка здесь больше нет — разбор тот же, что в
+	// delete.go: прямой факт снимается триггером в той же транзакции, что и отзыв.
 
 	pb, err := abToPb(revoked)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "marshal access binding")
 	}
 	return anypb.New(pb)
-}
-
-// syncRemoveTuples — bounded-retry synchronous OpenFGA tuple-removal for the
-// soft-revoke path. Mirrors the Delete use-case applier (shared constants
-// syncRemoveBaseDelay / syncRemoveMaxAttempts). Idempotent; interrupts on ctx
-// cancellation (graceful shutdown). Returns the last error after exhausting
-// attempts — the caller logs it non-fatal (async drain is the backstop).
-func (u *RevokeAccessBindingUseCase) syncRemoveTuples(ctx context.Context, tuples []clients.RelationTuple) error {
-	delay := syncRemoveBaseDelay
-	var err error
-	for attempt := 1; attempt <= syncRemoveMaxAttempts; attempt++ {
-		if err = u.relations.DeleteTuples(ctx, tuples); err == nil {
-			return nil
-		}
-		if attempt == syncRemoveMaxAttempts {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
-		}
-		if delay < time.Second {
-			delay *= 2
-		}
-	}
-	return err
 }

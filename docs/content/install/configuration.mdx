@@ -11,7 +11,7 @@ import dedent from 'ts-dedent'
 
 Kachō IAM конфигурируется через переменные окружения с префиксом **`KACHO_IAM_`** (плюс
 опциональный YAML-файл через `KACHO_IAM_CONFIG_PATH`). Эта страница перечисляет ключевые группы
-настроек: подключение к БД, OpenFGA, провайдеры идентичности (Kratos / Hydra), listener'ы и mTLS,
+настроек: подключение к БД, провайдеры идентичности (Kratos / Hydra), listener'ы и mTLS,
 режим аутентификации. Секреты (пароли, токены) подаются из окружения / секрет-хранилища, не
 хардкодятся.
 
@@ -29,18 +29,24 @@ Kachō IAM конфигурируется через переменные окр
   </tbody>
 </table>
 
-## OpenFGA (авторизация)
+## Авторизация — отдельных переменных нет
 
-<table>
-  <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
-  <tbody>
-    <tr><td><code>KACHO_IAM_OPENFGA_ENDPOINT</code></td><td>Адрес OpenFGA (например <code>kacho-umbrella-openfga:8080</code>)</td></tr>
-    <tr><td><code>KACHO_IAM_OPENFGA_STORE_ID</code> / <code>KACHO_IAM_OPENFGA_MODEL_ID</code></td><td>Store и pinned authorization model</td></tr>
-    <tr><td><code>KACHO_IAM_FGA_CHECK_TIMEOUT_MS</code></td><td>Таймаут одиночного <code>Check</code></td></tr>
-    <tr><td><code>KACHO_IAM_FGA_WRITE_TIMEOUT_MS</code></td><td>Таймаут записи tuple'ов</td></tr>
-    <tr><td><code>KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS</code></td><td>Таймаут <code>ListObjects</code> (по умолчанию 1000 мс)</td></tr>
-  </tbody>
-</table>
+Решение о доступе вычисляется **в той же базе**, что и остальное состояние сервиса, поэтому
+настраивается общими `KACHO_IAM_DB_*` выше. Ни адреса, ни таймаутов, ни выбора провайдера
+авторизации задавать не нужно.
+
+:::caution Эти переменные СНЯТЫ — уберите их из своих профилей
+Если в вашем `values`/`env` остались перечисленные ниже, их можно удалить: **читателя у них
+нет**, процесс их не смотрит и на их отсутствие не жалуется.
+
+`KACHO_IAM_OPENFGA_ENDPOINT` · `KACHO_IAM_OPENFGA_STORE_ID` · `KACHO_IAM_OPENFGA_MODEL_ID` ·
+`KACHO_IAM_AUTHZ_PROVIDER` · `KACHO_IAM_FGA_CHECK_TIMEOUT_MS` ·
+`KACHO_IAM_FGA_WRITE_TIMEOUT_MS` · `KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS`
+
+Они настраивали внешний движок прав, который снят целиком вместе со своим хранилищем и очередью.
+Оставленная переменная вреда не нанесёт, но и не сделает ничего — а выглядит как действующая
+настройка, поэтому лучше убрать.
+:::
 
 ## Идентичность (Kratos / Hydra)
 
@@ -79,14 +85,13 @@ listener'ы. Каждый может требовать mTLS.
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
     <tr><td><code>KACHO_IAM_AUTHN__MODE</code></td><td>Режим аутентификации (dev-фикстуры vs production-strict)</td></tr>
-    <tr><td><code>KACHO_IAM_AUTHZ_PROVIDER</code></td><td>Провайдер авторизации (OpenFGA)</td></tr>
     <tr><td><code>KACHO_IAM_HOOK_TOKEN</code></td><td>Токен для identity-хуков Kratos</td></tr>
   </tbody>
 </table>
 
 :::warning Production-режим — fail-closed
 В production-профиле сервис обязывает mTLS на публичном (`:9090`) и internal (`:9091`)
-listener'ах и сконфигурированный OpenFGA. Без них он **откажется стартовать** («refusing to start
+listener'ах. Без этого он **откажется стартовать** («refusing to start
 with insecure :9090/:9091») — никакого молчаливого insecure-downgrade. Анонимный доступ отклонён
 на всех портах. См. [Особенности дизайна](/advanced/design-decisions).
 :::
@@ -101,7 +106,6 @@ with insecure :9090/:9091») — никакого молчаливого insecur
     export KACHO_IAM_DB_PASSWORD=secret
     export KACHO_IAM_DB_NAME=kacho_iam
     export KACHO_IAM_DB_SSLMODE=disable
-    export KACHO_IAM_OPENFGA_ENDPOINT=localhost:8080
 
     bin/kacho-migrator up
     bin/kacho-iam serve

@@ -123,9 +123,9 @@ func tlsServer(t *testing.T, ca *testCA, h http.Handler) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(h)
 	srv.TLS = &tls.Config{Certificates: []tls.Certificate{ca.serverCert(t)}, MinVersion: tls.VersionTLS12}
-	// testLoggerWriter — тот же переходник t.Log→io.Writer, что уже несёт
-	// fga_applier_integration_test.go в этом же тестовом пакете. Заводить рядом
-	// второй такой же было бы двумя вещами на одну работу.
+	// testLoggerWriter — общий для пакета переходник t.Log→io.Writer
+	// (testmain_pgtest_test.go). Заводить рядом второй такой же было бы двумя
+	// вещами на одну работу.
 	srv.Config.ErrorLog = log.New(testLoggerWriter{t}, "[tlsServer] ", 0)
 	srv.StartTLS()
 	t.Cleanup(srv.Close)

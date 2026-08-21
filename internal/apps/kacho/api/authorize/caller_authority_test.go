@@ -35,10 +35,9 @@ func (a *authorityStub) Check(_ context.Context, subject, relation, object strin
 }
 
 func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
-	stub := &stubFGA{check: svcCheck}
+	stub := &stubVerdict{check: svcCheck}
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: stub,
-		ModelID:   "test-model",
 	})
 	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth)
 }
@@ -252,33 +251,6 @@ func TestCallerAuthority_ListSubjects_ResourceAdmin_Allowed(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("resource-admin ListSubjects must pass the gate: %v", err)
-	}
-}
-
-// TestCallerAuthority_ListObjects_ForeignSubject_Denied — a tenant may only
-// enumerate its OWN visible objects (no per-resource scope to delegate on).
-func TestCallerAuthority_ListObjects_ForeignSubject_Denied(t *testing.T) {
-	auth := &authorityStub{allow: map[string]bool{}}
-	h := newHandlerWithAuthority(true, auth)
-	_, err := h.ListObjects(userCtx("usr_alice"), &iamv1.ListObjectsRequest{
-		Subject:      "user:usr_bob",
-		ResourceType: "account",
-		Action:       "iam.accounts.list",
-	})
-	requireDenied(t, err)
-}
-
-// TestCallerAuthority_ListObjects_SelfSubject_Allowed — self-enumeration passes.
-func TestCallerAuthority_ListObjects_SelfSubject_Allowed(t *testing.T) {
-	auth := &authorityStub{allow: map[string]bool{}}
-	h := newHandlerWithAuthority(true, auth)
-	_, err := h.ListObjects(userCtx("usr_alice"), &iamv1.ListObjectsRequest{
-		Subject:      "user:usr_alice",
-		ResourceType: "account",
-		Action:       "iam.accounts.list",
-	})
-	if err != nil {
-		t.Fatalf("self ListObjects must pass the gate: %v", err)
 	}
 }
 

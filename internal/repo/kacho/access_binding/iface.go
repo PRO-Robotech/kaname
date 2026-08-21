@@ -81,11 +81,12 @@ type ReaderIface interface {
 	// excludeBinding — i.e. the tuples a revoke of excludeBinding MUST leave alone.
 	//
 	// WHY IT EXISTS. The ledger PK is per binding (binding_id, fga_user, relation,
-	// object), while an OpenFGA tuple is NOT refcounted: two bindings of the SAME
+	// object), while the tuple itself is NOT refcounted: two bindings of the SAME
 	// subject on the SAME scope hold TWO ledger rows for ONE live tuple. Replaying a
-	// binding's own ledger set verbatim onto OpenFGA therefore deletes access another
+	// binding's own ledger set verbatim as deletions therefore removes access another
 	// ACTIVE binding still grants (silent access-loss, and self-sustaining — the
-	// ledger is read as the mirror of OpenFGA, so no reconcile pass re-writes it).
+	// ledger is read as the mirror of the rights state, so no reconcile pass
+	// re-writes it).
 	// Delete/Revoke subtract this set so a shared tuple is removed only when the LAST
 	// ACTIVE claimant releases it — the same rule the reconciler already applies
 	// internally (reconcile.ReconcileStore.TuplesStillClaimedByOtherBindings).
@@ -233,8 +234,8 @@ type WriterIface interface {
 
 	// EmitRelationWrite — atomic FGA-tuple emit inside the writer-tx.
 	// INSERTs N rows into kacho_iam.fga_outbox (event_type='fga.tuple.write')
-	// in the current Writer-tx. Drainer (clients/fga_applier.go) asynchronously
-	// applies to OpenFGA. Tx rollback ⇒ no orphan rows (запрет #10).
+	// in the current Writer-tx; a trigger on that INSERT folds each row into a
+	// direct fact in the SAME commit. Tx rollback ⇒ no orphan rows (запрет #10).
 	//
 	// Caller supplies the tuples as {User, Relation, Object} triples (see
 	// kacho-iam/internal/clients.RelationTuple). len(tuples)==0 is a no-op.
@@ -405,9 +406,10 @@ type PageFilter struct {
 // NB: there is deliberately NO visible-id push-down here. Per-object read
 // visibility is applied by the use-case to the rows this filter RETURNS
 // (internal/authzfilter), not pushed into the SQL: the only way to obtain a
-// visible-id set up front is OpenFGA's ListObjects, which is capped server-side
-// at 1000 objects of the type in the store with no continuation token —
-// narrowing the query by that set silently hid a tenant's own bindings.
+// visible-id set up front is to enumerate everything visible — a question the
+// external engine answered capped at 1000 objects of the type in its store with no
+// continuation token, so narrowing the query by that set silently hid a tenant's own
+// bindings. The engine is gone; the question stays unbounded by construction.
 type ListFilter struct {
 	PageSize  int32
 	PageToken string

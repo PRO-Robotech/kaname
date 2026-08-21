@@ -20,7 +20,6 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
   <thead><tr><th>Зависимость</th><th>Роль · обязательность</th></tr></thead>
   <tbody>
     <tr><td><strong>PostgreSQL</strong></td><td>Хранилище <code>kacho_iam</code> — обязательно</td></tr>
-    <tr><td><strong>OpenFGA</strong></td><td>ReBAC-движок авторизации — обязательно</td></tr>
     <tr><td><strong>Ory Kratos</strong></td><td>Личности и интерактивный вход — для user-флоу</td></tr>
     <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 authorization server — для токенов (SAKey / UserToken)</td></tr>
     <tr><td><strong>api-gateway</strong></td><td>Edge для tenant-трафика (TLS + JWT) — для внешнего доступа</td></tr>
@@ -48,19 +47,20 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
 ```mermaid
 flowchart LR
   mig["init: kacho-migrator up"] --> app["kacho-iam serve"]
-  app -->|"нужен доступ"| deps["PostgreSQL · OpenFGA · Kratos · Hydra"]
+  app -->|"нужен доступ"| deps["PostgreSQL · Kratos · Hydra"]
 ```
 
 1. **Миграции** — `kacho-migrator up` накатывает схему `kacho_iam` (обычно init-container перед
    основным подом).
 2. **Сервис** — `kacho-iam serve` поднимает listener'ы (`:9090` public, `:9091` internal,
    `:9092` hooks, `:9095` metrics).
-3. **Модель авторизации** — при установке в OpenFGA пишется authorization model + seed
-   system-ролей и cluster-объекта; `KACHO_IAM_OPENFGA_MODEL_ID` пиннит используемую версию.
+3. **Модель авторизации** — вшита в образ сервиса и выводится из неё при проверке; при
+   установке сеются system-роли и cluster-объект. Отдельного хранилища, куда модель надо
+   «залить», и переменной с её версией больше нет.
 
 ## Проверка здоровья
 
-- **Readiness / liveness** — сервис отдаёт готовность после успешного подключения к БД и OpenFGA.
+- **Readiness / liveness** — сервис отдаёт готовность после успешного подключения к БД.
 - **Метрики** — Prometheus `/metrics` на cluster-internal listener (`:9095`).
 
 :::warning «Задеплоено» ≠ «работает»

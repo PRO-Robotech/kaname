@@ -59,7 +59,7 @@ func TestList645_05_AccountOwnerSeesEveryProjectOfHisAccount(t *testing.T) {
 	own := e.seedProject(t, e.callerAcc, "prj-own")
 
 	// When: one call, default page size.
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 	got, _, err := uc.Execute(ctx, repoproject.ListFilter{PageSize: probePageSize})
 	require.NoError(t, err)
 
@@ -95,12 +95,13 @@ func TestList645_06_DirectGrantBeyondTheThreshold(t *testing.T) {
 		e.seedProject(t, e.foreignAcc, projectName(i))
 	}
 	granted := e.seedProject(t, e.foreignAcc, "prj-granted")
-	// Both legs of the grant: the row in iam's own tables (what the candidate
-	// selection reads) and the tuple (what the model answers from).
-	e.seedAccessBindingFor(t, "user", grantee, e.anySystemRoleID(t), "project", granted)
-	e.fga.Write(t, "user:"+grantee, "v_get", fgaObject("project", granted))
+	// Выдача — ОДНА строка в собственных таблицах iam: её читает и отбор
+	// кандидатов сужаемой страницы, и вопрос о доступе. Прежде здесь стояли ДВЕ
+	// строки — выдача и её кортеж в чужом хранилище; вторая половина снята вместе
+	// с движком, и «две стороны выдачи» перестали быть предметом вовсе.
+	e.grantVerb(t, "user", grantee, "project", granted, "get")
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 	got, next, err := uc.Execute(ctx, repoproject.ListFilter{PageSize: probePageSize})
 	require.NoError(t, err)
 
@@ -133,15 +134,18 @@ func TestList645_07_GrantToAGroupTheCallerBelongsTo(t *testing.T) {
 	}
 	target := e.seedProject(t, e.foreignAcc, "prj-group-granted")
 
-	// The group holds the grant; the member is in the group. Both facts exist on
-	// both sides: the binding row and the membership row in iam's own tables, the
-	// userset and the membership tuple in the store.
-	e.seedAccessBindingFor(t, "group", grp, e.anySystemRoleID(t), "project", target)
+	// Выдача у ГРУППЫ, член — в группе. Обе стороны лежат там, где их держит
+	// продукт: строка выдачи и строка членства в собственных таблицах iam.
+	//
+	// Прежде рядом писались ещё две строки в чужое хранилище — глагольный кортеж
+	// на группу-множество и кортеж членства. Их предмет снят вместе с движком:
+	// теперь ОДИН источник, и вопрос о доступе разворачивает членство сам, читая
+	// `group_members`. Именно поэтому строка членства ниже — не оформление: без
+	// неё выдача группе не достигает никого.
+	e.grantVerb(t, "group", grp, "project", target, "get")
 	e.seedGroupMember(t, grp, "user", member)
-	e.fga.Write(t, "group:"+grp+"#member", "v_get", fgaObject("project", target))
-	e.fga.Write(t, "user:"+member, "member", "group:"+grp)
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 
 	gotMember, _, err := uc.Execute(e.ctxAs(member, "user"), repoproject.ListFilter{PageSize: probePageSize})
 	require.NoError(t, err)
@@ -176,10 +180,9 @@ func TestList645_07b_ServiceAccountPrincipalBeyondTheThreshold(t *testing.T) {
 		e.seedProject(t, e.foreignAcc, projectName(i))
 	}
 	granted := e.seedProject(t, e.foreignAcc, "prj-sa-granted")
-	e.seedAccessBindingFor(t, "service_account", sa, e.anySystemRoleID(t), "project", granted)
-	e.fga.Write(t, "service_account:"+sa, "v_get", fgaObject("project", granted))
+	e.grantVerb(t, "service_account", sa, "project", granted, "get")
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 	got, _, err := uc.Execute(ctx, repoproject.ListFilter{PageSize: probePageSize})
 	require.NoError(t, err)
 	require.Equal(t, []string{granted}, projectIDs(got),
@@ -218,7 +221,7 @@ func TestList645_09_FloorsHoldBeyondTheThreshold(t *testing.T) {
 		self := e.seedUser(t, e.foreignAcc, "self")
 		ctx := e.ctxAs(self, "user")
 
-		uc := userapp.NewListUsersUseCase(e.repo).WithRelationStore(e.fga.Client)
+		uc := userapp.NewListUsersUseCase(e.repo).WithRelationStore(e.gates)
 		got, _, err := uc.Execute(ctx, repouser.ListFilter{PageSize: probePageSize})
 		require.NoError(t, err)
 
@@ -283,7 +286,7 @@ func TestList645_10_StrangerSeesNothingAndOwnerSeesHis(t *testing.T) {
 	}
 	own := e.seedProject(t, e.callerAcc, "prj-own")
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 
 	stranger := e.seedUser(t, e.foreignAcc, "stranger")
 	gotStranger, nextStranger, err := uc.Execute(e.ctxAs(stranger, "user"),
@@ -323,9 +326,9 @@ func TestList645_25_AnonymousNeverReachesTheRelationStore(t *testing.T) {
 		e.seedProject(t, e.foreignAcc, projectName(i))
 	}
 	own := e.seedProject(t, e.callerAcc, "prj-own")
-	e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", own))
+	e.grantVerb(t, "user", string(e.callerUser), "project", own, "get")
 
-	counter := newCountingQueries(e.fga.Client)
+	counter := newCountingQueries(e.gates)
 	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(counter)
 
 	got, next, err := uc.Execute(e.ctxAnonymous(), repoproject.ListFilter{PageSize: probePageSize})
@@ -360,10 +363,10 @@ func TestList645_22_FormatIsJudgedBeforeRights(t *testing.T) {
 	}
 	e := newEnv(t)
 	own := e.seedProject(t, e.callerAcc, "prj-own")
-	e.fga.Write(t, fgaUser(e.callerUser), "v_get", fgaObject("project", own))
+	e.grantVerb(t, "user", string(e.callerUser), "project", own, "get")
 	stranger := e.seedUser(t, e.foreignAcc, "stranger")
 
-	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.fga.Client)
+	uc := projectapp.NewListProjectsUseCase(e.repo).WithRelationStore(e.gates)
 
 	callers := map[string]listCaller{
 		"anonymous": {ctx: e.ctxAnonymous()},

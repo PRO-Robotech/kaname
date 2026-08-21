@@ -114,7 +114,6 @@ func applyLegacyEnv(v *viper.Viper) {
 		{"KACHO_IAM_SAKEY_MAX_TTL", "authn.sakey-max-ttl"},
 		{"KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL", "authn.sakey-access-token-ttl"},
 		{"KACHO_IAM_SAKEY_BIND_DPOP", "authn.sakey-bind-dpop"},
-		// OpenFGA legacy aliases — extend as the rollout adds them.
 	}
 	for _, m := range simple {
 		if val, ok := os.LookupEnv(m.env); ok {

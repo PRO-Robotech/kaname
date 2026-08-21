@@ -46,7 +46,7 @@ import "context"
 // (false, nil) is a decision (hide existence); (false, err) means the decision
 // could not be made (map to UNAVAILABLE, never to NotFound).
 //
-// fgaType is the OpenFGA object_type (e.g. "account", "project", "iam_user");
+// fgaType is the rights-model object_type (e.g. "account", "project", "iam_user");
 // id is the bare resource id (no type prefix). The object string is composed as
 // `<fgaType>:<id>` — the SAME object the reconciler materializes and the gateway
 // Check's against.

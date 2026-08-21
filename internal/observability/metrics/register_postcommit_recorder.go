@@ -22,7 +22,6 @@ import (
 var (
 	RegisterPostCommitSteps = []string{
 		"forward_additive", "forward_guarded",
-		"tuple_write", "tuple_delete",
 		"residual_read", "residual_withdraw",
 	}
 	RegisterPostCommitOutcomes = []string{"ok", "error"}

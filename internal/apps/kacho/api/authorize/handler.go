@@ -31,10 +31,10 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// Fixed client-facing messages for non-validation failures. Raw use-case /
-// OpenFGA error text ("authz listObjects: <transport detail>", "authz
-// unavailable: <raw>") embeds authz-backend topology (store id, endpoint,
-// status) and MUST NOT reach the caller (CWE-209). The detailed error is
+// Fixed client-facing messages for non-validation failures. Raw use-case or
+// resolver error text ("authz listObjects: <detail>", "authz unavailable: <raw>")
+// embeds authz-backend internals and MUST NOT reach the caller (CWE-209). The
+// detailed error is
 // logged server-side instead. Deterministic "Illegal argument …" validation
 // text is safe and is surfaced verbatim.
 const (
@@ -58,7 +58,6 @@ const (
 type Authorizer interface {
 	Check(ctx context.Context, req service.CheckRequest) (*service.CheckResult, error)
 	BatchCheck(ctx context.Context, reqs []service.CheckRequest) ([]*service.CheckResult, error)
-	ListObjects(ctx context.Context, req service.ListObjectsRequest) (*service.ListObjectsResult, error)
 	ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error)
 	ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error)
 }
@@ -72,7 +71,7 @@ type Handler struct {
 	// (caller_authority.go). Optional / nil-safe: when unset the gate can still
 	// allow self-queries and passes through anonymous/system module PDP calls,
 	// but denies a non-self tenant principal that cannot be proven cluster-admin
-	// or resource-authority (fail-closed). Wired to the OpenFGA client in the
+	// or resource-authority (fail-closed). Wired to the decision door in the
 	// composition root via WithCallerAuthority.
 	authority authzguard.RelationChecker
 	// insecureAnonymousPeer — the EXCEPTION knob for the inner caller-authority
@@ -186,10 +185,9 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
 	return &iamv1.AuthorizeCheckResponse{
-		Allowed:              res.Allowed,
-		DenyReasons:          res.DenyReasons,
-		AuthorizationModelId: res.AuthorizationModelID,
-		CheckedAt:            shared.TimestampProto(res.CheckedAt),
+		Allowed:     res.Allowed,
+		DenyReasons: res.DenyReasons,
+		CheckedAt:   shared.TimestampProto(res.CheckedAt),
 	}, nil
 }
 
@@ -240,42 +238,12 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 	}
 	for i, r := range results {
 		out.Responses[i] = &iamv1.AuthorizeCheckResponse{
-			Allowed:              r.Allowed,
-			DenyReasons:          r.DenyReasons,
-			AuthorizationModelId: r.AuthorizationModelID,
-			CheckedAt:            shared.TimestampProto(r.CheckedAt),
+			Allowed:     r.Allowed,
+			DenyReasons: r.DenyReasons,
+			CheckedAt:   shared.TimestampProto(r.CheckedAt),
 		}
 	}
 	return out, nil
-}
-
-// ListObjects — see iamv1.AuthorizeServiceServer.
-func (h *Handler) ListObjects(ctx context.Context, req *iamv1.ListObjectsRequest) (*iamv1.ListObjectsResponse, error) {
-	// Inner defense-in-depth: ListObjects has no single resource scope, so a
-	// tenant caller may only enumerate its OWN visible objects or act as a
-	// cluster-admin (caller_authority.go).
-	if err := h.authorizeCaller(ctx, req.GetSubject(), nil); err != nil {
-		return nil, err
-	}
-	res, err := h.svc.ListObjects(ctx, service.ListObjectsRequest{
-		Subject:      req.GetSubject(),
-		ResourceType: req.GetResourceType(),
-		Action:       req.GetAction(),
-		MaxResults:   int(req.GetMaxResults()),
-		PageToken:    req.GetPageToken(),
-		Context:      structToMap(req.GetContext()),
-	})
-	if err != nil {
-		if strings.HasPrefix(err.Error(), "Illegal argument") {
-			return nil, status.Error(codes.InvalidArgument, err.Error())
-		}
-		slog.ErrorContext(ctx, "authorize backend unavailable", "op", "ListObjects", "err", err.Error())
-		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
-	}
-	return &iamv1.ListObjectsResponse{
-		ResourceIds: res.ResourceIDs,
-		Truncated:   res.Truncated,
-	}, nil
 }
 
 // ListSubjects — see iamv1.AuthorizeServiceServer.
@@ -331,7 +299,6 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 		ResourceType: req.GetResource().GetType(),
 		ResourceID:   req.GetResource().GetId(),
 		Relation:     req.GetRelation(),
-		MaxDepth:     int(req.GetMaxDepth()),
 	})
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "Illegal argument") {
@@ -341,36 +308,27 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 	}
 	return &iamv1.ExpandRelationsResponse{
-		Resource:             &iamv1.ResourceRef{Type: res.Resource.Type, Id: res.Resource.ID},
-		Relation:             res.Relation,
-		Tree:                 treeToProto(res.Tree),
-		AuthorizationModelId: res.AuthorizationModelID,
+		Resource: &iamv1.ResourceRef{Type: res.Resource.Type, Id: res.Resource.ID},
+		Relation: res.Relation,
+		Tree:     treeToProto(res.Tree),
 	}, nil
 }
 
-// treeToProto — service.ExpandTree → iamv1.UsersetTree (recursive).
+// treeToProto — основания права → iamv1.UsersetTree.
+//
+// Перечень ОДНОУРОВНЕВЫЙ, и это свойство источника, а не упрощение переходника.
+// Основание в реляционной форме — плоская запись (факт · выдача · членство); у
+// него не бывает глубины, которой неоткуда взяться. Рёбра графа сняты с контракта
+// вместе с движком, который их производил: заполнять их было бы нечем, а поле,
+// которое никогда не заполняется, обещает возможность, которой нет.
 func treeToProto(t *authztypes.ExpandTree) *iamv1.UsersetTree {
 	if t == nil {
 		return nil
 	}
-	out := &iamv1.UsersetTree{
+	return &iamv1.UsersetTree{
 		Leaves:    append([]string(nil), t.Leaves...),
 		Truncated: t.Truncated,
 	}
-	for _, e := range t.Computed {
-		out.Computed = append(out.Computed, &iamv1.ComputedUsersetEdge{
-			Relation: e.Relation,
-			Subtree:  treeToProto(e.Subtree),
-		})
-	}
-	for _, e := range t.TupleToUserset {
-		out.TupleToUserset = append(out.TupleToUserset, &iamv1.TupleToUsersetEdge{
-			Parent:   &iamv1.ResourceRef{Type: e.ParentType, Id: e.ParentID},
-			Relation: e.Relation,
-			Subtree:  treeToProto(e.Subtree),
-		})
-	}
-	return out
 }
 
 func structToMap(s *structpb.Struct) map[string]any {

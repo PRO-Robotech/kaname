@@ -15,7 +15,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 | Слушатель      | Порт  | Протокол  | Назначение                                                                       |
 |----------------|-------|-----------|----------------------------------------------------------------------------------|
 | public-gRPC    | 9090  | gRPC+TLS  | tenant-facing RPC: Account/Project/User/SA/Group/Role/AccessBinding/Conditions/Authorize/PermissionCatalog/SAKey/Operation |
-| internal-gRPC  | 9091  | gRPC+mTLS | admin/peer-call RPC: InternalIAM/InternalAuthorize/InternalCluster/InternalUser/InternalOperations/InternalSessionRevocations |
+| internal-gRPC  | 9091  | gRPC+mTLS | admin/peer-call RPC: InternalIAM/InternalCluster/InternalUser/InternalOperations/InternalSessionRevocations |
 | hooks-HTTP     | 9092  | HTTP      | Ory Kratos provision-хук + Ory Hydra token/refresh OAuth2-хуки (cluster-internal) |
 | metrics-HTTP   | 9095  | HTTP      | Prometheus `/metrics` (cluster-internal)                                          |
 
@@ -25,7 +25,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 ## Группы документации
 
 ### Навигация
-- [`00-overview.md`](00-overview.md) — обзор сервиса, port-mapping, архитектурная диаграмма (C4-context), список 28 internal-пакетов.
+- [`00-overview.md`](00-overview.md) — обзор сервиса, port-mapping, архитектурная диаграмма (C4-context), раскладка internal-пакетов.
 
 ### Ядро ресурсной модели (Account / Project / IAM-сущности)
 - [`01-account.md`](01-account.md) — Account (top-level tenant; глобально-уникальное имя; owner_user_id RESTRICT).
@@ -35,22 +35,20 @@ devops, архитектор: все, что нужно, чтобы поднят
 - [`05-sa-keys.md`](05-sa-keys.md) — SA Keys (Hydra OAuth client_id/secret; OpsResponseRedactor; ротация Delete+Create).
 - [`06-group.md`](06-group.md) — Group + GroupMember (триггер `group_members_member_exists_trg`).
 - [`07-role.md`](07-role.md) — Role (58 system seed; custom per-Account; multi-scope XOR; permissions JSONB).
-- [`08-access-binding.md`](08-access-binding.md) — AccessBinding (5-tuple; idempotent INSERT; atomic emit-in-tx FGA + subject_change).
+- [`08-access-binding.md`](08-access-binding.md) — AccessBinding (5-tuple; idempotent INSERT; эмиссия намерения и сброса кэша в той же транзакции).
 - Условия на привязку (ABAC-overlay) — главы нет. Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - [`10-operations.md`](10-operations.md) — LRO Operations (`iop`-prefix; async-API contract; principal extension).
 
 ### Authorization
-- [`19-authorize.md`](19-authorize.md) — Public AuthorizeService.Check (sync; high-throughput; cache-friendly).
-- [`20-internal-authorize.md`](20-internal-authorize.md) — InternalAuthorizeService (Cascade Check; ClusterAdminGrant fast-path).
+- [`19-authorize.md`](19-authorize.md) — публичный `AuthorizeService` (sync-проверка, `ExpandRelations`, снятые с контракта поля).
 - [`21-internal-iam.md`](21-internal-iam.md) — InternalIAMService (UpsertFromIdentity / PollSubjectChanges / RegisterResource).
 
 ### Cross-cutting / infrastructure
-- [`28-relationhook.md`](28-relationhook.md) — `relationhook.WriteHierarchyTuple`: родительский указатель для СВОИХ ресурсов iam.
-- [`29-openfga-check.md`](29-openfga-check.md) — OpenFGA REBAC Check + `fga_outbox` drainer + propagation chain.
+- [`29-relational-verdict.md`](29-relational-verdict.md) — вердикт реляционной формой + журнал намерений + родительский указатель.
 
 ### Operations / Runbook / Deployment
 - [`31-deployment.md`](31-deployment.md) — Полный deployment guide (helm umbrella, env vars, secrets, миграции).
-- [`32-observability.md`](32-observability.md) — Metrics / logs / tracing (slog → OTel, FGA-lag).
+- [`32-observability.md`](32-observability.md) — Metrics / logs / tracing (slog → OTel, латентность вердикта).
 - [`33-runbook.md`](33-runbook.md) — Production runbook (типичные P1/P2/P3 инциденты и действия).
 
 ## Как читать
@@ -58,7 +56,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 1. Если впервые — [`00-overview.md`](00-overview.md) (15 мин чтения).
 2. Если конкретный ресурс/RPC — открыть соответствующий файл из ядра / governance.
 3. Если нужно поднять в проде — [`31-deployment.md`](31-deployment.md) + [`33-runbook.md`](33-runbook.md).
-4. Если нужно понять authz-цепочку — [`19-authorize.md`](19-authorize.md) → [`29-openfga-check.md`](29-openfga-check.md).
+4. Если нужно понять authz-цепочку — [`19-authorize.md`](19-authorize.md) → [`29-relational-verdict.md`](29-relational-verdict.md) → [`../architecture/failure-domains.md`](../architecture/failure-domains.md).
 
 ## Источники истины (для самостоятельной проверки)
 

@@ -174,16 +174,11 @@ type relationQueriesStub struct {
 	relations  []string // every relation queried (visibility union viewer ∪ v_list)
 }
 
-func (s *relationQueriesStub) ListObjects(ctx context.Context, subject, relation, objectType string,
-	condCtx map[string]any, maxResults int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.called.subject = subject
-	s.called.relation = relation
-	s.called.objectType = objectType
-	s.relations = append(s.relations, relation)
-	return s.allowedIDs, nil
-}
+// Метод перечисления объектов снят вместе со своим RPC: порт его больше не
+// объявляет, и продукт этим путём не ходит. Дублёр, сохранивший способность,
+// которой нет у настоящего, ШИРЕ предмета — он предлагает путь, по которому
+// проверяемый код пойти не может, и первое же утверждение о нём стало бы
+// утверждением о том, чего не бывает.
 
 // CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
 // of enumerating (internal/authzfilter), answering from the SAME allow-set.

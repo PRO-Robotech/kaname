@@ -122,10 +122,10 @@ func ReadFloorRPCs() []string {
 		// supposed to be the entire grant.
 		"/kacho.cloud.iam.v1.InternalLimitService/Get",
 		"/kacho.cloud.iam.v1.InternalLimitService/List",
-		// InternalAuthorizeService — admin-tooling tuple/store reads (gateway-
-		// fronted; floor AND gateway-only both apply).
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/ReadTuples",
-		"/kacho.cloud.iam.v1.InternalAuthorizeService/GetFGAStoreInfo",
+		// Двух читающих методов администрирования хранилища отношений здесь больше
+		// нет: служба снята вместе с движком (стадия S6 эпика #747). Потолок,
+		// объявленный для несуществующего метода, ничего не гейтит и вводит в
+		// заблуждение того, кто читает перечень как поверхность.
 	}
 }
 

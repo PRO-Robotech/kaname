@@ -31,19 +31,15 @@ import (
 // `owner` (a per-OBJECT computed relation, NOT a hierarchy cascade — no O(mirror)
 // recompute, consistent with the flat model's `editor: this or admin`). This test
 // parses the CANONICAL model DSL (proto/kacho/cloud/iam/v1/fga_model.fga — the
-// single source the openfga-bootstrap ConfigMap is generated from, see
-// fga_model_configmap_identity_test.go) and asserts the derivation exists, so a
+// single source out of which the copy the service embeds is generated, see
+// services/iam/internal/authzmodel) and asserts the derivation exists, so a
 // future edit that re-dangles `owner` fails here rather than silently 404-ing
 // every registry owner.
 
-// findConfigMap returns the openfga-bootstrap model-stub ConfigMap path. It is
-// used only where the DEPLOYED artifact itself is under test (the pre-transformed
-// `model.json` the bootstrap Job applies); DSL assertions read the canonical file
-// via modelDSL instead. A missing ConfigMap is a hard failure, not a skip.
-func findConfigMap(t *testing.T) string {
-	t.Helper()
-	return configMapPath(t)
-}
+// Здесь стояла findConfigMap — путь к заготовке модели в карте чарта загрузки
+// движка отношений. Ни карты, ни подчарта, ни движка в дереве нет; единственным
+// её вызывающим была поведенческая проба, снятая вместе с ними. Утверждения ниже
+// читают канонический файл через modelDSL и от неё не зависели никогда.
 
 // modelDSL returns the canonical authorization-model DSL. Single source of truth
 // (fga_model_drift_test.go); the ConfigMap copy is generated from it and pinned

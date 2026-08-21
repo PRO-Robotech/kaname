@@ -15,10 +15,11 @@ package pg_test
 //
 // There is deliberately NO visible-id push-down in ListFilter: read visibility
 // is resolved PER-OBJECT by the use-case over the page this returns
-// (internal/authzfilter). The only way to build such an id-set up front is
-// OpenFGA's ListObjects, which is capped server-side at 1000 objects of the type
-// in the store with no continuation token — narrowing the query by it silently
-// hid a tenant's own roles.
+// (internal/authzfilter). Собрать такой набор идентификаторов ЗАРАНЕЕ можно было
+// только перечислением объектов, а оно снято с контракта (решение Р1) именно
+// потому, что не имело продолжения: ответ обрезался серверным пределом, и сверх
+// него ресурсы арендатора становились невидимы НАВСЕГДА при живых правах.
+// Порядок «страница → проверка страницы» этого класса не имеет by construction.
 
 import (
 	"context"

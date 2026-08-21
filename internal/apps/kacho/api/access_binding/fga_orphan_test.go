@@ -48,10 +48,11 @@ const (
 	roleID178c = "rol00000000000dyn01c"
 )
 
-// netTuples computes the residual FGA tuple set after applying a sequence of
-// writes and deletes: a tuple present in writes but not cancelled by an equal
-// delete is "still live in OpenFGA". An orphan tuple is a write with no matching
-// delete. The drainer is idempotent, so multiplicity does not matter — set
+// netTuples computes the residual tuple set after applying a sequence of writes and
+// deletes: a tuple present in writes but not cancelled by an equal delete is still
+// materialized — i.e. still a row in `kacho_iam.relation_fact`, which is what a
+// verdict resolves against. An orphan tuple is a write with no matching delete. The
+// projection of the journal is idempotent, so multiplicity does not matter — set
 // semantics on (User, Relation, Object).
 func netTuples(written, deleted []ab_repo.RelationTuple) map[ab_repo.RelationTuple]int {
 	net := map[ab_repo.RelationTuple]int{}

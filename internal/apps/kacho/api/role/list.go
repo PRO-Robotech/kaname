@@ -43,10 +43,11 @@ package role
 // filter applied to rows already taken. A floor applied after the fact is the
 // original defect wearing a floor's name.
 //
-// Still forbidden, and for its original reason: asking the MODEL which roles are
-// visible and narrowing the SQL to that id-set. That enumeration is truncated
-// server-side (OPENFGA_LIST_OBJECTS_MAX_RESULTS, default 1000, no continuation
-// token) and made a tenant's own custom roles vanish past the cap. The candidate
+// Still forbidden: asking the MODEL which roles are visible and narrowing the SQL
+// to that id-set. The external engine truncated that enumeration server-side
+// (default 1000, no continuation token) and made a tenant's own custom roles vanish
+// past the cap; the engine is gone, and the ban survives it because "enumerate
+// everything visible" is unbounded by construction. The candidate
 // set above is a different thing — it comes from iam's own tables, has no cap,
 // and decides nothing. See the internal/authzfilter package doc.
 //
@@ -339,10 +340,11 @@ func sortCatalogFirst(roles []domain.Role) {
 //
 // The predicate is unchanged from the ListObjects enumeration this replaces
 // (ListObjects returns, by definition, what Check would allow). What changed is
-// the SHAPE: OpenFGA caps ListObjects server-side at 1000 objects of the type in
-// the store with no continuation token, so past that population a role's own
-// grantee fell outside the returned prefix — List dropped the role and Get
-// answered NOT_FOUND, permanently (internal/authzfilter package doc).
+// the SHAPE: the external relations engine capped that enumeration server-side at
+// 1000 objects of the type in its store with no continuation token, so past that
+// population a role's own grantee fell outside the returned prefix — List dropped
+// the role and Get answered NOT_FOUND, permanently. The engine is gone; the shape
+// is what mattered and it stays (internal/authzfilter package doc).
 //
 // Fail-closed: a nil FGA port or an FGA error on ANY object → Unavailable; an
 // unresolvable subject → empty set (system roles still served).
@@ -366,7 +368,7 @@ func resolveVisibleRoleIDs(ctx context.Context, relationQueries clients.Relation
 	return visible, nil
 }
 
-// fgaRoleObjectType — the OpenFGA object type of a Role.
+// fgaRoleObjectType — the rights-model object type of a Role.
 const fgaRoleObjectType = "iam_role"
 
 // principalSubject builds the FGA subject string from the principal type:

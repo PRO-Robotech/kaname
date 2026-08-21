@@ -16,8 +16,8 @@ package pg_test
 //   - TestRevoke_AlreadyRevoked             — уже-revoked → ErrNotFound.
 //   - TestGrantRevoke_ConcurrentSameSubject — invariants на 2 goroutines.
 //   - TestList_JoinsUsers                   — denormalised email/display_name.
-//   - TestGrant_OpenFGAOutage               — DB-row + fga_outbox row commit'ятся
-//                                              в одной TX независимо от OpenFGA.
+//   - TestGrant_RowAndJournalCommitInOneTx  — строка выдачи + строка журнала
+//                                              коммитятся одной TX (ban #10).
 //
 // TestGet_Singleton — отдельный файл cluster_reader_integration_test.go.
 //
@@ -893,21 +893,19 @@ func TestList_JoinsUsers(t *testing.T) {
 	}
 }
 
-// ── TestGrant_OpenFGAOutage ──────────────────────────────────────────────────
+// ── TestGrant_RowAndJournalCommitInOneTx ─────────────────────────────────────
 //
-// Repo-layer scope of the OpenFGA-outage scenario:
+// Строка выдачи и строка ЖУРНАЛА намерений коммитятся ОДНОЙ транзакцией — ban #10:
+// инвариант держит оператор базы, а не последовательность «вставил, потом позвал».
 //
-//   The Writer.Grant operation MUST commit the cluster_admin_grants row and
-//   the fga_outbox row in a single TX, with NO live dependency on the
-//   OpenFGA service. The drainer + OperationsWorker (Task 3+) handle the
-//   live-FGA write asynchronously; their behaviour on outage is verified
-//   at the handler / e2e level.
-//
-//   This test confirms the atomicity contract: even with no OpenFGA running,
-//   the writer's TX succeeds and both rows are visible. The integration-test
-//   environment has no OpenFGA container, so this is the natural state.
+// Прежде это утверждение называлось «переживает недоступность движка» и доказывало
+// отсутствие живой зависимости от чужой службы. Со снятием движка предмет не пропал,
+// а стал НЕСУЩИМ: строка журнала и есть доставка — из неё триггер
+// (`kacho_iam.relation_fact_from_journal`) складывает прямой факт в тот же коммит.
+// Значит откат этой транзакции не может оставить выданное право, а её коммит не может
+// оставить право невыданным. Разъехаться этим двум строкам больше негде.
 
-func TestGrant_OpenFGAOutage(t *testing.T) {
+func TestGrant_RowAndJournalCommitInOneTx(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -937,7 +935,7 @@ func TestGrant_OpenFGAOutage(t *testing.T) {
 
 	require.NoError(t, tx.Commit(ctx))
 
-	// Verify both rows visible (TX committed independent of any OpenFGA RPC).
+	// Обе строки видны: транзакция закоммичена целиком, без обращения наружу.
 	require.Equal(t, 1, countActiveUserAdmins(t, ctx, pool))
 	require.Equal(t, 1, countOutboxByEvent(t, ctx, pool, "fga.tuple.write"))
 }
@@ -1038,9 +1036,10 @@ func TestReactivate_GrantRevokeGrant(t *testing.T) {
 	require.Equal(t, 1, countOutboxByEvent(t, ctx, pool, "fga.tuple.delete"))
 }
 
-// fgaTuplesGrantSystemAdmin — minimal tuple shape for the OpenFGA outage test.
-// The real use-case-level emitter call (Task 3) goes through the cluster
-// grant use-case which assembles the same single-tuple shape.
+// fgaTuplesGrantSystemAdmin — минимальная форма кортежа для пробы атомарности выше.
+// Настоящий вызов эмиттера идёт через use-case выдачи кластерного администратора и
+// собирает ту же одиночную форму. Имя `fga` историческое и совпадает с именем таблицы
+// журнала (`kacho_iam.fga_outbox`), которая жива.
 func fgaTuplesGrantSystemAdmin(subjectID string) []service.RelationTuple {
 	return []service.RelationTuple{
 		{User: "user:" + subjectID, Relation: "system_admin", Object: "cluster:" + domain.ClusterSingletonID},

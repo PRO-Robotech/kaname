@@ -9,24 +9,36 @@ package role
 //   - System roles (is_system) are the tenant-wide reference catalog floor: every
 //     authenticated principal sees them (RoleService.Get is <exempt>; the catalog
 //     of built-in roles is shared). They are NOT subject to the per-object filter.
-//   - CUSTOM roles are filtered per-object via FGA ListObjects(subject, "viewer",
-//     "iam_role") — the `viewer` tier cascades from the account tier
-//     (admin→editor→viewer; `viewer from account`), so a role's creator /
-//     account-admin resolves visibility on the roles in their account, while a
-//     foreign account resolves none (no existence leak). This is the SAME
-//     read-relation account/project List filter by (`viewer`), so the role
-//     read-surface is consistent with the rest of iam (read==enforce).
+//   - CUSTOM roles are filtered by a DIRECT per-object question about each row of
+//     the page — `viewer` on `iam_role:<id>`, then `v_list` for what `viewer`
+//     denied (authzfilter.RelationsFor("iam_role")). The `viewer` tier cascades
+//     from the account tier (admin→editor→viewer; `viewer from account`), so a
+//     role's creator / account-admin resolves visibility on the roles in their
+//     account, while a foreign account resolves none (no existence leak).
 //   - ListFilter.AccountID scopes the catalog to one Account (system +
 //     that Account's custom roles); a foreign Account's custom roles never appear.
-//   - Fail-closed: a nil FGA port or an FGA error → Unavailable, never an
-//     unfiltered/owner-only fallback.
+//   - Fail-closed: a nil relation port, or a question that could not be answered,
+//     → Unavailable, never an unfiltered/owner-only fallback. "Could not ask" and
+//     "not allowed" are different worlds.
 //   - page_size > 1000 → InvalidArgument (no silent clamp) — covered in the
 //     handler/repo tests; the use-case propagates the repo/validate error.
 //
-// The visible custom-role id-set is the FGA ListObjects(subject,"viewer","iam_role")
-// result: the `viewer` tier resolves an account-admin's own roles via the
-// account-tier cascade and resolves scope_grant/cluster grants too; the use-case's
-// job is to INTERSECT that set with the page and keep system roles (catalog floor).
+// # What this header used to say, and why that stopped being true
+//
+// The visible custom-role set used to be named as an enumeration —
+// ListObjects(subject,"viewer","iam_role") — and the use-case's job as intersecting
+// that set with the page. That door no longer exists in any form: the external
+// relation engine was removed in stage S6 and clients.RelationQueries carries no
+// method that enumerates objects. The predicate is unchanged (an enumeration
+// returns, by definition, what a Check would allow); what changed is the SHAPE, and
+// with it the direction of the intersection — the page is read first and each of its
+// rows is asked about, so the cost of a page follows the page.
+//
+// The reason for the removal is kept because it is still the reason: the enumeration
+// was capped server-side with no continuation token, so past that population a
+// tenant's own role fell outside the returned prefix and became permanently
+// invisible — Get → NOT_FOUND, List → absent — while the row and the grant both
+// existed.
 
 import (
 	"context"
@@ -154,9 +166,9 @@ func roleIDs(out []domain.Role) []string {
 	return ids
 }
 
-// ───────────── FGA ListObjects stub ─────────────
+// ───────────── relation-queries stub ─────────────
 
-// fgaObjectID extracts the bare id from an FGA object string
+// fgaObjectID extracts the bare id from an object string
 // ("iam_role:rol-c1" → "rol-c1"). Shared by the package's Check stubs.
 func fgaObjectID(object string) string {
 	for i := 0; i < len(object); i++ {
@@ -167,6 +179,12 @@ func fgaObjectID(object string) string {
 	return object
 }
 
+// roleFGAStub — stub clients.RelationQueries.
+//
+// The counters are kept because the question they now count — the per-object one —
+// is the question production asks; they used to be incremented by an enumeration
+// door as well, and that door is gone. A counter with no producer would make
+// "nothing was asked" true by construction of this type and unable to go red.
 type roleFGAStub struct {
 	clients.RelationQueries
 	mu           sync.Mutex // the per-object Check port is called concurrently
@@ -185,27 +203,12 @@ func newRoleFGAStub() *roleFGAStub {
 
 func (s *roleFGAStub) set(subject string, ids []string) { s.idsBySubject[subject] = ids }
 
-func (s *roleFGAStub) ListObjects(ctx context.Context, subject, relation, objectType string,
-	condCtx map[string]any, maxResults int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls++
-	s.relations[relation]++
-	s.lastSubject = subject
-	s.lastRelation = relation
-	s.lastObjType = objectType
-	if s.err != nil {
-		return nil, s.err
-	}
-	// Relation-agnostic id-set: returns the same grant-set for viewer AND v_list,
-	// so the use-case's viewer ∪ v_list union is exercised without these legacy
-	// tests caring which relation surfaced the role.
-	return s.idsBySubject[subject], nil
-}
-
-// CheckWithContext — the DIRECT per-object oracle the use-case now asks instead
-// of enumerating (internal/authzfilter). Same relation-agnostic grant-set, same
-// observability counters, so these tests' intent is unchanged by the shape swap.
+// CheckWithContext — the DIRECT per-object question the use-case asks
+// (internal/authzfilter).
+//
+// The grant-set is relation-agnostic: the same ids answer for `viewer` AND
+// `v_list`, so the use-case's viewer ∪ v_list union is exercised without these
+// older tests caring which relation surfaced the role.
 func (s *roleFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
 	_ map[string]any) (bool, error) {
 	s.mu.Lock()
@@ -256,7 +259,7 @@ func TestListRoles_UsesViewerAndVListRelationsOnIamRole(t *testing.T) {
 }
 
 // System roles are the tenant-wide catalog floor: visible even with an empty
-// FGA grant-set. Custom roles require a grant.
+// grant-set. Custom roles require a grant.
 func TestListRoles_D40_SystemRolesAlwaysVisible_CustomFiltered(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
@@ -272,7 +275,7 @@ func TestListRoles_D40_SystemRolesAlwaysVisible_CustomFiltered(t *testing.T) {
 		"system roles always visible (catalog floor); ungranted custom role hidden")
 }
 
-// LST-2 byName / LST-4 union: FGA returns exactly the granted custom ids → List
+// LST-2 byName / LST-4 union: exactly the granted custom ids resolve → List
 // shows system ∪ granted-custom.
 func TestListRoles_D41_D43_CustomByGrant_Union(t *testing.T) {
 	repo := newRoleListFakeRepo()
@@ -314,7 +317,7 @@ func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 	seedCustomRole(repo, "rol-cB", "acc-B") // foreign account
 
 	fga := newRoleFGAStub()
-	fga.set("user:usr-u1", []string{"rol-cA", "rol-cB"}) // even if FGA would allow both
+	fga.set("user:usr-u1", []string{"rol-cA", "rol-cB"}) // even if the model would allow both
 
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100, AccountID: domain.AccountID("acc-A")})
@@ -325,25 +328,26 @@ func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 		"accountId scope is pushed into the repo filter")
 }
 
-// D-47 fail-closed: FGA error → Unavailable, never an unfiltered list.
+// D-47 fail-closed: a question that could not be answered → Unavailable, never an
+// unfiltered list.
 func TestListRoles_D47_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
 	seedCustomRole(repo, "rol-c1", "acc-A")
 
 	fga := newRoleFGAStub()
-	fga.err = stderrors.New("openfga listObjects: status 503")
+	fga.err = stderrors.New("relation form did not answer: connection closed")
 
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
-	require.Error(t, err, "FGA outage must NOT return a (degraded) list")
+	require.Error(t, err, "an unanswered question must NOT return a (degraded) list")
 	require.Empty(t, out)
 	st, ok := status.FromError(err)
 	require.True(t, ok, "want grpc status; got %v", err)
-	require.Equal(t, codes.Unavailable, st.Code(), "FGA outage → UNAVAILABLE fail-closed (D-47)")
+	require.Equal(t, codes.Unavailable, st.Code(), "unanswered → UNAVAILABLE fail-closed (D-47)")
 }
 
-// nil FGA port → fail-closed Unavailable (never an unfiltered catalog leak).
+// nil relation port → fail-closed Unavailable (never an unfiltered catalog leak).
 func TestListRoles_D47_NilFGA_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedCustomRole(repo, "rol-c1", "acc-A")
@@ -353,7 +357,7 @@ func TestListRoles_D47_NilFGA_FailClosed(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, out)
 	st, _ := status.FromError(err)
-	require.Equal(t, codes.Unavailable, st.Code(), "nil FGA port → fail-closed Unavailable")
+	require.Equal(t, codes.Unavailable, st.Code(), "nil relation port → fail-closed Unavailable")
 }
 
 // BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
@@ -361,13 +365,18 @@ func TestListRoles_D47_NilFGA_FailClosed(t *testing.T) {
 //
 // It is not optional politeness: authzfilter takes its batched path whenever the
 // checker offers this method, so a stub that omitted it would leave every test in
-// this file exercising a code path production does not take. It refuses an
-// over-cap partition the way the relation store refuses one — an error, never a
-// trim — so the stub is never more permissive than the thing it stands in for.
+// this file exercising a code path production does not take.
+//
+// The refusal above authzfilter.MaxBatchChecksPerRequest keeps the stub from being
+// SLACKER than the declaration it stands behind: that constant is the partition size
+// authzfilter itself declares and splits a page against, so a filter that stopped
+// honouring its own declaration goes red here instead of quietly changing the shape
+// of the request. An error, never a trim — a short answer is indistinguishable from
+// a page of denials.
 func (s *roleFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
 	objects []string, condCtx map[string]any) ([]bool, error) {
 	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
-		return nil, fmt.Errorf("batchCheck received %d checks, the maximum allowed is %d",
+		return nil, fmt.Errorf("batch of %d objects exceeds the declared partition size %d",
 			len(objects), authzfilter.MaxBatchChecksPerRequest)
 	}
 	out := make([]bool, len(objects))

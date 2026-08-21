@@ -100,17 +100,21 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	if svcs != nil && svcs.internalIAMHandler != nil {
 		iamv1.RegisterInternalIAMServiceServer(srv, svcs.internalIAMHandler)
 	}
-	// AuthZ — internal-only admin RPCs.
-	if svcs != nil && svcs.internalAuthorizeHandler != nil {
-		iamv1.RegisterInternalAuthorizeServiceServer(srv, svcs.internalAuthorizeHandler)
-	}
+	// Служебных RPC администрирования хранилища отношений здесь больше нет: их
+	// предметом было чужое хранилище — его кортежи, его модель, его store id, — и
+	// вместе с ним снята вся служба.
 	// AuthorizeService ALSO on the internal listener — RBAC rules-model consumer
 	// list-filter edge. The SAME handler instance
 	// already registered on the public listener (registerPublicServices) is
 	// re-registered here so consumers (kacho-vpc / kacho-compute / kacho-nlb) can
-	// call AuthorizeService.ListObjects (per-object List filter) / BatchCheck /
-	// Check over the verified-mTLS :9091 service→service edge they already reuse
-	// for InternalIAMService.Check — instead of a separate public :9090 conn.
+	// call AuthorizeService.BatchCheck / Check over the verified-mTLS :9091
+	// service→service edge they already reuse for InternalIAMService.Check —
+	// instead of a separate public :9090 conn.
+	//
+	// Перечисления объектов в этом перечне больше нет: оно снято с контракта
+	// стадией S6 (эпик #747). Сужение списка идёт пообъектной проверкой СТРАНИЦЫ,
+	// прочитанной курсором из своей БД, — то есть тем самым `BatchCheck`, ради
+	// которого ребро и держится.
 	//
 	// This does NOT violate ban #6: ban #6 forbids Internal.* methods on the
 	// PUBLIC surface. The inverse — a PUBLIC service ADDITIONALLY exposed on the
@@ -118,8 +122,8 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	// internal listener is not tenant-facing). The internal interceptor chain
 	// (CallerPolicy floor: verified module cert required in prod; AuthorizeService
 	// is NOT gateway-fronted, NOT in ReadFloorRPCs, NOT acr-floored) admits any
-	// verified module SA. ListObjects accepts an EXPLICIT subject and filters from
-	// the END-USER's authz view, so the caller-authz is "this module MAY query
+	// verified module SA. Запрос принимает ЯВНОГО субъекта и отвечает из его
+	// авторизационного вида, so the caller-authz is "this module MAY query
 	// authz decisions" (verified-cert floor) — NOT "this module has access to the
 	// objects" (which is the explicit-subject's view).
 	if svcs != nil && svcs.authorizeHandler != nil {

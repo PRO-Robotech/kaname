@@ -69,10 +69,6 @@ func (f fakeSubjectAuthorizer) BatchCheck(_ context.Context, reqs []service.Chec
 	return out, nil
 }
 
-func (f fakeSubjectAuthorizer) ListObjects(context.Context, service.ListObjectsRequest) (*service.ListObjectsResult, error) {
-	return nil, nil
-}
-
 func (f fakeSubjectAuthorizer) ListSubjects(context.Context, service.ListSubjectsRequest) (*service.ListSubjectsResult, error) {
 	return nil, nil
 }

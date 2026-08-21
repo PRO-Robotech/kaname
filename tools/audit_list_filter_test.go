@@ -177,8 +177,12 @@ func TestGate_RealTreePasses_AndLegitimateEnumeratorsStaySilent(t *testing.T) {
 		// both flavours are in the effective ban
 		"ListObjects",
 		"Objects",
-		// and the legitimate callers were judged, not skipped
-		"authorize.ListObjects",
+		// and the legitimate caller was judged, not skipped.
+		//
+		// Их было двое, пока существовало перечисление объектов; RPC снят с
+		// контракта стадией S6 (эпик #747), и объявление профиля снято вместе с
+		// ним. Имя `ListObjects` при этом ОСТАЁТСЯ в запрете выше — как чужой
+		// словарь, который нельзя вывести из дерева и потому обязан быть выписан.
 		"authorize.ListSubjects",
 	} {
 		if !strings.Contains(out, want) {
@@ -262,7 +266,21 @@ func TestGate_EnumerationSourceExpiresWithItsSubject(t *testing.T) {
 	// The type AND its receivers, because the derivation reads both forms: renaming
 	// only the type declaration would leave the methods attributed to it and the ban
 	// intact — which is correct behaviour, and would make this injection model nothing.
-	patch(t, root, "internal/repo/kacho/pg/relverdict/asker.go", "Asker", "AskerMoved")
+	//
+	// ПОЭТОМУ ФАЙЛОВ ДВА, а не один. Приёмники типа живут и в соседнем файле
+	// (`asker_gate.go`, заведён стадией S6 эпика #747), и пока хоть один из них
+	// называет прежнее имя, набор методов типа находится — то есть инъекция
+	// перестаёт моделировать «источник переехал». Замечено прогоном: после
+	// появления второго файла эта проба зазеленела, ничего не проверив.
+	//
+	// Перечень намеренно ВЫПИСАН, а не выведен: вывод по каталогу утащил бы сюда
+	// пробы, и инъекция стала бы править то, чего не собиралась.
+	for _, rel := range []string{
+		"internal/repo/kacho/pg/relverdict/asker.go",
+		"internal/repo/kacho/pg/relverdict/asker_gate.go",
+	} {
+		patch(t, root, rel, "Asker", "AskerMoved")
+	}
 
 	out, err := runGate(t, root)
 	if err == nil {

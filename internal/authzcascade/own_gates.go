@@ -1,274 +1,242 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// own_gates.go — the relation client iam's OWN gates ask.
-//
-// # WHY THIS EXISTS
-//
-// The structural facts this package derives were first supplied on ONE surface:
-// AuthorizeService, which is the gate the api-gateway per-RPC middleware asks. iam's
-// own in-service gates put the same question to the relation store DIRECTLY, so they
-// kept resolving the cascade only over pointers the outbox had already delivered.
-//
-// One subject then got two different answers depending on who asked, and the pair was
-// absurd rather than merely inconsistent: the owner of a brand-new account was admitted
-// to DELETE it (the edge resolves his `owner` fact from the committed row) and told it
-// DOES NOT EXIST when he read it (the in-service read gate asked the store, found no
-// tuple, and a read denial is hidden as not-found). The delegated account administrator
-// was admitted at the edge on a project-scoped grant and refused inside.
-//
-// # THE SHAPE OF THE FIX
-//
-// Not three patched call sites. The gates do not hold a store of their own — they hold
-// whatever the composition root handed them, through narrow ports (
-// authzguard.RelationChecker, authzfilter.ObjectChecker, clients.RelationStore /
-// RelationQueries). So the root hands them THIS, and asking the store directly stops
-// being expressible: the store they can reach is the one that gives the same second
-// chance the edge gives. A gate added tomorrow inherits it without knowing it exists.
-//
-// Reached this way, and measured rather than assumed (page_cost_integration_test.go):
-//   - authzguard.AllowsVerb — behind account/project/user/group/service-account Get
-//     and the conditions read/write gates;
-//   - authzguard.RequireScopeRelation — the mutating defense-in-depth gate;
-//   - access_binding requireGrantAuthority Path 2 (fgaHoldsScopeAdmin) — binding
-//     Create/Delete/Revoke/Update/Get/ListBy*;
-//   - authzfilter.Visible / VisibleSet — every page filter;
-//   - account ListAllOperations, user Invite, authorize CallerAuthority.
-//
-// # WHAT IS NOT ROUTED THROUGH IT, AND WHY
-//
-//   - AuthorizeService keeps the raw transport. It already gives this second chance
-//     itself, and it deliberately asks the CHEAP flat cluster super-gate first, so
-//     routing it through here would make a cloud administrator pay a structural read
-//     before the gate that was going to admit him anyway. The two placements must
-//     nevertheless never disagree, so that is asserted on the observable answer, over
-//     real OpenFGA, in service/own_gates_agree_with_edge_integration_test.go — not by
-//     sharing an eight-line function, which would prove identical code and not
-//     identical answers.
-//   - seed.VerifyGate keeps the raw transport BY REQUIREMENT: its job is to report
-//     whether materialization was DELIVERED. A second chance derived from committed
-//     rows would make it answer yes about a queue that has delivered nothing — the
-//     gate would still run, still pass, and mean nothing. There is deliberately no
-//     "ask without the second chance" method here for it to use: a method whose only
-//     caller is hypothetical is a claim the code does not keep, and the root already
-//     holds the transport for its own reasons.
-//   - The cluster-singleton probes (system-viewer floor, fga-proxy gate,
-//     cluster-admin short-circuit, force-logout, WhoAmI flags) are unaffected either
-//     way: `cluster` is not a derivable type, so Derivable() answers no and no read
-//     is paid.
 package authzcascade
+
+// own_gates.go — ОДНО значение, которое получают все стражи службы.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ОДНО, А НЕ ПО ЗНАЧЕНИЮ НА СТРАЖА
+//
+// Композиционный корень провязывает эту дверь ВЕЗДЕ, где спрашивают о доступе.
+// Тогда «страж спросил мимо» невозможно by construction: другого значения для
+// него в корне нет. Именно расхождение двух значений — по одному у каждой
+// поверхности — однажды и дало два действующих источника ответа на один вопрос
+// об одном объекте.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТО ЗДЕСЬ НЕТ И БОЛЬШЕ НЕ БУДЕТ
+//
+// Запасного пути нет. Форма не ответила — вызывающий получает ОШИБКУ, а не отказ:
+// «не смог спросить» и «доступа нет» — разные миры, и представление первого на
+// успешном пути делает недоступность базы неотличимой от законного отказа.
+//
+// Второй попытки со «структурными фактами» тоже нет: она существовала ради
+// движка, который знал только доехавшее очередью. Форма читает те же
+// закоммиченные строки первым же вопросом (см. package doc).
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 )
 
-// Relations — the relation-client surface a gate may hold. Satisfied by
-// *clients.OpenFGAHTTPClient.
+// Asker — реляционная форма, отвечающая на вопрос о доступе своей базой.
 //
-// It is the FULL surface rather than just the two Check methods on purpose: the
-// wrapper has to be substitutable for the client at every wiring point in the
-// composition root, including the ones that write tuples or list subjects. A narrower
-// wrapper would leave the root choosing per call site which value to pass, and that
-// choice is exactly the thing that diverged.
-type Relations interface {
-	clients.RelationStore
-	clients.RelationQueries
-	// CheckWithContextualTuples — a Check that also carries tuples holding for THIS
-	// request only. The second chance is nothing but this call, over facts read from
-	// committed rows.
-	CheckWithContextualTuples(ctx context.Context, subject, relation, object string,
-		condCtx map[string]any, contextual []authztypes.TupleKey) (bool, error)
-	// ListUsers — the graph-expanded principal set of (object, relation). Not a Check and
-	// not decorated; it is here because a gate that resolves "who can do this" is wired
-	// from the same value as the gates that ask "may this subject", and requiring the
-	// composition root to keep a second value around for it is exactly how the two
-	// surfaces drifted apart.
-	ListUsers(ctx context.Context, objectType, objectID, relation string, userTypes []string) (principals []string, storeTruncated bool, err error)
-	// ReadTuplesStrong — сильное чтение существующих кортежей объекта.
-	//
-	// ОНО ЗДЕСЬ ПОТОМУ, ЧТО ЕГО ОТСУТСТВИЕ НИКОМУ НЕ БЫЛО ВИДНО. Синхронный писатель
-	// прав не требует эту возможность типом параметра: он ПРОБУЕТ привести переданное
-	// значение к набору с этим методом и, если не выходит, тихо остаётся без
-	// идемпотентного пути «прочитать, что уже есть, дописать недостающее». Компилятор
-	// такую потерю не ловит, обзор диффа — тоже.
-	//
-	// `clients.RelationQueries` объявляет только обычное `ReadTuples`, поэтому набор
-	// методов обёртки сильного чтения не содержал, а в бою писателю отдаётся именно
-	// обёртка. Следствие наблюдалось на боевой посадке: при попытке записать набор прав
-	// объекта, часть которого уже существует (а при доставке «хотя бы один раз» это
-	// ОБЫЧНЫЙ исход, не исключительный), ВЕСЬ набор объекта уезжал в очередь — та росла
-	// быстрее, чем разбиралась, и права появлялись с задержкой в десятки секунд.
-	//
-	// Так что комментарий выше — про «ПОЛНУЮ поверхность» — становится правдой только
-	// вместе с этой строкой. Разница между «обёртка подставима везде» и «почти везде»
-	// как раз и стоила той очереди.
-	ReadTuplesStrong(ctx context.Context, subjectFilter, relationFilter, objectFilter string,
-		pageSize int, pageToken string) ([]clients.ConditionalTuple, string, error)
+// Объявлен ПОРТОМ, а не конкретным типом, по двум причинам: дверь остаётся
+// переходником и не тянет за собой pgx, а проба может подставить форму, которая
+// НЕ ОТВЕЧАЕТ, — иначе исход «форма не ответила» непроверяем, а он тут главный.
+type Asker interface {
+	// Allowed — вердикт об объекте. Ошибка означает «ответа нет».
+	Allowed(ctx context.Context, subject, objectType, objectID, relation string,
+		condCtx map[string]any) (bool, error)
+	// AllowedMany — вердикт о СТРАНИЦЕ объектов одного типа, одной читающей
+	// транзакцией: все объекты страницы видят один снимок базы.
+	AllowedMany(ctx context.Context, subject, objectType string, objectIDs []string,
+		relation string, condCtx map[string]any) ([]bool, error)
+	// SubjectsPage — кто держит отношение на объекте, страницей с курсором.
+	SubjectsPage(ctx context.Context, objectType, objectID, relation, afterID string,
+		limit int) (subjects []string, nextAfter string, err error)
+	// Sources — кого называют основания права на объекте (разбор «почему»).
+	Sources(ctx context.Context, objectType, objectID, relation string) ([]string, error)
+	// DirectRelations — какие отношения субъект уже держит на объекте (текст отказа).
+	DirectRelations(ctx context.Context, subject, objectType, objectID string,
+		limit int) ([]string, error)
 }
 
-// FactSource — the structural facts iam can prove from its own committed rows.
-// Satisfied by *Resolver; declared as a port so the cost measurement can count
-// resolutions and the fail-closed test can make one fail.
-type FactSource interface {
-	// Derivable — answerable without touching the database, so a question about an
-	// object iam does not own costs no read.
-	Derivable(objectType string) bool
-	// StructuralFacts — (nil, nil) claims nothing; a non-nil error means the fact
-	// could not be READ, which is an unknown answer and not a negative one.
-	StructuralFacts(ctx context.Context, objectType, objectID string) ([]authztypes.TupleKey, error)
-}
-
-// Client — a Relations that gives a DENIED question a second chance over the
-// structural facts of the object it is about.
-//
-// Only a denial pays: an allow is returned untouched, so the common path costs
-// exactly what it did before. A contextual tuple can only ADD a resolution path, so
-// this can turn a deny into an allow and never the reverse — which is why supplying
-// only TRUE facts about a committed row is the whole safety argument, and why
-// cascade_coverage_test.go pins which relations the model reads those facts through.
+// Client — дверь решения поверх формы.
 type Client struct {
-	// Relations — embedded, so every method this wrapper does not override is the
-	// transport's own. Named (not anonymous-typed) so the overrides can call through.
-	Relations
-	facts FactSource
-	// compare — теневое сравнение, которому предъявляется КАЖДОЕ решение,
-	// принятое через эту обёртку. Провязывается композиционным корнем; nil —
-	// дешёвый no-op. Зачем это здесь, а не у каждого стража, — comparator.go.
-	compare VerdictComparator
+	form Asker
 }
 
-// Wrap returns the relation client iam's own gates must be given.
+// Wrap собирает дверь.
 //
-// A nil FactSource yields a plain pass-through rather than a panic: that is what a
-// unit test wiring only a transport gets, and it is the honest behaviour (no facts ⇒
-// no second chance). Production must not be in that state, which is why the
-// composition root asserts reachability at boot instead of hoping.
-func Wrap(inner Relations, facts FactSource) *Client {
-	return &Client{Relations: inner, facts: facts}
+// nil-форма — законный вход только для пробы, которая о доступе не спрашивает
+// вовсе: каждый вопрос к такой двери возвращает ОШИБКУ, а не «нет». Боевая
+// посадка в этом состоянии находиться не должна, и это проверяет отказ в старте
+// (`ownGateWiringComplaint`), а не надежда.
+func Wrap(form Asker) *Client {
+	return &Client{form: form}
 }
 
-// SecondChanceReachable reports whether a Wrap'd client can actually give the second
-// chance. The boot guard reads it, so "the gates silently went back to waiting for a
-// queue" cannot be a runtime surprise.
-func (c *Client) SecondChanceReachable() bool {
-	return c != nil && c.Relations != nil && c.facts != nil
-}
+// FormReachable — есть ли у двери чем отвечать. Читает страж старта.
+func (c *Client) FormReachable() bool { return c != nil && c.form != nil }
+
+// ErrFormNotWired — дверь собрана без формы.
+//
+// Отдельная ошибка, а не «нет»: тип, у которого источник ответа не провязан,
+// отвечал бы отказом на КАЖДЫЙ вопрос, и снаружи это неотличимо от честного
+// отказа модели.
+var ErrFormNotWired = fmt.Errorf("authzcascade: дверь решения собрана без формы — спросить не у кого")
 
 // Check — clients.RelationStore / authzguard.RelationChecker.
-//
-// ДВЕРЬ РЕШЕНИЯ: вопрос предъявляется сравнению до движка и сводится его
-// исходом. Почему это стоит здесь, а не у пятнадцати стражей поимённо, —
-// comparator.go.
-func (c *Client) Check(ctx context.Context, subject, relation, object string) (allowed bool, err error) {
-	// ПЕРЕКЛЮЧЁННЫЙ ТИП: решает форма, движок спрашивается рядом.
-	//
-	// Прежний путь при этом не исполняется вовсе — ни одним слагаемым. Оставить
-	// движку хотя бы одно значило бы, что «источник вердикта для этого типа —
-	// форма» неправда, и неправда молчаливая: ответ вызывающему выглядел бы
-	// исправным.
-	if ref, decided := c.decidesByForm(object); decided && subject != "" {
-		return c.verdictByForm(ctx, subject, ref, relation, nil,
-			func(sctx context.Context) (bool, bool) {
-				a, e := c.checkCore(sctx, subject, relation, object)
-				return a, e == nil
-			})
-	}
-	settle := c.present(ctx, subject, relation, object, nil)
-	defer func() { settle(allowed, err == nil) }()
-	return c.checkCore(ctx, subject, relation, object)
+func (c *Client) Check(ctx context.Context, subject, relation, object string) (bool, error) {
+	return c.CheckWithContext(ctx, subject, relation, object, nil)
 }
 
-// checkCore — та же дверь БЕЗ предъявления сравнению: внутренний путь обёртки.
-//
-// Существует ровно затем, чтобы внутренний доспрос не считался вторым решением.
-// Одно решение, посчитанное дважды, делает знаменатель выдуманным, и доля
-// сходимости перестаёт означать то, что написано на ней.
-func (c *Client) checkCore(ctx context.Context, subject, relation, object string) (bool, error) {
-	// Facts already read for this object (a page prefetch, page_memo.go) ride along with
-	// the FIRST question instead of being used to re-ask a denied one. Not a shortcut past
-	// the ordinary resolve: a contextual tuple can only ADD a resolution path, so one
-	// question carrying true facts has exactly the answer the ask-then-re-ask pair has.
-	if facts, known := c.memoFacts(ctx, object); known && len(facts) > 0 {
-		return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, nil, facts)
-	} else if known {
-		return c.Relations.Check(ctx, subject, relation, object) // read, nothing to add
-	}
-	allowed, err := c.Relations.Check(ctx, subject, relation, object)
-	if allowed || err != nil {
-		return allowed, err
-	}
-	return c.secondChance(ctx, subject, relation, object, nil)
-}
-
-// CheckWithContext — clients.RelationQueries / authzfilter.ObjectChecker.
-//
-// ДВЕРЬ РЕШЕНИЯ: см. Check выше.
+// CheckWithContext — clients.RelationQueries / authzguard.ContextRelationChecker /
+// authzfilter.ObjectChecker.
 func (c *Client) CheckWithContext(
 	ctx context.Context, subject, relation, object string, condCtx map[string]any,
-) (allowed bool, err error) {
-	// ПЕРЕКЛЮЧЁННЫЙ ТИП — см. Check выше.
-	if ref, decided := c.decidesByForm(object); decided && subject != "" {
-		return c.verdictByForm(ctx, subject, ref, relation, condCtx,
-			func(sctx context.Context) (bool, bool) {
-				a, e := c.checkWithContextCore(sctx, subject, relation, object, condCtx)
-				return a, e == nil
-			})
-	}
-	settle := c.present(ctx, subject, relation, object, condCtx)
-	defer func() { settle(allowed, err == nil) }()
-	return c.checkWithContextCore(ctx, subject, relation, object, condCtx)
-}
-
-// checkWithContextCore — та же дверь БЕЗ предъявления сравнению (внутренний путь).
-func (c *Client) checkWithContextCore(
-	ctx context.Context, subject, relation, object string, condCtx map[string]any,
 ) (bool, error) {
-	if facts, known := c.memoFacts(ctx, object); known && len(facts) > 0 {
-		return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
-	} else if known {
-		return c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
-	}
-	allowed, err := c.Relations.CheckWithContext(ctx, subject, relation, object, condCtx)
-	if allowed || err != nil {
-		return allowed, err
-	}
-	return c.secondChance(ctx, subject, relation, object, condCtx)
-}
-
-// secondChance re-asks a denied question with the structural facts of its object.
-//
-// Returns (allowed, err). A non-nil err means the fact could not be read; the caller
-// must surface that rather than fold it into the denial — the fact is part of the
-// decision, and an unread fact is an unknown answer. This is the same line the edge
-// draws (service.AuthorizeService.structuralFallback) and the same line the
-// neighbouring page filter draws on a Check error.
-func (c *Client) secondChance(
-	ctx context.Context, subject, relation, object string, condCtx map[string]any,
-) (bool, error) {
-	if c.facts == nil {
-		return false, nil
+	if c == nil || c.form == nil {
+		return false, ErrFormNotWired
 	}
 	ref, ok := parseObjectRef(object)
-	if !ok || !c.facts.Derivable(ref.Type) {
-		return false, nil // no read for an object iam does not own
+	if !ok {
+		// Неразобранный объект — НЕ отказ. Вернув «нет», дверь превратила бы
+		// опечатку в законный отказ, который никто никогда не найдёт.
+		return false, fmt.Errorf("authzcascade: объект %q не разбирается как «тип:идентификатор»", object)
 	}
-	facts, err := c.facts.StructuralFacts(ctx, ref.Type, ref.ID)
-	if err != nil {
-		return false, err
-	}
-	if len(facts) == 0 {
-		return false, nil
-	}
-	return c.Relations.CheckWithContextualTuples(ctx, subject, relation, object, condCtx, facts)
+	return c.form.Allowed(ctx, subject, ref.Type, ref.ID, relation, condCtx)
 }
 
-// Compile-time guards: the wrapper must be substitutable for the transport at every
-// port the composition root wires.
+// CheckWithContextConsistent — вопрос, которому нужен СВЕЖИЙ ответ.
+//
+// У формы это тождество обычному вопросу, и это не упрощение: она читает
+// ведущую базу службы, а «сильное чтение» существовало ровно затем, чтобы
+// заставить чужое хранилище не отвечать со своей отстающей копии. Метод остаётся
+// ИМЕНЕМ вопроса — вызывающий по-прежнему объявляет, что отставание ему
+// недопустимо, — и перестаёт быть просьбой к чужому транспорту.
+func (c *Client) CheckWithContextConsistent(
+	ctx context.Context, subject, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	return c.CheckWithContext(ctx, subject, relation, object, condCtx)
+}
+
+// BatchCheckWithContext — clients.RelationQueries / authzfilter.BatchObjectChecker.
+//
+// Ответ той же длины и в порядке заданных объектов: верный, но переставленный
+// вердикт отфильтровал бы страницу чужим ответом. Объекты разных типов в одной
+// партии — ошибка, а не молчаливое разбиение: страница списка по построению
+// однотипна, и партия, где это не так, означает ошибку вызывающего.
+func (c *Client) BatchCheckWithContext(
+	ctx context.Context, subject, relation string, objects []string, condCtx map[string]any,
+) ([]bool, error) {
+	if c == nil || c.form == nil {
+		return nil, ErrFormNotWired
+	}
+	if len(objects) == 0 {
+		return nil, nil
+	}
+	objectType := ""
+	ids := make([]string, len(objects))
+	for i, object := range objects {
+		ref, ok := parseObjectRef(object)
+		if !ok {
+			return nil, fmt.Errorf("authzcascade: объект %q не разбирается как «тип:идентификатор»", object)
+		}
+		if objectType == "" {
+			objectType = ref.Type
+		} else if ref.Type != objectType {
+			return nil, fmt.Errorf(
+				"authzcascade: партия несёт два типа объектов (%q и %q) — вердикты по ним "+
+					"собираются разными планами, и один ответ на два вопроса был бы вердиктом, "+
+					"которого никто не выносил", objectType, ref.Type)
+		}
+		ids[i] = ref.ID
+	}
+	return c.form.AllowedMany(ctx, subject, objectType, ids, relation, condCtx)
+}
+
+// ListSubjects — clients.RelationQueries: кто держит отношение на объекте.
+//
+// Курсор проходит НАСКВОЗЬ: страница без продолжения оставляет остаток
+// недостижимым при живых правах.
+func (c *Client) ListSubjects(
+	ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string,
+) ([]string, string, error) {
+	if c == nil || c.form == nil {
+		return nil, "", ErrFormNotWired
+	}
+	return c.form.SubjectsPage(ctx, objectType, objectID, relation, pageToken, pageSize)
+}
+
+// ListUsers — access_binding.PrincipalLister: развёрнутый набор принципалов.
+//
+// Второй результат — признак усечения У ИСТОЧНИКА. Форма его не производит:
+// перечисление постранично и продолжаемо, поэтому неполного ответа, о котором
+// нельзя спросить дальше, у неё не бывает. Признак остаётся в подписи, потому что
+// его читает вызывающий, и всегда false — это ЧЕСТНОЕ значение, а не заглушка.
+//
+// userTypes сужает по типу субъекта; пустой набор — «любой».
+func (c *Client) ListUsers(
+	ctx context.Context, objectType, objectID, relation string, userTypes []string,
+) ([]string, bool, error) {
+	if c == nil || c.form == nil {
+		return nil, false, ErrFormNotWired
+	}
+	want := make(map[string]struct{}, len(userTypes))
+	for _, t := range userTypes {
+		want[t] = struct{}{}
+	}
+
+	out := make([]string, 0, 64)
+	after := ""
+	// Предел обходов — не осторожность, а граница: перечисление принципалов
+	// объекта конечно, и обход, который её не имеет, на испорченном курсоре
+	// вертелся бы вечно, держа соединение живого запроса.
+	const maxPages = 64
+	for page := 0; page < maxPages; page++ {
+		subjects, next, err := c.form.SubjectsPage(ctx, objectType, objectID, relation, after, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, s := range subjects {
+			if len(want) > 0 {
+				ref, ok := parseObjectRef(s)
+				if !ok {
+					continue
+				}
+				if _, allowed := want[ref.Type]; !allowed {
+					continue
+				}
+			}
+			out = append(out, s)
+		}
+		if next == "" {
+			return out, false, nil
+		}
+		after = next
+	}
+	return nil, false, fmt.Errorf(
+		"authzcascade: перечисление принципалов %s:%s#%s не сошлось за %d страниц — "+
+			"частичный ответ здесь читался бы как полный набор имеющих право",
+		objectType, objectID, relation, maxPages)
+}
+
+// Sources — кого называют основания права на объекте.
+func (c *Client) Sources(ctx context.Context, objectType, objectID, relation string) ([]string, error) {
+	if c == nil || c.form == nil {
+		return nil, ErrFormNotWired
+	}
+	return c.form.Sources(ctx, objectType, objectID, relation)
+}
+
+// DirectRelations — какие отношения субъект уже держит на объекте.
+func (c *Client) DirectRelations(
+	ctx context.Context, subject, objectType, objectID string, limit int,
+) ([]string, error) {
+	if c == nil || c.form == nil {
+		return nil, ErrFormNotWired
+	}
+	return c.form.DirectRelations(ctx, subject, objectType, objectID, limit)
+}
+
+// Compile-time guards: дверь обязана быть подставима на каждом порту, который
+// провязывает композиционный корень.
 var (
-	_ Relations               = (*Client)(nil)
 	_ clients.RelationStore   = (*Client)(nil)
 	_ clients.RelationQueries = (*Client)(nil)
 )
