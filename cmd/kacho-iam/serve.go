@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytokenwire"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
@@ -190,6 +191,15 @@ func runServe(cfg config.Config) error {
 	if err := startSecretBackstop(ctx, pool, cfg, logger); err != nil {
 		return fmt.Errorf("secret backstop: %w", err)
 	}
+
+	// Своя чеканка токенов (задача #897): ключница, подписывающий ключ и
+	// подписант. Собирается ДО поверхностей, потому что от неё зависят обе —
+	// выдача докер-токена и публикация нашей записи набора.
+	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
+	if err != nil {
+		return fmt.Errorf("своя чеканка токенов: %w", err)
+	}
+	startSigningKeySweeper(ctx, signingKeystore, logger)
 
 	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, metricsReg, cfg, logger)
 
@@ -623,6 +633,11 @@ func runServe(cfg config.Config) error {
 			HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
 			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 			Logger:            logger,
+			// Приземление подписанта на НАСТОЯЩИЙ путь выдачи. Подписант без
+			// производственного вызывающего — тот же класс, что хранилище без
+			// читателя: он выглядит исправным, потому что его пробы зелены.
+			Signer:   tokenSigner,
+			TokenTTL: cfg.APIServer.RegistryToken.TokenTTL(),
 		})
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
@@ -696,7 +711,57 @@ func runServe(cfg config.Config) error {
 				Misconfigured: stats.Misconfigured,
 			}
 		})
-		jwksProxyHandler = jwksproxyhttp.NewMux(jwksMirror)
+		// (4а) НАША запись публикуемого набора — проекция ключницы.
+		//
+		// Записей у публикатора теперь ДВЕ, и у каждой свой ОБЪЯВЛЕННЫЙ путь.
+		// Объединять наборы в один документ было бы дешевле и уничтожило бы
+		// ровно ту защиту, ради которой развязка заводится: ключ одного
+		// издателя проверял бы токен, объявляющий другого.
+		//
+		// Запись зеркала остаётся на своём прежнем пути ДО последней фазы: её
+		// адрес объявлен у каждого сегодняшнего потребителя, и перенос сменил
+		// бы его у всех разом — цена, которой эта фаза не предусматривала.
+		records := []jwksproxyhttp.Record{{
+			Issuer:  cfg.AuthN.ResolveHydraIssuer(),
+			Path:    jwksproxyhttp.WellKnownJWKSPath,
+			Handler: jwksMirror,
+		}}
+		if signingKeystore != nil {
+			ourKeySet := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
+				Source: signingKeystore,
+				Logger: logger.With(slog.String("component", "jwks_own_keyset")),
+			})
+			records = append(records, jwksproxyhttp.Record{
+				Issuer:  cfg.AuthN.TokenSigning.Issuer,
+				Path:    cfg.AuthN.TokenSigning.ResolveKeySetPath(),
+				Handler: ourKeySet,
+			})
+		}
+		binding, berr := jwksproxyhttp.NewBinding(records)
+		if berr != nil {
+			// Издатель, объявленный принимаемым, но не имеющий записи
+			// источника, — ОТКАЗ В СТАРТЕ, а не молчаливый перебор записей и
+			// не путь, выведенный из самого издателя.
+			return fmt.Errorf("привязка «издатель → источник набора»: %w", berr)
+		}
+		jwksMux, merr := jwksproxyhttp.NewMux(binding)
+		if merr != nil {
+			return fmt.Errorf("маршруты публикации набора: %w", merr)
+		}
+		// (4б) Авторитет отзыва НАШИХ токенов — на том же внутреннем
+		// слушателе. Отзыв, который читается только на выдаче, отзывом не
+		// является: предъявленное продолжало бы проходить до истечения срока,
+		// и это состояние не сходится само.
+		if signingKeystore != nil {
+			introspect := tokenintrospecthttp.NewHandler(tokenintrospecthttp.Config{
+				Issuer:      cfg.AuthN.TokenSigning.Issuer,
+				Keys:        signingKeystore,
+				Revocations: kachopg.NewMintedTokenRevocationRepo(pool),
+				Logger:      logger.With(slog.String("component", "token_introspection")),
+			})
+			jwksMux.Handle(tokenintrospecthttp.IntrospectPath, introspect)
+		}
+		jwksProxyHandler = jwksMux
 	}
 	jwksProxySurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",

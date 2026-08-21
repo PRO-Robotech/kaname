@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 	"net/url"
 	"strings"
 
@@ -24,6 +25,27 @@ func (c Config) Validate() error {
 	var errs error
 
 	errs = multierr.Append(errs, c.validateMode())
+
+	// Страж своей чеканки токенов (задача #897). Действует в ЛЮБОМ режиме, а
+	// не только в производственном: незаданный издатель и пустой перечень
+	// допустимых алгоритмов означают «не сужаем» на всяком поднятом стенде, и
+	// «зелёный dev» такое состояние маскирует.
+	errs = multierr.Append(errs, c.AuthN.TokenSigning.Validate())
+
+	// Срок токена контура — СЛАГАЕМОЕ арифметики отсрочки снятия ключа. Срок
+	// сверх объявленного потолка не «урезается на выпуске»: молчаливое
+	// урезание сделало бы слагаемое неизвестным тому, кто его настраивал, и
+	// отсрочка перестала бы вычисляться. Отказ здесь виден оператору сразу;
+	// отказ на выпуске виден вызывающему и выглядит неисправностью выдачи.
+	if c.AuthN.TokenSigning.Enabled {
+		if ttl := c.APIServer.RegistryToken.TokenTTL(); ttl > tokenpolicy.MaxTokenTTL {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"api-server.registry-token.token-ttl is %s, above the declared ceiling %s — "+
+					"the ceiling is a term of the key-removal grace arithmetic, and raising one "+
+					"without the other lets a key be removed while tokens signed by it are alive",
+				ttl, tokenpolicy.MaxTokenTTL))
+		}
+	}
 
 	// logger.level must be a known level so a typo fails fast at boot rather
 	// than silently degrading observability. SlogLevel reports the allowed set.
@@ -350,9 +372,10 @@ func (c Config) validateMode() error {
 // runtime fail-closed (availability risk).
 //
 // The JWKS encryption key is still demanded here even though nothing decrypts
-// with it any more: its store (oidc_jwks_keys) was dropped in migration 0065 and
-// its rotator in 713f7e1. The requirement is KEPT deliberately — relaxing it
-// changes production start-up behaviour and is a separate decision.
+// Ключ обёртки требуется потому, что им оборачивается приватная половина
+// подписного ключа в ключнице (задача #897). Ручка об этом предмете в дереве
+// одна, и её значение меняет исход старта: объявленная и нечитаемая ручка была
+// бы мёртвым стражем.
 //
 // Secrets resolve from the YAML field OR the ENV indirection
 // (hook-shared-secret-env / jwks-encryption-key-hex-env) — the same precedence

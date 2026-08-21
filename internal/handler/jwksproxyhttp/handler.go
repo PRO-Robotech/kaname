@@ -219,15 +219,11 @@ func classify(err error) string {
 	return reasonUnavailable
 }
 
-// NewMux mounts the handler on the canonical well-known path. The caller exposes
-// the returned mux on the cluster-INTERNAL jwks-proxy listener (never external).
-func NewMux(h http.Handler) *http.ServeMux {
-	mux := http.NewServeMux()
-	if h != nil {
-		mux.Handle(WellKnownJWKSPath, h)
-	}
-	return mux
-}
+// Маршруты публикации монтирует NewMux(Binding) в binding.go: записей больше
+// одной, и перечень их путей ВЫВОДИТСЯ из объявленной привязки, а не
+// выписывается здесь. Прежний NewMux(http.Handler) знал ровно один путь, и
+// утверждение о единственном маршруте осталось бы зелёным, уедь второй на
+// внешнюю поверхность.
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Read-only well-known endpoint.

@@ -31,9 +31,23 @@ func TestJWKSProxy_RJU06_NotOnExternalRegistryTokenMux(t *testing.T) {
 	}
 
 	// The dedicated jwks-proxy mux DOES route the well-known path to the handler.
-	jwksMux := jwksproxyhttp.NewMux(
-		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }),
-	)
+	//
+	// Маршрут монтируется теперь ОБЪЯВЛЕННОЙ привязкой «издатель → путь»
+	// (записей больше одной, см. binding.go). Утверждение то же самое; изменился
+	// способ, каким путь попадает в mux, и это ровно то, что требовалось: перечень
+	// путей выводится из привязки, а не выписывается по месту.
+	binding, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{{
+		Issuer:  "https://provider.kacho.local",
+		Path:    jwksproxyhttp.WellKnownJWKSPath,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }),
+	}})
+	if err != nil {
+		t.Fatalf("законная привязка обязана строиться: %v", err)
+	}
+	jwksMux, err := jwksproxyhttp.NewMux(binding)
+	if err != nil {
+		t.Fatalf("mux по законной привязке обязан строиться: %v", err)
+	}
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, jwksproxyhttp.WellKnownJWKSPath, nil)
 	jwksMux.ServeHTTP(rec, req)
