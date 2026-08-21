@@ -753,11 +753,24 @@ func runServe(cfg config.Config) error {
 		// является: предъявленное продолжало бы проходить до истечения срока,
 		// и это состояние не сходится само.
 		if signingKeystore != nil {
+			// Обоснование снятия authN, выданное НАБОРУ КЛЮЧЕЙ, на эту
+			// поверхность НЕ распространяется: там на проводе только
+			// публичный материал, здесь — предъявленный токен. Слушатель,
+			// который сертификата даже не запрашивает, оставил бы авторитету
+			// нечем отказать, поэтому такой стенд не поднимается вовсе.
+			if !mtlsCfg.JWKSProxyVerifiesCaller() {
+				return fmt.Errorf(
+					"авторитет отзыва не может быть выставлен на слушателе, который не запрашивает " +
+						"клиентский сертификат: задайте KACHO_IAM_JWKSPROXY_SERVER_MTLS_CLIENTAUTHMODE=optional-mutual " +
+						"(набор проверочных ключей при этом остаётся доступен без сертификата) " +
+						"либо выключите свою чеканку authn.token-signing.enabled")
+			}
 			introspect := tokenintrospecthttp.NewHandler(tokenintrospecthttp.Config{
-				Issuer:      cfg.AuthN.TokenSigning.Issuer,
-				Keys:        signingKeystore,
-				Revocations: kachopg.NewMintedTokenRevocationRepo(pool),
-				Logger:      logger.With(slog.String("component", "token_introspection")),
+				Issuer:            cfg.AuthN.TokenSigning.Issuer,
+				Keys:              signingKeystore,
+				Revocations:       kachopg.NewMintedTokenRevocationRepo(pool),
+				Logger:            logger.With(slog.String("component", "token_introspection")),
+				RequireClientCert: true,
 			})
 			jwksMux.Handle(tokenintrospecthttp.IntrospectPath, introspect)
 		}

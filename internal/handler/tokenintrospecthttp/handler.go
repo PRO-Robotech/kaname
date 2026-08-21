@@ -88,6 +88,22 @@ type Config struct {
 	Revocations RevocationReader
 	Clock       func() time.Time
 	Logger      *slog.Logger
+	// RequireClientCert — принимать вопрос ТОЛЬКО от пира, предъявившего
+	// проверенный сертификат.
+	//
+	// Обязательно на всяком поднятом стенде, и вот почему это не педантизм.
+	// Соседняя поверхность того же слушателя — набор проверочных ключей —
+	// намеренно не требует ничего: на проводе только публичный материал, и
+	// потребитель обязан оставаться origin-agnostic. У ЭТОЙ поверхности
+	// предмет другой: ей ПРИСЫЛАЮТ предъявленный токен. Обоснование снятия
+	// authN, выданное набору ключей, сюда не распространяется, и молчаливое
+	// пользование им было бы тем самым запрещённым допущением «внутреннее —
+	// значит доверенное».
+	//
+	// Транспорт при этом сертификат лишь ЗАПРАШИВАЕТ (иначе набор ключей стал
+	// бы недоступен потребителю без сертификата), поэтому отказывать обязан
+	// сам обработчик — считать, что за него это сделал транспорт, нельзя.
+	RequireClientCert bool
 }
 
 // Stats — величины по каждому исходу. «Ноль отказов за всё время жизни»
@@ -135,6 +151,13 @@ func NewMux(h http.Handler) *http.ServeMux {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.RequireClientCert && !clientCertVerified(r) {
+		// Наружу — опознавательное слово и ничего сверх: спрашивающий без
+		// сертификата не обязан узнать, существует ли токен, о котором он
+		// собирался спросить.
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "client_certificate_required"})
+		return
+	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
@@ -259,6 +282,14 @@ func parsePublicKey(pemStr string) (crypto.PublicKey, error) {
 	default:
 		return nil, fmt.Errorf("unsupported public key type")
 	}
+}
+
+// clientCertVerified отвечает, предъявил ли пир сертификат, ПРОВЕРЕННЫЙ
+// транспортом. Читается именно проверенная цепочка, а не сырой список
+// предъявленного: непроверенный сертификат — это заявление пира о себе, и
+// принимать его за личность значило бы завести контроль, который не отказывает.
+func clientCertVerified(r *http.Request) bool {
+	return r.TLS != nil && len(r.TLS.VerifiedChains) > 0
 }
 
 func writeJSON(w http.ResponseWriter, code int, body map[string]any) {
