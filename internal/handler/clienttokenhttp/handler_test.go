@@ -73,6 +73,11 @@ func (s *stubIssuer) Issue(_ context.Context, in client_token.Input) (client_tok
 	return client_token.Output{}, s.outcome, errors.New("stub issuance refusal")
 }
 
+// testBodyCeiling — потолок тела в пробах. Число фикстуры, а не объявление
+// величины: величину объявляет профиль развёртывания, и построение требует её
+// заданной.
+const testBodyCeiling int64 = 64 << 10
+
 type stand struct {
 	h        *clienttokenhttp.Handler
 	verifier *stubVerifier
@@ -83,7 +88,11 @@ func newStand(t *testing.T) stand {
 	t.Helper()
 	v, i := &stubVerifier{}, &stubIssuer{}
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		// Потолок задаётся ЯВНО: у построения умолчания нет, и это не
+		// неудобство пробы, а условие того, чтобы страж старта мог отличить
+		// заданную величину от незаданной.
+		BodyCeiling: testBodyCeiling,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, v, i)
 	require.NoError(t, err)
 	return stand{h: h, verifier: v, issuer: i}
@@ -397,14 +406,23 @@ func TestRequestedAudienceReachesIssuanceAsGiven(t *testing.T) {
 }
 
 // TestHandlerRefusesToBuildWithoutItsPorts — эндпоинт без проверяющего принимал
-// бы кого угодно, без выдачи — не выдавал бы никому.
+// бы кого угодно, без выдачи — не выдавал бы никому, а без потолка тела читал
+// бы сколько прислали.
+//
+// Потолок стоит здесь наравне с портами намеренно. Пока построение
+// подставляло его молча, страж старта не мог отличить заданную величину от
+// незаданной: она не бывала незаданной. Умолчание, снимающее вопрос, снимает и
+// проверку — и снимает её тише, чем отсутствие проверки.
 func TestHandlerRefusesToBuildWithoutItsPorts(t *testing.T) {
-	_, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{}, nil, &stubIssuer{})
+	full := clienttokenhttp.Config{BodyCeiling: testBodyCeiling}
+	_, err := clienttokenhttp.NewHandler(full, nil, &stubIssuer{})
 	require.Error(t, err)
-	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{}, &stubVerifier{}, nil)
+	_, err = clienttokenhttp.NewHandler(full, &stubVerifier{}, nil)
 	require.Error(t, err)
-	// Положительный контроль.
 	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{}, &stubVerifier{}, &stubIssuer{})
+	require.Error(t, err, "нулевой потолок тела означает «без потолка» и обязан отвергать построение")
+	// Положительный контроль.
+	_, err = clienttokenhttp.NewHandler(full, &stubVerifier{}, &stubIssuer{})
 	require.NoError(t, err)
 }
 

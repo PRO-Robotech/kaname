@@ -219,14 +219,20 @@ type AuthNConfig struct {
 	// перечень допустимых алгоритмов приёма, путь нашей записи публикуемого
 	// набора и срок ключа. Пока выключена, её настройки не требуются; будучи
 	// включённой, требует их все — незаданное здесь означает «не сужаем».
-	TokenSigning         TokenSigningConfig `mapstructure:"token-signing"`
-	HooksHTTPEndpoint    string             `mapstructure:"hooks-http-endpoint"`
-	SAKeyRedactGrace     time.Duration      `mapstructure:"sakey-redact-grace"`
-	UserTokenRedactGrace time.Duration      `mapstructure:"usertoken-redact-grace"`
-	SAKeyDefaultTTL      time.Duration      `mapstructure:"sakey-default-ttl"`
-	SAKeyMaxTTL          time.Duration      `mapstructure:"sakey-max-ttl"`
-	SAKeyAccessTokenTTL  time.Duration      `mapstructure:"sakey-access-token-ttl"`
-	SAKeyBindDPoP        bool               `mapstructure:"sakey-bind-dpop"`
+	TokenSigning TokenSigningConfig `mapstructure:"token-signing"`
+	// ClientToken — токен-эндпоинт платформы (задача #898): приём вида выдачи
+	// «учётные данные клиента» с аутентификацией подписанным утверждением.
+	// Пока выключен, его настройки не требуются; будучи включённым, требует их
+	// все — и требует включённой своей чеканки, потому что выпускает НАШИМ
+	// подписантом и объявляет НАШЕГО издателя ожидаемым адресатом утверждения.
+	ClientToken          ClientTokenConfig `mapstructure:"client-token"`
+	HooksHTTPEndpoint    string            `mapstructure:"hooks-http-endpoint"`
+	SAKeyRedactGrace     time.Duration     `mapstructure:"sakey-redact-grace"`
+	UserTokenRedactGrace time.Duration     `mapstructure:"usertoken-redact-grace"`
+	SAKeyDefaultTTL      time.Duration     `mapstructure:"sakey-default-ttl"`
+	SAKeyMaxTTL          time.Duration     `mapstructure:"sakey-max-ttl"`
+	SAKeyAccessTokenTTL  time.Duration     `mapstructure:"sakey-access-token-ttl"`
+	SAKeyBindDPoP        bool              `mapstructure:"sakey-bind-dpop"`
 	// BootstrapMint — caller gate + key source for
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`

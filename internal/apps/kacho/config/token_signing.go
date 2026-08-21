@@ -62,12 +62,15 @@ type TokenSigningConfig struct {
 	KeyLifetime time.Duration `mapstructure:"key-lifetime"`
 }
 
-// ParseAlgorithmList читает перечень алгоритмов, считая ЭЛЕМЕНТЫ.
+// ParseCommaList читает перечень через запятую, считая ЭЛЕМЕНТЫ.
 //
 // Один предикат для стража и для вызывающего: два места об одном предмете
 // разошлись бы ровно на вырожденном значении — одинокая запятая даёт длину 1 и
 // ноль элементов, и страж, меряющий длину, объявил бы перечень непустым.
-func ParseAlgorithmList(raw string) []string {
+//
+// Предикат общий на все перечни настройки, а не свой у каждого: семантика у них
+// одна, а вторая копия разошлась бы именно там, где расхождение не видно.
+func ParseCommaList(raw string) []string {
 	var out []string
 	for _, part := range strings.Split(raw, ",") {
 		if v := strings.TrimSpace(part); v != "" {
@@ -76,6 +79,9 @@ func ParseAlgorithmList(raw string) []string {
 	}
 	return out
 }
+
+// ParseAlgorithmList читает перечень алгоритмов.
+func ParseAlgorithmList(raw string) []string { return ParseCommaList(raw) }
 
 // ResolveKeySetPath возвращает путь нашей записи набора.
 func (c TokenSigningConfig) ResolveKeySetPath() string {

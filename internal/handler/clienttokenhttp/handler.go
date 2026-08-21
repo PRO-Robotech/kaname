@@ -49,11 +49,6 @@ import (
 // TokenPath — объявленный путь эндпоинта.
 const TokenPath = "/iam/v1/token"
 
-// DefaultBodyCeiling — потолок тела запроса.
-//
-// Тело этого запроса — форма с одним подписанным утверждением; килобайты.
-// Потолок оставляет запас и делает конечным всё, что происходит с телом дальше.
-const DefaultBodyCeiling int64 = 64 << 10
 
 // Verifier — порт проверяющего утверждение.
 type Verifier interface {
@@ -67,8 +62,13 @@ type Issuer interface {
 
 // Config — настройка эндпоинта.
 type Config struct {
-	// BodyCeiling — потолок тела запроса. Ноль означал бы «без потолка»,
-	// поэтому построение подставляет объявленное число и не оставляет ноль.
+	// BodyCeiling — потолок тела запроса в байтах. ОБЯЗАТЕЛЕН.
+	//
+	// Умолчания здесь нет намеренно. Величина, которую построение подставляет
+	// молча, не может быть предметом стража старта: страж, требующий её
+	// задания, зелен при любом входе, потому что незаданной она не бывает. Тело
+	// этого запроса — форма с одним подписанным утверждением, и его потолок
+	// объявляет тот, кто поднимает сервис.
 	BodyCeiling int64
 	Logger      *slog.Logger
 }
@@ -96,7 +96,7 @@ func NewHandler(cfg Config, verifier Verifier, issuer Issuer) (*Handler, error) 
 		return nil, errRequired("issuer")
 	}
 	if cfg.BodyCeiling <= 0 {
-		cfg.BodyCeiling = DefaultBodyCeiling
+		return nil, errRequired("body ceiling")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
