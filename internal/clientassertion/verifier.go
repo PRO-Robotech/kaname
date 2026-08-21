@@ -84,6 +84,7 @@ const (
 	OutcomeMalformedSerialization Outcome = "malformed-serialization"
 	OutcomeDuplicateHeaderMember  Outcome = "duplicate-header-member"
 	OutcomeUnsupportedCritical    Outcome = "unsupported-critical-member"
+	OutcomeTokenTypeMismatch      Outcome = "token-type-mismatch"
 	OutcomeAlgorithmNotAllowed    Outcome = "algorithm-not-allowed"
 	OutcomeAlgorithmMismatch      Outcome = "algorithm-mismatch"
 	OutcomeIdentityMismatch       Outcome = "identity-mismatch"
@@ -144,6 +145,7 @@ func Outcomes() []Outcome {
 		OutcomeMalformedSerialization,
 		OutcomeDuplicateHeaderMember,
 		OutcomeUnsupportedCritical,
+		OutcomeTokenTypeMismatch,
 		OutcomeAlgorithmNotAllowed,
 		OutcomeAlgorithmMismatch,
 		OutcomeIdentityMismatch,
@@ -286,8 +288,9 @@ func refuse(o Outcome, format string, args ...any) (Result, error) {
 // Он выбран так, чтобы дорогое стояло после дешёвого, а решения о ключе — после
 // того, как ключ разрешён по РЕЕСТРУ:
 //
-//	вид предъявления → форма → заголовок → алгоритм словаря → личность →
-//	реестр → алгоритм КЛИЕНТА → подпись → адресат → время → однократность
+//	вид предъявления → форма → заголовок (дубли · пометки · ТИП) → алгоритм
+//	словаря → личность → реестр → алгоритм КЛИЕНТА → подпись → адресат →
+//	время → однократность
 //
 // Две границы в нём несущие. Сверка алгоритма с ЗАРЕГИСТРИРОВАННЫМ у клиента
 // стоит ДО проверки подписи: перечень допустимых алгоритмов строится из строки
@@ -337,7 +340,26 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeUnsupportedCritical, "header marks %q as must-understand and we do not understand it", member)
 	}
 
-	// (5) Алгоритм заголовка — из закрытого словаря. Симметричное семейство,
+	// (5) Объявленный тип. ПЕРВЫЙ из трёх независимых признаков, отделяющих
+	// утверждение клиента от токена доступа: с этой фазы один издатель работает
+	// с обоими видами подписанного, и различать их обязано КАЖДОЕ из трёх, а не
+	// какое-то одно (§2.6 приёмки F2).
+	//
+	// Тип требуется ЯВНО, и отсутствие типа отказом не прощается. Производитель
+	// типа на этой полосе — не мы, а предъявитель, поэтому «типа нет» было бы
+	// для него самым дешёвым способом снять признак целиком: принимая
+	// отсутствие, мы объявили бы признаком то, что снимается пропуском поля.
+	//
+	// Сравнение точное, без нормализации: значение объявлено в pkg/tokenpolicy
+	// рядом с типом токена доступа, и попарная различность двух объявлений есть
+	// предмет отдельного утверждения — совпади они, признак исчез бы молча, а
+	// положительный путь обоих видов остался бы зелёным.
+	typ, err := stringMember(header, "typ")
+	if err != nil || typ != tokenpolicy.TokenTypeClientAssertion {
+		return refuse(OutcomeTokenTypeMismatch, "header does not declare the client-assertion type")
+	}
+
+	// (6) Алгоритм заголовка — из закрытого словаря. Симметричное семейство,
 	// «без подписи» и всё, чего в словаре нет, отвергаются ЗДЕСЬ, до разрешения
 	// ключа: «прочее» не является корзиной приёма.
 	alg, err := stringMember(header, "alg")
@@ -353,7 +375,7 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeMalformedSerialization, "payload is not a JSON object")
 	}
 
-	// (6) Личность. Издатель и субъект обязаны совпадать между собой и оба
+	// (7) Личность. Издатель и субъект обязаны совпадать между собой и оба
 	// назвать НАШ идентификатор клиента. Сравнение простое, без нормализации и
 	// без учёта регистра.
 	issuer, errIss := stringMember(claims, "iss")
@@ -362,7 +384,7 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeIdentityMismatch, "issuer and subject must agree and both name the client")
 	}
 
-	// (7) Разрешение клиента по реестру. Зеркальное значение (идентификатор во
+	// (8) Разрешение клиента по реестру. Зеркальное значение (идентификатор во
 	// внешнем сервере) на этом пути НЕ УЧАСТВУЕТ вовсе — ни как второй ключ
 	// поиска, ни как запасной.
 	client, err := v.clients.ResolveAssertionClient(ctx, issuer)
@@ -376,13 +398,13 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeRegistryUnavailable, "registry is unavailable: %v", err)
 	}
 
-	// (8) Пустой зарегистрированный алгоритм — законный вход схемы, и означает
+	// (9) Пустой зарегистрированный алгоритм — законный вход схемы, и означает
 	// он «ключа нет», а НЕ «любой алгоритм».
 	if !client.CanPresentAssertion() {
 		return refuse(OutcomeClientCannotAssert, "client carries no registered key material")
 	}
 
-	// (9) Алгоритм заголовка обязан равняться ЗАРЕГИСТРИРОВАННОМУ у клиента, и
+	// (10) Алгоритм заголовка обязан равняться ЗАРЕГИСТРИРОВАННОМУ у клиента, и
 	// сверка эта стоит ДО проверки подписи.
 	//
 	// Реализация, выбирающая проверяющего ПО ТИПУ КЛЮЧА, этой сверки не делает
@@ -402,7 +424,7 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeClientCannotAssert, "registered key material is unusable: %v", err)
 	}
 
-	// (10) Подпись. Разбор — той же библиотекой, что у прочих поверхностей
+	// (11) Подпись. Разбор — той же библиотекой, что у прочих поверхностей
 	// приёма; её собственная проверка утверждений ОТКЛЮЧЕНА намеренно, и это
 	// решение, а не упущение: каждый исход ниже обязан иметь СВОЙ счётчик, а
 	// библиотека сводит несколько разных отказов в один. Ни одна проверка при
@@ -415,13 +437,13 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeSignatureMismatch, "signature does not verify against the registered key")
 	}
 
-	// (11) Адресат — идентификатор нашего издателя. Адрес эндпоинта в этом
+	// (12) Адресат — идентификатор нашего издателя. Адрес эндпоинта в этом
 	// качестве отвергается: он не одна строка, а несколько.
 	if !audienceContains(claims, v.policy.ExpectedAudience) {
 		return refuse(OutcomeAudienceMismatch, "audience is not our issuer identifier")
 	}
 
-	// (12) Время. Обязательность каждого поля включена ЯВНО: разбор, не
+	// (13) Время. Обязательность каждого поля включена ЯВНО: разбор, не
 	// встретив срока, сам бы не возразил.
 	exp, ok := numericDate(claims, "exp")
 	if !ok {
@@ -463,14 +485,14 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		}
 	}
 
-	// (13) Идентификатор однократности. Обязателен по НАШЕЙ политике: стандарт
+	// (14) Идентификатор однократности. Обязателен по НАШЕЙ политике: стандарт
 	// его не требует, а без него однократность невыразима.
 	assertionID, _ := stringMember(claims, "jti")
 	if err := domain.ValidateAssertionID(assertionID); err != nil {
 		return refuse(OutcomeAssertionIDMissing, "%v", err)
 	}
 
-	// (14) Погашение — ПОСЛЕДНИМ, и одним оператором на стороне хранилища.
+	// (15) Погашение — ПОСЛЕДНИМ, и одним оператором на стороне хранилища.
 	// Недоступность хранилища есть ОТКАЗ: «пропустить, погасим потом» — это та
 	// же пара «проверить и записать», разнесённая на неопределённый срок.
 	if err := v.replay.Redeem(ctx, client.ID, assertionID, exp); err != nil {
