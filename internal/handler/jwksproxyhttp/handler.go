@@ -1,17 +1,31 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// Package jwksproxyhttp — the cluster-INTERNAL Hydra-JWKS proxy: a thin, short-TTL
-// CACHING reverse-proxy of Ory Hydra's PUBLIC JWKS (`GET /.well-known/jwks.json`).
+// Package jwksproxyhttp — cluster-ВНУТРЕННИЙ публикатор наборов проверочных
+// ключей.
 //
-// Purpose. The data-plane (kacho-registry) verifies docker-Bearer signatures with
-// verification keys fetched from iam instead of dialing Hydra directly. Hydra stays
-// the token issuer/signer (iam mints NOTHING) — so iam serves a BYTE-IDENTICAL
-// mirror of Hydra's JWKS: the served `kid`/`alg` are Hydra's ACTUAL signing kids.
-// It never serves a `kacho-*` kid of iam's own: iam HAS no keyset. The rotator
-// CronJob was removed (713f7e1) and the `oidc_jwks_keys` store it wrote was
-// dropped (migration 0065) — nothing ever decrypted the stored private half. A
-// `kacho-*` kid would be a guaranteed kid-miss → fail-closed reject of every pull.
+// # Записей ДВЕ, и у каждой свой объявленный путь
+//
+// Платформа чеканит свои токены сама (задача #897), поэтому публикуются две
+// записи, а не одна:
+//
+//   - НАША (keyset.go) — ПРОЕКЦИЯ ключницы: только наши ключи, только публичный
+//     материал, собственного кэша нет by construction;
+//   - ЗЕРКАЛО прежнего издателя (этот файл) — тонкий кэширующий обратный
+//     посредник его публичного набора, побайтовое равенство источнику. Оно
+//     сохраняется до последней фазы отказа от внешнего OAuth-сервера и уходит
+//     вместе с ним: запись, которой больше нечего зеркалить, — находка, а не
+//     «оставим на всякий случай».
+//
+// Объединять наборы в один документ было бы дешевле и уничтожило бы ровно ту
+// защиту, ради которой развязка заводится: ключ одного издателя проверял бы
+// токен, объявляющий другого. Привязка «издатель → путь» — в binding.go.
+//
+// # Что верно ИМЕННО для зеркала
+//
+// Оно отдаёт чужие идентификаторы ключей и НИКОГДА наши: наши живут в своей
+// записи. Наш идентификатор здесь был бы гарантированным промахом проверки —
+// потребитель этой записи ищет ключи прежнего издателя.
 //
 // Fail-closed. A cold cache + an unavailable Hydra (network error / non-200 / empty
 // keyset / timeout) yields 502 — never an empty 200, never a substitute keyset. A
@@ -24,14 +38,31 @@
 // DefaultClient has no Timeout, so a hung/half-open Hydra would wedge the goroutine
 // forever).
 //
-// AuthN exception (security.md, RJU-07). This route is UNAUTHENTICATED-BY-DESIGN: it
-// serves only PUBLIC verification keys (standard OIDC well-known), on a cluster-
-// INTERNAL listener (:9097, never external — ban #6) protected by one-way
-// server-TLS (internal-CA leaf; NOT mutual — mTLS-gating would break the registry
-// verifier's "untouched" property). This is a CONSCIOUS, documented exception to the
-// "authN on every listener" invariant, justified by: internal-only surface +
-// server-TLS + only-public-material is served. Do NOT add an authN gate here without
-// revisiting that decision (and the registry verifier's TLS client).
+// # Снятие authN — задокументированное исключение, и его обоснование СМЕНИЛОСЬ
+//
+// Маршруты НАБОРА КЛЮЧЕЙ не требуют аутентификации осознанно. Прежде это
+// обосновывалось тем, что публикуется ЧУЖОЕ зеркало; после того как платформа
+// стала чеканить сама, обоснование другое и записано здесь, чтобы двух мест об
+// одном предмете не завелось: на проводе — ТОЛЬКО ПУБЛИЧНЫЙ МАТЕРИАЛ проверки
+// подписи (наш в одной записи, прежнего издателя в другой), в форме
+// стандартного документа, на cluster-ВНУТРЕННЕМ слушателе (:9097, никогда
+// внешнем — ban #6), под односторонней TLS с сертификатом внутреннего
+// удостоверяющего центра.
+//
+// Требовать сертификат у ПОТРЕБИТЕЛЯ набора нельзя: он обязан оставаться
+// origin-agnostic, и взаимная TLS сломала бы ровно это свойство.
+//
+// # Но соседняя поверхность того же слушателя обоснованием НЕ пользуется
+//
+// Авторитет отзыва (internal/handler/tokenintrospecthttp) стоит на этом же
+// слушателе и принимает ПРЕДЪЯВЛЕННЫЙ ТОКЕН, а не отдаёт публичный материал.
+// Обоснование выше на него не распространяется, поэтому он требует
+// проверенного клиентского сертификата САМ, а слушатель переводится в режим
+// «сертификат запрашивается и верифицируется, если предъявлен» — набор ключей
+// при этом остаётся доступен без сертификата.
+//
+// Не добавляйте здесь authN-гейт, не пересмотрев это решение (и TLS-клиента
+// потребителя набора).
 package jwksproxyhttp
 
 import (
