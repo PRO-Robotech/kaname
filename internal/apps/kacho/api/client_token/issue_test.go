@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -82,7 +83,55 @@ func (s *stubClaims) ClaimsForAssertionClient(_ context.Context, c domain.Assert
 	for k, v := range s.set {
 		out[k] = v
 	}
-	return out, service.ResolvedPrincipal{Kind: service.PrincipalUser, UserID: c.OwnerID}, nil
+	// Вид клиента различается ТАК ЖЕ, как настоящим объявлением состава:
+	// у клиента ключа служебной учётки принципал машинный и поля пользователя
+	// не несёт. Дублёр, отвечающий одинаково на оба вида, был бы снисходительнее
+	// продукта — и скрыл бы ровно то расхождение путей, ради которого их и
+	// подают по отдельности.
+	switch c.Kind {
+	case domain.AssertionClientServiceAccount:
+		return out, service.ResolvedPrincipal{Kind: service.PrincipalServiceAccount}, nil
+	case domain.AssertionClientUser:
+		return out, service.ResolvedPrincipal{Kind: service.PrincipalUser, UserID: c.OwnerID}, nil
+	default:
+		// Словарь видов ЗАКРЫТ: «прочее» не является корзиной приёма.
+		return nil, service.ResolvedPrincipal{}, fmt.Errorf("stub claims: unknown assertion client kind %q", c.Kind)
+	}
+}
+
+// assertionClientKindsUnderTest — оба пути выдачи, поданные ОТДЕЛЬНЫМИ входами.
+//
+// Перечень ВЫВОДИТСЯ из закрытого словаря домена, а не выписывается: вид,
+// заведённый в домене и забытый здесь, оставил бы свой путь без утверждения —
+// молча, потому что «проверено» и «не перечислено» выглядят одинаково.
+func assertionClientKindsUnderTest() []domain.AssertionClientKind {
+	return domain.AssertionClientKinds()
+}
+
+// ownerFor — идентификатор владельца по виду клиента: у пути пользовательского
+// токена владелец — участие человека, у пути ключа служебной учётки — учётка.
+func ownerFor(kind domain.AssertionClientKind) string {
+	if kind == domain.AssertionClientServiceAccount {
+		return "sva_0123456789abcdefg"
+	}
+	return "usr_0123456789abcdefg"
+}
+
+// idFor — идентификатор клиента по виду: формы префиксов у двух реестров разные.
+func idFor(kind domain.AssertionClientKind) string {
+	if kind == domain.AssertionClientServiceAccount {
+		return "soc_0123456789abcdefg"
+	}
+	return "uoc_0123456789abcdefg"
+}
+
+// ofKind — фикстура клиента названного вида.
+func ofKind(kind domain.AssertionClientKind) func(*domain.AssertionClient) {
+	return func(c *domain.AssertionClient) {
+		c.Kind = kind
+		c.ID = idFor(kind)
+		c.OwnerID = ownerFor(kind)
+	}
 }
 
 func newUseCase(t *testing.T, mutate ...func(*client_token.Config)) (*client_token.UseCase, *stubClaims) {
@@ -126,15 +175,29 @@ func parse(t *testing.T, raw string) (jwt.MapClaims, map[string]any) {
 	return tok.Claims.(jwt.MapClaims), tok.Header
 }
 
-// TestF2_29_TokenExpiryNeverOutlivesTheClient — НЕРАВЕНСТВО, а не прилагательное.
+// TestF2_29_TokenExpiryNeverOutlivesTheClient — НЕРАВЕНСТВО, а не прилагательное,
+// и оно утверждается по КАЖДОМУ из двух путей выдачи.
 //
 // «Выдаётся укороченный» / «выдаётся обычный» зеленеет на ЛЮБОЙ реализации с
 // полем допуска: `min(обычный, остаток) + запас`, округление вверх, «грация»,
 // добавленная через полгода. При малом остатке токен всё ещё «укороченный», при
 // большом — «обычный», обе половины зелены, а токен, переживший клиента,
 // существует. Прилагательное описывает НАПРАВЛЕНИЕ величины; требуется ГРАНИЦА.
+//
+// # Почему оба вида клиента подаются отдельными входами
+//
+// Приёмка ожидала, что пути выдачи — РАЗНЫЕ пакеты use-case, и требовала
+// утверждения по каждому именно поэтому. В дереве они сведены в один: потолок
+// стоит в ОДНОМ месте и достаётся обоим видам, то есть требование сегодня
+// выполняется by construction.
+//
+// Проба всё равно подаёт оба, и это не церемония. Расщепление путей —
+// правдоподобная следующая правка (у двух реестров разные таблицы, разные
+// владельцы и разные состояния владельца), и после неё ограничение, оставленное
+// в одной ветке, оставит вторую без него. Проба, спрашивающая один вид, в этот
+// момент останется зелёной — то есть перестанет измерять ровно тогда, когда
+// станет нужна.
 func TestF2_29_TokenExpiryNeverOutlivesTheClient(t *testing.T) {
-	uc, _ := newUseCase(t)
 	const normal = 15 * time.Minute
 
 	cases := []struct {
@@ -152,40 +215,52 @@ func TestF2_29_TokenExpiryNeverOutlivesTheClient(t *testing.T) {
 		// выдачи, укорачивающей всё подряд.
 		{"остаток больше обычного", 10 * normal, normal},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			exp := now.Add(c.remaining)
-			out, outcome, err := uc.Issue(context.Background(), client_token.Input{
-				Client: client(func(cl *domain.AssertionClient) { cl.ExpiresAt = exp.Unix() }),
-			})
+
+	kinds := assertionClientKindsUnderTest()
+	require.Len(t, kinds, 2, "путей выдачи ДВА; перечень выведен из закрытого словаря домена")
+
+	for _, kind := range kinds {
+		t.Run(string(kind), func(t *testing.T) {
+			uc, _ := newUseCase(t)
+
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					exp := now.Add(c.remaining)
+					out, outcome, err := uc.Issue(context.Background(), client_token.Input{
+						Client: client(ofKind(kind), func(cl *domain.AssertionClient) { cl.ExpiresAt = exp.Unix() }),
+					})
+					require.NoError(t, err)
+					require.Equal(t, clientassertion.OutcomeAccepted, outcome)
+
+					claims, _ := parse(t, out.AccessToken)
+					tokenExp := time.Unix(int64(claims["exp"].(float64)), 0).UTC()
+
+					// НЕРАВЕНСТВО: момент истечения токена НЕ ПОЗЖЕ момента
+					// истечения клиента. Сравниваются две величины, а не
+					// характеризуется одна.
+					require.False(t, tokenExp.After(exp),
+						"путь %s: токен истекает %s, клиент %s — токен пережил клиента", kind, tokenExp, exp)
+					require.Equal(t, c.wantTTL, tokenExp.Sub(now), "путь %s", kind)
+				})
+			}
+
+			// Клиент БЕЗ срока — выдаётся обычный: незаданный срок означает
+			// «бессрочно», и это законное состояние схемы.
+			out, outcome, err := uc.Issue(context.Background(), client_token.Input{Client: client(ofKind(kind))})
 			require.NoError(t, err)
 			require.Equal(t, clientassertion.OutcomeAccepted, outcome)
-
 			claims, _ := parse(t, out.AccessToken)
-			tokenExp := time.Unix(int64(claims["exp"].(float64)), 0).UTC()
+			require.Equal(t, normal, time.Unix(int64(claims["exp"].(float64)), 0).UTC().Sub(now),
+				"путь %s: бессрочный клиент обязан получать обычный срок", kind)
 
-			// НЕРАВЕНСТВО: момент истечения токена НЕ ПОЗЖЕ момента истечения
-			// клиента. Сравниваются две величины, а не характеризуется одна.
-			require.False(t, tokenExp.After(exp),
-				"токен истекает %s, клиент %s — токен пережил клиента", tokenExp, exp)
-			require.Equal(t, c.wantTTL, tokenExp.Sub(now))
+			// Истёкший клиент токена НЕ получает.
+			_, outcome, err = uc.Issue(context.Background(), client_token.Input{
+				Client: client(ofKind(kind), func(cl *domain.AssertionClient) { cl.ExpiresAt = now.Add(-time.Second).Unix() }),
+			})
+			require.Error(t, err, "путь %s", kind)
+			require.Equal(t, clientassertion.OutcomeClientExpired, outcome, "путь %s", kind)
 		})
 	}
-
-	// Клиент БЕЗ срока — выдаётся обычный: незаданный срок означает
-	// «бессрочно», и это законное состояние схемы.
-	out, outcome, err := uc.Issue(context.Background(), client_token.Input{Client: client()})
-	require.NoError(t, err)
-	require.Equal(t, clientassertion.OutcomeAccepted, outcome)
-	claims, _ := parse(t, out.AccessToken)
-	require.Equal(t, normal, time.Unix(int64(claims["exp"].(float64)), 0).UTC().Sub(now))
-
-	// Истёкший клиент токена НЕ получает.
-	_, outcome, err = uc.Issue(context.Background(), client_token.Input{
-		Client: client(func(cl *domain.AssertionClient) { cl.ExpiresAt = now.Add(-time.Second).Unix() }),
-	})
-	require.Error(t, err)
-	require.Equal(t, clientassertion.OutcomeClientExpired, outcome)
 }
 
 // TestF2_30_OwnerNotActiveGetsNoToken — оба не-`ACTIVE` состояния доезжают сюда
