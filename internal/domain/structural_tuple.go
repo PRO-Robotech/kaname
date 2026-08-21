@@ -41,13 +41,33 @@ type StructuralTuple struct {
 
 // bindableScopes — the closed set of AccessBinding scopes that are hierarchy
 // parents. A binding carries exactly ONE, named by resource_type.
+//
+// ВЛАДЕЛЕЦ НАБОРА ОДИН, и это существенно. Тот же набор решает, будет ли у
+// привязки звено в цепи областей (StructuralParent ниже), — значит всякий, кто
+// спрашивает «называет ли эта привязка предка», обязан спрашивать ЗДЕСЬ.
+// Второй ответ на тот же вопрос уже существовал: план чтения материализации
+// предка у привязки с областью «кластер» НЕ ДАЁТ (это его намеренное свойство,
+// оговорённое его собственным комментарием), и перепись, взявшая предикат
+// оттуда, объявляла законную строку «лишней». Перечень мест, где цепь законно
+// расходится с планом чтения, ведётся поимённо — см. legalDifferences в
+// scopeedgesource_gate_test.go.
+var bindableScopes = []string{"project", "account", "cluster"}
+
+// BindableScopes — копия закрытого набора областей выдачи, годных в предки.
+// Копия, а не сам срез: набор закрыт, и вызывающий не вправе его пополнить.
+func BindableScopes() []string {
+	out := make([]string, len(bindableScopes))
+	copy(out, bindableScopes)
+	return out
+}
+
 func isBindableScope(scope string) bool {
-	switch scope {
-	case "project", "account", "cluster":
-		return true
-	default:
-		return false
+	for _, s := range bindableScopes {
+		if s == scope {
+			return true
+		}
 	}
+	return false
 }
 
 // StructuralParent returns the binding's scope parent-pointer:

@@ -68,6 +68,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
@@ -86,6 +87,37 @@ type TypePlan struct {
 	Table      string
 	Join       string
 	ParentExpr string
+}
+
+// parentExprOverride — типы, у которых «источник называет предка» спрашивается
+// НЕ у плана чтения материализации.
+//
+// ПОЧЕМУ ПЕРЕОПРЕДЕЛЕНИЕ, А НЕ ПРАВКА МАТЕРИАЛИЗАЦИИ. План чтения отвечает на
+// вопрос «что содержит объект» и у привязки с областью «кластер» предка НЕ ДАЁТ
+// НАМЕРЕННО — оба его выражения на такой строке пусты, и его собственный
+// комментарий это оговаривает. Цепь областей предка такой привязке ДАЁТ, и
+// модель на её стороне: у типа объявлены все три области. Расхождение законно и
+// ведётся поимённо (legalDifferences в scopeedgesource_gate_test.go).
+//
+// Перепись, спрашивавшая план чтения, объявляла такую строку «лишней» — то есть
+// красила ВЕРНУЮ реализацию. Пока в дереве не было ни одной привязки с областью
+// «кластер», нуль получался не от свойства, а от пустоты этого класса: первая же
+// такая строка сделала бы инструмент постоянным ложным сигналом — и на прогоне,
+// и на стенде, где та же перепись гоняется скриптом.
+//
+// НАБОР ОБЛАСТЕЙ БЕРЁТСЯ У ВЛАДЕЛЬЦА (domain.BindableScopes), а не выписывается
+// здесь: тот же набор решает, будет ли у привязки звено, и второй его копии
+// заводить нельзя — она разошлась бы молча ровно там, где расхождение и опасно.
+func parentExprOverride(catalogType string) (string, bool) {
+	if catalogType != "iam.accessBinding" {
+		return "", false
+	}
+	scopes := domain.BindableScopes()
+	quoted := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		quoted = append(quoted, "'"+s+"'")
+	}
+	return "(o.resource_type IN (" + strings.Join(quoted, ", ") + "))", true
 }
 
 // Plans выводит план переписи: по одной записи на КАЖДЫЙ выводимый тип.
@@ -115,13 +147,17 @@ func Plans() ([]TypePlan, error) {
 			missing = append(missing, modelType+" ("+catalogType+")")
 			continue
 		}
+		parentExpr := "(COALESCE(" + c.ParentAccountExpr + ", '') <> '' OR COALESCE(" +
+			c.ParentProjectExpr + ", '') <> '')"
+		if override, ok := parentExprOverride(catalogType); ok {
+			parentExpr = override
+		}
 		out = append(out, TypePlan{
 			ModelType:   modelType,
 			CatalogType: catalogType,
 			Table:       c.Table,
 			Join:        c.Join,
-			ParentExpr: "(COALESCE(" + c.ParentAccountExpr + ", '') <> '' OR COALESCE(" +
-				c.ParentProjectExpr + ", '') <> '')",
+			ParentExpr:  parentExpr,
 		})
 	}
 	if len(missing) > 0 {

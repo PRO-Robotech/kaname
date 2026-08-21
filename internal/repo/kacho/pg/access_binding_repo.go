@@ -67,9 +67,14 @@ type abReader struct {
 // target). Order parity между SELECT (scanAB) и RETURNING (Insert/TransitionStatus/
 // SetDeletionProtection/DeleteGuarded). `target_digest` is write-only (index key,
 // computed on Insert) — NOT scanned, so it is deliberately absent here.
-const abCols = "id, subject_type, subject_id, role_id, resource_type, resource_id, " +
+//
+// `role_id` читается через COALESCE: у ФОРМЫ ОТНОШЕНИЯ (системная выдача) роли
+// нет, и колонка допускает NULL. Пустая строка здесь — не подмена значения, а его
+// отсутствие в том же виде, в каком отсутствие выражено во всём домене: форму
+// выдачи различает пара (role_id, granted_relation), и ровно одна из них непуста.
+const abCols = "id, subject_type, subject_id, COALESCE(role_id, '') AS role_id, resource_type, resource_id, " +
 	"status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
-	"deletion_protection, labels, target"
+	"deletion_protection, labels, target, granted_relation, is_system"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
@@ -642,12 +647,16 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		INSERT INTO access_bindings (
 			id, subject_type, subject_id, role_id, resource_type, resource_id,
 			status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope,
-			deletion_protection, labels, target, target_digest
+			deletion_protection, labels, target, target_digest, granted_relation, is_system
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6,
+			$1, $2, $3,
+			-- Роли может не быть: у формы отношения колонка NULL, и внешний ключ
+			-- пропускает её by construction. Пустая строка вместо NULL уехала бы в
+			-- ключ и дала бы отказ ссылочной целостности на несуществующую роль.
+			NULLIF($4, ''), $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 		)
 		RETURNING %s`, abCols)
 	var scopeArg any
@@ -670,6 +679,8 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		labelsJSON,
 		targetJSON,
 		targetDigest,
+		b.GrantedRelation,
+		b.System,
 	)
 	out, err := scanAB(row)
 	if err != nil {
@@ -956,7 +967,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		labelsJSON   []byte
 		targetJSON   []byte
 	)
-	dest := make([]any, 0, 18)
+	dest := make([]any, 0, 20)
 	if len(versionOut) > 0 {
 		dest = append(dest, versionOut[0])
 	}
@@ -977,6 +988,8 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		&ab.DeletionProtection,
 		&labelsJSON,
 		&targetJSON,
+		&ab.GrantedRelation,
+		&ab.System,
 	)
 	err := row.Scan(dest...)
 	if err != nil {

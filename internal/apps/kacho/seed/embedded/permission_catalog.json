@@ -292,21 +292,23 @@
   },
   {
     "fqn": "kacho.cloud.compute.v1.MachineTypeService/Get",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "compute.machineTypes.get",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.MachineTypeService/List",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "compute.machineTypes.list",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Create",
@@ -460,39 +462,43 @@
   },
   {
     "fqn": "kacho.cloud.geo.v1.RegionService/Get",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "geo.regions.get",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.RegionService/List",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "geo.regions.list",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.ZoneService/Get",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "geo.zones.get",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.geo.v1.ZoneService/List",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "geo.zones.list",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/Create",
@@ -502,7 +508,8 @@
       "object_type": "",
       "from_request_field": ""
     },
-    "required_acr_min": "2"
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccessBindingService/Delete",
@@ -648,7 +655,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SELF_SERVICE"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/Delete",
@@ -677,7 +685,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/ListAllOperations",
@@ -759,7 +768,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SELF_SERVICE"
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/AddMember",
@@ -808,7 +818,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/ListMembers",
@@ -857,7 +868,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalClusterService/Get",
@@ -906,7 +918,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
@@ -915,7 +928,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/GetRoleCompiled",
@@ -924,7 +938,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
@@ -933,7 +948,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
@@ -942,7 +958,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/RegisterResource",
@@ -951,7 +968,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/UnregisterResource",
@@ -960,7 +978,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalInteractiveClientService/Create",
@@ -1099,7 +1118,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
@@ -1119,7 +1139,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalUserService/Get",
@@ -1128,7 +1149,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
@@ -1137,7 +1159,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
@@ -1146,7 +1169,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
   },
   {
     "fqn": "kacho.cloud.iam.v1.LimitService/Create",
@@ -1200,12 +1224,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.PermissionCatalogService/ListPermissionCatalog",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "iam.permissions.list",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/Create",
@@ -1244,7 +1269,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/ListOperations",
@@ -1293,7 +1319,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/List",
@@ -1302,7 +1329,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/ListOperations",
@@ -1411,7 +1439,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/ListOperations",
@@ -1480,7 +1509,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "SERVICE_SIDE_AUTHZ"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/ListOperations",
@@ -1822,7 +1852,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "HANDLER_DECIDES"
   },
   {
     "fqn": "kacho.cloud.operation.OperationService/Get",
@@ -1831,7 +1862,8 @@
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
-    }
+    },
+    "exempt_reason": "HANDLER_DECIDES"
   },
   {
     "fqn": "kacho.cloud.quota.v1.IdentityQuotaService/List",
@@ -1841,7 +1873,8 @@
       "object_type": "",
       "from_request_field": ""
     },
-    "required_acr_min": "1"
+    "required_acr_min": "1",
+    "exempt_reason": "SELF_SERVICE"
   },
   {
     "fqn": "kacho.cloud.registry.v1.InternalRegistryService/GetRegistryStats",
@@ -2037,21 +2070,23 @@
   },
   {
     "fqn": "kacho.cloud.storage.v1.DiskTypeService/Get",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "storage.disk_types.get",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.DiskTypeService/List",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
+    "permission": "storage.disk_types.list",
+    "required_relation": "viewer",
     "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    }
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Copy",
