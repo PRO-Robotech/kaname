@@ -292,23 +292,21 @@
   },
   {
     "fqn": "kacho.cloud.compute.v1.MachineTypeService/Get",
-    "permission": "compute.machineTypes.get",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.compute.v1.MachineTypeService/List",
-    "permission": "compute.machineTypes.list",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.compute.v1.PlacementGroupService/Create",
@@ -2039,23 +2037,21 @@
   },
   {
     "fqn": "kacho.cloud.storage.v1.DiskTypeService/Get",
-    "permission": "storage.disk_types.get",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.storage.v1.DiskTypeService/List",
-    "permission": "storage.disk_types.list",
-    "required_relation": "viewer",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
+      "object_type": "",
+      "from_request_field": ""
+    }
   },
   {
     "fqn": "kacho.cloud.storage.v1.ImageService/Copy",
