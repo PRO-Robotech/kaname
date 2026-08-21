@@ -116,7 +116,7 @@ healthcheck:
   enable: true
 repository:
   postgres:
-    maxConns: 50
+    maxConns: 80
     sslMode: disable
 authn:
   mode: dev
