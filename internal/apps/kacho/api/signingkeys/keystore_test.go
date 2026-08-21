@@ -343,3 +343,71 @@ func rsaPublicPEM(t *testing.T, bits int) string {
 	require.NoError(t, err)
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 }
+
+// TestKeystore_F1_30_SweepRemovesOnlyAfterTheComputedGrace — F1-30 на уровне
+// ключницы: ключ, выведенный из подписи, ОСТАЁТСЯ в наборе всю отсрочку.
+//
+// Отсрочка ВЫЧИСЛЕНА, а не выбрана: она покрывает срок последнего подписанного
+// токена плюс потолок кэша ключей у потребителя. Проба, укладывающаяся в срок
+// кэша, этого свойства не измеряет — поэтому здесь двигаются часы, а не ждётся
+// время.
+func TestKeystore_F1_30_SweepRemovesOnlyAfterTheComputedGrace(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	at := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
+	require.NoError(t, err)
+
+	clockAt := at
+	ks, err := signingkeys.New(signingkeys.Config{
+		Algorithm:    domain.SigningAlgRS256,
+		KeyLifetime:  90 * 24 * time.Hour,
+		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		Clock:        func() time.Time { return clockAt },
+	}, store, store, wrapper)
+	require.NoError(t, err)
+
+	old, err := ks.Generate(ctx)
+	require.NoError(t, err)
+	require.NoError(t, ks.Activate(ctx, old.KID))
+	fresh, err := ks.Generate(ctx)
+	require.NoError(t, err)
+	require.NoError(t, ks.Activate(ctx, fresh.KID)) // старый выведен сменой
+
+	// ВНУТРИ отсрочки ключ ещё в наборе: токены, подписанные им, живы, и
+	// снимок набора у потребителя ещё может быть не обновлён.
+	clockAt = at.Add(tokenpolicy.KeyRemovalGrace - time.Minute)
+	n, err := ks.SweepRemovable(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "ключ снят раньше вычисленной отсрочки")
+	set, err := ks.PublishedSet(ctx)
+	require.NoError(t, err)
+	require.True(t, publishedContains(set, old.KID), "выведенный ключ обязан оставаться в наборе всю отсрочку")
+
+	// ЗА отсрочкой — снимается. Положительный контроль: без него «не снят»
+	// зелено и на сметателе, который не снимает никогда.
+	clockAt = at.Add(tokenpolicy.KeyRemovalGrace + time.Minute)
+	n, err = ks.SweepRemovable(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	set, err = ks.PublishedSet(ctx)
+	require.NoError(t, err)
+	require.False(t, publishedContains(set, old.KID))
+	require.True(t, publishedContains(set, fresh.KID), "подписывающий ключ снят вместе с выведенным")
+
+	// Повторный обход — НЕ отказ: снятие идемпотентно по свойству оператора,
+	// и сметатель соседней реплики не отменяет работу первого и не обрывает
+	// собственный обход.
+	n, err = ks.SweepRemovable(ctx)
+	require.NoError(t, err, "повторный обход обязан быть безвредным: петля идёт в каждой реплике")
+	require.Equal(t, 0, n)
+}
+
+func publishedContains(set []domain.PublishedKey, kid domain.KeyID) bool {
+	for _, k := range set {
+		if k.KID == kid {
+			return true
+		}
+	}
+	return false
+}

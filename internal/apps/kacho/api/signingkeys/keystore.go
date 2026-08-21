@@ -29,6 +29,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/signingkeygen"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
 )
@@ -279,6 +281,13 @@ func (k *Keystore) SweepRemovable(ctx context.Context) (int, error) {
 			continue
 		}
 		if err := k.writer.Remove(ctx, rec.KID, now); err != nil {
+			if errors.Is(err, iamerr.ErrFailedPrecondition) {
+				// Ключ уже снят — соседней репликой либо оператором. Это
+				// НЕ отказ: снятие идемпотентно по существу, и прерывать из-за
+				// него обход остальных ключей значило бы, что сметатель
+				// работает тем хуже, чем больше реплик.
+				continue
+			}
 			k.failures.Add(1)
 			return n, err
 		}
