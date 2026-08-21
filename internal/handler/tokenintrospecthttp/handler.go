@@ -48,6 +48,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/PRO-Robotech/kacho/pkg/httpbody"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
@@ -163,7 +164,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxTokenBytes)
+	// Потолок — в pkg/httpbody, единственной в дереве реализации; вместе с ней
+	// приезжает слой «объявленная длина сверх потолка», которого здесь не было.
+	if httpbody.Cap(w, r, maxTokenBytes) {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "payload_too_large"})
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return

@@ -101,6 +101,35 @@ const (
 	OutcomeReplayed               Outcome = "replayed"
 	OutcomeRegistryUnavailable    Outcome = "registry-unavailable"
 	OutcomeReplayStoreUnavailable Outcome = "replay-store-unavailable"
+
+	// Исходы ниже производит НЕ проверяющий, а эндпоинт и выдача. Они живут в
+	// этом же закрытом словаре намеренно: перечень исходов есть перечень
+	// СЧЁТЧИКОВ, и разложи мы его по двум местам — «у каждого исхода свой
+	// счётчик» перестало бы быть проверяемым одним предикатом, а исход,
+	// заведённый в одном месте и забытый в другом, остался бы без счётчика.
+	// Мёртвый контроль тогда снова стал бы невидимым.
+
+	// OutcomeMethodNotAllowed — обращение методом, отличным от объявленного.
+	OutcomeMethodNotAllowed Outcome = "method-not-allowed"
+	// OutcomeBodyAboveCeiling — объявленная длина либо само тело сверх потолка.
+	OutcomeBodyAboveCeiling Outcome = "body-above-ceiling"
+	// OutcomeMalformedRequest — тело не разбирается как форма запроса.
+	OutcomeMalformedRequest Outcome = "malformed-request"
+	// OutcomeMultipleAssertions — параметр с утверждением встретился дважды.
+	// «Ровно одно утверждение» есть требование к НАШЕМУ разбору, а не описание
+	// намерения клиента.
+	OutcomeMultipleAssertions Outcome = "multiple-assertions"
+	// OutcomeUnsupportedGrantType — вид выдачи вне закрытого перечня.
+	OutcomeUnsupportedGrantType Outcome = "unsupported-grant-type"
+	// OutcomeAudienceNotAllowed — запрошенный адресат вне объявленного
+	// конфигурацией перечня адресатов платформы.
+	OutcomeAudienceNotAllowed Outcome = "requested-audience-not-allowed"
+	// OutcomeClientExpired — срок клиента истёк.
+	OutcomeClientExpired Outcome = "client-expired"
+	// OutcomeOwnerNotActive — владелец клиента не в состоянии ACTIVE.
+	OutcomeOwnerNotActive Outcome = "owner-not-active"
+	// OutcomeIssuanceFailed — аутентификация прошла, выпуск не состоялся.
+	OutcomeIssuanceFailed Outcome = "issuance-failed"
 )
 
 // Outcomes возвращает закрытый словарь исходов целиком.
@@ -132,8 +161,31 @@ func Outcomes() []Outcome {
 		OutcomeReplayed,
 		OutcomeRegistryUnavailable,
 		OutcomeReplayStoreUnavailable,
+		OutcomeMethodNotAllowed,
+		OutcomeBodyAboveCeiling,
+		OutcomeMalformedRequest,
+		OutcomeMultipleAssertions,
+		OutcomeUnsupportedGrantType,
+		OutcomeAudienceNotAllowed,
+		OutcomeClientExpired,
+		OutcomeOwnerNotActive,
+		OutcomeIssuanceFailed,
 	}
 }
+
+// Refuse собирает отказ названного исхода за пределами проверяющего — на
+// эндпоинте и на выдаче.
+//
+// Экспортирована, чтобы отказ СОБИРАЛСЯ ОДНИМ СПОСОБОМ везде: вторая сборка
+// разошлась бы с этой в том, что видит предъявитель, и разошлась бы молча.
+func Refuse(o Outcome, format string, args ...any) (Result, error) { return refuse(o, format, args...) }
+
+// PresenterResponseFor — опознавательное слово стандартной формы.
+//
+// Одно и то же для ВСЕХ исходов отказа аутентификации. Функция, а не константа:
+// вызывающему нужен именно ответ, а не строка, и подмена одного другим на
+// каком-то из путей была бы ровно тем расхождением, которого мы избегаем.
+func PresenterResponseFor(Outcome) string { return presenterResponse }
 
 // Result — исход проверки вместе с тем, что вправе узнать вызывающий.
 type Result struct {
