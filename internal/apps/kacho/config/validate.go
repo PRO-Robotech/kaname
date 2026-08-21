@@ -5,9 +5,10 @@ package config
 
 import (
 	"fmt"
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 	"net/url"
 	"strings"
+
+	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 
 	"go.uber.org/multierr"
 
