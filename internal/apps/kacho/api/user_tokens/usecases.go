@@ -339,6 +339,9 @@ func (u *IssueUserTokenUseCase) scheduleSecretRedact(callerCtx context.Context, 
 }
 
 // awaitOpDone поллит операцию, пока она не станет Done. Bounded: 100 попыток по 20ms.
+//
+// РЕПЛИКИ: запрос — петля принадлежит ОДНОМУ запросу выдачи и ждёт исхода его же операции;
+// у каждой реплики свои запросы.
 func (u *IssueUserTokenUseCase) awaitOpDone(ctx context.Context, opID string) bool {
 	for attempt := 0; attempt < 100; attempt++ {
 		op, err := u.opsRepo.Get(ctx, opID)

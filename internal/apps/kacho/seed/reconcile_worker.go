@@ -121,6 +121,10 @@ func NewReconcileWorker(engine ReconcileEngine, queue ReconcileQueue, cfg Reconc
 //
 // Term enforcement runs on its OWN goroutine (runExpiry), not in this loop. See
 // runExpiry for why that is a correctness property and not a scheduling nicety.
+//
+// РЕПЛИКИ: клейм — дренаж берёт события клеймом с пропуском занятых (ClaimReconcileEvents),
+// а сверка берёт на каждую выдачу её собственный исключающий замок, поэтому
+// конкурирующие проходы сериализуются в базе, а не наперегонки.
 func (w *ReconcileWorker) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -230,6 +234,10 @@ func (w *ReconcileWorker) sweep(ctx context.Context) {
 // `condition non_expired(current_time, valid_until)` and no relation references it,
 // so that is a model change (a new model id and a rollout) plus a predicate in the
 // form's condition set, and is deliberately not made here.
+//
+// РЕПЛИКИ: одиночка — снятие берёт на каждую выдачу её собственный исключающий замок
+// (pg_advisory_xact_lock), поэтому две реплики над одной выдачей
+// сериализуются в базе в любом порядке, а само снятие идемпотентно.
 func (w *ReconcileWorker) runExpiry(ctx context.Context) {
 	tick := time.NewTicker(w.sweepIvl)
 	defer tick.Stop()

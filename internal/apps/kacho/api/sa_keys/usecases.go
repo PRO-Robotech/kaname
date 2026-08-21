@@ -502,6 +502,9 @@ func (u *IssueSAKeyUseCase) graceAfter(d time.Duration) <-chan time.Time {
 // awaitOpDone поллит операцию, пока она не станет Done. Bounded: 100 попыток по
 // 20ms (~2s). Возвращает false, если операция не завершилась в бюджете (worker-
 // panic / DB-down) или ctx истёк — тогда затирать нечего (ответа с секретом нет).
+//
+// РЕПЛИКИ: запрос — петля принадлежит ОДНОМУ запросу выдачи и ждёт исхода его же операции;
+// у каждой реплики свои запросы.
 func (u *IssueSAKeyUseCase) awaitOpDone(ctx context.Context, opID string) bool {
 	for attempt := 0; attempt < 100; attempt++ {
 		op, err := u.opsRepo.Get(ctx, opID)

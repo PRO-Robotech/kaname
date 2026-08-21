@@ -72,6 +72,10 @@ func NewBootstrapReconciler(run BootstrapRunFn, cfg BootstrapReconcilerConfig) *
 // Transient errors and non-terminal skips ("user not registered") are retried
 // on the configured interval. Run is non-fatal by contract — the bootstrap
 // grant is a best-effort startup convenience, never a hard startup gate.
+//
+// РЕПЛИКИ: на-реплику — петля сходящаяся: она прекращается, как только выдача закоммичена.
+// Взаимное исключение держит ОГРАНИЧЕНИЕ УНИКАЛЬНОСТИ в базе — проигравший
+// получает 23505 и отчитывается пропуском «concurrent race», а не отказом.
 func (r *BootstrapReconciler) Run(ctx context.Context) error {
 	// Immediate first attempt (don't wait a full interval on a fresh boot).
 	for {

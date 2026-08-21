@@ -25,6 +25,10 @@ const reconcileOutboxChannel = "kacho_iam_resource_reconcile_outbox"
 // на случай уведомления, пришедшего в окно реконнекта). На обрыве conn —
 // exp-backoff и pool.Reset (idle-conn'ы к тому же backend'у тоже могли умереть),
 // зеркалит listen-loop corelib drainer. Блокирует до отмены ctx.
+//
+// РЕПЛИКИ: на-реплику — подписка будит воркера СВОЕГО процесса и ничего не пишет. Разведи её —
+// и неразбуженная реплика перестала бы дренажить вовсе; очередь разводит
+// клейм воркера, а не подписка.
 func (a *ReconcileAdapter) Watch(ctx context.Context, wakeup chan<- struct{}) {
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
@@ -56,6 +60,9 @@ func (a *ReconcileAdapter) Watch(ctx context.Context, wakeup chan<- struct{}) {
 // listenOnce держит одну LISTEN-подписку на hijacked-conn'е до обрыва/отмены.
 // Conn забирается из pool через Hijack: LISTEN живет на одном соединении, и его
 // нельзя возвращать в pool (idle-reset уничтожит подписку).
+//
+// РЕПЛИКИ: на-реплику — одна сессия подписки того же процесса; см. довод у ReconcileAdapter.Watch.
+// Читает уведомления и ничего не пишет.
 func (a *ReconcileAdapter) listenOnce(ctx context.Context, wakeup chan<- struct{}) error {
 	pc, err := a.pool.Acquire(ctx)
 	if err != nil {
