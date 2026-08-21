@@ -11,7 +11,13 @@ import (
 )
 
 // SessionRevocation — fast lookup table keyed by token_jti (PK). A cron
-// cleanup deletes rows past ttl_expires_at. Migration 0013.
+// cleanup deletes rows past ttl_expires_at (`DeleteExpired`,
+// `pg/audit_session_revocation_repos.go`). Migration `0001_initial.sql`.
+//
+// Номер миграции здесь был неверен — стояло 0013, а это про снятие перечня
+// условий обхода. Правится вместе с тем же дефектом у соседа
+// (`audit_outbox_entry.go`): радиус берётся по МЕХАНИЗМУ — «номер миграции,
+// названный в шапке сущности», — а не по файлу, где дефект заметили.
 type SessionRevocation struct {
 	TokenJTI     string
 	RevokedAt    time.Time
