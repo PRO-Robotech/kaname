@@ -109,10 +109,21 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
 таблице, поэтому предела нет by construction, а `nextPageToken` наконец означает то, что обещает
 контракт.
 
-:::warning Освобождение снимает authz, но не authN
-`<exempt>`-RPC (List'ы, `Role.Get`, `WhoAmI`, `Account.Create`, `AccessBinding.Create`,
-`PermissionCatalog`) не проходят per-RPC Check, но **анонима всё равно отвергает**
-anti-anonymous интерсептор IAM (`UNAUTHENTICATED`). Освобождается только *авторизация*.
+:::warning Освобождение снимает authz, но не authN — и обязано называть причину
+`<exempt>`-RPC (List'ы, `Role.Get`, `WhoAmI`, `Account.Create`, `AccessBinding.Create`)
+не проходят per-RPC Check, но **анонима всё равно отвергает** anti-anonymous
+интерсептор IAM (`UNAUTHENTICATED`). Освобождается только *авторизация*.
+
+Каждая такая запись каталога несёт **причину** из закрытого словаря —
+`INTERNAL_LISTENER` · `SERVICE_SIDE_AUTHZ` · `SELF_SERVICE` · `HANDLER_DECIDES`:
+один и тот же литерал стоял за четырьмя несопоставимыми полосами, и отличить их
+можно было только прочитав реализацию каждого RPC.
+
+Причины «глобальный справочник» в словаре **нет**. Публичное чтение справочника
+(регионы, зоны, типы машин, типы дисков, словарь прав) освобождением больше не
+выражается: оно стоит на отношении, которое платформа выдаёт **системной выдачей**
+субъекту «любой аутентифицированный», — и потому видно перечислением выдач и
+отзывается штатно.
 :::
 
 ## Owner и cluster-admin

@@ -1015,6 +1015,10 @@ func runServe(cfg config.Config) error {
 		if oerr := seed.BackfillOwnerBindings(ctx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}
+		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
+		// предмет #893/#895, — поэтому их отсутствие обязано быть видно оператору, а
+		// не выглядеть поломкой продукта.
+		seed.LogSystemGrantCensus(ctx, pool, logger.With(slog.String("component", "system_grants")))
 		res, berr := backfillRunner.RunOnce(ctx)
 		if berr != nil {
 			logger.Warn("p8 backfill: reconcile-sweep failed (next boot/sweep will retry)", slog.Any("err", berr))

@@ -269,7 +269,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// НИ ОДНА служебная учётка модуля больше не несёт привязки: все семь
+	// НИ ОДНА служебная учётка модуля больше не несёт выдачи В ФОРМЕ РОЛИ: все семь
 	// backing-ролей сняты (0076 — оператор сети, 0077 — остальные шесть). Прежняя
 	// редакция пинила «ровно одна привязка на модуль» для четырёх из них; после
 	// снятия это утверждение требовало бы возвращения снятого.
@@ -280,18 +280,65 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	// тот случай, ради которого её стоило бы удалить, — воскрешённую учётку с
 	// привязкой.
 	allModuleSAs := []string{"vpc", "compute", "nlb", "vpc-operator", "api-gateway", "registry", "storage"}
-	requireAllUnbound := func(t *testing.T, when string) {
+
+	// ЧТО ИМЕННО ЗАПРЕЩЕНО — форма РОЛИ, а не «строка на поверхности выдач».
+	//
+	// Прежняя редакция считала строки БЕЗ различения формы, и это было точным
+	// выражением предмета ровно до тех пор, пока форма у выдачи была ОДНА.
+	// Работа #893/#895 завела вторую (`granted_relation` ВЗАМЕН `role_id`,
+	// взаимоисключающе по access_bindings_grant_form_ck) и перенесла на
+	// поверхность выдач встроенный доступ, который раньше лежал прямым фактом
+	// посева. Встроенный `system_viewer@cluster` учёток шлюза, vpc и compute
+	// заведён миграцией 0014 и НАМЕРЕННО сохранён — он не backing-роль и никогда
+	// ею не был; изменилось только то, что теперь его ВИДНО.
+	//
+	// Поэтому предикат сужается до `role_id IS NOT NULL`: воскрешение снятого
+	// объявления — это возвращение РОЛИ, и только оно. Считать любую строку
+	// значило бы требовать, чтобы встроенный доступ снова стал невидимым.
+	requireNoRoleFormGrant := func(t *testing.T, when string) {
 		t.Helper()
 		for _, svc := range allModuleSAs {
 			var count int
 			require.NoError(t, pool.QueryRow(ctx,
-				`SELECT count(*) FROM kacho_iam.access_bindings WHERE subject_id = $1`,
+				`SELECT count(*) FROM kacho_iam.access_bindings
+				  WHERE subject_id = $1 AND role_id IS NOT NULL`,
 				svaID(svc)).Scan(&count))
 			require.Zerof(t, count,
-				"служебная учётка kacho-%s обязана остаться без привязки (%s): её backing-роль снята", svc, when)
+				"служебная учётка kacho-%s обязана остаться без выдачи в форме РОЛИ (%s): "+
+					"её backing-роль снята (0076/0077)", svc, when)
 		}
 	}
-	requireAllUnbound(t, "после миграций")
+	requireNoRoleFormGrant(t, "после миграций")
+
+	// Положительный контроль НА НОВУЮ ФОРМУ. Без него сужение предиката молча
+	// сняло бы с оси покрытие того самого, ради чего она сужена: «ноль ролей»
+	// зеленело бы и на дереве, где встроенный доступ не доехал до поверхности
+	// выдач вовсе — то есть на возвращении прежнего дефекта.
+	//
+	// Ось идёт по ВСЕМ семи учёткам, а не по трём несущим: клетка, выпавшая из
+	// перечня, перестала бы проверяться молча.
+	builtInRelationGrant := map[string]bool{"api-gateway": true, "vpc": true, "compute": true}
+	for _, svc := range allModuleSAs {
+		var relCnt int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*) FROM kacho_iam.access_bindings
+			  WHERE subject_id = $1
+			    AND role_id IS NULL
+			    AND granted_relation = 'system_viewer'
+			    AND resource_type = 'cluster'
+			    AND is_system`,
+			svaID(svc)).Scan(&relCnt))
+		if builtInRelationGrant[svc] {
+			require.Equalf(t, 1, relCnt,
+				"встроенный system_viewer@cluster учётки kacho-%s (миграция 0014) обязан быть ВИДЕН "+
+					"на поверхности выдач в форме отношения: иначе доступ есть, а перечисление "+
+					"выдач о нём молчит — предмет #893/#895", svc)
+			continue
+		}
+		require.Zerof(t, relCnt,
+			"у kacho-%s встроенного system_viewer@cluster нет и не было — выдача в форме отношения "+
+				"здесь означала бы доступ, которого никто не заводил", svc)
+	}
 
 	// Положительный контроль: привязки в базе ЕСТЬ — «ноль у модулей» получен не
 	// из пустой таблицы. Посев заводит кластерные выдачи бутстрап-учётке.
@@ -317,7 +364,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	// поэтому повторный прогон не возвращает ничего. Отдельно проверяется, что
 	// повтор идемпотентен и по тому, что в нём ОСТАЛОСЬ (учётки).
 	reapplySeed(t, ctx, pool)
-	requireAllUnbound(t, "после повторного посева")
+	requireNoRoleFormGrant(t, "после повторного посева")
 	for _, svc := range allModuleSAs {
 		var roleCnt int
 		require.NoError(t, pool.QueryRow(ctx,
