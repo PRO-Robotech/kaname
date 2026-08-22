@@ -25,21 +25,16 @@
 package metrics
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/status"
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 )
@@ -64,9 +59,6 @@ type Registry struct {
 	// уже после того как отказ истолкован; на прогоне из 736 запросов с одним
 	// отказом это означает найти одну строку среди тысяч.
 	authzStoreAttempts *prometheus.CounterVec
-
-	grpcHandled  *prometheus.CounterVec
-	grpcDuration *prometheus.HistogramVec
 
 	// compensationOnce/compensation — единственный экземпляр коллекторов
 	// компенсации. Их потребители (writer намерений и дренаж) собираются в
@@ -125,17 +117,8 @@ func NewRegistry() *Registry {
 				"came from the idle pool. Distinguishes a store outage from a dead " +
 				"pooled connection — indistinguishable from the caller's side.",
 		}, []string{"op", "outcome", "reused"}),
-		grpcHandled: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_grpc_server_handled_total",
-			Help: "Total gRPC requests completed on the server, by service, method and resulting status code.",
-		}, []string{"grpc_service", "grpc_method", "grpc_code"}),
-		grpcDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "kacho_iam_grpc_server_handling_seconds",
-			Help:    "Latency of gRPC requests handled on the server, by service and method.",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"grpc_service", "grpc_method"}),
 	}
-	reg.MustRegister(r.authzDuration, r.authzDecisions, r.authzStoreAttempts, r.grpcHandled, r.grpcDuration)
+	reg.MustRegister(r.authzDuration, r.authzDecisions, r.authzStoreAttempts)
 	return r
 }
 
@@ -185,6 +168,26 @@ func (r *Registry) RegisterPoolStats(poolName string, pool *pgxpool.Pool) {
 func (r *Registry) Handler() http.Handler {
 	return promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{})
 }
+
+// Registerer отдаёт реестр этого сервиса как ПРИЁМНИК регистрации.
+//
+// # Зачем окно наружу, если рядом есть именованные
+//
+// Соседние окна (`RegisterAuthzCache`, `RegisterListNarrow`, `RegisterPoolStats`)
+// принимают ЧИТАТЕЛЯ готовых величин: они существуют, чтобы этот пакет не
+// импортировал доменные. Здесь предмет обратный — носителю входящего пути надо
+// ЗАВЕСТИ своё семейство серий, а не отдать читателя, и заводит он его СВОИМИ
+// руками. Тогда несогласованное объявление (то же имя с другой размерностью)
+// становится отказом подъёма, а не молчаливой пропажей семейства со скрейпа.
+//
+// Разбор решения — у поля, ради которого окно открыто:
+// `pkg/servicecontract.Spec.Metrics` (отказ старта О13). Здесь он не
+// пересказывается: два места об одном предмете расходятся на первом уточнении.
+//
+// Отдаётся именно `Registerer`, а не сам реестр: собирать величины через это
+// окно нельзя, и сузить его до одной операции дешевле, чем потом выяснять, кто
+// ещё им воспользовался.
+func (r *Registry) Registerer() prometheus.Registerer { return r.reg }
 
 // AuthzObservation is a single recorded authz Check outcome.
 type AuthzObservation struct {
@@ -244,28 +247,19 @@ func (r *Registry) ObserveAuthzStoreAttempt(op, outcome string, reused bool) {
 	r.authzStoreAttempts.WithLabelValues(op, outcome, strconv.FormatBool(reused)).Inc()
 }
 
-// UnaryServerInterceptor returns a grpc.UnaryServerInterceptor that records the
-// per-RPC request count (with the resulting status code) and handling latency.
-// Register it on both the public and internal gRPC listeners.
-func (r *Registry) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		start := time.Now()
-		resp, err := handler(ctx, req)
-		svc, method := splitFullMethod(info.FullMethod)
-		code := status.Code(err)
-		r.grpcHandled.WithLabelValues(svc, method, code.String()).Inc()
-		r.grpcDuration.WithLabelValues(svc, method).Observe(time.Since(start).Seconds())
-		return resp, err
-	}
-}
-
-// splitFullMethod splits "/pkg.Service/Method" into ("pkg.Service", "Method").
-// A malformed value yields ("unknown", fullMethod) so labels stay bounded.
-func splitFullMethod(fullMethod string) (service, method string) {
-	trimmed := strings.TrimPrefix(fullMethod, "/")
-	idx := strings.LastIndex(trimmed, "/")
-	if idx < 0 {
-		return "unknown", fullMethod
-	}
-	return trimmed[:idx], trimmed[idx+1:]
-}
+// Задержка обслуженного вызова наблюдается НЕ ЗДЕСЬ.
+//
+// Здесь стояла своя пара серий (`kacho_iam_grpc_server_handling_seconds` и
+// `kacho_iam_grpc_server_handled_total`) со своим интерсептором и своим
+// разбором полного имени метода. Предмет у неё тот же, что у платформенного
+// измерителя `pkg/grpcsrv.ServerLatency`, — а два места об одном предмете
+// расходятся: эта пара смешивала отказ с успехом в одном ряду (быстрый отказ
+// занижает хвост, медленный завышает), не различала полосу слушателя и брала
+// сетку корзин по умолчанию, начинающуюся с пяти миллисекунд, — то есть
+// складывала все чтения из своей базы в одну корзину.
+//
+// Теперь iam берёт тот же измеритель, что и остальные шесть сервисов, и его
+// ряды лежат в общем семействе платформы: вопрос «где во всей платформе вырос
+// хвост» стал одним запросом, а не семью. Провязка — в композиционном корне
+// (`cmd/kacho-iam/serve.go`), потому что слушателей iam строит сам, минуя
+// носитель входящего пути.

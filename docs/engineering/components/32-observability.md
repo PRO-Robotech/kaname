@@ -70,14 +70,39 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 держит тесты герметичными и исключает duplicate-register панику при рестартах
 сервера в одном процессе.
 
+### Задержка обслуженного вызова — ПЛАТФОРМЕННАЯ серия, не своя
+
+Свои серии `kacho_iam_grpc_server_handled_total` и
+`kacho_iam_grpc_server_handling_seconds` **сняты**. Их предмет — тот же, что у
+платформенного измерителя `pkg/grpcsrv.ServerLatency`, а два места об одном
+предмете расходятся: снятая пара смешивала отказ с успехом в одном ряду, не
+различала полосу слушателя и брала сетку корзин по умолчанию (первая граница —
+пять миллисекунд), то есть складывала все чтения из своей базы в одну корзину.
+
+Теперь iam берёт тот же измеритель, что и остальные шесть сервисов:
+
+| Metric | Type | Labels | Описание |
+|---|---|---|---|
+| `kacho_grpc_server_handled_total` | counter | grpc_service, grpc_method, listener, grpc_code | Обслуженные вызовы обоих слушателей, включая оборванные подписки. |
+| `kacho_grpc_server_handling_seconds` | histogram | grpc_service, grpc_method, listener, outcome | Задержка ОДИНОЧНОГО вызова. `outcome` ∈ {ok, error}: быстрый отказ занижает хвост, медленный завышает, поэтому смешивать их нельзя. |
+| `kacho_grpc_server_stream_seconds` | histogram | grpc_service, grpc_method, listener, outcome | Срок жизни серверного стрима — ДРУГАЯ величина, поэтому и серия другая, со своей сеткой корзин. |
+
+Домен читается из метки `grpc_service` (полное имя метода начинается с пакета
+контракта), поэтому отдельной метки сервиса нет. Полоса `listener` ∈
+{public, internal, unknown} различает два слушателя: `OperationService` и пара
+`Internal*` служатся обоими, и слитый ряд был бы средним двух разных величин.
+
+Провязка — в композиционном корне (`cmd/kacho-iam/serve.go`): слушателей iam
+строит сам, минуя носитель входящего пути, поэтому отказ старта О13
+(`servicecontract.New`) сюда не достаёт. Свойство держит обход дерева
+`internal/repohygiene.TestEveryGRPCListenerObservesItsLatency`.
+
 ### Собственные метрики
 
 Все имена несут префикс `kacho_iam_`.
 
 | Metric                                          | Type      | Labels                              | Описание                                                       |
 |-------------------------------------------------|-----------|-------------------------------------|----------------------------------------------------------------|
-| `kacho_iam_grpc_server_handled_total`           | counter   | grpc_service, grpc_method, grpc_code | Завершенные gRPC-запросы на сервере (оба listener'а).          |
-| `kacho_iam_grpc_server_handling_seconds`        | histogram | grpc_service, grpc_method           | Latency обработки gRPC-запросов.                               |
 | `kacho_iam_authz_check_duration_seconds`        | histogram | rpc, allowed                        | Latency authz Check hot-path (FGA Check + транспорт). SLO ≤30ms p95. |
 | `kacho_iam_authz_check_decisions_total`         | counter   | rpc, decision                       | Решения Check по полосе и исходу (`allow`/`deny`/`error`).    |
 | `kacho_iam_lro_inflight`                         | gauge     | —                                   | Операции, выданные пулу воркеров прямо сейчас.                 |
@@ -161,12 +186,14 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
     summary: "reconciler-sweep падает — осиротевшие операции не подбираются"
 
 - alert: KachoIAMRPCErrorRate
+  # Отбор по grpc_service, а не по имени серии: серия теперь общая на платформу,
+  # и без отбора тревога считала бы долю по всем семи сервисам сразу.
   expr: |
-    sum(rate(kacho_iam_grpc_server_handled_total{grpc_code!="OK"}[5m]))
-      / sum(rate(kacho_iam_grpc_server_handled_total[5m])) > 0.05
+    sum(rate(kacho_grpc_server_handled_total{grpc_service=~"kacho\\.cloud\\.iam\\..*",grpc_code!="OK"}[5m]))
+      / sum(rate(kacho_grpc_server_handled_total{grpc_service=~"kacho\\.cloud\\.iam\\..*"}[5m])) > 0.05
   for: 10m
   annotations:
-    summary: "доля не-OK gRPC-ответов > 5%"
+    summary: "доля не-OK gRPC-ответов iam > 5%"
 ```
 
 ## Healthcheck

@@ -390,18 +390,40 @@ func runServe(cfg config.Config) error {
 	// decides WHO MAY SPEAK FOR A USER, this decides ON WHICH RPC.
 	publicCallerPolicy := authzguard.NewPublicCallerPolicy(productionMode, authzguard.PublicPeerCallableRPCs())
 
+	// Измеритель задержки — ОДИН на процесс, полос у него две.
+	//
+	// Тот же измеритель, что носитель входящего пути ставит остальным шести
+	// сервисам: ряды iam ложатся в общее семейство платформы, и вопрос «где во
+	// всей платформе вырос хвост» остаётся одним запросом. Слушателей iam строит
+	// сам, минуя носитель, поэтому провязать измеритель обязан здесь — отказ
+	// старта О13 сюда не достаёт.
+	//
+	// Две полосы: `OperationService` и пара `Internal*` служатся обоими
+	// слушателями, и слитый ряд был бы средним двух разных величин — публичный
+	// вызов приходит от арендатора через край, внутренний от соседнего модуля по
+	// mTLS.
+	//
+	// Отказ регистрации — отказ подъёма, а не предупреждение: он означает
+	// несогласованное объявление серии, и поднять процесс значило бы отдать ему
+	// диагностическую поверхность без семейства, которого на ней не будет никогда.
+	latency, err := grpcsrv.NewServerLatency(metricsReg.Registerer())
+	if err != nil {
+		return fmt.Errorf("измеритель задержки обслуженного вызова: %w", err)
+	}
+
 	// Anti-anonymous guard перед мутирующими RPC: минимальная защита от
 	// анонимного создания Account/Project/AccessBinding/Group/SA/Role
 	// в дополнение к вопросу о доступе через AuthorizeService.
 	//
-	// Порядок: метрики (оборачивают всё) → recovery → личность вызывающего
+	// Порядок: измеритель задержки (оборачивает всё) → recovery → личность вызывающего
 	// (identityUnary: сертификат, затем переданная личность от разрешённого
 	// отправителя) → пер-RPC политика вызывающего → анти-аноним.
 	publicUnary := append([]grpc.UnaryServerInterceptor{
-		// Metrics interceptor first — wraps the full chain so the recorded
-		// latency/code covers the whole RPC (request count + handling
-		// seconds + grpc_code), for every public RPC including authz Check.
-		metricsReg.UnaryServerInterceptor(),
+		// Измеритель задержки первым — он оборачивает цепочку целиком, поэтому
+		// длительность и код накрывают ВЕСЬ вызов, включая вопрос о доступе.
+		// Стоя внутри решения о доступе, он оставил бы неизмеренным каждый отказ
+		// по правам — то есть исход, ради которого метрику и смотрят.
+		latency.UnaryServerInterceptor(grpcsrv.ListenerPublic),
 		// Panic-recovery immediately inside metrics: a panic in any downstream
 		// interceptor or handler becomes a logged codes.Internal for that ONE
 		// request instead of crashing the whole PDP process (metrics still
@@ -420,6 +442,9 @@ func runServe(cfg config.Config) error {
 		authzguard.AntiAnonymousUnary(logger),
 	)
 	publicStream := append([]grpc.StreamServerInterceptor{
+		// Срок жизни подписки — своя серия и своя сетка корзин: это другая
+		// величина, и общая с задержкой вызова не разрешала бы ни ту, ни другую.
+		latency.StreamServerInterceptor(grpcsrv.ListenerPublic),
 		grpcsrv.StreamPanicRecovery(logger),
 	}, identityStream(cfg)...)
 	publicStream = append(publicStream,
@@ -471,9 +496,11 @@ func runServe(cfg config.Config) error {
 	//     denies a non-gateway SAN on a gateway-fronted RPC first, so the SA
 	//     exemption cannot be abused).
 	internalUnary := append([]grpc.UnaryServerInterceptor{
-		// Metrics interceptor first — observe every internal RPC (the
-		// per-RPC authz-gate InternalIAMService.Check hot path lives here).
-		metricsReg.UnaryServerInterceptor(),
+		// Измеритель задержки первым — здесь живёт горячий путь пер-RPC гейта
+		// прав (`InternalIAMService.Check`), и его задержка есть задержка КАЖДОГО
+		// вызова всей платформы: она входит слагаемым в чужие хвосты, поэтому
+		// собственный ряд у неё обязан быть.
+		latency.UnaryServerInterceptor(grpcsrv.ListenerInternal),
 		// Panic-recovery immediately inside metrics — same rationale as the
 		// public chain: a handler/interceptor panic on the PDP hot path must
 		// not crash the process (fail-closed cluster-wide); it degrades to a
@@ -492,6 +519,7 @@ func runServe(cfg config.Config) error {
 		internalACRFloor.Unary(),
 	)
 	internalStream := append([]grpc.StreamServerInterceptor{
+		latency.StreamServerInterceptor(grpcsrv.ListenerInternal),
 		grpcsrv.StreamPanicRecovery(logger),
 	}, identityStream(cfg)...)
 	internalStream = append(internalStream,

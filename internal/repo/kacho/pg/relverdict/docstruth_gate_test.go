@@ -51,6 +51,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -59,9 +60,17 @@ import (
 )
 
 const (
-	chainArchDoc      = "services/iam/docs/engineering/architecture/scope-chain-reaches-the-root.md"
-	chainQueryGo      = "services/iam/internal/repo/kacho/pg/relverdict/query.go"
-	chainMigGlob      = "785001_*.sql"
+	chainArchDoc = "services/iam/docs/engineering/architecture/scope-chain-reaches-the-root.md"
+	chainQueryGo = "services/iam/internal/repo/kacho/pg/relverdict/query.go"
+	// chainMigDecl — по чему опознаётся миграция, ОБЪЯВЛЯЮЩАЯ представление цепи.
+	// Здесь стоял образец имени файла (`785001_*.sql`), и он ПЕРЕЖИЛ СВОЙ ПРЕДМЕТ
+	// в тот же день, когда цепь была объявлена заново другой миграцией: гейт
+	// продолжал выводить «истину о цепи» из СНЯТОГО определения и объявлял
+	// расхождением ровно то, что стало верным. Действующая миграция выводится из
+	// набора — берётся НАИБОЛЬШАЯ версия, чей блок Up объявляет представление,
+	// потому что порядок применения числовой и последнее объявление переживает
+	// предыдущие.
+	chainMigDecl      = `CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+kacho_iam\.resource_scope_edge\b`
 	cteCommentTop     = "-- scope — ОБЛАСТИ"
 	cteCommentEnd     = "scope(s_type, s_id, depth) AS ("
 	docsChainViewName = "kacho_iam.resource_scope_edge"
@@ -134,21 +143,46 @@ func tablesUnderTheView(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatalf("миграции не прочитаны (%v): выводить истину не из чего", err)
 	}
-	var body string
+	decl := regexp.MustCompile(chainMigDecl)
+	version := regexp.MustCompile(`^([0-9]+)_`)
+	var body, from string
+	best, seen := -1, 0
 	for _, e := range entries {
-		if ok, _ := filepath.Match(chainMigGlob, e.Name()); !ok {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
 		}
+		seen++
 		raw, rerr := migrations.FS.ReadFile(e.Name())
 		if rerr != nil {
 			t.Fatalf("миграция %s не прочитана: %v", e.Name(), rerr)
 		}
-		body = string(raw)
+		text := string(raw)
+		upAt, downAt := strings.Index(text, "-- +goose Up"), strings.Index(text, "-- +goose Down")
+		if upAt < 0 || downAt < upAt || !decl.MatchString(text[upAt:downAt]) {
+			continue
+		}
+		m := version.FindStringSubmatch(e.Name())
+		if m == nil {
+			t.Fatalf("у миграции %s нет числовой версии в имени: порядок применения по "+
+				"такому имени не установить", e.Name())
+		}
+		v, cerr := strconv.Atoi(m[1])
+		if cerr != nil {
+			t.Fatalf("версия миграции %s не число: %v", e.Name(), cerr)
+		}
+		if v > best {
+			best, body, from = v, text, e.Name()
+		}
+	}
+	if seen == 0 {
+		t.Fatal("во встроенном наборе НОЛЬ миграций: предпосылка гейта ложна, и его " +
+			"молчание означало бы «ничего не прочитано»")
 	}
 	if body == "" {
-		t.Fatalf("миграция по образцу %q во встроенном наборе не найдена: гейт не может "+
-			"вывести истину о цепи, и это ОТКАЗ, а не согласие", chainMigGlob)
+		t.Fatalf("среди %d миграций ни одна не объявляет %s: гейт не может вывести истину "+
+			"о цепи, и это ОТКАЗ, а не согласие", seen, docsChainViewName)
 	}
+	t.Logf("осмотрено миграций %d; действующее определение цепи — %s (версия %d)", seen, from, best)
 	up := strings.Index(body, "-- +goose Up")
 	down := strings.Index(body, "-- +goose Down")
 	if up < 0 || down < 0 || down < up {

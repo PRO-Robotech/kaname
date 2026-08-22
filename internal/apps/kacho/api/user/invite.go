@@ -447,10 +447,18 @@ func (uc *InviteUserUseCase) doInvite(
 					return inviteTxResult{}, ferr
 				}
 			}
-			// A freshly-inserted invitee user
-			// row must forward-materialize under the owner `*.*` binding (the flat model
-			// dropped the iam_user `from account` access cascade). Co-commit the
-			// reconcile event in the SAME writer-tx as the InsertPending (ban #10).
+			// A freshly-inserted invitee user row must forward-materialize under the
+			// owner `*.*` binding. Co-commit the reconcile event in the SAME writer-tx
+			// as the InsertPending (ban #10).
+			//
+			// ЗДЕСЬ СТОЯЛО «the flat model dropped the iam_user `from account` access
+			// cascade» — И ЭТО НЕВЕРНО. Модель объявляет `define super_admin: admin from
+			// account` у типа `iam_user` и сегодня, а компилятор плана даёт от неё два
+			// источника всем семи отношениям типа. Плоская модель сняла ЯРУСНЫЙ каскад
+			// (`viewer`/`editor` от аккаунта), а не уровень супер-доступа. Комментарий,
+			// объявляющий каскад снятым, ведёт к правке модели «раз его всё равно нет» —
+			// и она отняла бы доступ у владельца аккаунта и у делегированного
+			// администратора (измерено вердиктом, обе стороны).
 			if out.userIsNew {
 				if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(out.user.ID)); err != nil {
 					return inviteTxResult{}, err
