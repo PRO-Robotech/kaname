@@ -680,13 +680,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/List",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.accounts.list",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.AccountService/ListAllOperations",
@@ -813,13 +813,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/List",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.groups.list",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.GroupService/ListMembers",
@@ -1264,13 +1264,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/List",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.projects.list",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.ProjectService/ListOperations",
@@ -1324,13 +1324,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/List",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.roles.list",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/ListOperations",
@@ -1434,13 +1434,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/List",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.service_accounts.list",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.ServiceAccountService/ListOperations",
@@ -1504,13 +1504,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/List",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.users.list",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/ListOperations",
