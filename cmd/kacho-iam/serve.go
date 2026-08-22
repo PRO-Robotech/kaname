@@ -1038,18 +1038,30 @@ func runServe(cfg config.Config) error {
 		runSubjectChangeOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
-	// Журнал аудита. Дренажа у него НЕТ и в этой фазе не будет — приёмника не
-	// существует, — поэтому скан здесь делает не «наблюдение за доставкой», а
-	// единственную вещь, которую вообще можно сделать честно: делает молчание
-	// слышимым. Без него «ноль доставленных за всю жизнь очереди» не производит
-	// ни одна величина. Решение и предикат пересмотра — в реестре отступлений
-	// iam, audit-outbox-has-no-receiver.md.
+	// Журнал аудита: состояние очереди. Теперь у неё есть доставка (вывоз
+	// ниже), поэтому величины сканера читаются как обычно: глубина падает,
+	// возраст головы ограничен сверху. До появления приёмника они лишь делали
+	// молчание слышимым — растущая глубина и стареющая голова были верным
+	// описанием, а не сигналом сбоя.
 	tasks = append(tasks, func() error {
 		runAuditOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
-	// ВОЗВРАТА ОТРАВЛЕННЫХ СТРОК тоже нет, и это следствие, а не упущение: травил
-	// строки дренаж, отказом владельца прав. Дренажа нет — травить некому.
+	// Журнал аудита: вывоз в приёмник. Строится ДО запуска задач, чтобы ошибка
+	// сборки останавливала старт, а не всплывала фоном: журнал, который не
+	// вывозится, снаружи неотличим от журнала, в котором нечего вывозить.
+	auditShipper, err := buildAuditShipper(pool, metricsReg.OutboxRecorder(), logger)
+	if err != nil {
+		_ = listener.Close()
+		_ = internalListener.Close()
+		return fmt.Errorf("audit shipper wiring: %w", err)
+	}
+	tasks = append(tasks, func() error {
+		return auditShipper.Run(ctx)
+	})
+	// ВОЗВРАТА ОТРАВЛЕННЫХ СТРОК у журнала нет, и это следствие контракта
+	// приёмника, а не упущение: класса «не приму никогда» у него не существует,
+	// поэтому травить нечего — непринятая запись ждёт следующей попытки.
 
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_kacho_root` to
 	// the user identified by KACHO_IAM_BOOTSTRAP_ROOT_EMAIL and enqueues the
