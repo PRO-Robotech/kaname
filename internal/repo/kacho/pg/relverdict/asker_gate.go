@@ -108,3 +108,68 @@ func (a *Asker) DirectRelations(
 	}
 	return out, nil
 }
+
+// DirectRelationsMany — те же прямые отношения субъекта, но о СТРАНИЦЕ объектов
+// одного типа, ОДНИМ запросом.
+//
+// # Зачем отдельный метод, а не цикл по DirectRelations
+//
+// Хвост текста отказа платится на КАЖДОМ отказанном объекте, а страница списка
+// отказами и состоит — она ими сужается. Цикл вернул бы стоимость набора ровно
+// туда, откуда её убрал страничный вердикт: партия из ста отказов стоила бы ста
+// запросов диагностики при одном запросе на сам вердикт.
+//
+// # Предел — НА ОБЪЕКТ, и он держится запросом, а не отбором в памяти
+//
+// Диагностике нужен намёк, а не полный разбор, поэтому у каждого объекта не
+// более `limit` отношений. Считает это сама база (нумерация внутри объекта),
+// иначе запрос вернул бы все отношения всех объектов и обрезался бы после
+// чтения — то есть предел ограничивал бы длину ответа, но не работу.
+//
+// Ключа у объекта без прямых отношений в ответе нет: пустой срез и отсутствие
+// ключа означают для вызывающего одно и то же — «хвоста не будет».
+func (a *Asker) DirectRelationsMany(
+	ctx context.Context, subject, objectType string, objectIDs []string, limit int,
+) (map[string][]string, error) {
+	if a == nil || a.pool == nil {
+		return nil, fmt.Errorf("relverdict: источник не собран")
+	}
+	if subject == "" || objectType == "" || len(objectIDs) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 16
+	}
+	rows, err := a.pool.Query(ctx, `
+		SELECT r.object_id, r.relation
+		  FROM (
+		    SELECT d.object_id, d.relation,
+		           row_number() OVER (PARTITION BY d.object_id ORDER BY d.relation) AS rn
+		      FROM (
+		        SELECT DISTINCT f.object_id, f.relation
+		          FROM kacho_iam.relation_fact f
+		         WHERE f.object_type = $1
+		           AND f.object_id = ANY ($2::text[])
+		           AND f.subject   = $3
+		      ) d
+		  ) r
+		 WHERE r.rn <= $4::int
+		 ORDER BY r.object_id, r.rn`, objectType, objectIDs, subject, limit)
+	if err != nil {
+		return nil, fmt.Errorf("relverdict: прямые отношения субъекта на странице: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]string, len(objectIDs))
+	for rows.Next() {
+		var objectID, rel string
+		if serr := rows.Scan(&objectID, &rel); serr != nil {
+			return nil, fmt.Errorf("relverdict: разбор прямого отношения страницы: %w", serr)
+		}
+		out[objectID] = append(out[objectID], rel)
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return nil, fmt.Errorf("relverdict: чтение прямых отношений страницы: %w", rerr)
+	}
+	return out, nil
+}

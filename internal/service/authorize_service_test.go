@@ -546,3 +546,36 @@ func TestAuthorize_CheckRelation_StoreErrorIsUnavailable(t *testing.T) {
 		t.Errorf("expected message to mention authz unavailable; got %v", err)
 	}
 }
+
+// BatchCheckWithContext — ПАКЕТНАЯ ДВЕРЬ К ТОМУ ЖЕ ОРАКУЛУ, из которого отвечает
+// пообъектная. Своего ответа у неё нет намеренно: дублёр, отвечающий партии не
+// то, что отвечает по одному, скрыл бы ровно то расхождение, ради которого он и
+// подставляется.
+func (m *mockRelations) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := m.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
+}
+
+// DirectRelationsMany — та же диагностика о странице, тем же оракулом.
+func (m *mockRelations) DirectRelationsMany(ctx context.Context, subject, objectType string,
+	objectIDs []string, limit int) (map[string][]string, error) {
+	out := make(map[string][]string, len(objectIDs))
+	for _, objectID := range objectIDs {
+		rels, err := m.DirectRelations(ctx, subject, objectType, objectID, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(rels) > 0 {
+			out[objectID] = rels
+		}
+	}
+	return out, nil
+}

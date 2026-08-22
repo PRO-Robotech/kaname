@@ -190,3 +190,35 @@ func TestAuthorizeService_D_ReachableOnInternalListener(t *testing.T) {
 			"(регистрация аддитивна — публичная поверхность не сузилась)")
 	require.NoError(t, err, "D-4: публичный маршрут дошёл до use-case")
 }
+
+// BatchCheckWithContext — пакетная дверь к ТОМУ ЖЕ оракулу, из которого отвечает
+// пообъектная: дублёр, отвечающий партии не то, что отвечает по одному, скрыл бы
+// ровно то расхождение, ради которого он и подставляется.
+func (a authzStubAuthorizer) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := a.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
+}
+
+// DirectRelationsMany — та же диагностика о странице, тем же оракулом.
+func (a authzStubAuthorizer) DirectRelationsMany(ctx context.Context, subject, objectType string,
+	objectIDs []string, limit int) (map[string][]string, error) {
+	out := make(map[string][]string, len(objectIDs))
+	for _, objectID := range objectIDs {
+		rels, err := a.DirectRelations(ctx, subject, objectType, objectID, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(rels) > 0 {
+			out[objectID] = rels
+		}
+	}
+	return out, nil
+}

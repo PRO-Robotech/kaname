@@ -109,6 +109,11 @@ type queryUnderGate struct {
 func queriesUnderGate() []queryUnderGate {
 	return []queryUnderGate{
 		{"вердикт", verdictQuerySQL, paramDictionary{model: "$2", catalog: "$9"}},
+		// Вердикт о СТРАНИЦЕ — отдельный запрос и потому отдельный судимый:
+		// он собирает те же ветви, но своими подстановками, и словарь у него
+		// может разойтись независимо. Перечень судимых выписан, поэтому запрос,
+		// сюда не внесённый, остался бы не осмотренным молча.
+		{"вердикт о странице", verdictManyQuerySQL, paramDictionary{model: "$2", catalog: "$9"}},
 		{"разбор оснований", expandQuerySQL, paramDictionary{model: "$1", catalog: "$7"}},
 		{"перечисление субъектов", subjectsQuerySQL, paramDictionary{model: "$1", catalog: "$9"}},
 		{"перечисление объектов", listQuerySQL, paramDictionary{model: "$2", catalog: "$9"}},

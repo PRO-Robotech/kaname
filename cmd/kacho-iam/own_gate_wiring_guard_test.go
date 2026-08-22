@@ -69,6 +69,13 @@ func (a askerNeverAsked) Sources(context.Context, string, string, string) ([]str
 	return nil, a.fail("Sources")
 }
 
+// DirectRelationsMany — страничная диагностика. Страж провязки её тоже не зовёт:
+// его предмет — существование формы, а не её ответы.
+func (a askerNeverAsked) DirectRelationsMany(context.Context, string, string, []string, int) (
+	map[string][]string, error) {
+	return nil, a.fail("DirectRelationsMany")
+}
+
 func (a askerNeverAsked) DirectRelations(context.Context, string, string, string, int) ([]string, error) {
 	return nil, a.fail("DirectRelations")
 }
