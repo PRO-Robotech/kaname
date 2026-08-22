@@ -2,28 +2,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 =======================================================================
 
 ПРОВЕНАНС
-  снято               2026-08-20 18:15:26 MSK
-  ревизия дерева      e0c38ff4e3a45f07cbb48b286026830ef0020fad
-  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
-                      исполнявшееся дерево целиком
+  снято               2026-08-22 11:30:22 MSK
+  ревизия дерева      3209d824b52565b523fb5d4edd4cbcf63bba165d
+  состояние дерева    ГРЯЗНОЕ: путей с несохранёнными правками 2.
+                      Ревизия выше НЕ описывает исполнявшееся дерево целиком —
+                      повторение по ней даст другой код. Отчёт остаётся годным
+                      как наблюдение и НЕ годится как воспроизводимый замер.
   машина              AMD Ryzen 5 5600X 6-Core Processor, ядер 12
   Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
-  отпечаток состава     82264717550b88e6
-  отпечаток содержимого c350caa8c02171f1
-  файлов под отпечатком 9, таблиц выведено 1 (kacho_iam.resource_mirror)
+  отпечаток состава     fa69a57e8d28cd98
+  отпечаток содержимого 7dbf8e0b97ab2e6b
+  файлов под отпечатком 5, таблиц выведено 1 (kacho_iam.resource_mirror)
   предикат отпечатка    все не-тестовые .go каталога services/iam/internal/apps/kacho/api/access_binding/reconcile; все .sql каталога services/iam/internal/migrations, называющие хотя бы одну таблицу, которую пишет материализатор (имена таблиц ВЫВЕДЕНЫ из его кода по приставке "kacho_iam.", а не выписаны)
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (пофайлово, чтобы гейт назвал ВИНОВНИКА, а не только факт)
     f0dd4dd52e495c59  services/iam/internal/apps/kacho/api/access_binding/reconcile/forward.go
     04a2fbeda88d6813  services/iam/internal/apps/kacho/api/access_binding/reconcile/reconcile.go
     5b5c3b193ab46523  services/iam/internal/apps/kacho/api/access_binding/reconcile/tuples.go
     2fce1aac32b50a98  services/iam/internal/migrations/0019_resource_mirror.sql
-    8bad6f9ec06a83ec  services/iam/internal/migrations/0020_access_binding_target_members.sql
-    80d81b3ed7ea3468  services/iam/internal/migrations/0021_resource_reconcile_outbox.sql
     bf698e90d4421558  services/iam/internal/migrations/0054_resource_mirror_parent_scope_idx.sql
-    009515ae9d1bae7b  services/iam/internal/migrations/0074_retire_compute_block_storage.sql
-    6c7213049f74120a  services/iam/internal/migrations/0084_backfill_parent_edges_from_mirror.sql
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)
   полосы: аддитивная (создание выдачи) · полная (правка роли) · удаление истечением срока · веер выдач
@@ -56,24 +54,24 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 
 полоса                     членов      исход                                       время   стейтм.     ACTIVE     реестр очер.движ.
 ------------------------------------------------------------------------------------------------------------------------------------
-аддитивная (создание)      100         СОШЁЛСЯ                                      29ms         9        100        400       116
-аддитивная (создание)      1000        СОШЁЛСЯ                                     238ms         9       1000       4000      1016
-аддитивная (создание)      10000       СОШЁЛСЯ                                     2.26s         9      10000      40000     10016
-аддитивная (создание)      65536       СОШЁЛСЯ                                    4.678s        72      65536       4096      1040
-аддитивная (создание)      655360*     СОШЁЛСЯ                                   44.789s        72     655360      40960     10256
-полная (правка роли)       100         СОШЁЛСЯ                                      77ms       307        100        400       116
-полная (правка роли)       1000        СОШЁЛСЯ                                     678ms      3007       1000       4000      1016
-полная (правка роли)       10000       СОШЁЛСЯ                                    7.135s     30007      10000      40000     10016
-полная (правка роли)       65536       СОШЁЛСЯ                                   34.195s    132166      65536       4096      1040
-полная (правка роли)       655360*     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s    444639          0          0        16
-удаление истечением срока  100         СОШЁЛСЯ                                     133ms      1107          0          0       216
-удаление истечением срока  1000        СОШЁЛСЯ                                    1.731s     11007          0          0      2016
-удаление истечением срока  10000       СОШЁЛСЯ                                    39.58s    110007          0          0     20016
-удаление истечением срока  65536       СОШЁЛСЯ                                   34.518s    140295          0          0      2064
-полная, ВЕЕР выдач         1×100       СОШЁЛСЯ                                      80ms       307        100        400       116
-полная, ВЕЕР выдач         9×100       СОШЁЛСЯ                                     655ms      2763        100        400       916
-полная, ВЕЕР выдач         227×100     СОШЁЛСЯ                                    16.46s     69689        100        400     22716
-полная, ВЕЕР выдач         512×100*    СОШЁЛСЯ                                    39.55s    157184        100        400     51216
+аддитивная (создание)      100         СОШЁЛСЯ                                      37ms         9        100        400       117
+аддитивная (создание)      1000        СОШЁЛСЯ                                     284ms         9       1000       4000      1017
+аддитивная (создание)      10000       СОШЁЛСЯ                                    2.479s         9      10000      40000     10017
+аддитивная (создание)      65536       СОШЁЛСЯ                                    4.854s        72      65536       4096      1041
+аддитивная (создание)      655360*     СОШЁЛСЯ                                    48.33s        72     655360      40960     10257
+полная (правка роли)       100         СОШЁЛСЯ                                      80ms       307        100        400       117
+полная (правка роли)       1000        СОШЁЛСЯ                                     735ms      3007       1000       4000      1017
+полная (правка роли)       10000       СОШЁЛСЯ                                    7.146s     30007      10000      40000     10017
+полная (правка роли)       65536       СОШЁЛСЯ                                   37.664s    132166      65536       4096      1041
+полная (правка роли)       655360*     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s    388215          0          0        17
+удаление истечением срока  100         СОШЁЛСЯ                                     149ms      1107          0          0       217
+удаление истечением срока  1000        СОШЁЛСЯ                                    2.025s     11007          0          0      2017
+удаление истечением срока  10000       СОШЁЛСЯ                                   50.174s    110007          0          0     20017
+удаление истечением срока  65536       СОШЁЛСЯ                                   44.186s    140295          0          0      2065
+полная, ВЕЕР выдач         1×100       СОШЁЛСЯ                                      91ms       307        100        400       117
+полная, ВЕЕР выдач         9×100       СОШЁЛСЯ                                     817ms      2763        100        400       917
+полная, ВЕЕР выдач         227×100     СОШЁЛСЯ                                   21.158s     69689        100        400     22717
+полная, ВЕЕР выдач         512×100*    СОШЁЛСЯ                                   47.539s    157184        100        400     51217
 
 СТЕЙТМЕНТОВ НА ЧЛЕНА — ЭТО И ЕСТЬ РАЗЛИЧИЕ ПАКЕТНОЙ И ПОШТУЧНОЙ ПОЛОС
   Знаменатель — члены ВСЕГО (веер × членов на выдачу), а не члены одной выдачи:
@@ -81,24 +79,24 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
   другого предиката.
 полоса                     членов всего     стейтментов         на члена три самых частых
 ------------------------------------------------------------------------------------------------------------------------------------
-аддитивная (создание)      100                        9           0.0900 SELECT id, cluster_id,×1 · SELECT m.object_type, m.object_id,×1 · INSERT INTO kacho_iam.access_binding_target_members×1
-аддитивная (создание)      1000                       9           0.0090 SELECT id, subject_type,×1 · SELECT id, cluster_id,×1 · SELECT binding_id, role_id,×1
-аддитивная (создание)      10000                      9           0.0009 SELECT binding_id, role_id,×1 · SELECT id, subject_type,×1 · SELECT id, cluster_id,×1
-аддитивная (создание)      65536                     72           0.0011 SELECT m.object_type, m.object_id,×64 · SELECT binding_id, role_id,×1 · begin×1
-аддитивная (создание)      655360                    72           0.0001 SELECT m.object_type, m.object_id,×64 · begin×1 · SELECT binding_id, role_id,×1
+аддитивная (создание)      100                        9           0.0900 SELECT binding_id, role_id,×1 · SELECT id, subject_type,×1 · SELECT m.object_type, m.object_id,×1
+аддитивная (создание)      1000                       9           0.0090 INSERT INTO kacho_iam.access_binding_emitted_tuples×1 · begin×1 · INSERT INTO kacho_iam.access_binding_target_members×1
+аддитивная (создание)      10000                      9           0.0009 SELECT m.object_type, m.object_id,×1 · INSERT INTO kacho_iam.fga_outbox×1 · begin×1
+аддитивная (создание)      65536                     72           0.0011 SELECT m.object_type, m.object_id,×64 · SELECT id, cluster_id,×1 · INSERT INTO kacho_iam.fga_outbox×1
+аддитивная (создание)      655360                    72           0.0001 SELECT m.object_type, m.object_id,×64 · SELECT id, subject_type,×1 · INSERT INTO kacho_iam.access_binding_target_members×1
 полная (правка роли)       100                      307           3.0700 INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.fga_outbox×100 · INSERT INTO kacho_iam.access_binding_emitted_tuples×100
-полная (правка роли)       1000                    3007           3.0070 INSERT INTO kacho_iam.access_binding_target_members×1000 · INSERT INTO kacho_iam.access_binding_emitted_tuples×1000 · INSERT INTO kacho_iam.fga_outbox×1000
+полная (правка роли)       1000                    3007           3.0070 INSERT INTO kacho_iam.access_binding_target_members×1000 · INSERT INTO kacho_iam.fga_outbox×1000 · INSERT INTO kacho_iam.access_binding_emitted_tuples×1000
 полная (правка роли)       10000                  30007           3.0007 INSERT INTO kacho_iam.access_binding_target_members×10000 · INSERT INTO kacho_iam.fga_outbox×10000 · INSERT INTO kacho_iam.access_binding_emitted_tuples×10000
 полная (правка роли)       65536                 132166           2.0167 INSERT INTO kacho_iam.access_binding_target_members×65536 · INSERT INTO kacho_iam.access_binding_emitted_tuples×65536 · INSERT INTO kacho_iam.fga_outbox×1024
-полная (правка роли)       655360                444639           0.6785 INSERT INTO kacho_iam.access_binding_target_members×217165 · INSERT INTO kacho_iam.access_binding_emitted_tuples×217164 · INSERT INTO kacho_iam.fga_outbox×10240
+полная (правка роли)       655360                388215           0.5924 INSERT INTO kacho_iam.access_binding_target_members×188953 · INSERT INTO kacho_iam.access_binding_emitted_tuples×188952 · INSERT INTO kacho_iam.fga_outbox×10240
 удаление истечением срока  100                     1107          11.0700 DELETE FROM kacho_iam.access_binding_emitted_tuples×400 · SELECT EXISTS (×400 · SELECT fga_user, relation,×100
-удаление истечением срока  1000                   11007          11.0070 DELETE FROM kacho_iam.access_binding_emitted_tuples×4000 · SELECT EXISTS (×4000 · SELECT fga_user, relation,×1000
-удаление истечением срока  10000                 110007          11.0007 SELECT EXISTS (×40000 · DELETE FROM kacho_iam.access_binding_emitted_tuples×40000 · DELETE FROM kacho_iam.access_binding_target_members×10000
-удаление истечением срока  65536                 140295           2.1407 DELETE FROM kacho_iam.access_binding_target_members×65536 · SELECT fga_user, relation,×65536 · DELETE FROM kacho_iam.access_binding_emitted_tuples×4096
-полная, ВЕЕР выдач         100                      307           3.0700 INSERT INTO kacho_iam.fga_outbox×100 · INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.access_binding_emitted_tuples×100
+удаление истечением срока  1000                   11007          11.0070 SELECT EXISTS (×4000 · DELETE FROM kacho_iam.access_binding_emitted_tuples×4000 · SELECT fga_user, relation,×1000
+удаление истечением срока  10000                 110007          11.0007 SELECT EXISTS (×40000 · DELETE FROM kacho_iam.access_binding_emitted_tuples×40000 · SELECT fga_user, relation,×10000
+удаление истечением срока  65536                 140295           2.1407 SELECT fga_user, relation,×65536 · DELETE FROM kacho_iam.access_binding_target_members×65536 · DELETE FROM kacho_iam.access_binding_emitted_tuples×4096
+полная, ВЕЕР выдач         100                      307           3.0700 INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.fga_outbox×100 · INSERT INTO kacho_iam.access_binding_emitted_tuples×100
 полная, ВЕЕР выдач         900                     2763           3.0700 INSERT INTO kacho_iam.access_binding_target_members×900 · INSERT INTO kacho_iam.fga_outbox×900 · INSERT INTO kacho_iam.access_binding_emitted_tuples×900
-полная, ВЕЕР выдач         22700                  69689           3.0700 INSERT INTO kacho_iam.access_binding_target_members×22700 · INSERT INTO kacho_iam.access_binding_emitted_tuples×22700 · INSERT INTO kacho_iam.fga_outbox×22700
-полная, ВЕЕР выдач         51200                 157184           3.0700 INSERT INTO kacho_iam.access_binding_target_members×51200 · INSERT INTO kacho_iam.access_binding_emitted_tuples×51200 · INSERT INTO kacho_iam.fga_outbox×51200
+полная, ВЕЕР выдач         22700                  69689           3.0700 INSERT INTO kacho_iam.fga_outbox×22700 · INSERT INTO kacho_iam.access_binding_target_members×22700 · INSERT INTO kacho_iam.access_binding_emitted_tuples×22700
+полная, ВЕЕР выдач         51200                 157184           3.0700 INSERT INTO kacho_iam.fga_outbox×51200 · INSERT INTO kacho_iam.access_binding_target_members×51200 · INSERT INTO kacho_iam.access_binding_emitted_tuples×51200
 
 НАСЫЩЕНИЕ ШТАТНОГО ПРИБОРА
   Корзины `kacho_iam_binding_materialization_tuples` кончаются на 5000. Точка,
@@ -117,25 +115,25 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 ОТЛОЖЕННАЯ РАБОТА, ОСТАВШАЯСЯ ПОСЛЕ ПРОХОДА (очереди)
 полоса                     членов всего  очередь движка очередь пересведения
 ------------------------------------------------------------------------------------------------------------------------------------
-аддитивная (создание)      100                      116                    0
-аддитивная (создание)      1000                    1016                    0
-аддитивная (создание)      10000                  10016                    0
-аддитивная (создание)      65536                   1040                    0
-аддитивная (создание)      655360                 10256                    0
-полная (правка роли)       100                      116                    0
-полная (правка роли)       1000                    1016                    0
-полная (правка роли)       10000                  10016                    0
-полная (правка роли)       65536                   1040                    0
-полная (правка роли)       655360                    16                    0
-удаление истечением срока  100                      216                    0
-удаление истечением срока  1000                    2016                    0
-удаление истечением срока  10000                  20016                    0
-удаление истечением срока  65536                   2064                    0
-полная, ВЕЕР выдач         100                      116                    0
-полная, ВЕЕР выдач         900                      916                    0
-полная, ВЕЕР выдач         22700                  22716                    0
-полная, ВЕЕР выдач         51200                  51216                    0
+аддитивная (создание)      100                      117                    0
+аддитивная (создание)      1000                    1017                    0
+аддитивная (создание)      10000                  10017                    0
+аддитивная (создание)      65536                   1041                    0
+аддитивная (создание)      655360                 10257                    0
+полная (правка роли)       100                      117                    0
+полная (правка роли)       1000                    1017                    0
+полная (правка роли)       10000                  10017                    0
+полная (правка роли)       65536                   1041                    0
+полная (правка роли)       655360                    17                    0
+удаление истечением срока  100                      217                    0
+удаление истечением срока  1000                    2017                    0
+удаление истечением срока  10000                  20017                    0
+удаление истечением срока  65536                   2065                    0
+полная, ВЕЕР выдач         100                      117                    0
+полная, ВЕЕР выдач         900                      917                    0
+полная, ВЕЕР выдач         22700                  22717                    0
+полная, ВЕЕР выдач         51200                  51217                    0
 
 
 ОБЪЁМ ОСМОТРЕННОГО
-  точек исполнено 18, настенное время 6m11s
+  точек исполнено 18, настенное время 7m0s
