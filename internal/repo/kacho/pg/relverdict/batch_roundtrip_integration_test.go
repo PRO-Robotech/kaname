@@ -123,7 +123,11 @@ func withCountedPool(t *testing.T, seed func(ctx context.Context, tx pgx.Tx)) (
 	if err != nil {
 		t.Fatalf("пул: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	// Закрытие С ПРЕДЕЛОМ, а не `t.Cleanup(pool.Close)`: отложенное закрытие ждёт
+	// соединение, которое проба, упавшая внутри открытой транзакции, не вернёт
+	// никогда, — и уносит с собой вердикт всего пакета. Держится гейтом дерева
+	// `TestPoolCloseInTestsIsBounded`; он и поймал здесь первую редакцию.
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
