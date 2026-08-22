@@ -331,6 +331,15 @@ type abFakeRepo struct {
 	// get_error_mapping_test.go to simulate a transient (non-not-found) Reader
 	// failure on the Update/Delete existence-check Get.
 	forceGetErr error
+	// membersOfGroupsErr — отказ чтения состава групп. Ручка нужна, потому что
+	// «полнота перечисления» держится ТОЛЬКО тем, что отказ соседа отказывает
+	// запросу: проглоченный отказ даёт тихо усечённый ответ, неотличимый от
+	// честного «в группах никого» (#914).
+	membersOfGroupsErr error
+	// groupsReaderNil — непровязанный читатель групп. Отдельная полоса от
+	// отказа: «мне нечем ответить» и «ответ пуст» — разные факты, и второй не
+	// вправе производиться первым.
+	groupsReaderNil bool
 	// emittedTuples — persisted exact emitted-set per binding
 	// (access_binding_emitted_tuples), keyed by binding id. Co-committing
 	// the grant tuples here lets revoke/Role.Update use the stored set
@@ -523,11 +532,19 @@ func (rd *abFakeReader) Accounts() acct_repo.ReaderIface      { return &fakeAcct
 func (rd *abFakeReader) Projects() proj_repo.ReaderIface      { return &fakeProjRdr{repo: rd.repo} }
 func (rd *abFakeReader) Users() user_repo.ReaderIface         { return &fakeUserRdr{repo: rd.repo} }
 func (rd *abFakeReader) ServiceAccounts() sa_repo.ReaderIface { return &fakeSARdr{repo: rd.repo} }
-func (rd *abFakeReader) Groups() group.ReaderIface            { return &fakeGroupRdr{repo: rd.repo} }
-func (rd *abFakeReader) Roles() role_repo.ReaderIface         { return &fakeRoleRdr{repo: rd.repo} }
-func (rd *abFakeReader) AccessBindings() ab_repo.ReaderIface  { return &fakeABRdr{repo: rd.repo} }
-func (rd *abFakeReader) Commit(_ context.Context) error       { return nil }
-func (rd *abFakeReader) Rollback(_ context.Context) error     { return nil }
+func (rd *abFakeReader) Groups() group.ReaderIface {
+	rd.repo.mu.Lock()
+	nilReader := rd.repo.groupsReaderNil
+	rd.repo.mu.Unlock()
+	if nilReader {
+		return nil
+	}
+	return &fakeGroupRdr{repo: rd.repo}
+}
+func (rd *abFakeReader) Roles() role_repo.ReaderIface        { return &fakeRoleRdr{repo: rd.repo} }
+func (rd *abFakeReader) AccessBindings() ab_repo.ReaderIface { return &fakeABRdr{repo: rd.repo} }
+func (rd *abFakeReader) Commit(_ context.Context) error      { return nil }
+func (rd *abFakeReader) Rollback(_ context.Context) error    { return nil }
 
 // abFakeWriter implements kachorepo.Writer.
 type abFakeWriter struct {
@@ -809,6 +826,9 @@ func (g *fakeGroupRdr) ListMembers(_ context.Context, _ domain.GroupID, _ group.
 func (g *fakeGroupRdr) MembersOfGroups(_ context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, error) {
 	g.repo.mu.Lock()
 	defer g.repo.mu.Unlock()
+	if g.repo.membersOfGroupsErr != nil {
+		return nil, g.repo.membersOfGroupsErr
+	}
 	want := make(map[string]struct{}, len(groupIDs))
 	for _, id := range groupIDs {
 		want[string(id)] = struct{}{}

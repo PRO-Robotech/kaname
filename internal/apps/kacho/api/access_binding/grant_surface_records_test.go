@@ -30,11 +30,14 @@ package access_binding
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
@@ -55,29 +58,94 @@ func (s *stubClusterAdmins) ListActive(context.Context) ([]domain.ClusterAdminEn
 }
 
 const (
-	gsGroupID  = "grp0000000000000wrt1"
-	gsBindGrp  = "acb00000000000grp001"
-	gsBindUser = "acb00000000000usr001"
-	gsAccount  = "acc_gs_914"
+	// Три группы, и каждая проверяет СВОЙ путь до состава.
+	//
+	// Форм субъекта у выдачи ДВЕ, и они не совпадают: канонический набор
+	// `subjects[]` и плоская пара строки, в которую путь создания кладёт ТОЛЬКО
+	// `subjects[0]` (`create.go`). Выдача на две группы поэтому хранит вторую
+	// исключительно в наборе — и достаёт её единственная ветвь `groupSubjectsOf`.
+	//
+	// Фикстура обязана делать НАГРУЖЕННЫМИ обе ветви, иначе снятие одной из них
+	// проходит зелёным: групповая выдача с одним субъектом достаётся и той, и
+	// другой, и проба перестаёт различать их вовсе.
+	gsGroupFlat  = "grp0000000000000wrt1" // только в плоской паре — ветвь пары
+	gsGroupBoth  = "grp0000000000000wrt2" // и в паре, и в наборе — перекрытие
+	gsGroupMulti = "grp0000000000000wrt3" // только в наборе — ветвь набора
+
+	gsBindGrp   = "acb00000000000grp001" // выдача одной группе, набора нет
+	gsBindMulti = "acb00000000000grp002" // многосубъектная: пара + вторая группа
+	gsBindUser  = "acb00000000000usr001" // выдача человеку — групп не даёт
+	gsAccount   = "acc_gs_914"
 )
 
-// newGrantSurfaceFixture — страница с ДВУМЯ выдачами: одна выдана группе (её
-// состав и есть предмет второго вида), другая — человеку.
+// gsExpectedGroups — группы, чей состав перечисление обязано вернуть, и путь,
+// которым каждая туда попадает. Проба утверждает СОСТАВ множества, а не его
+// мощность: потеря ветви обязана называть ПРОПАВШУЮ группу, иначе разбирающий
+// отказ видит «было 5, стало 3» и не знает, какая из форм субъекта отвалилась.
+var gsExpectedGroups = map[string]string{
+	gsGroupFlat:  "плоская пара выдачи",
+	gsGroupBoth:  "обе формы сразу",
+	gsGroupMulti: "канонический набор subjects[] (в плоскую пару НЕ попадает)",
+}
+
+// newGrantSurfaceFixture — страница с ТРЕМЯ выдачами: одна группе одной формой,
+// одна МНОГОСУБЪЕКТНАЯ (две группы), одна человеку.
+//
+// Многосубъектная — не украшение: `subjects` публичное повторяющееся поле
+// запроса создания, выдача на две группы законна и достижима арендатором. Без
+// неё ветвь набора в `groupSubjectsOf` не исполняется НИ РАЗУ, и её снятие
+// проходит зелёным по всему пакету.
 func newGrantSurfaceFixture(t *testing.T) (*abFakeRepo, *abQueriesStub) {
 	t.Helper()
 	repo := newABFakeRepo("usr_o", gsAccount, "", "rol_v", "kacho.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
+		// Плоская пара без строк набора: так выглядит выдача, у которой
+		// канонический набор не спроецирован. Единственный путь к её группе —
+		// ветвь пары.
 		{ID: gsBindGrp, ResourceType: "account", ResourceID: gsAccount,
-			SubjectType: domain.SubjectTypeGroup, SubjectID: gsGroupID},
+			SubjectType: domain.SubjectTypeGroup, SubjectID: gsGroupFlat},
+		// Многосубъектная: пара несёт ПЕРВЫЙ субъект (так её кладёт путь
+		// создания), вторая группа живёт только в наборе.
+		{ID: gsBindMulti, ResourceType: "account", ResourceID: gsAccount,
+			SubjectType: domain.SubjectTypeGroup, SubjectID: gsGroupBoth},
 		{ID: gsBindUser, ResourceType: "account", ResourceID: gsAccount,
 			SubjectType: domain.SubjectTypeUser, SubjectID: "usr_a"},
 	})
-	repo.AddGroupMember(gsGroupID, "service_account", "sva0000000000000one1")
-	repo.AddGroupMember(gsGroupID, "service_account", "sva0000000000000two2")
+	seedABSubjects(repo, gsBindMulti, []domain.Subject{
+		{Type: domain.SubjectTypeGroup, ID: gsGroupBoth},
+		{Type: domain.SubjectTypeGroup, ID: gsGroupMulti},
+	})
+	repo.AddGroupMember(gsGroupFlat, "service_account", "sva0000000000000one1")
+	repo.AddGroupMember(gsGroupFlat, "service_account", "sva0000000000000two2")
+	repo.AddGroupMember(gsGroupBoth, "service_account", "sva000000000000three")
+	repo.AddGroupMember(gsGroupMulti, "service_account", "sva0000000000000four")
+	repo.AddGroupMember(gsGroupMulti, "user", "usr0000000000000five")
 
 	fga := newABQueriesStub()
-	fga.set("v_get", "user:usr_caller", []string{gsBindGrp, gsBindUser})
+	fga.set("v_get", "user:usr_caller", []string{gsBindGrp, gsBindMulti, gsBindUser})
 	return repo, fga
+}
+
+// seedABSubjects — канонический набор субъектов выдачи в дублёре
+// `access_binding_subjects`. Тот же путь, которым его наполняет запись.
+func seedABSubjects(repo *abFakeRepo, id domain.AccessBindingID, subs []domain.Subject) {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.abSubjects == nil {
+		repo.abSubjects = map[domain.AccessBindingID][]domain.Subject{}
+	}
+	repo.abSubjects[id] = append([]domain.Subject(nil), subs...)
+}
+
+// groupsOfMemberships — группы, чей состав вернуло перечисление.
+func groupsOfMemberships(records []*iamv1.GrantSurfaceRecord) map[string]int {
+	out := map[string]int{}
+	for _, r := range records {
+		if m := r.GetGroupMembership(); m != nil {
+			out[m.GetGroupId()]++
+		}
+	}
+	return out
 }
 
 // kindOfArm — вид, который называет ВЕТВЬ записи. Отдельно от поля `kind`
@@ -131,18 +199,29 @@ func TestABList_R914_EnumerationReturnsAllThreeKinds(t *testing.T) {
 	require.NoError(t, err)
 
 	counts := kindCounts(t, resp.GetRecords())
-	assert.Equal(t, 2, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_ACCESS_BINDING],
+	assert.Equal(t, 3, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_ACCESS_BINDING],
 		"выдачи страницы обязаны быть в перечислении: без них оно не перечисление, а довесок")
-	assert.Equal(t, 2, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_GROUP_MEMBERSHIP],
+	assert.Equal(t, 5, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_GROUP_MEMBERSHIP],
 		"состав группы, названной субъектом выдачи, — второй вид: без него «выдано группе» "+
 			"не отвечает на вопрос, КОМУ выдано")
+
+	// СОСТАВ множества групп, а не его мощность. Обе формы субъекта обязаны
+	// доводить до состава, и потеря любой из них называет пропавшую группу
+	// поимённо — иначе разбирающий видит упавшее число и не знает, что отвалилось.
+	got := groupsOfMemberships(resp.GetRecords())
+	for gid, how := range gsExpectedGroups {
+		assert.Containsf(t, got, gid,
+			"состав группы %s не вернулся: её достаёт %s — значит эта форма субъекта "+
+				"перестала доходить до перечисления, и неполнота выглядит как «в группе никого»",
+			gid, how)
+	}
 	assert.Equal(t, 1, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_CLUSTER_ADMIN],
 		"верхний ярус супер-доступа — третий вид: своя поверхность у него остаётся, "+
 			"но чтение обязано быть одно")
 
 	// Поле выдач остаётся тем же: перечисление ДОБАВЛЯЕТ вид, а не подменяет
 	// прежний ответ.
-	assert.Len(t, resp.GetAccessBindings(), 2)
+	assert.Len(t, resp.GetAccessBindings(), 3)
 }
 
 // TestABList_R914_TenantSeesNoClusterAdmins — отрицательное плечо: арендатору
@@ -176,8 +255,10 @@ func TestABList_R914_TenantSeesNoClusterAdmins(t *testing.T) {
 
 	// Положительный контроль рядом. Без него ноль выше зеленел бы и на
 	// перечислении, которое не заполняется вовсе.
-	assert.Equal(t, 2, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_ACCESS_BINDING])
-	assert.Equal(t, 2, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_GROUP_MEMBERSHIP])
+	assert.Equal(t, 3, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_ACCESS_BINDING])
+	assert.Equal(t, 5, counts[iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_GROUP_MEMBERSHIP])
+	assert.Len(t, groupsOfMemberships(resp.GetRecords()), len(gsExpectedGroups),
+		"арендатору состав групп его же выдач возвращается целиком — обеими формами субъекта")
 }
 
 // TestABList_R914_LegacyProjectionLeavesTheFieldEmptyAndSaysSo — устаревшее
@@ -195,7 +276,7 @@ func TestABList_R914_TenantSeesNoClusterAdmins(t *testing.T) {
 func TestABList_R914_LegacyProjectionLeavesTheFieldEmptyAndSaysSo(t *testing.T) {
 	rows := []domain.AccessBinding{
 		{ID: gsBindGrp, ResourceType: "account", ResourceID: gsAccount,
-			SubjectType: domain.SubjectTypeGroup, SubjectID: gsGroupID},
+			SubjectType: domain.SubjectTypeGroup, SubjectID: gsGroupFlat},
 	}
 	legacy, err := listToProto(rows, "")
 	require.NoError(t, err)
@@ -209,4 +290,75 @@ func TestABList_R914_LegacyProjectionLeavesTheFieldEmptyAndSaysSo(t *testing.T) 
 	canonical, err := listPageToProto(ListPage{Bindings: rows})
 	require.NoError(t, err)
 	assert.Len(t, canonical.GetRecords(), 1)
+}
+
+// TestABList_R914_NeighbourReadFailureRefusesTheRequest — ОТКАЗ ЧТЕНИЯ СОСЕДА
+// ОТКАЗЫВАЕТ ЗАПРОСУ, а не усекает перечисление молча.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ПРОБА, А НЕ СВОЙСТВО, ВИДНОЕ В КОДЕ
+//
+// Единственный предмет поля `records` — ПОЛНОТА. Проглоченный отказ соседа даёт
+// ответ, который выглядит полным и им не является: «состава нет» неотличимо от
+// «состав не удалось прочитать», а вызывающий записывает это к себе как факт о
+// доступе. Написать `return nil` вместо `return err` — правка на одну строку,
+// и без пробы её ничто не остановит.
+//
+// Полос ТРИ, и они разные: отказ чтения состава, непровязанный читатель групп
+// («мне нечем ответить» — не то же, что «пусто»), отказ чтения верхнего яруса.
+// Каждая проверяется отдельно, потому что закрыть одну и оставить две — ровно
+// тот исход, ради которого проба и пишется.
+func TestABList_R914_NeighbourReadFailureRefusesTheRequest(t *testing.T) {
+	newHandler := func(repo *abFakeRepo, fga *abQueriesStub, admins *stubClusterAdmins) *Handler {
+		return (&Handler{}).WithList(NewListUseCase(repo).
+			WithRelationStore(onlyClusterAdmin()).
+			WithRelationQueries(fga).
+			WithClusterAdmins(admins))
+	}
+
+	t.Run("отказ чтения состава групп", func(t *testing.T) {
+		repo, fga := newGrantSurfaceFixture(t)
+		repo.membersOfGroupsErr = stderrors.New("состав недоступен")
+		h := newHandler(repo, fga, &stubClusterAdmins{})
+
+		_, err := h.List(clusterAdminCtx("usr_caller"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+		require.Error(t, err, "проглоченный отказ отдал бы 200 с усечённым перечислением — "+
+			"полнота и есть предмет этого поля")
+		st, _ := status.FromError(err)
+		assert.Equal(t, codes.Unavailable, st.Code())
+	})
+
+	t.Run("читатель групп не провязан", func(t *testing.T) {
+		repo, fga := newGrantSurfaceFixture(t)
+		repo.groupsReaderNil = true
+		h := newHandler(repo, fga, &stubClusterAdmins{})
+
+		_, err := h.List(clusterAdminCtx("usr_caller"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+		require.Error(t, err, "«мне нечем ответить» не вправе производить «состава нет»")
+		st, _ := status.FromError(err)
+		assert.Equal(t, codes.Unavailable, st.Code())
+	})
+
+	t.Run("отказ чтения верхнего яруса", func(t *testing.T) {
+		repo, fga := newGrantSurfaceFixture(t)
+		admins := &stubClusterAdmins{err: stderrors.New("поверхность недоступна")}
+		h := newHandler(repo, fga, admins)
+
+		_, err := h.List(clusterAdminCtx("usr_caller"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+		require.Error(t, err, "перечисление без верхнего яруса читается как «администраторов нет»")
+		st, _ := status.FromError(err)
+		assert.Equal(t, codes.Unavailable, st.Code())
+		assert.Equal(t, 1, admins.calls, "поверхность обязана быть спрошена — иначе отказ нечем получить")
+	})
+
+	// Положительный контроль всех трёх полос сразу: без отказов тот же запрос
+	// проходит. Без него три отрицания зеленели бы и на перечислении, которое
+	// отказывает всегда.
+	t.Run("положительный контроль: без отказов запрос проходит", func(t *testing.T) {
+		repo, fga := newGrantSurfaceFixture(t)
+		h := newHandler(repo, fga, &stubClusterAdmins{})
+		resp, err := h.List(clusterAdminCtx("usr_caller"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.GetRecords())
+	})
 }
