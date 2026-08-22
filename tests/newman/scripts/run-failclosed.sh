@@ -120,6 +120,41 @@ restore() {
       exit 1
     }
   done
+
+  # СПОСОБНОСТЬ, А НЕ ПРИСУТСТВИЕ. Проба готовности службы намеренно НЕ ходит в
+  # базу — служба обязана переживать её недоступность, — поэтому `rollout status`
+  # выше возвращается мгновенно: под и не перезапускался. Между «под Ready» и
+  # «пул переподключился» лежит окно повторных попыток, и следующая волна
+  # попадает ровно в него.
+  # Цена измерена, а не предположена (прогон 32532668160): база встала за 22с до
+  # начала волны церемонии, служба была Ready, но вход паролем ушёл в её хук,
+  # тот не смог писать, и провайдер ответил 502 — посев не встал, ДЕВЯТЬ
+  # коллекций остались без отчёта, то есть без вердикта вовсе.
+  # Спрашиваем у самой базы, вернулись ли к ней соединения службы: это
+  # наблюдаемое СЛЕДСТВИЕ восстановления пула, а не объявление о нём.
+  echo "[failclosed] жду СПОСОБНОСТИ: соединения службы к базе"
+  conn_probe() {
+    kubectl -n "$NS" exec "statefulset/$DEPLOY" -c postgresql -- bash -c \
+      'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
+       "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()"' \
+      2>/dev/null | tr -d '[:space:]'
+  }
+  deadline=$((SECONDS + SCALE_TIMEOUT))
+  probed=0
+  while :; do
+    live="$(conn_probe)"
+    case "$live" in ''|*[!0-9]*) : ;; *) probed=1; [ "$live" -gt 0 ] && break ;; esac
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      if [ "$probed" -eq 0 ]; then
+        echo "FATAL: опрос соединений НЕ ИСПОЛНИЛСЯ ни разу за ${SCALE_TIMEOUT}s — это отказ самой проверки, а не вердикт о стенде: следующие коллекции судить нечем" >&2
+      else
+        echo "FATAL: служба не вернула ни одного соединения к базе за ${SCALE_TIMEOUT}s — стенд повреждён для следующих коллекций" >&2
+      fi
+      exit 1
+    fi
+    sleep 2
+  done
+  echo "[failclosed] способность подтверждена: соединений службы к базе $live"
   echo "[failclosed] стенд восстановлен"
   exit "$rc"
 }
