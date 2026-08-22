@@ -90,6 +90,10 @@ type ListUseCase struct {
 	// (unwired → the gate is never taken and only the per-object floor runs); a
 	// wired port whose ANSWER fails is a different fact and refuses.
 	relations clients.RelationStore
+
+	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// Не провязан ⇒ наблюдение выключено, а не сломано.
+	listScan shared.ListScanRecorder
 }
 
 func NewListUseCase(r Repo) *ListUseCase {
@@ -97,6 +101,12 @@ func NewListUseCase(r Repo) *ListUseCase {
 }
 
 // WithRelationQueries wires the FGA ListObjects port (viewer ∪ v_list floor).
+// WithListScanRecorder провязывает съём стоимости страницы (#653).
+func (u *ListUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListUseCase {
+	u.listScan = rec
+	return u
+}
+
 func (u *ListUseCase) WithRelationQueries(q clients.RelationQueries) *ListUseCase {
 	u.queries = q
 	return u
@@ -244,6 +254,7 @@ func (u *ListUseCase) collectVisiblePage(
 	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
 	visible := make([]domain.AccessBinding, 0, need)
 
+	scan := shared.ListScan{}
 	for len(visible) < need {
 		rows, _, err := rd.AccessBindings().List(ctx, repoab.ListFilter{
 			SubjectID:      f.SubjectID,
@@ -261,6 +272,7 @@ func (u *ListUseCase) collectVisiblePage(
 		if len(rows) == 0 {
 			break
 		}
+		scan.AddBatch(len(rows))
 		last := rows[len(rows)-1]
 		cursor = &repoab.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
 
@@ -281,6 +293,8 @@ func (u *ListUseCase) collectVisiblePage(
 
 	// Токен считается от последней ОТДАННОЙ видимой строки в keyset-порядке —
 	// том самом, в котором их вернул обход.
+	scan.Report(ctx, u.listScan, "access_binding")
+
 	if len(visible) > want {
 		boundary := visible[want-1]
 		return visible[:want], shared.EncodeVisiblePageToken(shared.VisibleCursor{

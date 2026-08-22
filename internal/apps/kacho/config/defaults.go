@@ -93,6 +93,17 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.token-signing.allowed-algorithms", "")
 	v.SetDefault("authn.token-signing.key-set-path", "/.well-known/kacho/jwks.json")
 	v.SetDefault("authn.token-signing.key-lifetime", "2160h")
+	// Токен-эндпоинт платформы (задача #898). Умолчания заданы ТОЛЬКО у
+	// величин, которые описывают НАШ расход и ничего не разрешают: потолок
+	// тела и обычный срок токена. У перечня адресатов, адресата по умолчанию и
+	// слушателя умолчаний НЕТ — каждое из них расширяет принимаемое либо
+	// выставляет поверхность, и умолчание здесь было бы решением, принятым за
+	// оператора. Страж старта требует их все, как только эндпоинт включён.
+	v.SetDefault("authn.client-token.enabled", false)
+	v.SetDefault("authn.client-token.allowed-audiences", "")
+	v.SetDefault("authn.client-token.default-audience", "")
+	v.SetDefault("authn.client-token.token-ttl", "15m")
+	v.SetDefault("authn.client-token.body-ceiling", 64<<10)
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
 	// иначе клиент проигрывает гонку и получает ПУСТОЕ поле (затирание очищает

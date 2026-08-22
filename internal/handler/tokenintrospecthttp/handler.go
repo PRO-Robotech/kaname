@@ -48,6 +48,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/PRO-Robotech/kacho/pkg/httpbody"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
@@ -163,7 +164,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxTokenBytes)
+	// Потолок — в pkg/httpbody, единственной в дереве реализации; вместе с ней
+	// приезжает слой «объявленная длина сверх потолка», которого здесь не было.
+	if httpbody.Cap(w, r, maxTokenBytes) {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "payload_too_large"})
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return
@@ -236,6 +242,14 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 		if t.Method.Alg() != string(pub.Algorithm) {
 			return nil, fmt.Errorf("header algorithm does not match the key")
 		}
+		// Параметр, помеченный отправителем обязательным к пониманию, мы обязаны
+		// либо исполнить, либо отвергнуть токен целиком (RFC 7515 §4.1.11).
+		// Обратная сторона того же требования — НЕ помеченное неизвестное
+		// игнорируется (RFC 7519, EID 8060); на этом держится совместимость,
+		// поэтому прочие неизвестные поля разбор молча пропускает.
+		if ok, name := tokenpolicy.CriticalHeadersUnderstood(critHeaders(t.Header)); !ok {
+			return nil, fmt.Errorf("critical header %q is not understood", name)
+		}
 		return parsePublicKey(pub.PublicKeyPEM)
 	})
 	if err != nil || !tok.Valid {
@@ -248,23 +262,67 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 	if sub == "" {
 		return false, nil
 	}
-	revokeBefore, found, err := h.cfg.Revocations.RevokedBefore(ctx, sub)
-	if err != nil {
-		return false, fmt.Errorf("revocations: %w", err)
+
+	// Ключей отсечки ДВА, и это не два механизма, а два ключа у одного
+	// (задача #898, приёмка F2 §2.10).
+	//
+	// Субъекта мало. Отзыв КЛИЕНТА — снятие ключа, которым клиент себя
+	// аутентифицирует, — обязан снимать и уже выданные ИМ токены; иначе
+	// контроль действует на выдаче и не действует на предъявлении, а такое
+	// состояние НЕ СХОДИТСЯ САМО: окно закрывает только срок токена, и
+	// величина его от нагрузки не зависит.
+	//
+	// Идентификатор клиента приезжает СВОИМ составом утверждений — тем же,
+	// что и на пути обратного вызова, — поэтому второго claim'а ради отзыва
+	// заводить не потребовалось. Ключи не коллизят by construction:
+	// идентификаторы платформы глобально уникальны (ban #15).
+	revocationKeys := []string{sub}
+	for _, name := range revocationSubjectClaims {
+		if v, ok := claims[name].(string); ok && v != "" {
+			revocationKeys = append(revocationKeys, v)
+		}
 	}
-	if !found {
-		return true, nil
-	}
-	issued, err := claims.GetIssuedAt()
-	if err != nil || issued == nil {
-		// Токен без отметки выпуска не сопоставим с отзывом субъекта —
-		// отвергаем, а не пропускаем: при сомнении отказ.
+
+	// Токен без отметки выпуска не сопоставим НИ С КАКОЙ отсечкой — ни с уже
+	// стоящей, ни с будущей. Принять его значило бы завести материал, который
+	// отозвать нечем; при сомнении отказ.
+	issued, issuedErr := claims.GetIssuedAt()
+	if issuedErr != nil || issued == nil {
 		return false, nil
 	}
-	// Отзыв действует ВПЕРЁД: выпущенное до момента отзыва недействительно,
-	// выпущенное после — действительно. Иначе отзыв субъекта означал бы
-	// вечную блокировку, а не снятие выданного.
-	return issued.Time.After(revokeBefore) || issued.Time.Equal(revokeBefore), nil
+
+	for _, key := range revocationKeys {
+		revokeBefore, found, err := h.cfg.Revocations.RevokedBefore(ctx, key)
+		if err != nil {
+			// Недоступность источника отсечек НЕ ЕСТЬ «не отозван»: это третий
+			// исход, и спрашивающий закрывается сам.
+			return false, fmt.Errorf("revocations: %w", err)
+		}
+		if !found {
+			continue
+		}
+		// Отзыв действует ВПЕРЁД: выпущенное до момента отсечки
+		// недействительно, выпущенное после — действительно. Иначе отзыв
+		// означал бы вечную блокировку принципала, а не снятие выданного.
+		if issued.Time.Before(revokeBefore) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// revocationSubjectClaims — утверждения, чьё значение служит ВТОРЫМ ключом
+// отсечки.
+//
+// Перечень объявлен один раз и закрыт: имя, заведённое в составе утверждений и
+// забытое здесь, дало бы клиента, чей отзыв не доезжает до предъявления, — и
+// не доезжал бы он МОЛЧА, потому что «работает» и «не отозвано» выглядят
+// одинаково.
+var revocationSubjectClaims = []string{
+	// Клиент пользовательского токена.
+	"kacho_user_token_id",
+	// Клиент ключа служебной учётки.
+	"kacho_sa_key_id",
 }
 
 func parsePublicKey(pemStr string) (crypto.PublicKey, error) {
@@ -296,4 +354,76 @@ func writeJSON(w http.ResponseWriter, code int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// critHeaders приводит `crit` к перечню имён.
+//
+// Разбор отдаёт заголовок как произвольный JSON, поэтому годятся ровно два вида:
+// список строк и его отсутствие. Всё прочее — не перечень имён, и принимать по
+// нему решение нельзя; такой вход даёт одно ЗАВЕДОМО неизвестное имя, то есть
+// отказ. Молчаливый пропуск здесь означал бы «параметр помечен обязательным, а
+// мы не разобрали его форму и приняли токен».
+func critHeaders(h map[string]any) []string {
+	raw, ok := h["crit"]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return []string{"<crit is not a list>"}
+	}
+	out := make([]string, 0, len(list))
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return []string{"<crit entry is not a string>"}
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// DeclaredDeviations — обязательные проверки, которых интроспекция НЕ исполняет,
+// вместе с причиной. Пустая причина не засчитывается: отступление без неё
+// неотличимо от пропуска.
+//
+// Обе причины — про РАЗНИЦУ ВОПРОСА, а не про очередь работ. Интроспекция
+// отвечает о состоянии токена У ЕГО ИЗДАТЕЛЯ («выпущен нами, подписан, не
+// истёк, не отозван»), а не о пригодности токена ДЛЯ ЗАДАЮЩЕГО ВОПРОС. Адресат
+// и тип — свойства поверхности предъявления, и проверяет их та поверхность, где
+// токен предъявлен: край и проверяющий реестра исполняют обе.
+func (h *Handler) DeclaredDeviations() []tokenpolicy.Deviation {
+	return []tokenpolicy.Deviation{
+		{
+			Check: tokenpolicy.CheckAudience,
+			Reason: "интроспекция сообщает состояние токена у издателя, а не его " +
+				"пригодность для спрашивающего: адресата проверяет поверхность " +
+				"предъявления, у которой он свой",
+		},
+		{
+			Check: tokenpolicy.CheckTokenType,
+			Reason: "по той же причине: тип объявляет, для какой поверхности токен " +
+				"выпущен, и сверяет его та поверхность, а не издатель",
+		},
+	}
+}
+
+// DeclaredChecks возвращает состав проверок ЭТОГО проверяющего.
+//
+// Объявление существует затем, чтобы его можно было СВЕРИТЬ с единым перечнем
+// (`tokenpolicy.MandatoryChecks`), а не читать три реализации глазами. Запись,
+// которой проверяющий не исполняет, отсюда нельзя: тогда объявление станет
+// вторым местом об одном предмете, и разойдётся оно молча.
+func (h *Handler) DeclaredChecks() []tokenpolicy.Check {
+	return []tokenpolicy.Check{
+		tokenpolicy.CheckAlgorithmAllowed,
+		tokenpolicy.CheckKeyID,
+		tokenpolicy.CheckSignature,
+		tokenpolicy.CheckKeyBoundAlgorithm,
+		tokenpolicy.CheckIssuer,
+		tokenpolicy.CheckExpiry,
+		tokenpolicy.CheckNotBefore,
+		tokenpolicy.CheckCriticalHeaders,
+		tokenpolicy.CheckRevocation,
+	}
 }

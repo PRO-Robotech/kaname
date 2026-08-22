@@ -13,7 +13,6 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -111,9 +110,16 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetRoleRequest) (*iamv1.Ro
 }
 
 func (h *Handler) List(ctx context.Context, req *iamv1.ListRolesRequest) (*iamv1.ListRolesResponse, error) {
-	// #184: page_size > MaxPageSize → sync INVALID_ARGUMENT (no silent clamp).
-	// First statement so a malformed page_size is rejected before any work.
-	if _, err := corevalidate.PageSize("page_size", req.GetPageSize()); err != nil {
+	// Форма страницы судится ЗДЕСЬ, на транспортной границе, и первым
+	// стейтментом — как у остальных шести списочных поверхностей сервиса
+	// (#660). Прежде роли судили величину здесь, а форму токена — первым
+	// стейтментом use-case: порядок «формат до замыкания по личности»
+	// соблюдался, но форма была одна из семи, и следующий, кто заведёт
+	// восьмую поверхность, скопировал бы ту, на которую посмотрел.
+	//
+	// Оба предмета — величина и форма токена — теперь у одного вызова:
+	// два места об одном вопросе расходятся при первой же правке одного.
+	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err
 	}
 	filter := reporole.ListFilter{

@@ -105,6 +105,10 @@ type ListProjectsUseCase struct {
 	// use-case asks: the one about the caller (cluster administrator) and the
 	// per-object verdicts. When nil the whole read fails closed.
 	relationQueries clients.RelationQueries
+
+	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// Не провязан ⇒ наблюдение выключено, а не сломано.
+	listScan shared.ListScanRecorder
 }
 
 func NewListProjectsUseCase(r Repo) *ListProjectsUseCase {
@@ -112,6 +116,12 @@ func NewListProjectsUseCase(r Repo) *ListProjectsUseCase {
 }
 
 // WithRelationStore wires the relation-store port.
+// WithListScanRecorder провязывает съём стоимости страницы (#653).
+func (u *ListProjectsUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListProjectsUseCase {
+	u.listScan = rec
+	return u
+}
+
 func (u *ListProjectsUseCase) WithRelationStore(relations clients.RelationQueries) *ListProjectsUseCase {
 	u.relationQueries = relations
 	return u
@@ -223,6 +233,7 @@ func (u *ListProjectsUseCase) collectVisiblePage(
 	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
 	visible := make([]domain.Project, 0, need)
 
+	scan := shared.ListScan{}
 	for len(visible) < need {
 		rows, _, err := rd.Projects().List(ctx, project.ListFilter{
 			AccountID:  f.AccountID,
@@ -237,6 +248,7 @@ func (u *ListProjectsUseCase) collectVisiblePage(
 		if len(rows) == 0 {
 			break
 		}
+		scan.AddBatch(len(rows))
 		last := rows[len(rows)-1]
 		cursor = &project.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
 
@@ -254,6 +266,8 @@ func (u *ListProjectsUseCase) collectVisiblePage(
 	// Токен считается от последней ОТДАННОЙ видимой строки в keyset-порядке —
 	// том самом, в котором их вернул обход. Никакой пересортировки между этими
 	// двумя строками нет и быть не должно.
+	scan.Report(ctx, u.listScan, "project")
+
 	if len(visible) > want {
 		boundary := visible[want-1]
 		return visible[:want], shared.EncodeVisiblePageToken(shared.VisibleCursor{

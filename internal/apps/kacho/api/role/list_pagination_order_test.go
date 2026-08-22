@@ -12,62 +12,63 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 )
 
-// Формат пагинации проверяется ДО замыкания по личности вызывающего.
+// Форма страницы судится НА ТРАНСПОРТНОЙ ГРАНИЦЕ и ДО всякой работы.
 //
-// Предмет. Use-case сначала решает, кто спрашивает: анонимный (в том числе
-// непроброшенный принципал, который попадает сюда же) получает пустую страницу
-// без ошибки и до репозитория не доходит. Пока формат курсора проверял только
-// репозиторий, один и тот же мусорный `page_token` получал разный ответ в
-// зависимости от того, опознан ли вызывающий, — то есть проверка ввода зависела
-// от прав.
+// Предмет (#660). Шесть списочных поверхностей сервиса судят форму страницы
+// в обработчике, роли судили величину там, а форму курсора — первым
+// стейтментом use-case. Порядок «формат до замыкания по личности» при этом
+// соблюдался, то есть дефекта поведения не было; предмет в том, что форма
+// была ОДНА ИЗ СЕМИ, и следующий, кто заведёт восьмую поверхность,
+// скопировал бы ту, на которую посмотрел.
 //
-// Тройка, а не одиночное утверждение. Проба «анонимный получает InvalidArgument»
-// в одиночку зеленела бы и на полностью сломанном use-case, поэтому рядом стоят
-// (а) положительный контроль формы — законная первая страница у названного
-// вызывающего проходит без ошибки, и (б) контроль сохранности замыкания —
-// анонимный с ЗАКОННОЙ пагинацией по-прежнему получает пустую страницу без
-// ошибки, а не отказ. Вместе они утверждают «ответ на формат не зависит от
-// личности», не подменяя это на «всё отвергается».
-func TestListPaginationFormatCheckedBeforeIdentityShortCircuit(t *testing.T) {
+// Тройка, а не одиночное утверждение. «Мусорный курсор отвергнут» в одиночку
+// зеленело бы и на обработчике, который отвергает всё: рядом стоит
+// положительный контроль — законная страница доходит до use-case, — и
+// контроль второй оси, величины страницы. Вместе они утверждают «форма
+// судится здесь и судится по форме», а не «всё отвергается».
+//
+// Подставного репозитория здесь нет намеренно: утверждение о ПОРЯДКЕ
+// проверяется тем, что отказ приходит раньше, чем обработчику понадобится
+// хоть одна зависимость. Нулевой use-case это и показывает: пройди проверка
+// формы позже, вызов упал бы разыменованием, а не кодом ответа.
+func TestListPaginationFormatCheckedAtTheTransportBoundary(t *testing.T) {
 	const garbageToken = "not-a-real-token!!"
 
-	t.Run("анонимный вызывающий — отказ по формату курсора", func(t *testing.T) {
-		uc := NewListRolesUseCase(newRoleListFakeRepo()).WithRelationStore(newRoleFGAStub())
+	t.Run("мусорный курсор — отказ по формату, до всякой работы", func(t *testing.T) {
+		h := NewHandler(nil, nil, nil, nil, nil)
 
-		_, _, err := uc.Execute(context.Background(), reporole.ListFilter{PageSize: 100, PageToken: garbageToken})
+		_, err := h.List(context.Background(), &iamv1.ListRolesRequest{
+			PageSize:  100,
+			PageToken: garbageToken,
+		})
 
-		require.Error(t, err,
-			"пустая страница вместо отказа: замыкание по личности опередило проверку формата")
+		require.Error(t, err, "форма курсора обязана судиться на границе, а не глубже")
 		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 
-	t.Run("анонимный вызывающий — отказ по page_size вне диапазона", func(t *testing.T) {
-		uc := NewListRolesUseCase(newRoleListFakeRepo()).WithRelationStore(newRoleFGAStub())
+	t.Run("величина страницы вне диапазона — тот же рубеж", func(t *testing.T) {
+		h := NewHandler(nil, nil, nil, nil, nil)
 
-		_, _, err := uc.Execute(context.Background(), reporole.ListFilter{PageSize: 1001})
+		_, err := h.List(context.Background(), &iamv1.ListRolesRequest{PageSize: 1001})
 
 		require.Error(t, err)
 		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 
-	t.Run("названный вызывающий, законная страница — проходит", func(t *testing.T) {
-		uc := NewListRolesUseCase(newRoleListFakeRepo()).WithRelationStore(newRoleFGAStub())
+	t.Run("законная страница — рубеж пропускает", func(t *testing.T) {
+		h := NewHandler(nil, nil, nil, nil, nil)
 
-		_, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
+		// Законный ввод обязан ПРОЙТИ рубеж формы. Что будет дальше — не
+		// предмет этой пробы: use-case здесь отсутствует, и исход зависит от
+		// его устройства. Предмет — что отказ, если он придёт, будет НЕ о
+		// форме: без этого контроля первые два утверждения зеленели бы и на
+		// обработчике, отвергающем каждый ввод.
+		_, err := h.List(context.Background(), &iamv1.ListRolesRequest{PageSize: 100})
 
-		require.NoError(t, err, "проба обязана отвергать формат, а не всё подряд")
-	})
-
-	t.Run("анонимный, законная страница — по-прежнему пустая страница без ошибки", func(t *testing.T) {
-		uc := NewListRolesUseCase(newRoleListFakeRepo()).WithRelationStore(newRoleFGAStub())
-
-		out, next, err := uc.Execute(context.Background(), reporole.ListFilter{PageSize: 100})
-
-		require.NoError(t, err, "замыкание fail-closed обязано уцелеть: это не отказ, а пустая выдача")
-		assert.Empty(t, out)
-		assert.Empty(t, next)
+		assert.NotEqual(t, codes.InvalidArgument, status.Code(err),
+			"законная страница отвергнута рубежом формы — проба отвергает всё подряд, а не форму")
 	})
 }

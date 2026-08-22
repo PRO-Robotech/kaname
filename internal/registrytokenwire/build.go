@@ -71,7 +71,7 @@ type BuildConfig struct {
 // data-plane's verification keys are Hydra's, served via the separate
 // cluster-internal jwks-proxy mirror (internal/handler/jwksproxyhttp) — not by this
 // `/iam/token` shim.
-func Build(pool *pgxpool.Pool, cfg BuildConfig) (http.Handler, error) {
+func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 	saRepo := kachopg.NewSAOAuthClientRepo(pool)
 
 	validator := registrytokenuc.NewSAKeyValidator(NewSAClientLookup(saRepo))
