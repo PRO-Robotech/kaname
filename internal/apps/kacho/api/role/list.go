@@ -86,6 +86,10 @@ type ListRolesUseCase struct {
 	// visibility on the iam_role objects of a page. When nil the use-case fails
 	// closed.
 	relationQueries clients.RelationQueries
+
+	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// Не провязан ⇒ наблюдение выключено, а не сломано.
+	listScan shared.ListScanRecorder
 }
 
 func NewListRolesUseCase(r Repo) *ListRolesUseCase {
@@ -95,6 +99,12 @@ func NewListRolesUseCase(r Repo) *ListRolesUseCase {
 // WithRelationStore wires the FGA client used to resolve the principal's
 // readable-role visibility on iam_role. Mirrors ListAccountsUseCase /
 // ListProjectsUseCase.
+// WithListScanRecorder провязывает съём стоимости страницы (#653).
+func (u *ListRolesUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListRolesUseCase {
+	u.listScan = rec
+	return u
+}
+
 func (u *ListRolesUseCase) WithRelationStore(relations clients.RelationQueries) *ListRolesUseCase {
 	u.relationQueries = relations
 	return u
@@ -214,6 +224,7 @@ func (u *ListRolesUseCase) collectVisiblePage(
 	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
 	visible := make([]domain.Role, 0, need)
 
+	scan := shared.ListScan{}
 	for len(visible) < need {
 		rows, _, err := rd.Roles().List(ctx, reporole.ListFilter{
 			AccountID:  f.AccountID,
@@ -229,6 +240,7 @@ func (u *ListRolesUseCase) collectVisiblePage(
 		if len(rows) == 0 {
 			break
 		}
+		scan.AddBatch(len(rows))
 		last := rows[len(rows)-1]
 		cursor = &reporole.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
 
@@ -248,6 +260,8 @@ func (u *ListRolesUseCase) collectVisiblePage(
 	// бы токеном границу презентационной сортировки — величину, к обходу
 	// отношения не имеющую, и обход поехал бы не оттуда.
 	page, next := visible, ""
+	scan.Report(ctx, u.listScan, "role")
+
 	if len(visible) > want {
 		boundary := visible[want-1]
 		page = visible[:want]

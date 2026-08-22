@@ -71,6 +71,10 @@ type ListGroupsUseCase struct {
 	// relationQueries — FGA ListObjects-порт, резолвящий visible-set принципала на
 	// iam_group. При nil use-case fail-closed (никогда unfiltered).
 	relationQueries clients.RelationQueries
+
+	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// Не провязан ⇒ наблюдение выключено, а не сломано.
+	listScan shared.ListScanRecorder
 }
 
 func NewListGroupsUseCase(r Repo) *ListGroupsUseCase {
@@ -79,6 +83,12 @@ func NewListGroupsUseCase(r Repo) *ListGroupsUseCase {
 
 // WithRelationStore wires the FGA ListObjects client (паритет с
 // account/project/service_account/role List).
+// WithListScanRecorder провязывает съём стоимости страницы (#653).
+func (u *ListGroupsUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListGroupsUseCase {
+	u.listScan = rec
+	return u
+}
+
 func (u *ListGroupsUseCase) WithRelationStore(relations clients.RelationQueries) *ListGroupsUseCase {
 	u.relationQueries = relations
 	return u
@@ -190,6 +200,7 @@ func (u *ListGroupsUseCase) collectVisiblePage(
 	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
 	visible := make([]domain.Group, 0, need)
 
+	scan := shared.ListScan{}
 	for len(visible) < need {
 		rows, _, err := rd.Groups().List(ctx, repogroup.ListFilter{
 			AccountID:  f.AccountID,
@@ -204,6 +215,7 @@ func (u *ListGroupsUseCase) collectVisiblePage(
 		if len(rows) == 0 {
 			break
 		}
+		scan.AddBatch(len(rows))
 		last := rows[len(rows)-1]
 		cursor = &repogroup.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
 
@@ -220,6 +232,8 @@ func (u *ListGroupsUseCase) collectVisiblePage(
 
 	// Токен считается от последней ОТДАННОЙ видимой строки в keyset-порядке —
 	// том самом, в котором их вернул обход.
+	scan.Report(ctx, u.listScan, "group")
+
 	if len(visible) > want {
 		boundary := visible[want-1]
 		return visible[:want], shared.EncodeVisiblePageToken(shared.VisibleCursor{

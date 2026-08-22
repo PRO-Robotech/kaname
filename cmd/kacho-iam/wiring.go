@@ -242,7 +242,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler)
 	accountDelete := accountapp.NewDeleteAccountUseCase(kachoRepo, opsRepo)
 	accountGet := accountapp.NewGetAccountUseCase(kachoRepo).WithRelationStore(relationStore)
-	accountList := accountapp.NewListAccountsUseCase(kachoRepo).WithRelationStore(relationStore)
+	// listScanRec — съём стоимости страницы для списков с добором (#653).
+	// Один экземпляр на сборку: гистограммы размечены видом ресурса.
+	listScanRec := metricsReg.NewListScanRecorder()
+
+	accountList := accountapp.NewListAccountsUseCase(kachoRepo).WithRelationStore(relationStore).
+		WithListScanRecorder(listScanRec)
 	accountListAllOps := accountapp.NewListAllOperationsUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger)
 	accountHandler := accountapp.NewHandler(accountCreate, accountUpdate, accountDelete, accountGet, accountList).
@@ -270,13 +275,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler)
 	projectDelete := projectapp.NewDeleteProjectUseCase(kachoRepo, opsRepo)
 	projectGet := projectapp.NewGetProjectUseCase(kachoRepo).WithRelationStore(relationStore)
-	projectList := projectapp.NewListProjectsUseCase(kachoRepo).WithRelationStore(relationStore)
+	projectList := projectapp.NewListProjectsUseCase(kachoRepo).WithRelationStore(relationStore).
+		WithListScanRecorder(listScanRec)
 	projectHandler := projectapp.NewHandler(projectCreate, projectUpdate, projectDelete, projectGet, projectList).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
 	// UserService + InternalUserService.
 	userGet := userapp.NewGetUserUseCase(kachoRepo).WithRelationStore(relationStore)
-	userList := userapp.NewListUsersUseCase(kachoRepo).WithRelationStore(relationStore)
+	userList := userapp.NewListUsersUseCase(kachoRepo).WithRelationStore(relationStore).
+		WithListScanRecorder(listScanRec)
 	userUpdate := userapp.NewUpdateUserUseCase(kachoRepo, opsRepo).
 		// Same revoke-latency fix as accountUpdate above: iam.user is label-selectable,
 		// so a label clear is a REVOCATION, and without the in-process object-forward it
@@ -316,7 +323,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler, logger)
 	saDelete := serviceaccountapp.NewDeleteServiceAccountUseCase(kachoRepo, opsRepo)
 	saGet := serviceaccountapp.NewGetServiceAccountUseCase(kachoRepo).WithRelationStore(relationStore)
-	saList := serviceaccountapp.NewListServiceAccountsUseCase(kachoRepo).WithRelationStore(relationStore)
+	saList := serviceaccountapp.NewListServiceAccountsUseCase(kachoRepo).WithRelationStore(relationStore).
+		WithListScanRecorder(listScanRec)
 	// Disable / Enable — the writers for the state that decides whether a service
 	// account may authenticate. The state was read by the token hook, by key
 	// issuance and by the docker-token validator long before anything could set
@@ -342,7 +350,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler, logger)
 	groupDelete := groupapp.NewDeleteGroupUseCase(kachoRepo, opsRepo)
 	groupGet := groupapp.NewGetGroupUseCase(kachoRepo).WithRelationStore(relationStore)
-	groupList := groupapp.NewListGroupsUseCase(kachoRepo).WithRelationStore(relationStore)
+	groupList := groupapp.NewListGroupsUseCase(kachoRepo).WithRelationStore(relationStore).
+		WithListScanRecorder(listScanRec)
 	groupAdd := groupapp.NewAddMemberUseCase(kachoRepo, opsRepo)
 	groupRemove := groupapp.NewRemoveMemberUseCase(kachoRepo, opsRepo)
 	// ListMembers names the group in the request, so it re-asks the model about
@@ -390,7 +399,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// roleList — per-object scope-filtered: the FGA v_list set on
 	// iam_role is intersected with the catalog (system roles bypass). relationStore
 	// is always non-nil, so List fails closed on an FGA outage (D-47).
-	roleList := roleapp.NewListRolesUseCase(kachoRepo).WithRelationStore(relationStore)
+	roleList := roleapp.NewListRolesUseCase(kachoRepo).WithRelationStore(relationStore).
+		WithListScanRecorder(listScanRec)
 	roleHandler := roleapp.NewHandler(roleCreate, roleUpdate, roleDelete, roleGet, roleList).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
@@ -440,7 +450,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// every sibling read returns the full set.
 	abList := accessbindingapp.NewListUseCase(kachoRepo).
 		WithRelationStore(relationStore).
-		WithRelationQueries(relationStore)
+		WithRelationQueries(relationStore).
+		WithListScanRecorder(listScanRec)
 	abListBySub := accessbindingapp.NewListBySubjectUseCase(kachoRepo)
 	abListByAcc := accessbindingapp.NewListByAccountUseCase(kachoRepo).
 		WithRelationStore(relationStore, logger).

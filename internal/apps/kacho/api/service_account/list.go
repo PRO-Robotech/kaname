@@ -71,6 +71,10 @@ type ListServiceAccountsUseCase struct {
 	// relationQueries — FGA ListObjects-порт, резолвящий visible-set принципала на
 	// iam_service_account. При nil use-case fail-closed (никогда unfiltered).
 	relationQueries clients.RelationQueries
+
+	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// Не провязан ⇒ наблюдение выключено, а не сломано.
+	listScan shared.ListScanRecorder
 }
 
 func NewListServiceAccountsUseCase(r Repo) *ListServiceAccountsUseCase {
@@ -78,6 +82,12 @@ func NewListServiceAccountsUseCase(r Repo) *ListServiceAccountsUseCase {
 }
 
 // WithRelationStore wires the FGA ListObjects client (паритет с account/role List).
+// WithListScanRecorder провязывает съём стоимости страницы (#653).
+func (u *ListServiceAccountsUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListServiceAccountsUseCase {
+	u.listScan = rec
+	return u
+}
+
 func (u *ListServiceAccountsUseCase) WithRelationStore(relations clients.RelationQueries) *ListServiceAccountsUseCase {
 	u.relationQueries = relations
 	return u
@@ -197,6 +207,7 @@ func (u *ListServiceAccountsUseCase) collectVisiblePage(
 	// отобранное, и опережающую строку, до которой вердикт ещё не дошёл.
 	visible := make([]domain.ServiceAccount, 0, need)
 
+	scan := shared.ListScan{}
 	for len(visible) < need {
 		rows, _, err := rd.ServiceAccounts().List(ctx, reposa.ListFilter{
 			AccountID:  f.AccountID,
@@ -211,6 +222,7 @@ func (u *ListServiceAccountsUseCase) collectVisiblePage(
 		if len(rows) == 0 {
 			break
 		}
+		scan.AddBatch(len(rows))
 		last := rows[len(rows)-1]
 		cursor = &reposa.Cursor{CreatedAt: last.CreatedAt, ID: string(last.ID)}
 
@@ -227,6 +239,8 @@ func (u *ListServiceAccountsUseCase) collectVisiblePage(
 
 	// Токен считается от последней ОТДАННОЙ видимой строки в keyset-порядке —
 	// том самом, в котором их вернул обход.
+	scan.Report(ctx, u.listScan, "service_account")
+
 	if len(visible) > want {
 		boundary := visible[want-1]
 		return visible[:want], shared.EncodeVisiblePageToken(shared.VisibleCursor{
