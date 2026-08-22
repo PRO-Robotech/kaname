@@ -106,7 +106,8 @@ var declaredWithoutReader = map[verbPair]string{
 	{Type: "vpc_address_pool", Relation: "v_update"}: "все RPC — system_admin@cluster (admin-only ресурс)",
 	{Type: "vpc_address_pool", Relation: "v_delete"}: "все RPC — system_admin@cluster (admin-only ресурс)",
 
-	// RoleService/Get объявлен `<exempt>`: единичное чтение роли энфорсится ТЕМ ЖЕ
+	// RoleService/Get стоит на полосе `scope_filtered` (#973; прежде — `<exempt>`
+	// с неверно названной причиной). Единичное чтение роли энфорсится ТЕМ ЖЕ
 	// предикатом, что страница (`iam_role` → {viewer, v_list} в
 	// internal/authzfilter/visibility.go), поэтому страница и чтение не могут
 	// разойтись. Отдельного `v_get` на роли не спрашивает никто.

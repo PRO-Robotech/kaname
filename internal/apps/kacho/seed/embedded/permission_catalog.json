@@ -1314,13 +1314,13 @@
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/Get",
-    "permission": "\u003cexempt\u003e",
+    "permission": "iam.roles.get",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
       "from_request_field": ""
     },
-    "exempt_reason": "SERVICE_SIDE_AUTHZ"
+    "scope_filtered": true
   },
   {
     "fqn": "kacho.cloud.iam.v1.RoleService/List",

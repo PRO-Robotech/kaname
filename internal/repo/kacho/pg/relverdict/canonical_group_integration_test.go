@@ -44,14 +44,14 @@ func seedGroupFact(t *testing.T, ctx context.Context, tx pgx.Tx, groupID, subjec
 
 func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 	for _, tc := range []struct {
-		имя   string
+		name  string
 		group string
-		форма string
+		form  string
 	}{
 		{"каноническая (её производит продукт)", "grp-canon", "group:grp-canon#member"},
 		{"голая (группа как субъект выдачи)", "grp-bare", "group:grp-bare"},
 	} {
-		t.Run(tc.имя, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			withTx(t, func(ctx context.Context, tx pgx.Tx) {
 				seedTenant(t, ctx, tx)
 				exec(t, ctx, tx,
@@ -61,7 +61,7 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 					`INSERT INTO kacho_iam.resource_mirror (object_type, object_id)
 					 VALUES ($1, 'net-1') ON CONFLICT DO NOTHING`,
 					catalogFormOf(t, "vpc_network"))
-				seedGroupFact(t, ctx, tx, tc.group, tc.форма)
+				seedGroupFact(t, ctx, tx, tc.group, tc.form)
 
 				// (1) прямой вопрос — членство даёт право
 				got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
@@ -73,7 +73,7 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 				}
 				if got != relverdict.Allow {
 					t.Errorf("член группы не получил права в форме %q: вердикт %s — "+
-						"недоответ выглядит как честное «прав нет»", tc.форма, got)
+						"недоответ выглядит как честное «прав нет»", tc.form, got)
 				}
 
 				// (2) кто имеет право — член обязан быть НАЗВАН
@@ -85,7 +85,7 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 				}
 				if !containsStr(subs, "user:usr-member") {
 					t.Errorf("член группы не назван среди субъектов (%v) при форме %q — "+
-						"разбор доступа тогда не находит того, у кого доступ есть", subs, tc.форма)
+						"разбор доступа тогда не находит того, у кого доступ есть", subs, tc.form)
 				}
 
 				// (3) из чего складывается — основание через членство названо
@@ -101,7 +101,7 @@ func TestGroupSubjectFormsAreBothHonoured(t *testing.T) {
 				}
 				if !viaGroup {
 					t.Errorf("основание через членство не названо (%+v) при форме %q — "+
-						"снимать право пошли бы не туда", src, tc.форма)
+						"снимать право пошли бы не туда", src, tc.form)
 				}
 
 				// Отрицание рядом: посторонний не получает ничего ни одним вопросом.

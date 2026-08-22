@@ -196,7 +196,7 @@ repository:
   postgres:
     url: "postgres://iam@kacho-umbrella-pg-iam:5432/kacho_iam"
     slave-url: ""                  # опц. read-replica; пусто → Reader-TX на master
-    max-conns: 50
+    max-conns: 80
     ssl-mode: disable
     password-from-env: KACHO_IAM_DB_PASSWORD
 

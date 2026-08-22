@@ -3,9 +3,9 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 =======================================================================================================================================================================================================================================================
 
 ПРОВЕНАНС
-  снято               2026-08-22 04:49:19 MSK
-  ревизия дерева      8e1caf51d48fe6d9336c9098b016d15032c87b8e
-  состояние дерева    ГРЯЗНОЕ: путей с несохранёнными правками 2.
+  снято               2026-08-22 11:03:45 MSK
+  ревизия дерева      c88aa855bef64a9241886f9d2a29553a11bc8f76
+  состояние дерева    ГРЯЗНОЕ: путей с несохранёнными правками 3.
                       Ревизия выше НЕ описывает исполнявшееся дерево целиком —
                       повторение по ней даст другой код. Отчёт остаётся годным
                       как наблюдение и НЕ годится как воспроизводимый замер.
@@ -13,25 +13,22 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
   Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
-  отпечаток состава     7ba7de0a736c9ee9
-  отпечаток содержимого e355c739bb6627c8
-  файлов под отпечатком 101, таблиц выведено 17 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.clusters, kacho_iam.group_members, kacho_iam.groups, kacho_iam.memberships, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.resource_scope_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
-  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kacho/pg/relverdict и services/iam/internal/repo/kacho/pg/scalegrid; все .sql каталога services/iam/internal/migrations, называющие хотя бы одну таблицу, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kacho_iam.", а не выписаны)
+  отпечаток состава     4db508c2021cfa4d
+  отпечаток содержимого ad3d7ccb7ff97eb6
+  файлов под отпечатком 67, таблиц выведено 17 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.clusters, kacho_iam.group_members, kacho_iam.groups, kacho_iam.memberships, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.resource_scope_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
+  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kacho/pg/relverdict и services/iam/internal/repo/kacho/pg/scalegrid; те .sql каталога services/iam/internal/migrations, что МЕНЯЮТ СТРУКТУРУ (CREATE/ALTER/DROP вне комментариев) хотя бы одной таблицы, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kacho_iam.", а не выписаны); БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем)
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (пофайлово, чтобы гейт назвал ВИНОВНИКА, а не только факт)
     c758aac510e28d60  services/iam/internal/migrations/0001_initial.sql
     62348872b893054b  services/iam/internal/migrations/0002_users_unique_email_dedup.sql
     aa49cd3b9492f8e0  services/iam/internal/migrations/0003_access_bindings_unique_active_grant.sql
-    a02ddefc083e2a59  services/iam/internal/migrations/0004_backfill_cluster_admin_grants_into_access_bindings.sql
     19aa55de138caee6  services/iam/internal/migrations/0005_rbac_v2_grammar_and_scope.sql
     7ff2cec19fb0d262  services/iam/internal/migrations/0008_drop_organizations.sql
     16cc6c3652691a9d  services/iam/internal/migrations/0009_sec_c_module_sa_least_priv.sql
     4e1ea0a477c34747  services/iam/internal/migrations/0011_users_drop_global_email_uniqueness.sql
     e5a730c8556b8b95  services/iam/internal/migrations/0012_user_token_revocations.sql
-    c159c6cd035cab2e  services/iam/internal/migrations/0017_backfill_operations_account_id.sql
     201f8d39e020c29c  services/iam/internal/migrations/0018_access_binding_targets.sql
     2fce1aac32b50a98  services/iam/internal/migrations/0019_resource_mirror.sql
     8bad6f9ec06a83ec  services/iam/internal/migrations/0020_access_binding_target_members.sql
-    80d81b3ed7ea3468  services/iam/internal/migrations/0021_resource_reconcile_outbox.sql
     af839023a123d464  services/iam/internal/migrations/0022_access_binding_selector.sql
     6369414729b76f69  services/iam/internal/migrations/0023_iam_direct_labels_gin.sql
     04f67f3eab99342e  services/iam/internal/migrations/0024_access_binding_emitted_tuples.sql
@@ -39,67 +36,38 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
     26a84afa11bee91f  services/iam/internal/migrations/0026_role_rule_selectors.sql
     69204abb1165d499  services/iam/internal/migrations/0027_target_members_rule_rekey.sql
     2e943a7fc30f0fcc  services/iam/internal/migrations/0028_access_binding_subjects.sql
-    1ca217b5906a7f07  services/iam/internal/migrations/0029_backfill_group_member_fga_tuples.sql
     9729c6a02af8d998  services/iam/internal/migrations/0030_drop_legacy_target_selector.sql
     499f1c24288515a0  services/iam/internal/migrations/0031_reseed_system_roles_rules.sql
     e6435f1e969e6291  services/iam/internal/migrations/0033_rule_module_scalar.sql
     3a53f608200a821f  services/iam/internal/migrations/0034_role_rule_selectors_all_arms.sql
     8089219a6d23ea80  services/iam/internal/migrations/0035_access_binding_deletion_protection_and_owner_role.sql
-    bf6957b3dcc05fd8  services/iam/internal/migrations/0036_backfill_owner_bindings_existing_accounts.sql
-    22687e008aac4b4e  services/iam/internal/migrations/0038_owner_role_rule_selectors.sql
-    823c3feb9cd29e22  services/iam/internal/migrations/0039_owner_role_rule_selectors_iam_content.sql
-    8045642ff82ae174  services/iam/internal/migrations/0040_edit_roles_include_read_verbs.sql
     4bac90d6c83787b8  services/iam/internal/migrations/0041_iam_content_labels.sql
-    4fc20953646741c1  services/iam/internal/migrations/0043_registry_owner_role_selector.sql
-    aa029a769c3f510a  services/iam/internal/migrations/0044_registry_sa_least_priv.sql
-    426cf9e4b4614819  services/iam/internal/migrations/0045_registry_sa_rules.sql
     66e71326c11bac5a  services/iam/internal/migrations/0046_user_oauth_clients.sql
     ea01a86bd3069b4d  services/iam/internal/migrations/0049_access_binding_subject_exists.sql
     4f46a28591ad9432  services/iam/internal/migrations/0050_principal_subject_ref_before_delete.sql
-    2f63eb3d2bbb243a  services/iam/internal/migrations/0053_system_role_rule_selectors.sql
     bf698e90d4421558  services/iam/internal/migrations/0054_resource_mirror_parent_scope_idx.sql
     60dc89e1cac86b85  services/iam/internal/migrations/0055_access_binding_target.sql
     078e1ecd19a2cc49  services/iam/internal/migrations/0056_role_definition_tier.sql
-    a9cc87f9e6333295  services/iam/internal/migrations/0057_storage_sa_least_priv.sql
-    1a294f569b44bbdc  services/iam/internal/migrations/0058_bootstrap_service_account.sql
-    06cd85ed7d5c773c  services/iam/internal/migrations/0059_nlb_operator_drop_start_stop.sql
-    ea8842aacd3f0ea8  services/iam/internal/migrations/0060_storage_system_role_selectors.sql
     c307d457f4b68ed5  services/iam/internal/migrations/0062_access_binding_target_cardinality.sql
     6233dacb45a71fa0  services/iam/internal/migrations/0071_service_accounts_drop_project_id.sql
     4ad3eb7ae1527170  services/iam/internal/migrations/0072_access_binding_role_assignable.sql
     44ec42f0e21f719b  services/iam/internal/migrations/0073_list_cursor_indexes.sql
-    009515ae9d1bae7b  services/iam/internal/migrations/0074_retire_compute_block_storage.sql
     cc8240774aa47f17  services/iam/internal/migrations/0075_retire_tenant_condition_surface.sql
-    3786c90cf62359b1  services/iam/internal/migrations/0076_retire_operator_dead_fanout.sql
-    2e70b7fb2b003e45  services/iam/internal/migrations/0077_retire_module_sa_dead_roles.sql
-    23f8607dd8cc5415  services/iam/internal/migrations/0081_retire_operator_service_account.sql
     ece41b99d4543a28  services/iam/internal/migrations/0082_resource_parent_edge.sql
     1216565fa592475e  services/iam/internal/migrations/0083_relation_fact.sql
-    6c7213049f74120a  services/iam/internal/migrations/0084_backfill_parent_edges_from_mirror.sql
     c958e71cd01d63c7  services/iam/internal/migrations/0085_role_verb_projection.sql
     3f7426f21b0d3332  services/iam/internal/migrations/0086_relation_fact_condition.sql
-    497fdc94f72a5499  services/iam/internal/migrations/0087_guest_access_key_system_role_selectors.sql
-    be3827602e0a8248  services/iam/internal/migrations/0088_placement_group_system_role_selectors.sql
-    a88eab6c89fecf40  services/iam/internal/migrations/0089_role_verb_type_form_comment.sql
-    79ea18afd6c77da5  services/iam/internal/migrations/0090_vpc_cidr_group_role_selectors.sql
     10f43160376a80c8  services/iam/internal/migrations/0091_type_dictionary_of_the_scope_chain.sql
     6c72633aaecd4d18  services/iam/internal/migrations/0092_resource_count_limits.sql
-    a00f0b2fb745944b  services/iam/internal/migrations/0093_quota_reader_group.sql
-    9f46fdbc986bdb72  services/iam/internal/migrations/0096_quota_reader_all_owners.sql
-    05ba9a89d5db8181  services/iam/internal/migrations/0098_relation_fact_follows_the_journal.sql
-    bfeea9bf807a4d02  services/iam/internal/migrations/0100_relation_fact_reads_the_whole_grant.sql
     3b077c2ffcd40a1b  services/iam/internal/migrations/470001_memberships_expand.sql
     02dbbf5091d79374  services/iam/internal/migrations/472002_membership_carries_rights.sql
     d246bbd4221b87e0  services/iam/internal/migrations/484002_account_quota_identity_carrier.sql
-    3045af2563bed533  services/iam/internal/migrations/513001_system_role_rules_speak_the_catalog_dictionary.sql
     142d9c6b6a340c43  services/iam/internal/migrations/708001_list_cursor_indexes.sql
     a0c5f6cb92e68363  services/iam/internal/migrations/732001_binding_subject_carries_its_scope.sql
     11839ffcb2202689  services/iam/internal/migrations/740001_scope_chain_reaches_the_root.sql
     10afaa5d859057df  services/iam/internal/migrations/781001_scope_chain_takes_the_project_parent_from_the_journal.sql
     49c0c0ad4e02e6a6  services/iam/internal/migrations/785001_scope_chain_covers_iam_own_types.sql
-    84a8c87c04454f2a  services/iam/internal/migrations/800001_binding_subject_row_comes_with_the_grant.sql
     1bf1f86cb161d282  services/iam/internal/migrations/893001_grant_surface_admits_the_relation_form.sql
-    751e67acb75ac856  services/iam/internal/migrations/893002_built_in_access_moves_onto_the_grant_surface.sql
     f6f5854b322258b9  services/iam/internal/migrations/898002_client_revocation_reaches_presentation.sql
     0f36e1cc4f65d12d  services/iam/internal/migrations/944001_identity_scope_comes_from_membership.sql
     75d8453d798afd9a  services/iam/internal/repo/kacho/pg/relverdict/asker.go
@@ -113,9 +81,7 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
     58d619c49f38051b  services/iam/internal/repo/kacho/pg/relverdict/subjects.go
     6dd100ec78c176ec  services/iam/internal/repo/kacho/pg/scalegrid/census.go
     813a7da914ee5057  services/iam/internal/repo/kacho/pg/scalegrid/dictionary.go
-    8e6a0bae815081b1  services/iam/internal/repo/kacho/pg/scalegrid/fingerprint.go
     6138411d3c7dbc10  services/iam/internal/repo/kacho/pg/scalegrid/grid.go
-    5a11a41e5d368582  services/iam/internal/repo/kacho/pg/scalegrid/report.go
     cdc06d17418bff07  services/iam/internal/repo/kacho/pg/scalegrid/seed.go
     1b91d4b57ab104da  services/iam/internal/repo/kacho/pg/scalegrid/strength.go
     0c4fdd69541c927c  services/iam/internal/repo/kacho/pg/scalegrid/strength_census.go
@@ -150,11 +116,11 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ N
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-100        прямыми выдачами             30        17       47         56      2     900µs   4.157ms      7
-1000       прямыми выдачами             30        15       45         45      2     921µs   1.169ms      7
-10000      прямыми выдачами             30        15       45         45      2     949µs   1.216ms      7
-100000     прямыми выдачами             30        15       45         45      2     739µs   1.491ms      7
-1000000    прямыми выдачами             30        15       45         45      2     773µs   1.062ms      7
+100        прямыми выдачами             30        17       47         56      2     870µs   5.076ms      7
+1000       прямыми выдачами             30        15       45         45      2     764µs     995µs      7
+10000      прямыми выдачами             30        15       45         45      2     913µs   1.495ms      7
+100000     прямыми выдачами             30        15       45         45      2     965µs   1.353ms      7
+1000000    прямыми выдачами             30        15       45         45      2     852µs   1.066ms      7
 
   отношение к нижней точке (несущая): 100→1.00  1000→1.00  10000→1.00  100000→1.00  1000000→1.00  
   отношение сверочная/несущая по точкам: 100→1.87  1000→1.50  10000→1.50  100000→1.50  1000000→1.50  
@@ -181,9 +147,9 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ B
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-100        прямыми выдачами            137        15      152        160      2     815µs   3.667ms      7
-1000       прямыми выдачами             30        15       45         45      2     709µs     918µs      7
-1000000    прямыми выдачами             22        15       37         62      2   4.109ms   6.164ms      7
+100        прямыми выдачами            137        15      152        160      2     937µs    4.27ms      7
+1000       прямыми выдачами             30        15       45         45      2     814µs   1.175ms      7
+1000000    прямыми выдачами             22        15       37         62      2   4.688ms   7.124ms      7
 
   отношение к нижней точке (несущая): 100→1.00  1000→0.22  1000000→0.16  
   отношение сверочная/несущая по точкам: 100→1.17  1000→1.50  1000000→2.82  
@@ -208,14 +174,14 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ R
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-1          прямыми выдачами             24        15       39         50      2     752µs   3.708ms      7
-9          прямыми выдачами             30        15       45         45      2     735µs     915µs      7
-100        прямыми выдачами            123        15      138         45      2     831µs   1.198ms      7
-100        через группы                123        15      138         45      2     901µs   1.274ms      7
-227        прямыми выдачами            249        15      264         46      2     773µs     986µs      7
-227        через группы                249        15      264         46      2     727µs     967µs      7
-1000       прямыми выдачами           1023        15     1038         46      2     829µs   1.324ms      7
-1000       через группы               1023        15     1038         46      2     968µs   1.273ms      7
+1          прямыми выдачами             24        15       39         50      2   1.237ms   6.696ms      7
+9          прямыми выдачами             30        15       45         45      2     909µs   2.315ms      7
+100        прямыми выдачами            123        15      138         45      2     834µs   1.051ms      7
+100        через группы                123        15      138         45      2     865µs   1.375ms      7
+227        прямыми выдачами            249        15      264         46      2   1.185ms    1.51ms      7
+227        через группы                249        15      264         46      2     811µs   1.369ms      7
+1000       прямыми выдачами           1023        15     1038         46      2     964µs    1.18ms      7
+1000       через группы               1023        15     1038         46      2    1.24ms   2.651ms      7
 
   отношение к нижней точке (несущая): 1→1.00  9→1.25  100→5.12  100→5.12  227→10.38  227→10.38  1000→42.62  1000→42.62  
   отношение сверочная/несущая по точкам: 1→2.08  9→1.50  100→0.37  100→0.37  227→0.18  227→0.18  1000→0.04  1000→0.04  
@@ -245,14 +211,14 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ F
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-0          фактом лично                 29         8       37         51      2     760µs   4.533ms      7
-1          фактом лично                 30        15       45         45      2     728µs     987µs      7
-10         фактом лично                 39        91      130         72      2     749µs     971µs      7
-10         фактом через группу          39       101      140         57      2     756µs     970µs      7
-10         фактом подстановкой user:*       39        81      120         57      2     889µs   1.197ms      7
-100        фактом лично                129       811      940        342      2     777µs     807µs      7
-100        фактом через группу         129       911     1040        342      2     918µs   1.189ms      7
-100        фактом подстановкой user:*      129       711      840        342      2     811µs   1.094ms      7
+0          фактом лично                 29         8       37         51      2   1.375ms   6.756ms      7
+1          фактом лично                 30        15       45         45      2   1.085ms   1.312ms      7
+10         фактом лично                 39        91      130         72      2     988µs   1.305ms      7
+10         фактом через группу          39       101      140         57      2     828µs   1.079ms      7
+10         фактом подстановкой user:*       39        81      120         57      2     842µs   1.078ms      7
+100        фактом лично                129       811      940        342      2   1.286ms   1.554ms      7
+100        фактом через группу         129       911     1040        342      2     877µs   1.317ms      7
+100        фактом подстановкой user:*      129       711      840        342      2     968µs   1.227ms      7
 
   отношение к нижней точке (несущая): 0→1.00  1→1.03  10→1.34  10→1.34  10→1.34  100→4.45  100→4.45  100→4.45  
   отношение сверочная/несущая по точкам: 0→1.76  1→1.50  10→1.85  10→1.46  10→1.46  100→2.65  100→2.65  100→2.65  
@@ -280,7 +246,7 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 
 
 ОБЪЁМ ОСМОТРЕННОГО
-  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 9m51s
+  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 11m1s
 
 ПЕРЕПИСЬ ПРИБОРА В ВЕРХНЕЙ ТОЧКЕ ОСИ N (доля неотнесённого печатается всегда)
 ПРАВИЛО ОТНЕСЕНИЯ (объявлено до прогона; перепись печатает его дословно из кода)

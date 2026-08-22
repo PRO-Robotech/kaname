@@ -213,6 +213,10 @@ func TestScaleGridFullReportIsFreshAndItsSubjectHasNotMoved(t *testing.T) {
 				"файлов под отпечатком %d (в шапке записано %d), таблиц выведено %d",
 				gr.path, valueAfter(text, "  ревизия дерева      "), age,
 				len(fp.Files), len(recordedFileHashes(text)), len(fp.Tables))
+			// ПРИЗНАК ОТБОРА печатается рядом с числом: «файлов 74» без него не
+			// отличить от «файлов 115», а разница между ними — та самая ширина
+			// предмета, из-за которой отчёты обесценивались без причины (#961).
+			t.Logf("признак отбора под отпечаток: %s", scalegrid.FingerprintPredicate)
 
 			findings := judgeReport(text, fp, func(rel string) string {
 				return scalegrid.ContentOf(root, rel)
