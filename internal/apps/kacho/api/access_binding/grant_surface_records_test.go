@@ -362,3 +362,39 @@ func TestABList_R914_NeighbourReadFailureRefusesTheRequest(t *testing.T) {
 		assert.NotEmpty(t, resp.GetRecords())
 	})
 }
+
+// TestABList_R914_IncompleteMembershipIsNamedInTheAnswer — усечение состава
+// ДОЕЗЖАЕТ до вызывающего, а не остаётся в репозитории.
+//
+// Предел состава законен: членство неограниченно by construction, и у него есть
+// свой пагинированный глагол. Незаконно — промолчать: усечённый состав читается
+// как факт о доступе, «в группе больше никого». Признак усечения потому и часть
+// ОТВЕТА, а не журнала — путь его переноса обязан быть проверен, иначе честная
+// граница в репозитории оканчивается молчанием на проводе.
+func TestABList_R914_IncompleteMembershipIsNamedInTheAnswer(t *testing.T) {
+	repo, fga := newGrantSurfaceFixture(t)
+	repo.incompleteGroups = []domain.GroupID{gsGroupMulti}
+	h := (&Handler{}).WithList(NewListUseCase(repo).
+		WithRelationStore(onlyClusterAdmin()).
+		WithRelationQueries(fga).
+		WithClusterAdmins(&stubClusterAdmins{}))
+
+	resp, err := h.List(clusterAdminCtx("usr_caller"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+	require.NoError(t, err)
+	assert.Equal(t, []string{gsGroupMulti}, resp.GetIncompleteMembershipGroupIds(),
+		"группа с усечённым составом обязана быть НАЗВАНА в ответе: без имени вызывающий "+
+			"не знает ни того, что состав неполон, ни к какой группе идти за остатком")
+
+	// Отрицание рядом: без усечения перечень пуст. Пустой перечень — это
+	// утверждение «состав полон», и оно обязано быть отличимо от «не заполняли».
+	clean, fga2 := newGrantSurfaceFixture(t)
+	h2 := (&Handler{}).WithList(NewListUseCase(clean).
+		WithRelationStore(onlyClusterAdmin()).
+		WithRelationQueries(fga2).
+		WithClusterAdmins(&stubClusterAdmins{}))
+	resp2, err := h2.List(clusterAdminCtx("usr_caller"), &iamv1.ListAccessBindingsRequest{PageSize: 100})
+	require.NoError(t, err)
+	assert.Empty(t, resp2.GetIncompleteMembershipGroupIds(),
+		"состав всех названных групп возвращён целиком — объявлять усечение не о чем")
+	assert.NotEmpty(t, resp2.GetRecords(), "положительный контроль: перечисление не пусто")
+}

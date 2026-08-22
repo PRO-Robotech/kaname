@@ -654,10 +654,15 @@ func listPageToProto(page ListPage) (*iamv1.ListAccessBindingsResponse, error) {
 			},
 		})
 	}
+	var incomplete []string
+	for _, g := range page.IncompleteMembershipGroups {
+		incomplete = append(incomplete, string(g))
+	}
 	return &iamv1.ListAccessBindingsResponse{
-		AccessBindings: out,
-		NextPageToken:  page.NextPageToken,
-		Records:        records,
+		AccessBindings:               out,
+		NextPageToken:                page.NextPageToken,
+		Records:                      records,
+		IncompleteMembershipGroupIds: incomplete,
 	}, nil
 }
 

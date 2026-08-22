@@ -380,6 +380,6 @@ func (grpUnrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject
 
 // MembersOfGroups — предмет этой пробы не касается состава нескольких групп;
 // дублёр отвечает пусто и говорит об этом, а не притворяется источником.
-func (r *scopeGroupRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, error) {
-	return nil, nil
+func (r *scopeGroupRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	return nil, nil, nil
 }

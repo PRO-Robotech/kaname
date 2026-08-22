@@ -340,6 +340,10 @@ type abFakeRepo struct {
 	// отказа: «мне нечем ответить» и «ответ пуст» — разные факты, и второй не
 	// вправе производиться первым.
 	groupsReaderNil bool
+	// incompleteGroups — перечень групп, чей состав дублёр объявляет неполным.
+	// Настоящий читатель объявляет это, упершись в предел выборки; дублёру
+	// предел ни к чему, а признак нужен — иначе путь его переноса не проверен.
+	incompleteGroups []domain.GroupID
 	// emittedTuples — persisted exact emitted-set per binding
 	// (access_binding_emitted_tuples), keyed by binding id. Co-committing
 	// the grant tuples here lets revoke/Role.Update use the stored set
@@ -823,11 +827,11 @@ func (g *fakeGroupRdr) ListMembers(_ context.Context, _ domain.GroupID, _ group.
 // MembersOfGroups — дублёр отвечает ИЗ ТОГО ЖЕ хранилища, что и IsMember.
 // Дублёр, отвечающий пусто там, где настоящий отвечает составом, сделал бы
 // невидимым ровно тот недоответ, ради которого пробу и пишут.
-func (g *fakeGroupRdr) MembersOfGroups(_ context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, error) {
+func (g *fakeGroupRdr) MembersOfGroups(_ context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
 	g.repo.mu.Lock()
 	defer g.repo.mu.Unlock()
 	if g.repo.membersOfGroupsErr != nil {
-		return nil, g.repo.membersOfGroupsErr
+		return nil, nil, g.repo.membersOfGroupsErr
 	}
 	want := make(map[string]struct{}, len(groupIDs))
 	for _, id := range groupIDs {
@@ -853,7 +857,10 @@ func (g *fakeGroupRdr) MembersOfGroups(_ context.Context, groupIDs []domain.Grou
 			MemberID:   domain.SubjectID(parts[2]),
 		})
 	}
-	return out, nil
+	// Дублёр отдаёт состав целиком и говорит об этом пустым перечнем неполных:
+	// снисходительнее настоящего он быть не вправе, но и усечения, которого не
+	// было, объявлять не должен.
+	return out, g.repo.incompleteGroups, nil
 }
 func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) (bool, error) {
 	g.repo.mu.Lock()

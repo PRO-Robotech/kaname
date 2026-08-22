@@ -162,6 +162,6 @@ func (r *memberPageReader) Visibility() visibility.ReaderIface { return nil }
 
 // MembersOfGroups — предмет этой пробы не касается состава нескольких групп;
 // дублёр отвечает пусто и говорит об этом, а не притворяется источником.
-func (r *memberPageRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, error) {
-	return nil, nil
+func (r *memberPageRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	return nil, nil, nil
 }
