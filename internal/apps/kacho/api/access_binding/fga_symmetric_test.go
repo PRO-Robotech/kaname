@@ -41,6 +41,8 @@ package access_binding
 import (
 	"context"
 	stderrors "errors"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -799,6 +801,39 @@ func (g *fakeGroupRdr) List(_ context.Context, _ group.ListFilter) ([]domain.Gro
 }
 func (g *fakeGroupRdr) ListMembers(_ context.Context, _ domain.GroupID, _ group.MemberPage) ([]domain.GroupMember, string, error) {
 	return nil, "", nil
+}
+
+// MembersOfGroups — дублёр отвечает ИЗ ТОГО ЖЕ хранилища, что и IsMember.
+// Дублёр, отвечающий пусто там, где настоящий отвечает составом, сделал бы
+// невидимым ровно тот недоответ, ради которого пробу и пишут.
+func (g *fakeGroupRdr) MembersOfGroups(_ context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, error) {
+	g.repo.mu.Lock()
+	defer g.repo.mu.Unlock()
+	want := make(map[string]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		want[string(id)] = struct{}{}
+	}
+	keys := make([]string, 0, len(g.repo.groupMembers))
+	for k := range g.repo.groupMembers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var out []domain.GroupMember
+	for _, k := range keys {
+		parts := strings.SplitN(k, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if _, ok := want[parts[0]]; !ok {
+			continue
+		}
+		out = append(out, domain.GroupMember{
+			GroupID:    domain.GroupID(parts[0]),
+			MemberType: domain.SubjectType(parts[1]),
+			MemberID:   domain.SubjectID(parts[2]),
+		})
+	}
+	return out, nil
 }
 func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) (bool, error) {
 	g.repo.mu.Lock()

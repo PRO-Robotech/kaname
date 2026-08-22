@@ -68,7 +68,11 @@ func TestGrantedVerbs_UpdateImpliesDeleteOnLeavesOnly(t *testing.T) {
 // Тип, не объявивший набора глаголов, не получает ни одного: отношения `v_*` у
 // него нет, и пара в проекции адресовала бы то, чего в модели не существует.
 func TestGrantedVerbs_TypeWithoutDeclaredVerbsGetsNone(t *testing.T) {
-	const undeclared = "iam_fgaproxy"
+	// Тип платформенного синглтона: он в модели ЕСТЬ и глаголов не объявляет.
+	// Прежде здесь стояло имя якоря вне иерархии, снятого вместе с типом (#914),
+	// — предпосылка выполнялась бы тогда по причине «такого типа нет вовсе», а
+	// это другое утверждение.
+	const undeclared = "cluster"
 	if len(VerbsOfType(undeclared)) != 0 {
 		t.Skipf("у типа %s появился набор глаголов — предпосылка пробы истекла", undeclared)
 	}

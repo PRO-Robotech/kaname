@@ -34,6 +34,19 @@ type ReaderIface interface {
 	// is not a member. Backend errors (DB-unavailable / SQL syntax) surface
 	// as ErrInternal / ErrUnavailable via the standard mapErr.
 	IsMember(ctx context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) (bool, error)
+
+	// MembersOfGroups — состав НЕСКОЛЬКИХ групп ОДНИМ вопросом.
+	//
+	// Отдельно от ListMembers, а не «позвать его в цикле»: у полного
+	// перечисления выдач (#914) на странице бывает до тысячи выдач, и вопрос
+	// на каждую группу означал бы тысячу обращений к базе на один ответ —
+	// стоимость страницы, принадлежащая числу строк, а не запросу.
+	//
+	// Страницы у него нет НАМЕРЕННО, и это ограничение названо: он отвечает на
+	// состав групп, названных субъектами УЖЕ ОГРАНИЧЕННОЙ страницы выдач, то
+	// есть его вход ограничен сверху размером той страницы. Пустой перечень
+	// идентификаторов — пустой ответ, а не «все группы».
+	MembersOfGroups(ctx context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, error)
 }
 
 type WriterIface interface {

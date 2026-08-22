@@ -221,6 +221,52 @@ func (r *groupReader) ListMembers(ctx context.Context, groupID domain.GroupID, p
 	return out, next, nil
 }
 
+// MembersOfGroups — состав нескольких групп одним обращением.
+//
+// Ключ `group_members_pkey (group_id, member_type, member_id)` ведущей колонкой
+// обслуживает сравнение `group_id = ANY(...)` НАПРЯМУЮ: колонка идёт голой, без
+// вычисления вокруг неё, поэтому строки чужих групп не читаются вовсе.
+// Порядок задан явно — набор возвращается устойчивым, чтобы ответ не зависел от
+// того, каким планом его собрали.
+func (r *groupReader) MembersOfGroups(ctx context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, error) {
+	if len(groupIDs) == 0 {
+		// Пустой вход — пустой ответ. Ни в коем случае не «все группы»: тот же
+		// запрос без предиката вернул бы состав всего кластера.
+		return nil, nil
+	}
+	ids := make([]string, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		if id == "" {
+			continue
+		}
+		ids = append(ids, string(id))
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.tx.Query(ctx, `
+		SELECT group_id, member_type, member_id, added_at
+		  FROM group_members
+		 WHERE group_id = ANY($1)
+		 ORDER BY group_id ASC, added_at ASC, member_id ASC`, ids)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	var out []domain.GroupMember
+	for rows.Next() {
+		var m domain.GroupMember
+		if err := rows.Scan((*string)(&m.GroupID), (*string)(&m.MemberType), (*string)(&m.MemberID), &m.AddedAt); err != nil {
+			return nil, mapErr(err, "", "")
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	return out, nil
+}
+
 type groupWriter struct {
 	groupReader
 }

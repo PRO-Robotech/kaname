@@ -265,11 +265,11 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	// false keeps parity with those two RPCs.
 	f.IncludeRevoked = req.GetIncludeRevoked()
 
-	rows, next, err := h.list.Execute(ctx, f)
+	page, err := h.list.Execute(ctx, f)
 	if err != nil {
 		return nil, err
 	}
-	return listToProto(rows, next)
+	return listPageToProto(page)
 }
 
 // abListFilterFields — the closed whitelist of List filter keys (F11).
@@ -609,6 +609,67 @@ func abToPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 	return &pb, nil
 }
 
+func listPageToProto(page ListPage) (*iamv1.ListAccessBindingsResponse, error) {
+	out := make([]*iamv1.AccessBinding, 0, len(page.Bindings))
+	// records — ПОЛНОЕ перечисление поверхности выдач: те же выдачи плюс записи
+	// двух соседних поверхностей. Вид называется дважды — полем `kind` и ветвью
+	// `record`, — и оба прочтения строятся ЗДЕСЬ, одной функцией на вид: запись,
+	// чей `kind` разошёлся с ветвью, читалась бы разными вызывающими по-разному.
+	records := make([]*iamv1.GrantSurfaceRecord, 0,
+		len(page.Bindings)+len(page.Memberships)+len(page.ClusterAdmins))
+	for _, b := range page.Bindings {
+		pb, err := abToPb(b)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "marshal access binding")
+		}
+		out = append(out, pb)
+		records = append(records, &iamv1.GrantSurfaceRecord{
+			Kind:   iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_ACCESS_BINDING,
+			Record: &iamv1.GrantSurfaceRecord_Binding{Binding: pb},
+		})
+	}
+	for _, m := range page.Memberships {
+		records = append(records, &iamv1.GrantSurfaceRecord{
+			Kind: iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_GROUP_MEMBERSHIP,
+			Record: &iamv1.GrantSurfaceRecord_GroupMembership{
+				GroupMembership: &iamv1.GroupMembershipRecord{
+					GroupId:    string(m.GroupID),
+					MemberType: string(m.MemberType),
+					MemberId:   string(m.MemberID),
+					AddedAt:    tsOrNil(m.AddedAt),
+				},
+			},
+		})
+	}
+	for _, a := range page.ClusterAdmins {
+		records = append(records, &iamv1.GrantSurfaceRecord{
+			Kind: iamv1.GrantSurfaceKind_GRANT_SURFACE_KIND_CLUSTER_ADMIN,
+			Record: &iamv1.GrantSurfaceRecord_ClusterAdmin{
+				ClusterAdmin: &iamv1.ClusterAdminRecord{
+					Id:          a.ClusterAdminGrantID,
+					SubjectType: a.SubjectType,
+					SubjectId:   a.SubjectID,
+					GrantedAt:   tsOrNil(a.GrantedAt),
+				},
+			},
+		})
+	}
+	return &iamv1.ListAccessBindingsResponse{
+		AccessBindings: out,
+		NextPageToken:  page.NextPageToken,
+		Records:        records,
+	}, nil
+}
+
+// listToProto — проекция УСТАРЕВШЕГО семейства
+// (ListByScope/ListBySubject/ListByRole/ListByAccount).
+//
+// Поле полного перечисления (`records`) она НЕ заполняет, и это сказано здесь и
+// в комментарии самого поля, а не оставлено читателю как «ничего не найдено».
+// Заполнять его отсюда было бы неверно вдвойне: у этих четырёх чтений нет ни
+// вопроса о кластерном администраторе, ни своего вердикта видимости для
+// соседних видов, — то есть перечисление вышло бы либо неполным, либо шире
+// того, что вызывающему дозволено видеть.
 func listToProto(rows []domain.AccessBinding, next string) (*iamv1.ListAccessBindingsResponse, error) {
 	out := make([]*iamv1.AccessBinding, 0, len(rows))
 	for _, b := range rows {
@@ -619,4 +680,15 @@ func listToProto(rows []domain.AccessBinding, next string) (*iamv1.ListAccessBin
 		out = append(out, pb)
 	}
 	return &iamv1.ListAccessBindingsResponse{AccessBindings: out, NextPageToken: next}, nil
+}
+
+// tsOrNil — отметка времени в ответе усечена до СЕКУНД, как у всякого
+// timestamp'а этого контракта: микросекунды базы на провод не текут. Нулевое
+// время остаётся НЕЗАПОЛНЕННЫМ, а не эпохой: «не задано» и «01.01.1970» —
+// разные утверждения, и второе читается как факт.
+func tsOrNil(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t.Truncate(time.Second))
 }

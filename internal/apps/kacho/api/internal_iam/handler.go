@@ -59,7 +59,7 @@ type subjectChanger interface {
 
 // relationWriteGate — narrow authz port for the resource-registration RPCs.
 // Authorize resolves the mTLS client-cert→SA identity and
-// ReBAC-checks `fga_writer` on `iam_fgaproxy:system`. Implemented by
+// ReBAC-checks `fga_writer` on `cluster:cluster_kacho_root` (#914). Implemented by
 // *authzguard.RelationWriteGate.
 type relationWriteGate interface {
 	Authorize(ctx context.Context) (callerDomain string, err error)
@@ -152,7 +152,7 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 // same commit. Idempotent: repeat of the same tuple → OK, never AlreadyExists.
 //
 // authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
-// (cert-cert→SA → `fga_writer@iam_fgaproxy:system`). cluster-internal :9091.
+// (cert-cert→SA → `fga_writer@cluster:cluster_kacho_root`). cluster-internal :9091.
 // validateProxyTuple applies the shared proxy-write rule and maps its verdict to the
 // transport. This is the ONE place the refusal becomes a gRPC status, so the code and
 // the text cannot drift between the three RPCs that share the rule; the rule itself is

@@ -80,6 +80,41 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 )
 
+// clusterAdminReader — перечисление ДЕЙСТВУЮЩИХ кластерных администраторов.
+//
+// Своя поверхность у них остаётся (выдать / отозвать / перечислить своим
+// глаголом), но ЧТЕНИЕ сводится сюда: две поверхности об одном предмете
+// расходятся молча — спрашивающий «кто имеет доступ» получает ответ с одной из
+// них и считает его полным (#914, решение 2).
+type clusterAdminReader interface {
+	ListActive(ctx context.Context) ([]domain.ClusterAdminEntry, error)
+}
+
+// ListPage — одна страница ПОЛНОГО перечисления поверхности выдач.
+//
+// Три вида, три поля, и это не «список разнородного»: у членства нет ни роли,
+// ни области, ни срока, у кластерного администратора — свой порядок выдачи, и
+// втискивание их в форму выдачи потребовало бы пустых полей, которые читатель
+// принимает за «не задано», а не за «неприменимо».
+type ListPage struct {
+	// Bindings — выдачи этой страницы, уже суженные вердиктом.
+	Bindings []domain.AccessBinding
+	// NextPageToken — продолжение обхода ВЫДАЧ. Соседние виды сопровождают
+	// страницу и по страницам не режутся: их объём ограничен её содержимым
+	// (членство) либо мал по построению (кластерные администраторы).
+	NextPageToken string
+	// Memberships — состав ТЕХ групп, что названы субъектами выдач на этой
+	// странице. Членство в группе без выдачи доступа не даёт и к вопросу «кто
+	// имеет доступ» не относится; видимость наследуется от выдачи, которую
+	// вызывающий и так видит.
+	Memberships []domain.GroupMember
+	// ClusterAdmins — все действующие кластерные администраторы, и ТОЛЬКО тому,
+	// кто сам кластерный администратор. Верхний ярус супер-доступа обязан быть
+	// виден целиком тому, кто им распоряжается, и не обязан — арендатору:
+	// перечисление имён администраторов облака арендатору не адресовано.
+	ClusterAdmins []domain.ClusterAdminEntry
+}
+
 type ListUseCase struct {
 	repo Repo
 	// queries — FGA port resolving the caller's visible bindings on the page.
@@ -94,6 +129,12 @@ type ListUseCase struct {
 	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
+
+	// clusterAdmins — соседняя поверхность верхнего яруса супер-доступа.
+	// Не провязана ⇒ перечисление её вида не несёт, и это ОТЛИЧИМО: вид не
+	// объявляется пустым, он просто отсутствует. Провязанный порт, чей ОТВЕТ
+	// не получен, — другой факт, и он отказывает (см. neighbours).
+	clusterAdmins clusterAdminReader
 }
 
 func NewListUseCase(r Repo) *ListUseCase {
@@ -109,6 +150,13 @@ func (u *ListUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListUse
 
 func (u *ListUseCase) WithRelationQueries(q clients.RelationQueries) *ListUseCase {
 	u.queries = q
+	return u
+}
+
+// WithClusterAdmins провязывает чтение соседней поверхности кластерных
+// администраторов (#914, решение 2). nil-safe: непровязанный порт вида не даёт.
+func (u *ListUseCase) WithClusterAdmins(r clusterAdminReader) *ListUseCase {
+	u.clusterAdmins = r
 	return u
 }
 
@@ -133,26 +181,26 @@ func (u *ListUseCase) WithRelationStore(relations clients.RelationStore) *ListUs
 // of it visible to the caller. The predicate fields on f (subject/role/scope/
 // scopeId) narrow the page at the SQL layer; visibility is applied to the rows
 // that page yields.
-func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) ([]domain.AccessBinding, string, error) {
+func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) (ListPage, error) {
 	// C7 — формат ПЕРВЫМ стейтментом, до решения о том, кто спрашивает. Хендлер
 	// судит СЫРОЙ запрос (насыщающее сужение int64→int32), здесь судится уже
 	// суженное значение и форма токена.
 	if err := shared.ValidateVisiblePagination(f.PageToken, f.PageSize); err != nil {
-		return nil, "", err
+		return ListPage{}, err
 	}
 	after, err := shared.DecodeVisiblePageToken("page_token", f.PageToken)
 	if err != nil {
-		return nil, "", err
+		return ListPage{}, err
 	}
 
 	subject, _ := authzguard.PrincipalSubject(ctx) // fail-closed: anon / unknown → ""
 	if subject == "" {
-		return []domain.AccessBinding{}, "", nil
+		return ListPage{Bindings: []domain.AccessBinding{}}, nil
 	}
 	if u.queries == nil {
 		// No visibility is resolvable at all. An empty page here cannot be told
 		// apart from "you have no grants" — see the file doc, change (1).
-		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+		return ListPage{}, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 
 	// D-9 flat super-gate (parity with Get / ListByScope / ListByAccount /
@@ -167,32 +215,102 @@ func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) ([]domai
 	// ровно то же, что раньше: гейт не провязан и не срабатывает.
 	clusterAdmin, err := authzguard.SubjectIsClusterAdminPlainE(ctx, u.relations, subject)
 	if err != nil {
-		return nil, "", shared.MapRepoErr(iamerr.ErrUnavailable)
+		return ListPage{}, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
-		return nil, "", shared.MapRepoErr(err)
+		return ListPage{}, shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
 	scope, err := u.subjectScope(ctx, rd, clusterAdmin)
 	if err != nil {
-		return nil, "", err
+		return ListPage{}, err
 	}
 	page, next, err := u.collectVisiblePage(ctx, rd, scope, f, after, clusterAdmin)
 	if err != nil {
-		return nil, "", err
+		return ListPage{}, err
 	}
 	// Subjects and the materialization stamp are projected onto the RETURNED page
 	// only — the rows a verdict discarded never needed either.
 	if err := projectSubjectsBatch(ctx, rd, page); err != nil {
-		return nil, "", err
+		return ListPage{}, err
 	}
 	if err := projectMaterializedAtBatch(ctx, rd, page); err != nil {
-		return nil, "", err
+		return ListPage{}, err
 	}
-	return page, next, nil
+	out := ListPage{Bindings: page, NextPageToken: next}
+	if err := u.neighbours(ctx, rd, &out, clusterAdmin); err != nil {
+		return ListPage{}, err
+	}
+	return out, nil
+}
+
+// neighbours дочитывает две соседние поверхности для УЖЕ ОТОБРАННОЙ страницы.
+//
+// Обе читаются на ТОЙ ЖЕ транзакции, что и страница: иначе состав группы и
+// выдача, его давшая, приехали бы из разных снимков, и ответ описывал бы
+// состояние, которого не было ни в один момент.
+//
+// Отказ чтения — ОТКАЗ ЗАПРОСА, а не тихо усечённое перечисление: полнота и
+// есть предмет этого поля, и «соседей нет» обязано означать «их нет», а не «их
+// не удалось прочитать».
+func (u *ListUseCase) neighbours(
+	ctx context.Context, rd Reader, page *ListPage, clusterAdmin bool,
+) error {
+	if groups := groupSubjectsOf(page.Bindings); len(groups) > 0 {
+		gr := rd.Groups()
+		if gr == nil {
+			return shared.MapRepoErr(iamerr.ErrUnavailable)
+		}
+		members, err := gr.MembersOfGroups(ctx, groups)
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		page.Memberships = members
+	}
+
+	// Верхний ярус супер-доступа перечисляется ТОМУ, КТО ИМ РАСПОРЯЖАЕТСЯ.
+	// Арендатору он не адресован: список администраторов облака — не ответ на
+	// вопрос «кто имеет доступ к МОЕМУ».
+	if !clusterAdmin || u.clusterAdmins == nil {
+		return nil
+	}
+	admins, err := u.clusterAdmins.ListActive(ctx)
+	if err != nil {
+		return shared.MapRepoErr(iamerr.ErrUnavailable)
+	}
+	page.ClusterAdmins = admins
+	return nil
+}
+
+// groupSubjectsOf — идентификаторы групп, названных субъектами выдач страницы.
+//
+// Читаются ОБЕ формы субъекта: плоская пара (легаси-проекция строки) и
+// многосубъектный набор. Одна из двух дала бы неполный ответ ровно там, где
+// выдача заведена другой формой, — и неполнота выглядела бы как «в группе никого».
+func groupSubjectsOf(rows []domain.AccessBinding) []domain.GroupID {
+	seen := make(map[domain.GroupID]struct{}, len(rows))
+	var out []domain.GroupID
+	add := func(t domain.SubjectType, id domain.SubjectID) {
+		if t != domain.SubjectTypeGroup || id == "" {
+			return
+		}
+		gid := domain.GroupID(id)
+		if _, dup := seen[gid]; dup {
+			return
+		}
+		seen[gid] = struct{}{}
+		out = append(out, gid)
+	}
+	for _, b := range rows {
+		add(b.SubjectType, b.SubjectID)
+		for _, s := range b.Subjects {
+			add(s.Type, s.ID)
+		}
+	}
+	return out
 }
 
 // subjectScope resolves the structural facts of the caller once per request.
