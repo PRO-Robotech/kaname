@@ -39,6 +39,17 @@ const (
 	// «место кончилось» пойдёт искать, что понизить, там, где ничего не
 	// назначено.
 	reasonQuotaNotProvisioned = "QUOTA_NOT_PROVISIONED"
+
+	// reasonQuotaRateExceeded — темп исчерпан: за текущее окно принято столько,
+	// сколько названо величиной. Арендатору требуется ПОДОЖДАТЬ.
+	//
+	// Отдельный признак, а не оттенок `QUOTA_EXCEEDED`, и различие несущее ровно
+	// так же, как между двумя предыдущими: там разница в действии АДМИНИСТРАТОРА,
+	// здесь — в действии САМОГО ВЫЗЫВАЮЩЕГО. Повтор запроса по объёму не пройдёт
+	// никогда, повтор по темпу пройдёт в следующем окне; клиент, не различающий
+	// эти полосы, либо бросает работу там, где надо повторить, либо повторяет
+	// вечно там, где повтор бесполезен.
+	reasonQuotaRateExceeded = "QUOTA_RATE_EXCEEDED"
 )
 
 // quotaReasonDomain — источник отказа в `ErrorInfo.domain`, как его видит клиент.
@@ -57,6 +68,11 @@ func quotaRefusal(err error) (error, bool) {
 	switch {
 	case stderrors.Is(err, iamerr.ErrQuotaExceeded):
 		code, reason = codes.ResourceExhausted, reasonQuotaExceeded
+	case stderrors.Is(err, iamerr.ErrQuotaRateExceeded):
+		// Тот же код, что у объёма: место исчерпано, и край отдаёт 429 в обоих
+		// случаях. Различает полосы ПРИЗНАК — по коду они и не должны различаться,
+		// потому что «повтори позже» на транспортном уровне верно для обеих.
+		code, reason = codes.ResourceExhausted, reasonQuotaRateExceeded
 	case stderrors.Is(err, iamerr.ErrQuotaNotProvisioned):
 		// FAILED_PRECONDITION, а не INVALID_ARGUMENT: ввод арендатора корректен,
 		// не выполнено предусловие ПЛАТФОРМЫ. INVALID_ARGUMENT обвинил бы

@@ -40,6 +40,7 @@ func reasonOf(st *status.Status) (string, string) {
 func TestMapRepoErrProducesTheQuotaRefusal(t *testing.T) {
 	const exceeded = "identity ext-42 has reached its limit of 5 iam.account"
 	const notProvisioned = "iam.account has no limit on identity ext-42"
+	const rateExceeded = "identity ext-42 has reached its admission rate of 3 iam.account per 3600 seconds"
 
 	cases := []struct {
 		name       string
@@ -63,6 +64,18 @@ func TestMapRepoErrProducesTheQuotaRefusal(t *testing.T) {
 			wantCode:   codes.FailedPrecondition,
 			wantMsg:    notProvisioned,
 			wantReason: "QUOTA_NOT_PROVISIONED",
+		},
+		{
+			// Полоса ТЕМПА. Код тот же, что у объёма, — на транспортном уровне
+			// «повтори позже» верно для обеих, — а признак СВОЙ: повтор по объёму
+			// не пройдёт никогда, повтор по темпу пройдёт в следующем окне.
+			// Клиент, не различающий эти полосы, либо бросает работу там, где надо
+			// повторить, либо повторяет вечно там, где повтор бесполезен.
+			name:       "темп исчерпан — подождать следующего окна",
+			in:         iamerr.Wrapf(iamerr.ErrQuotaRateExceeded, "%s", rateExceeded),
+			wantCode:   codes.ResourceExhausted,
+			wantMsg:    rateExceeded,
+			wantReason: "QUOTA_RATE_EXCEEDED",
 		},
 	}
 

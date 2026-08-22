@@ -62,6 +62,16 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		return iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message)
 	case "KQ003": // строка ресурса не несёт носителя — дефект схемы, не арендатора
 		return iamerr.Wrapf(iamerr.ErrInternal, "quota accounting")
+	// Полоса ТЕМПА (`kacho_rate_refuse`, миграция задачи #618). Её производитель
+	// отдельный: тот, что выше, рендерится из общего шаблона шести владельцев и
+	// говорит о строке учёта ОБЪЁМА, а этой полосы нет больше ни у кого.
+	case "KQ004": // окно полно: за текущее окно принято столько, сколько названо
+		return iamerr.Wrapf(iamerr.ErrQuotaRateExceeded, "%s", pgErr.Message)
+	case "KQ005": // величина темпа не названа — администратору требуется ЗАВЕСТИ её
+		// Тот же sentinel, что у не названного предела объёма, и это не небрежность:
+		// действие администратора одно и то же — назначить величину, — а какую
+		// именно, говорит текст производителя, который доезжает дословно.
+		return iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message)
 	case "23505": // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case "23503": // foreign_key_violation
