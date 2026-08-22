@@ -24,6 +24,8 @@ package registrytokenhttp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -141,6 +143,9 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Username: user,
 		Password: pass,
 		Service:  service,
+		// Материал привязки токена к ключу владельца (Ф1б #926) — из
+		// ПРОВЕРЕННОЙ цепочки, а не из того, что пир прислал.
+		ConfirmationX5TS256: verifiedClientCertThumbprint(r),
 	})
 	if err != nil {
 		h.writeError(w, service, err)
@@ -191,4 +196,35 @@ func (h *TokenHandler) challenge(w http.ResponseWriter, service string) {
 	w.Header().Set("WWW-Authenticate",
 		fmt.Sprintf(`Bearer realm=%q,service=%q`, h.cfg.Realm, service))
 	http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+}
+
+// verifiedClientCertThumbprint — отпечаток клиентского сертификата хопа выдачи
+// по RFC 8705 §3.1: base64url от SHA-256 над DER целиком.
+//
+// # Почему ПРОВЕРЕННАЯ цепочка, а не присланный сертификат
+//
+// `PeerCertificates` содержит то, что пир ПРИСЛАЛ; `VerifiedChains` — то, что
+// принято против доверенных корней. Считать отпечаток по первому значило бы
+// разрешить предъявителю назначить себе привязку самому: он присылает любой
+// сертификат, получает токен, привязанный к нему, и предъявляет их вместе.
+// Привязка, которую выбирает предъявитель, не привязывает ни к чему.
+//
+// # Почему пусто — законный исход, а не отказ
+//
+// Слушатель выдачи докер-токена односторонний ПО РЕШЕНИЮ: по нему едет HTTP
+// Basic, и клиентского сертификата на нём не спрашивают. Значит на сегодняшней
+// посадке материал не предъявляется, токен выходит предъявительским, и это
+// ровно то, чего требует приёмка: привязка не появляется там, где её не
+// просили. Начнёт ли хоп её предъявлять — свойство ПОСАДКИ слушателя, а не
+// этого кода; код обязан лишь не выдумывать того, чего не предъявили.
+func verifiedClientCertThumbprint(r *http.Request) string {
+	if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.VerifiedChains[0]) == 0 {
+		return ""
+	}
+	leaf := r.TLS.VerifiedChains[0][0]
+	if leaf == nil || len(leaf.Raw) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(leaf.Raw)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

@@ -48,13 +48,31 @@ func (a *LocalMintAdapter) MintToken(ctx context.Context, in registrytokenuc.Min
 	if in.Scope != "" {
 		claims["scope"] = in.Scope
 	}
-	tok, err := a.signer.Sign(ctx, tokensigner.Request{
+	req := tokensigner.Request{
 		Subject:   in.Subject,
 		Audience:  []string{in.Audience},
 		TokenType: registryTokenType,
 		TTL:       a.ttl,
 		Claims:    claims,
-	})
+	}
+	// Привязка токена к ключу владельца (Ф1б, задача #926).
+	//
+	// Материал берётся ИЗ ПРЕДЪЯВЛЕННОГО при выдаче и никогда не выдумывается:
+	// переходник его только переносит. Не предъявлен ⇒ указатель остаётся nil, и
+	// токен выходит предъявительским — привязка не появляется там, где её не
+	// просили.
+	//
+	// До этой провязки у возможности не было НИ ОДНОГО производственного
+	// вызывающего: подписант умел проставлять привязку, а входа, которым её
+	// можно было бы попросить, в контуре не существовало. Возможность без
+	// вызывающего неотличима от исправной — запись в неё удаётся.
+	if in.HasConfirmation() {
+		req.Confirmation = &tokensigner.Confirmation{
+			X5TS256: in.ConfirmationX5TS256,
+			JKT:     in.ConfirmationJKT,
+		}
+	}
+	tok, err := a.signer.Sign(ctx, req)
 	if err != nil {
 		return registrytokenuc.MintOutput{}, err
 	}
