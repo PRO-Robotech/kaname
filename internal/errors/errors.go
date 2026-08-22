@@ -54,6 +54,17 @@ var (
 	// предусловие ПЛАТФОРМЫ.
 	ErrQuotaNotProvisioned = stderrors.New("resource count quota not provisioned")
 
+	// ErrQuotaRateExceeded — потолок на ТЕМП заведения достигнут: за текущее окно
+	// принято столько, сколько названо величиной.
+	//
+	// Отдельный sentinel, а не оттенок `ErrQuotaExceeded`, и различие несущее:
+	// отказ по объёму ТЕРМИНАЛЕН (лечится поднятием предела), отказ по темпу
+	// ВРЕМЕНЕН (лечится ожиданием следующего окна). Свести их в один — значит
+	// отправить арендатора ждать того, что не наступит, либо просить поднять
+	// предел, который он не исчерпал. Маппится в RESOURCE_EXHAUSTED (край → HTTP
+	// 429) с признаком `QUOTA_RATE_EXCEEDED`.
+	ErrQuotaRateExceeded = stderrors.New("admission rate quota exceeded")
+
 	// ErrAborted — a transient concurrency conflict the caller can retry (the
 	// operation was aborted, typically a transaction serialization failure).
 	// Maps to gRPC ABORTED, the idiomatic "retry the transaction" code — unlike
@@ -95,7 +106,7 @@ func StripSentinel(err error) string {
 		return ""
 	}
 	msg := err.Error()
-	for _, s := range []error{ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrSelfRevoke, ErrLastAdmin} {
+	for _, s := range []error{ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrQuotaRateExceeded, ErrSelfRevoke, ErrLastAdmin} {
 		prefix := s.Error() + ": "
 		if rest, ok := strings.CutPrefix(msg, prefix); ok {
 			return rest

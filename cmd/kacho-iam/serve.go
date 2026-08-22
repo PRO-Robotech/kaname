@@ -1051,6 +1051,21 @@ func runServe(cfg config.Config) error {
 	// ВОЗВРАТА ОТРАВЛЕННЫХ СТРОК тоже нет, и это следствие, а не упущение: травил
 	// строки дренаж, отказом владельца прав. Дренажа нет — травить некому.
 
+	// Рост числа ЛИЧНОСТЕЙ. Потолок на аккаунты личности (484002) обходится
+	// заведением личностей, и это накопление не производила ни одна величина:
+	// «личностей за всё время» и «сколько их появилось за час» не спрашивал
+	// никто. Замер читает НАКОПИТЕЛЬНЫЙ журнал (задача #619) — падать этой величине
+	// некуда, поэтому над ней определён рост, — и держит рядом счётчик своих
+	// исходов, иначе ноль на витрине означал бы сразу и «личностей не было», и
+	// «замер не снят». Это страховка, а не мера: отказ по такому порогу пришёл бы
+	// следующему честному человеку, поэтому порог только наблюдается.
+	identityGrowth := newIdentityGrowthSampler(kachopg.NewIdentityGrowthRepo(pool))
+	metricsReg.NewIdentityGrowthCollector(identityGrowth.Counts)
+	tasks = append(tasks, func() error {
+		identityGrowth.Run(ctx, logger)
+		return nil
+	})
+
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_kacho_root` to
 	// the user identified by KACHO_IAM_BOOTSTRAP_ROOT_EMAIL and enqueues the
 	// FGA tuple into the transactional fga_outbox, out of which a trigger folds the
