@@ -17,6 +17,7 @@ package pg
 import (
 	stderrors "errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -42,6 +43,14 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	}
 	var pgErr *pgconn.PgError
 	if !stderrors.As(err, &pgErr) {
+		// Отказ БЕЗ строки состояния — сервер не ответил вовсе. Единственный его
+		// осмысленный класс здесь — не дозвонились (#666); всё остальное
+		// возвращается нетронутым, чтобы «непонятное» не выдавалось за
+		// «временное»: обещание повтора там, где повторять нечего, хуже
+		// молчания.
+		if isConnectionFailure(err) {
+			return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+		}
 		return err
 	}
 	switch pgErr.Code {
@@ -98,12 +107,57 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	if strings.HasPrefix(pgErr.Code, "08") {
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
 	}
+	// Отказ ПРИНЯТЬ соединение, поднятый самим сервером (#666). Оба класса лежат
+	// вне восьмого семейства, поэтому проверка выше их не ловила, и они уезжали в
+	// `Internal` — то есть «сервис сломан» на состояние, которое проходит само за
+	// секунды и повторяется успешно.
+	//
+	// Это не редкость и не край: пул строится без нижней границы, соединения
+	// открываются лениво на первом обращении, готовности базы служебный бинарь не
+	// ждёт — значит быстрый транзиторный отказ открытия в загрузочной буре
+	// ожидаем ПО ПОСТРОЕНИЮ.
+	switch pgErr.Code {
+	case "53300": // too_many_connections — слоты сервера исчерпаны
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+	case "57P03": // cannot_connect_now — сервер ещё поднимается
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+	}
 	// Unmapped SQLSTATE — never return the raw *pgconn.PgError: its Error()
 	// carries table/constraint/column/SQLSTATE and would surface verbatim as the
 	// gRPC INTERNAL message (data-integrity.md: no pgx leak, fixed INTERNAL text).
 	// A new constraint that should produce a tenant-facing message must be added
 	// to the constraint-aware switches above.
-	return iamerr.Wrapf(iamerr.ErrInternal, "database error")
+	//
+	// КОД СОСТОЯНИЯ ОСТАЁТСЯ В ЦЕПОЧКЕ, и это не послабление утечки (#666).
+	// Клиенту достаётся фиксированный текст: перевод sentinel'а в статус
+	// заменяет сообщение `Internal` целиком. А журналу сервера без кода назвать
+	// причину нечем вовсе — комментарии на этом пути обещают журналу деталь, и
+	// обещание держится, только если деталь в цепочке ЕСТЬ. Пять символов кода
+	// состояния разведки схемы не дают: ни имени таблицы, ни ограничения, ни
+	// столбца, ни текста сервера здесь нет.
+	return iamerr.Wrapf(iamerr.ErrInternal, "database error: sqlstate %s", pgErr.Code)
+}
+
+// isConnectionFailure — отказ, случившийся ДО того, как сервер что-либо сказал.
+//
+// Три формы, и каждая встречается в этом дереве: собственный тип драйвера
+// (`ConnectError`), сетевая операция (`net.OpError` — так приходит «в
+// соединении отказано») и закрытое драйвером соединение. Все три означают одно:
+// повтор осмыслен, потому что состояние временное.
+//
+// Списком форм, а не «всё непонятное — недоступность»: корзина «прочее»
+// обещала бы повтор там, где повторять нечего, и прятала бы настоящие поломки
+// под кодом, который вызывающий обязан игнорировать.
+func isConnectionFailure(err error) bool {
+	var connErr *pgconn.ConnectError
+	if stderrors.As(err, &connErr) {
+		return true
+	}
+	var opErr *net.OpError
+	if stderrors.As(err, &opErr) {
+		return true
+	}
+	return stderrors.Is(err, pgconn.ErrConnClosed)
 }
 
 func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {

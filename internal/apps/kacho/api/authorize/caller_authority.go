@@ -72,6 +72,14 @@ var callerAuthorityRelations = []string{"admin"}
 //
 // Fail-closed on every degraded mode (nil checker, Check transport error): a
 // tenant principal that cannot prove authority is denied, never allowed.
+//
+// ОТКАЗЫ РАЗНЫЕ, И РАЗЛИЧИЕ НАЗЫВАЕТСЯ КОДОМ (#665). Отказ в правах говорит
+// вызывающему «повтор бессмыслен»: решение зависит от тройки (субъект,
+// отношение, объект), и одинаковый повтор не меняет ни одного из трёх. Если же
+// хотя бы один заданный вопрос остался БЕЗ ОТВЕТА (хранилище отношений не
+// отвечает), о правах не сказано ничего, и ответом идёт `Unavailable` — тот же
+// код, которым этот же обработчик отвечает на недоступность движка вердиктов
+// ниже по телу. Fail-closed не ослабляется: вызов отвергнут в обоих случаях.
 func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv1.ResourceRef) error {
 	callerSubject, ok := authzguard.PrincipalSubject(ctx)
 	if !ok {
@@ -90,9 +98,23 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 	if subject != "" && callerSubject == subject {
 		return nil
 	}
-	// Cluster-admin flat super-gate (fail-closed: nil checker / Check error → false).
-	if authzguard.SubjectIsClusterAdmin(ctx, h.authority, callerSubject) {
+	// unanswered — неполадка на ЛЮБОМ из заданных ниже вопросов. Копится, а не
+	// возвращается сразу: разрешению второе мнение не нужно, поэтому «да» любого
+	// последующего вопроса сильнее неполадки на предыдущем.
+	var unanswered error
+
+	// Cluster-admin flat super-gate. Ответ берётся ВМЕСТЕ с причиной
+	// (`…PlainE`), а не булевым сокращением: у запроса с подстановочным
+	// идентификатором объекта полоса «право на этот объект» не исполняется вовсе,
+	// и тогда неполадка сверх-гейта — единственный вопрос, оставшийся без
+	// ответа. Проглотив её, обработчик отвечал бы терминальным отказом на
+	// мигание хранилища.
+	admin, adminErr := authzguard.SubjectIsClusterAdminPlainE(ctx, h.authority, callerSubject)
+	if admin {
 		return nil
+	}
+	if adminErr != nil {
+		unanswered = adminErr
 	}
 	// Delegated authority on the specific queried resource.
 	if h.authority != nil && res != nil {
@@ -100,11 +122,21 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 		if rType != "" && rID != "" && rID != "*" {
 			object := rType + ":" + rID
 			for _, rel := range callerAuthorityRelations {
-				if allowed, err := h.authority.Check(ctx, callerSubject, rel, object); err == nil && allowed {
+				allowed, err := h.authority.Check(ctx, callerSubject, rel, object)
+				switch {
+				case err != nil:
+					unanswered = err
+				case allowed:
 					return nil
 				}
 			}
 		}
+	}
+	// Отказ — решение ТОЛЬКО когда каждый заданный вопрос получил ответ.
+	// Сырая ошибка наружу не идёт (`security.md` §Hardening #1): текст хранилища
+	// отношений может нести адрес и диагностику движка.
+	if unanswered != nil {
+		return authzguard.AuthzBackendUnavailable()
 	}
 	return status.Error(codes.PermissionDenied, "permission denied")
 }

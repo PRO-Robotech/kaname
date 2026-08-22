@@ -187,12 +187,17 @@ type fakeChecker struct {
 	asked []string
 	// only — читателем считается только названный субъект.
 	only string
+	// failFor — хранилище не отвечает ТОЛЬКО про названного субъекта. Без этого
+	// поля нельзя поставить опыт «одна личность не отвечает, вторая разрешает»,
+	// а именно он отличает «разрешению второе мнение не нужно» от «любая
+	// неполадка гасит разрешение».
+	failFor string
 }
 
 func (f *fakeChecker) Check(_ context.Context, subject, relation, object string) (bool, error) {
 	f.subject, f.relation, f.object = subject, relation, object
 	f.asked = append(f.asked, subject)
-	if f.fail {
+	if f.fail || (f.failFor != "" && subject == f.failFor) {
 		return false, grpcstatus.Error(codes.Unavailable, "store unreachable")
 	}
 	// only — «читателем является ТОЛЬКО этот субъект». Пусто означает «любой»,
@@ -509,12 +514,20 @@ func TestResolve_NarrowGate(t *testing.T) {
 		require.False(t, repo.touched)
 	})
 
+	// «Хранилище не ответило» — НЕ «не положено». Отказ в правах говорит «повтор
+	// бессмыслен»: решение зависит от тройки (субъект, отношение, объект), и
+	// одинаковый повтор не меняет ни одного из трёх. Недоступность о правах не
+	// говорит ничего, и тот же вопрос мгновением позже получает ответ.
+	//
+	// Fail-closed не меняется ни там, ни там: запрос отвергнут, доступа никто не
+	// получил. Различается КОД — и код здесь весь сигнал (#665).
 	t.Run("store cannot answer", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.stated = stated
 		_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(&fakeChecker{fail: true}).
 			Execute(callerCtx(), "prj-x", "vpc")
-		require.Equal(t, codes.PermissionDenied, codeOf(t, err))
+		require.Equal(t, codes.Unavailable, codeOf(t, err),
+			"недоступность хранилища прав обязана быть повторяемой, а не терминальным отказом")
 		require.False(t, repo.touched)
 	})
 
@@ -723,5 +736,130 @@ func TestListChanged_PageSizeOutOfRange_Refused(t *testing.T) {
 	_, err := NewListChangedUseCase(repo, fakeCursors{}).WithQuotaReaderChecker(&fakeChecker{answer: true}).
 		Execute(callerCtx(), "", 1001)
 	require.Equal(t, codes.InvalidArgument, codeOf(t, err))
+	require.False(t, repo.touched)
+}
+
+// ── #665: «хранилище прав не ответило» ≠ «не положено» ───────────────────────
+
+// TestQuotaReaderGate_OutageIsNotARefusal — утверждается НАБЛЮДАЕМОЕ: какой код
+// получает вызывающий на каждом из трёх исходов вопроса о правах, на ОБЕИХ
+// полосах, которые этот гейт стережёт.
+//
+// Три исхода названы вместе намеренно: порознь каждая проба зеленела бы на
+// гейте, который всегда отвечает своим одним кодом. Положительный контроль стоит
+// здесь же — отрицание без него не отличает «отвергает верно» от «отвергает всё».
+//
+// ЧТО РАЗЛИЧАЕТ КОД. Отказ в правах говорит вызывающему «повтор бессмыслен»:
+// решение зависит от тройки (субъект, отношение, объект), и одинаковый повтор не
+// меняет ни одного из трёх. Недоступность хранилища о правах не говорит НИЧЕГО.
+// Схлопнув их, гейт выдаёт терминальный вердикт на мигание — а полосу мутации
+// это делает терминальным отказом арендатору, который обязан был повториться.
+func TestQuotaReaderGate_OutageIsNotARefusal(t *testing.T) {
+	stated := []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+
+	lanes := []struct {
+		name string
+		call func(checker authzguard.RelationChecker, repo *fakeLimitRepo) error
+	}{
+		{
+			// Полоса мутации: её зовёт домен перед списанием, и её код видит
+			// арендатор.
+			name: "Resolve",
+			call: func(checker authzguard.RelationChecker, repo *fakeLimitRepo) error {
+				_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).
+					Execute(callerCtx(), "prj-x", "vpc")
+				return err
+			},
+		},
+		{
+			// Полоса тянущего: её код решает, повторит ли синхронизатор проход
+			// (`retry.OnUnavailable` повторяет ТОЛЬКО недоступность).
+			name: "ListChangedSince",
+			call: func(checker authzguard.RelationChecker, repo *fakeLimitRepo) error {
+				_, err := NewListChangedUseCase(repo, fakeCursors{}).WithQuotaReaderChecker(checker).
+					Execute(callerCtx(), "", 10)
+				return err
+			},
+		},
+	}
+
+	for _, lane := range lanes {
+		t.Run(lane.name, func(t *testing.T) {
+			t.Run("хранилище не ответило", func(t *testing.T) {
+				repo := newFakeRepo()
+				repo.stated = stated
+				err := lane.call(&fakeChecker{fail: true}, repo)
+				require.Equal(t, codes.Unavailable, codeOf(t, err),
+					"вопрос остался без ответа — это не решение о правах, и повтор осмыслен")
+				require.False(t, repo.touched, "fail-closed не меняется: до хранилища дело не дошло")
+			})
+
+			t.Run("явный отказ", func(t *testing.T) {
+				repo := newFakeRepo()
+				repo.stated = stated
+				err := lane.call(&fakeChecker{answer: false}, repo)
+				require.Equal(t, codes.PermissionDenied, codeOf(t, err),
+					"модель ответила «нет» — повтор ничего не изменит, и код обязан это сказать")
+				require.False(t, repo.touched)
+			})
+
+			// Положительный контроль: право есть → проходит. Без него оба
+			// отрицания выше остались бы зелёными на гейте, отвергающем всё.
+			t.Run("право есть", func(t *testing.T) {
+				repo := newFakeRepo()
+				repo.stated = stated
+				require.NoError(t, lane.call(&fakeChecker{answer: true}, repo))
+			})
+		})
+	}
+}
+
+// TestQuotaReaderGate_AllowNeedsNoSecondOpinion — разрешение одной личности
+// сильнее неполадки на вопросе о другой.
+//
+// Гейт спрашивает про ДВЕ законные личности. Если первый вопрос не получил
+// ответа, а второй ответил «да», доступ есть: разрешению второе мнение не нужно.
+// Обратное правило («любая неполадка гасит разрешение») сделало бы мигание
+// хранилища отказом там, где право доказано, — и отличить это от настоящего
+// отказа было бы нечем.
+//
+// Форма повторяет соседний гейт того же пакета (`authzguard.AllowsVerb`): «отказ
+// — решение только тогда, когда КАЖДЫЙ заданный вопрос получил ответ».
+func TestQuotaReaderGate_AllowNeedsNoSecondOpinion(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+
+	moduleSVA := "service_account:" + authzguard.ServiceAccountIDForService("compute")
+	checker := &fakeChecker{answer: true, failFor: moduleSVA}
+
+	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/kacho-compute", true)
+	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "service_account", ID: "sva-admin"})
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
+	require.NoError(t, err, "вторая личность разрешила — неполадка на первом вопросе доступ не отнимает")
+	require.Contains(t, checker.asked, moduleSVA, "первый вопрос обязан быть задан, иначе проба ни о чём")
+}
+
+// TestQuotaReaderGate_UnansweredThenDenied_IsUnavailable — первая личность не
+// получила ответа, вторая ответила «нет». Отказом это НЕ является: гейт не
+// вправе называть решением набор вопросов, часть которых осталась без ответа.
+//
+// Без этой пробы естественная реализация «запомнить последний исход» вернула бы
+// отказ в правах, и мигание хранилища снова стало бы терминальным — но уже
+// только на стенде с двумя личностями, то есть там, где юниты его не видят.
+func TestQuotaReaderGate_UnansweredThenDenied_IsUnavailable(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stated = []domain.Limit{{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16}}
+
+	moduleSVA := "service_account:" + authzguard.ServiceAccountIDForService("compute")
+	// `only` называет читателем субъекта, о котором никто не спросит, поэтому
+	// вторая личность получает честное «нет»; первая — неполадку.
+	checker := &fakeChecker{answer: true, only: "service_account:sva-nobody-asks-about", failFor: moduleSVA}
+
+	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/kacho-compute", true)
+	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "service_account", ID: "sva-admin"})
+
+	_, err := NewResolveUseCase(repo).WithQuotaReaderChecker(checker).Execute(ctx, "prj-x", "vpc")
+	require.Equal(t, codes.Unavailable, codeOf(t, err))
 	require.False(t, repo.touched)
 }

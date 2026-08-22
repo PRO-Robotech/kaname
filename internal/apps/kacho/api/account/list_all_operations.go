@@ -129,11 +129,20 @@ func (u *ListAllOperationsUseCase) requireAccountViewAuthority(ctx context.Conte
 	}
 
 	// Path 2 — delegated admin via FGA.
+	//
+	// Исходы вопроса разведены: «хранилище ответило нет» и «хранилище не
+	// ответило» — разные отказы. Прежде здесь стояло `if cerr == nil && allowed`,
+	// после чего управление уходило на безусловный `PermissionDenied` — то есть
+	// неполадка хранилища прав сообщала аудитору, что ему не положено, и повтор
+	// выглядел бессмысленным.
 	if u.relations != nil {
 		if subject, ok := authzguard.PrincipalSubject(ctx); ok {
 			object := fmt.Sprintf("account:%s", strings.ToLower(accountID))
 			allowed, cerr := u.relations.Check(ctx, subject, "admin", object)
-			if cerr == nil && allowed {
+			if cerr != nil {
+				return authzguard.AuthzBackendUnavailable()
+			}
+			if allowed {
 				return nil
 			}
 		}
