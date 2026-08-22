@@ -197,17 +197,26 @@ func TestAccountRate_ConcurrentCreationAtTheLastSlotAdmitsExactlyOne(t *testing.
 	// Окно на двоих: первый занят фикстурой, свободно РОВНО ОДНО место.
 	setAccountRateCeiling(t, ctx, pool, 2, 3600)
 
+	// Барьер обязателен: без него участники стартуют по мере планирования, и
+	// первый успевает закоммитить раньше, чем последний вошёл в оператор. Проба
+	// осталась бы верной по утверждению и слабее по СИЛЕ — она мерила бы разброс
+	// планировщика, а не разрешение гонки. `close` отпускает всех разом.
 	const racers = 8
 	var (
 		wg      sync.WaitGroup
+		ready   sync.WaitGroup
 		mu      sync.Mutex
 		okCount int
 		codes   []string
 	)
+	start := make(chan struct{})
 	wg.Add(racers)
+	ready.Add(racers)
 	for i := 0; i < racers; i++ {
 		go func(idx int) {
 			defer wg.Done()
+			ready.Done()
+			<-start
 			err := insertAccount(ctx, pool, fmt.Sprintf("rate-acc-race-%d", idx), userID)
 			mu.Lock()
 			defer mu.Unlock()
@@ -223,6 +232,8 @@ func TestAccountRate_ConcurrentCreationAtTheLastSlotAdmitsExactlyOne(t *testing.
 			}
 		}(i)
 	}
+	ready.Wait() // все участники запланированы и стоят на барьере
+	close(start)
 	wg.Wait()
 
 	require.Equal(t, 1, okCount,
