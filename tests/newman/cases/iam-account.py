@@ -437,118 +437,6 @@ CASES.append(Case(
 ))
 
 
-# ---------------------------------------------------------------------------
-# IAM-ACC-CR-BVA-NAME-MIN / -MAX — граничная длина имени → 200
-#
-# ИМЯ АККАУНТА ГЛОБАЛЬНО УНИКАЛЬНО (`accounts_name_unique UNIQUE (name)`), поэтому
-# литеральное имя проходит РОВНО ОДИН РАЗ и коллизится на каждом следующем прогоне.
-# Пока создание отвергалось раньше вставки, эта мина была не видна: кейс падал по
-# другой причине. Под человеческим предъявителем он бы прошёл один раз и залип.
-#
-# Поэтому имя СОБИРАЕТСЯ из runId в пре-скрипте, а длина ПРОВЕРЯЕТСЯ утверждением:
-# без этой проверки правка энтропии молча сдвинула бы длину, и граничный кейс
-# перестал бы быть граничным, оставаясь зелёным. За собой оба кейса убирают —
-# иначе аккаунты копятся и списочные контракты поедут.
-# ---------------------------------------------------------------------------
-
-def _bva_name_script(var: str, length: int) -> list:
-    """Собрать имя ровно `length` символов с энтропией прогона и проверить длину."""
-    return [
-        "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
-        # Первый символ обязан быть буквой (^[a-z]), остальные — [-a-z0-9].
-        "const _A = 'abcdefghijklmnopqrstuvwxyz';",
-        "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
-        "let _h = 0; for (const _c of _rid) { _h = (_h * 33 + _c.charCodeAt(0)) >>> 0; }",
-        f"const _len = {length};",
-        "let _n = _A[_h % 26];",
-        "const _tail = _rid.slice(-(_len - 1));",
-        "for (let _i = 1; _i < _len - _tail.length; _i++) { _n += _B[(_h >>> (_i % 24)) % 36]; }",
-        "_n += _tail;",
-        "_n = _n.slice(0, _len);",
-        f"pm.environment.set('{var}', _n);",
-        # Фикстура не снисходительнее продукта: если имя не той длины или не той
-        # формы, граничного кейса больше нет — и об этом обязано быть сказано ЗДЕСЬ.
-        #
-        # ФОРМА: утвердить (назвав переменную), ЗАТЕМ снять шаг. Эталон —
-        # gen.py::require_env_url, правило объявлено в exec-coverage.py (STATIC BANS).
-        # Прежняя редакция утверждала ВНЕ ветки и шаг всё равно отправляла: сломанная
-        # фикстура уезжала на сервер, ответ приходил, и падение читалось как дефект
-        # продукта на границе имени — тогда как граничного случая в запросе уже не было.
-        # Отправленный шаг со сломанной фикстурой хуже неотправленного: он даёт
-        # утверждению предмет, которого тот не описывает.
-        "const _bvaOk = _rid.length > 0 && _n.length === _len "
-        "&& /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
-        "if (!_bvaOk) {",
-        f"  pm.test('fixture: runId is seeded (name entropy source for {var})', "
-        "() => pm.expect(_rid.length, 'runId').to.be.above(0));",
-        f"  pm.test('fixture: BVA name is exactly {length} chars', "
-        "() => pm.expect(_n.length, _n).to.eql(_len));",
-        f"  pm.test('fixture: BVA name matches the product regex ({var})', "
-        "() => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
-        "  pm.execution.skipRequest();",
-        "}",
-    ]
-
-
-CASES.append(Case(
-    id="IAM-ACC-CR-BVA-NAME-MIN",
-    title="Create с name len=3 (min) → 200 OK",
-    classes=["BVA"],
-    priority="P2",
-    steps=[
-        Step(
-            name="cr-name-min",
-            method="POST",
-            path="/iam/v1/accounts",
-            body={"name": "{{bvaMinName}}"},
-            auth="jwtHumanCeremony",
-            pre_script=_bva_name_script("bvaMinName", 3),
-            test_script=[
-                *assert_status(200),
-                *assert_iam_operation_envelope(),
-                *save_from_response("j.id", "opId"),
-                *save_from_response("j.metadata && j.metadata.accountId", "bvaMinAccId"),
-                *save_from_response("j.metadata && j.metadata.defaultProjectId", "bvaMinPrjId"),
-            ],
-        ),
-        poll_operation_until_done(),
-        # Уборка: сперва дочерний проект (FK RESTRICT), затем аккаунт.
-        *reliable_delete("teardown-bva-min-project", "/iam/v1/projects/{{bvaMinPrjId}}",
-                         auth=_HUMAN_STEPUP, op_key="bvaMinPrj"),
-        *reliable_delete("teardown-bva-min-account", "/iam/v1/accounts/{{bvaMinAccId}}",
-                         auth=_HUMAN_STEPUP, op_key="bvaMinAcc"),
-    ],
-))
-
-
-CASES.append(Case(
-    id="IAM-ACC-CR-BVA-NAME-MAX",
-    title="Create с name len=63 (max) → 200 OK",
-    classes=["BVA"],
-    priority="P2",
-    steps=[
-        Step(
-            name="cr-name-max",
-            method="POST",
-            path="/iam/v1/accounts",
-            body={"name": "{{bvaMaxName}}"},
-            auth="jwtHumanCeremony",
-            pre_script=_bva_name_script("bvaMaxName", 63),
-            test_script=[
-                *assert_status(200),
-                *assert_iam_operation_envelope(),
-                *save_from_response("j.id", "opId"),
-                *save_from_response("j.metadata && j.metadata.accountId", "bvaMaxAccId"),
-                *save_from_response("j.metadata && j.metadata.defaultProjectId", "bvaMaxPrjId"),
-            ],
-        ),
-        poll_operation_until_done(),
-        *reliable_delete("teardown-bva-max-project", "/iam/v1/projects/{{bvaMaxPrjId}}",
-                         auth=_HUMAN_STEPUP, op_key="bvaMaxPrj"),
-        *reliable_delete("teardown-bva-max-account", "/iam/v1/accounts/{{bvaMaxAccId}}",
-                         auth=_HUMAN_STEPUP, op_key="bvaMaxAcc"),
-    ],
-))
 
 
 # ---------------------------------------------------------------------------
@@ -1205,6 +1093,147 @@ CASES.append(Case(
         # Poll the GET until the account is actually gone (async delete + FGA
         # owner-tuple removal can lag the Operation→done a beat).
         get_until_gone("/iam/v1/accounts/{{crudAccountId}}", "Account"),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# ПОЧЕМУ ГРАНИЧНЫЕ КЕЙСЫ ИМЕНИ СТОЯТ ЗДЕСЬ, А НЕ В РАЗДЕЛЕ CREATE
+# ---------------------------------------------------------------------------
+# Аккаунт занимает слот потолка своей ЛИЧНОСТИ (`iam.account`, умолчание 5 на
+# внешний идентификатор входа), а ВСЯ волна церемонии идёт под одним человеком:
+# другой её вести не может — аккаунт принадлежит пользователю by construction.
+# Значит одновременно живые аккаунты волны складываются в один потолок.
+#
+# `IAM-ACC-CR-CRUD-OK` заводит аккаунт, который живёт до `IAM-ACC-DL-CRUD-OK` —
+# это НАМЕРЕННАЯ форма полосы CRUD, и сводить её нельзя без потери предмета.
+# Пока граничные кейсы стояли в разделе создания, их недолговечные аккаунты
+# ложились ПОВЕРХ долгоживущего: пик доходил до 4 при потолке 5, то есть запас
+# был в одну единицу. Следствие наблюдалось: следующее создание где угодно в
+# волне упиралось в потолок, и отказ доставался не тому кейсу, который его
+# вызвал, — читался он как каскад отказов в правах, потому что квоту в тексте
+# никто с волной не связывал.
+#
+# Здесь долгоживущий аккаунт уже снят, поэтому пик остаётся 3 и запас равен
+# двум: одиночное новое создание в волну помещается, а два подряд — уже
+# изменение, видимое в обзоре.
+#
+# ДЕРЖИТСЯ ГЕЙТОМ, А НЕ ЭТИМ КОММЕНТАРИЕМ:
+# `deploy/scripts/assert-identity-account-peak-under-ceiling.py` считает пик по
+# сгенерированным коллекциям в порядке волны и падает, когда запас меньше двух.
+# Сами кейсы от переезда не изменились ни на строку: их предмет — длина имени,
+# а не соседство с полосой CRUD.
+
+# ---------------------------------------------------------------------------
+# IAM-ACC-CR-BVA-NAME-MIN / -MAX — граничная длина имени → 200
+#
+# ИМЯ АККАУНТА ГЛОБАЛЬНО УНИКАЛЬНО (`accounts_name_unique UNIQUE (name)`), поэтому
+# литеральное имя проходит РОВНО ОДИН РАЗ и коллизится на каждом следующем прогоне.
+# Пока создание отвергалось раньше вставки, эта мина была не видна: кейс падал по
+# другой причине. Под человеческим предъявителем он бы прошёл один раз и залип.
+#
+# Поэтому имя СОБИРАЕТСЯ из runId в пре-скрипте, а длина ПРОВЕРЯЕТСЯ утверждением:
+# без этой проверки правка энтропии молча сдвинула бы длину, и граничный кейс
+# перестал бы быть граничным, оставаясь зелёным. За собой оба кейса убирают —
+# иначе аккаунты копятся и списочные контракты поедут.
+# ---------------------------------------------------------------------------
+
+def _bva_name_script(var: str, length: int) -> list:
+    """Собрать имя ровно `length` символов с энтропией прогона и проверить длину."""
+    return [
+        "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
+        # Первый символ обязан быть буквой (^[a-z]), остальные — [-a-z0-9].
+        "const _A = 'abcdefghijklmnopqrstuvwxyz';",
+        "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
+        "let _h = 0; for (const _c of _rid) { _h = (_h * 33 + _c.charCodeAt(0)) >>> 0; }",
+        f"const _len = {length};",
+        "let _n = _A[_h % 26];",
+        "const _tail = _rid.slice(-(_len - 1));",
+        "for (let _i = 1; _i < _len - _tail.length; _i++) { _n += _B[(_h >>> (_i % 24)) % 36]; }",
+        "_n += _tail;",
+        "_n = _n.slice(0, _len);",
+        f"pm.environment.set('{var}', _n);",
+        # Фикстура не снисходительнее продукта: если имя не той длины или не той
+        # формы, граничного кейса больше нет — и об этом обязано быть сказано ЗДЕСЬ.
+        #
+        # ФОРМА: утвердить (назвав переменную), ЗАТЕМ снять шаг. Эталон —
+        # gen.py::require_env_url, правило объявлено в exec-coverage.py (STATIC BANS).
+        # Прежняя редакция утверждала ВНЕ ветки и шаг всё равно отправляла: сломанная
+        # фикстура уезжала на сервер, ответ приходил, и падение читалось как дефект
+        # продукта на границе имени — тогда как граничного случая в запросе уже не было.
+        # Отправленный шаг со сломанной фикстурой хуже неотправленного: он даёт
+        # утверждению предмет, которого тот не описывает.
+        "const _bvaOk = _rid.length > 0 && _n.length === _len "
+        "&& /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
+        "if (!_bvaOk) {",
+        f"  pm.test('fixture: runId is seeded (name entropy source for {var})', "
+        "() => pm.expect(_rid.length, 'runId').to.be.above(0));",
+        f"  pm.test('fixture: BVA name is exactly {length} chars', "
+        "() => pm.expect(_n.length, _n).to.eql(_len));",
+        f"  pm.test('fixture: BVA name matches the product regex ({var})', "
+        "() => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
+        "  pm.execution.skipRequest();",
+        "}",
+    ]
+
+
+CASES.append(Case(
+    id="IAM-ACC-CR-BVA-NAME-MIN",
+    title="Create с name len=3 (min) → 200 OK",
+    classes=["BVA"],
+    priority="P2",
+    steps=[
+        Step(
+            name="cr-name-min",
+            method="POST",
+            path="/iam/v1/accounts",
+            body={"name": "{{bvaMinName}}"},
+            auth="jwtHumanCeremony",
+            pre_script=_bva_name_script("bvaMinName", 3),
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.accountId", "bvaMinAccId"),
+                *save_from_response("j.metadata && j.metadata.defaultProjectId", "bvaMinPrjId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        # Уборка: сперва дочерний проект (FK RESTRICT), затем аккаунт.
+        *reliable_delete("teardown-bva-min-project", "/iam/v1/projects/{{bvaMinPrjId}}",
+                         auth=_HUMAN_STEPUP, op_key="bvaMinPrj"),
+        *reliable_delete("teardown-bva-min-account", "/iam/v1/accounts/{{bvaMinAccId}}",
+                         auth=_HUMAN_STEPUP, op_key="bvaMinAcc"),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-ACC-CR-BVA-NAME-MAX",
+    title="Create с name len=63 (max) → 200 OK",
+    classes=["BVA"],
+    priority="P2",
+    steps=[
+        Step(
+            name="cr-name-max",
+            method="POST",
+            path="/iam/v1/accounts",
+            body={"name": "{{bvaMaxName}}"},
+            auth="jwtHumanCeremony",
+            pre_script=_bva_name_script("bvaMaxName", 63),
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.accountId", "bvaMaxAccId"),
+                *save_from_response("j.metadata && j.metadata.defaultProjectId", "bvaMaxPrjId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        *reliable_delete("teardown-bva-max-project", "/iam/v1/projects/{{bvaMaxPrjId}}",
+                         auth=_HUMAN_STEPUP, op_key="bvaMaxPrj"),
+        *reliable_delete("teardown-bva-max-account", "/iam/v1/accounts/{{bvaMaxAccId}}",
+                         auth=_HUMAN_STEPUP, op_key="bvaMaxAcc"),
     ],
 ))
 
