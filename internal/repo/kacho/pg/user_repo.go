@@ -81,8 +81,19 @@ func (r *userReader) GetByEmail(ctx context.Context, email domain.Email) (domain
 // Используется для idempotent Invite path: если row уже существует (любого
 // статуса), use-case делает idempotent return / re-attach.
 func (r *userReader) GetByAccountEmail(ctx context.Context, accountID domain.AccountID, email domain.Email) (domain.User, error) {
+	// Принадлежность читается из ЧЛЕНСТВА, а не из колонки строки (kacho#470):
+	// один человек состоит в скольких угодно аккаунтах, и «его строка в этом
+	// аккаунте» перестала существовать как понятие. Вопрос теперь другой и
+	// честный: есть ли человек с такой почтой и состоит ли он ЗДЕСЬ.
+	//
+	// Отказ остаётся прежним по тону и адресату: спрашивающий про аккаунт
+	// получает ответ про аккаунт, а не «человека нет вообще» — иначе он узнал бы
+	// о существовании чужой строки.
 	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM users WHERE account_id = $1 AND lower(email) = lower($2)`, userCols),
+		fmt.Sprintf(`SELECT %s FROM users
+		              WHERE lower(email) = lower($2)
+		                AND EXISTS (SELECT 1 FROM memberships m
+		                             WHERE m.user_id = users.id AND m.account_id = $1)`, userCols),
 		string(accountID), string(email))
 	u, err := scanUser(row)
 	if err != nil {
