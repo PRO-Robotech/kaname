@@ -1,7 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: BUSL-1.1
 --
--- 914001_relation_write_moves_onto_the_cluster — право модуля писать кортежи
+-- 20260822212316_relation_write_moves_onto_the_cluster — право модуля писать кортежи
 -- переезжает с якоря ВНЕ ИЕРАРХИИ на КЛАСТЕРНОЕ отношение и становится обычной
 -- системной выдачей.
 --

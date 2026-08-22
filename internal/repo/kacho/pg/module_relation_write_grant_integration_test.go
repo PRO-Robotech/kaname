@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
@@ -79,7 +80,12 @@ func TestIntegration_R914_RelationWriteIsAskedOnTheCluster(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, setupTestDB(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	// Закрытие С ПРЕДЕЛОМ: закрытие пула ждёт возврата ВСЕХ соединений, а
+	// проба, упавшая внутри открытой транзакции, своё уже не вернёт — отложенное
+	// закрытие встанет ждать писателя, которого нет, и пакет упрётся в предел
+	// прогона. Тогда «не выполнилось» приходит к читателю под видом красного, и
+	// вердикта нет ни у одной пробы пакета.
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	asker := relverdict.NewAsker(pool)
 
@@ -96,13 +102,19 @@ func TestIntegration_R914_RelationWriteIsAskedOnTheCluster(t *testing.T) {
 	// Якорь вне иерархии обязан исчезнуть ЦЕЛИКОМ, а не получить дубль на
 	// кластере: два действующих основания об одном предмете расходятся молча, и
 	// отзыв кластерного оставил бы работающим прежнее.
+	//
+	// Отбор ПОЛОЖИТЕЛЬНЫЙ — по имени того самого якоря, а не «всё, кроме трёх
+	// ярусов». Список-исключение стареет молча: он растёт от работы, к пробе
+	// отношения не имеющей, и, исключив лишнее, даёт ноль, не посмотрев ни на
+	// одну строку. Здесь спрашивается ровно тот якорь, с которого право уезжает.
+	offHierarchyAnchors := []string{"iam_fgaproxy"}
 	var offHierarchy int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM kacho_iam.relation_fact
-		 WHERE object_type NOT IN ('cluster', 'account', 'project')
-		   AND relation <> 'member'`).Scan(&offHierarchy))
+		 WHERE object_type = ANY($1::text[])`, offHierarchyAnchors).Scan(&offHierarchy))
 	assert.Zero(t, offHierarchy,
-		"основание доступа на якоре вне иерархии: его не видно перечислением выдач и нечем отозвать")
+		"основание доступа на якоре вне иерархии %v: его не видно перечислением выдач и нечем отозвать",
+		offHierarchyAnchors)
 }
 
 // TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite — ИСХОД отзыва, а не
@@ -119,7 +131,12 @@ func TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite(t *testing.T) {
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, setupTestDB(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	// Закрытие С ПРЕДЕЛОМ: закрытие пула ждёт возврата ВСЕХ соединений, а
+	// проба, упавшая внутри открытой транзакции, своё уже не вернёт — отложенное
+	// закрытие встанет ждать писателя, которого нет, и пакет упрётся в предел
+	// прогона. Тогда «не выполнилось» приходит к читателю под видом красного, и
+	// вердикта нет ни у одной пробы пакета.
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	asker := relverdict.NewAsker(pool)
 	repo := kachopg.New(pool, nil)

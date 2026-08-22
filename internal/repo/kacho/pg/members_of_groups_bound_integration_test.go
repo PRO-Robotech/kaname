@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -73,7 +74,12 @@ func TestIntegration_R914_MembersOfGroupsIsBoundedAndNamesTheTruncation(t *testi
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, setupTestDB(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	// Закрытие С ПРЕДЕЛОМ: закрытие пула ждёт возврата ВСЕХ соединений, а
+	// проба, упавшая внутри открытой транзакции, своё уже не вернёт — отложенное
+	// закрытие встанет ждать писателя, которого нет, и пакет упрётся в предел
+	// прогона. Тогда «не выполнилось» приходит к читателю под видом красного, и
+	// вердикта нет ни у одной пробы пакета.
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	const smallGroup = "grp-bound-a-small914" // по порядку РАНЬШЕ — умещается целиком
 	const hugeGroup = "grp-bound-b-huge9141"  // по порядку ПОЗЖЕ — упирается в предел
