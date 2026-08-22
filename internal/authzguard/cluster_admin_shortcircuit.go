@@ -38,6 +38,29 @@ func IsClusterAdmin(ctx context.Context, checker RelationChecker) bool {
 	return SubjectIsClusterAdmin(ctx, checker, subject)
 }
 
+// IsClusterAdminE is IsClusterAdmin with the reason kept: it separates "the
+// store answered: not an admin" (false, nil) from "the store could not be asked"
+// (false, err).
+//
+// # Когда обязателен именно он
+//
+// Всюду, где несработавший супер-гейт МЕНЯЕТ наблюдаемый ответ, а не просто
+// «не срабатывает». Списочный путь — главный такой случай: проглоченная
+// неполадка отдаёт well-formed `200` с молча суженной страницей, которую
+// вызывающий не отличит от отзыва прав. Ровно это и требует godoc
+// SubjectIsClusterAdminPlainE ниже; булева обёртка остаётся для мест, где
+// обычная пообъектная полоса всё равно отработает и сама сообщит о неполадке.
+func IsClusterAdminE(ctx context.Context, checker RelationChecker) (bool, error) {
+	if checker == nil {
+		return false, nil
+	}
+	subject, ok := PrincipalSubject(ctx) // fail-closed: anon / empty / unknown type → ""
+	if !ok {
+		return false, nil
+	}
+	return SubjectIsClusterAdminPlainE(ctx, checker, subject)
+}
+
 // SubjectIsClusterAdmin is the subject-string variant of IsClusterAdmin — used by
 // authorize_service.Check, whose request already carries a pre-formatted FGA
 // subject ("user:usr_xxx" / "service_account:sva_xxx") rather than a ctx

@@ -233,6 +233,13 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 	// IsClusterAdmin(ctx, checker) — object fixed; nothing can vary, so a call in a
 	// loop repeats one identical question per row.
 	"IsClusterAdmin": {relationGuardRoot, -1, -1, -1},
+	// IsClusterAdminE(ctx, checker) — та же форма и та же стоимость; отличается
+	// лишь тем, что сохраняет ПРИЧИНУ отказа. Заведена, чтобы списочный путь мог
+	// отличить «хранилище ответило нет» от «хранилище не ответило»: проглоченная
+	// неполадка на супер-гейте отдаёт well-formed 200 с молча суженной страницей.
+	// Перечислена по тому же основанию, что и SubjectIsClusterAdminE ниже — вопрос
+	// один на запрос, и «один» здесь видит только этот гейт.
+	"IsClusterAdminE": {relationGuardRoot, -1, -1, -1},
 	// SubjectIsClusterAdmin(ctx, checker, subject) — the subject IS argument 2 here,
 	// which is precisely why argument 2 is not globally the relation.
 	"SubjectIsClusterAdmin": {relationGuardRoot, 2, -1, -1},
