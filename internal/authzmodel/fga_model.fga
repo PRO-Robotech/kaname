@@ -236,6 +236,30 @@ type cluster
     # из группы — одна строка членства; снять одного из перечисления — снятие
     # кортежей по всем объектам (data-integrity.md B18).
     define quota_reader: [service_account, group#member] or system_admin
+    # fga_writer — право писать кортежи отношений через iam (#914). Модули
+    # никогда не пишут в хранилище отношений сами: они зовут
+    # `InternalIAMService.RegisterResource`/`UnregisterResource`, а гейт
+    # (`authzguard.RelationWriteGate`) спрашивает это отношение.
+    #
+    # Почему на КЛАСТЕРЕ, а не на служебном синглтоне. Прежде отношение висело на
+    # якоре вне иерархии `cluster → account → project`. У такого якоря нет ни
+    # яруса, ни владельца: выдачей это не выражалось, перечисление выдач о нём
+    # молчало, и отзывать было нечем. У кластера все три ответа уже есть —
+    # владелец, отзыв его же поверхностью, определённая вложенность, — а модуль
+    # пишет кортежи для всех арендаторов сразу, то есть его право и есть право
+    # уровня кластера by construction. Решение и его цена —
+    # `services/iam/docs/engineering/architecture/grant-surface-boundaries.md`.
+    #
+    # Почему `group#member`, а не перечисление учёток. Получателей пятеро, и
+    # состав меняется с каждым новым доменом, который начнёт регистрировать свои
+    # ресурсы (data-integrity.md B18).
+    #
+    # Почему БЕЗ `or system_admin`. Перенос обязан оставить фактический доступ
+    # тем же: сегодня право писать кортежи есть ровно у модулей, и добавление
+    # администратора облака расширило бы его — то есть сделало бы переезд
+    # изменением прав, а не изменением того, где право объявлено. Отдельное
+    # отношение остаётся отдельным правом.
+    define fga_writer: [service_account, group#member]
 
 # ---------------------------------------------------------------------------
 # Identity & hierarchy — account → project. (B2B Organization fully removed in
@@ -427,15 +451,22 @@ type iam_access_binding
 # Условия на кортеже (`condition …` в конце этого файла и ограничения
 # `… with mfa_fresh`) к снятому типу отношения не имеют и остаются живыми.
 
-# SEC-A/SEC-C — FGA-proxy authority object. Modules (kacho-vpc / kacho-compute /
-# kacho-nlb) NEVER write to FGA directly; they call InternalIAMService.
-# RegisterResource/UnregisterResource, gated by a ReBAC Check
-# `service_account:<sva>#fga_writer@iam_fgaproxy:system` (authzguard.FGAProxyGate,
-# fgaProxyObject="iam_fgaproxy:system"). Without this type the Check is rejected
-# движком ("object type is undefined in the authorization model" → status 400),
-# the gate denies every module, and NO owner-hierarchy tuple is ever written — so
-# resource creators cannot view their own resources once real authz is enforced.
-# The fga_writer tuples are seeded by kacho-iam migration 0009 (least-priv).
+# ИСТОРИЧЕСКИЙ ЯКОРЬ права модуля писать кортежи. ЖИВЫХ фактов на нём НЕТ:
+# право переехало на кластерное отношение `cluster#fga_writer` и выдаётся
+# системной выдачей (#914) — там же его видно перечислением выдач и там же его
+# закрывает отзыв.
+#
+# ПОЧЕМУ ТИП ОСТАЁТСЯ, ХОТЯ ФАКТОВ НА НЁМ НЕТ. Его продолжают выдавать УЖЕ
+# ПРИМЕНЁННЫЕ миграции (0009 · 0044 · 0057), а применённую миграцию не правят
+# (ban #5). Тип, снятый из модели при живых выдающих его миграциях, означал бы
+# строку журнала, которую не найдёт ни один вопрос о доступе: план вывода
+# строится из модели, и отношения, которого в модели нет, он не спрашивает.
+# Ровно это и ловит гейт `internal/repohygiene`
+# `TestEveryRelationGrantedByMigrationsExistsInTheAppliedModel`.
+#
+# Снимается тип вместе со своими миграциями — то есть не раньше, чем перепись
+# применённых перестанет их содержать. До тех пор он здесь НЕ мёртвый скелет, а
+# запись о том, что эти миграции выдают.
 type iam_fgaproxy
   relations
     define fga_writer: [service_account]

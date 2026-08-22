@@ -6,7 +6,7 @@
 // Unit-level: the FGA-proxy gate resolves the verified mTLS client-cert SAN
 // (SPIRE format spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) to a deterministic
 // ServiceAccount id, then ReBAC-checks `service_account:<sva>#fga_writer@
-// iam_fgaproxy:system` via the injected RelationChecker. No DB / no live TLS:
+// cluster:cluster_kacho_root` via the injected RelationChecker. No DB / no live TLS:
 //   - cert-identity injected via grpcsrv.WithCertIdentity;
 //   - ReBAC decision injected via a fake RelationChecker.
 //
@@ -89,7 +89,10 @@ func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 	require.Equal(t, "vpc", dom, "Authorize returns the caller module domain for object-type binding")
 	require.Equal(t, "service_account:"+sva("vpc"), chk.gotSubject, "SAN mapped to deterministic sva-id")
 	require.Equal(t, "fga_writer", chk.gotRelation)
-	require.Equal(t, "iam_fgaproxy:system", chk.gotObject)
+	// Объект вопроса — платформенный синглтон кластера (#914). Утверждение
+	// стоит дословно: гейт, спросивший про ДРУГОЙ объект, задаёт вопрос, на
+	// который системная выдача не отвечает, — и отказ выглядел бы честным.
+	require.Equal(t, "cluster:cluster_kacho_root", chk.gotObject)
 }
 
 func TestRelationWriteGate_B08_NoFGAWriterRelationDenied(t *testing.T) {
