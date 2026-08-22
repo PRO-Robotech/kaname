@@ -814,8 +814,15 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 // Account-scoped AccessBinding (accountAB) НЕ получает iam_access_binding
 // hierarchy-tuple: FGA-тип `iam_access_binding` имеет только `project`-parent —
 // account-scoped binding'и per-resource Get авторизуются через grant-tuples выше.
-// Без `iam_user`-hierarchy-tuple per-resource UserService.Get/Update/Delete
-// никогда не авторизуется.
+// ЗДЕСЬ СТОЯЛО «без `iam_user`-hierarchy-tuple per-resource UserService.Get/
+// Update/Delete никогда не авторизуется» — И ЭТО НЕВЕРНО СО ДНЯ СНЯТИЯ ВНЕШНЕГО
+// ДВИЖКА. Предка личности называет не этот кортеж, а цепь областей
+// (`kacho_iam.resource_scope_edge`), и берёт она его из таблицы членств (#944;
+// прежде — из колонки строки). Читателя у самого кортежа на пути решения нет:
+// атом плана ищет `admin`/`owner` НА ОБЪЕКТЕ-ПРЕДКЕ, а не отношение `account` на
+// личности. Кортеж пишется тремя местами и не читается ни одним — предмет
+// заведён отдельно (#946), здесь он назван, а не снят: уборка и отрыв — разные
+// изменения.
 //
 // rbac-contract-a-flat-fallout: the `admin@account` self-grant tuple is DROPPED —
 // the account-scoped binding is now the OWNER binding (OwnerRoleID), whose tier

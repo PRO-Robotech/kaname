@@ -31,18 +31,35 @@ func TestMetricsListener_ConfiguredSeparatePort(t *testing.T) {
 	}
 }
 
-// TestServeWiresMetricsInterceptorAndListener — composition-root guard. serve.go
-// must (1) create the prometheus registry, (2) register the gRPC metrics
-// interceptor on BOTH listeners, and (3) stand up the /metrics HTTP listener.
+// TestServeWiresMetricsInterceptorAndListener — страж композиционного корня.
+// serve.go обязан (1) завести реестр, (2) провязать измеритель задержки на ОБА
+// слушателя РАЗНЫМИ полосами и (3) поднять поверхность /metrics.
 //
-// RED-demonstration: drop metricsReg.UnaryServerInterceptor() / the metrics
-// listener from serve.go → this test fails before merge.
+// # Что здесь изменилось и почему это не ослабление
+//
+// Прежде страж искал `metricsReg.UnaryServerInterceptor()` дважды. Своей пары
+// серий у iam больше нет: её предмет тот же, что у платформенного измерителя
+// `pkg/grpcsrv.ServerLatency`, и два места об одном предмете уже разошлись по
+// трём осям (исход смешан с успехом, полоса слушателя не различалась, сетка
+// корзин взята по умолчанию). Искать в исходнике имя снятого метода значило бы
+// требовать дефекта.
+//
+// Утверждение стало СТРОЖЕ, а не слабее: прежде обе строки были одинаковы, и
+// провязка одного и того же слушателя дважды прошла бы. Теперь каждая полоса
+// названа поимённо, поэтому «оба слушателя» проверяется буквально.
+//
+// RED-демонстрация: снять любую из двух строк полосы — страж краснеет до мёржа.
 func TestServeWiresMetricsInterceptorAndListener(t *testing.T) {
 	src := readFileT(t, "serve.go")
 
 	for _, want := range []string{
 		"metrics.NewRegistry()",
-		"metricsReg.UnaryServerInterceptor()",
+		// Измеритель заводится СКВОЗЬ окно регистрации того же реестра, который
+		// скребут: собранный над чужим реестром, он считал бы в пустоту, и отказ
+		// старта этого не увидел бы.
+		"grpcsrv.NewServerLatency(metricsReg.Registerer())",
+		"latency.UnaryServerInterceptor(grpcsrv.ListenerPublic)",
+		"latency.UnaryServerInterceptor(grpcsrv.ListenerInternal)",
 		"cfg.APIServer.MetricsListenAddress()",
 		`metricsMux.Handle("/metrics", metricsReg.Handler())`,
 		// Подъём и гашение слушателя ЗДЕСЬ БОЛЬШЕ НЕ ИЩУТСЯ, и это не ослабление:
@@ -66,9 +83,22 @@ func TestServeWiresMetricsInterceptorAndListener(t *testing.T) {
 		}
 	}
 
-	// The metrics interceptor must appear on BOTH gRPC servers — once for the
-	// public listener, once for the internal listener.
-	if got := strings.Count(src, "metricsReg.UnaryServerInterceptor()"); got != 2 {
-		t.Errorf("metricsReg.UnaryServerInterceptor() wired %d times, want 2 (public + internal)", got)
+	// Измеритель обязан стоять на ОБОИХ серверах и РАЗНЫМИ полосами: один и тот
+	// же метод служится обоими слушателями, и одна полоса на двоих слила бы два
+	// ряда в один — среднее двух разных величин.
+	if got := strings.Count(src, "latency.UnaryServerInterceptor("); got != 2 {
+		t.Errorf("измеритель задержки провязан %d раз, ожидалось 2 (публичный + внутренний)", got)
+	}
+	// Прежняя пара серий не имеет права вернуться: две серии об одном предмете
+	// расходятся, и оставленная про запас читалась бы панелями как живая.
+	if strings.Contains(src, "metricsReg.UnaryServerInterceptor()") {
+		t.Error("собственный интерсептор метрик iam вернулся в композиционный корень: " +
+			"его предмет тот же, что у платформенного измерителя, и две серии об одном " +
+			"предмете уже разошлись однажды")
+	}
+	// Подписки обоих слушателей тоже наблюдаются: iam служит стрим отражения, и
+	// оборванная подписка иначе не видна нигде.
+	if got := strings.Count(src, "latency.StreamServerInterceptor("); got != 2 {
+		t.Errorf("измеритель подписок провязан %d раз, ожидалось 2 (публичный + внутренний)", got)
 	}
 }

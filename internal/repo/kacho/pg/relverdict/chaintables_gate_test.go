@@ -590,7 +590,14 @@ func TestR7_4_16_TheWholeDerivationFallsWhenANameLeavesTheCatalogue(t *testing.T
 	}
 
 	// (а) КРАСНОЕ С КООРДИНАТОЙ: имя ушло из каталога, цепь продолжает читать.
-	const gone = chainTableMark + "users"
+	//
+	// ЦЕЛЬ ИНЪЕКЦИИ — ТАБЛИЦА ЧЛЕНСТВ, а не строка пользователя. Здесь стояло
+	// `users`, и мишень пережила свой предмет: с #944 звено личности берёт аккаунт
+	// из членства, цепь таблицу пользователей больше НЕ ЧИТАЕТ — снятие её имени
+	// из каталога перестало быть дефектом, и инъекция доказывала бы способность
+	// гейта упасть там, где падать не на чем. Мишенью обязана быть таблица,
+	// которую цепь читает СЕГОДНЯ.
+	const gone = chainTableMark + "memberships"
 	injected := chainSyntheticRoot(t, root, gone)
 	findings := chainJudgeRoot(t, injected)
 	if len(findings) != 1 {

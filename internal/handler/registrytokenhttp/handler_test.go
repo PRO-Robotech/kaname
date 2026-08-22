@@ -23,6 +23,8 @@ type fakeIssuer struct {
 	gotUser string
 	gotPass string
 	gotSvc  string
+	// gotConfirmationX5TS256 — материал привязки, дошедший до выдачи.
+	gotConfirmationX5TS256 string
 
 	// Anonymous-pull path.
 	anonEnabled bool
@@ -33,6 +35,7 @@ type fakeIssuer struct {
 
 func (f *fakeIssuer) Execute(_ context.Context, in registrytokenuc.IssueInput) (registrytokenuc.IssueOutput, error) {
 	f.gotUser, f.gotPass, f.gotSvc = in.Username, in.Password, in.Service
+	f.gotConfirmationX5TS256 = in.ConfirmationX5TS256
 	return f.out, f.err
 }
 

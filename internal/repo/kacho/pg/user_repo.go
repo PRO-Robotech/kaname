@@ -210,28 +210,43 @@ func (r *userReader) FindActiveByEmail(ctx context.Context, email domain.Email) 
 	return out, nil
 }
 
-// ListAccountsForUser — все Account'ы, где у user'а есть ACTIVE-row или где
-// user является owner'ом (default-deny scope для UserService.List).
+// ListAccountsForUser — все Account'ы, где человек СОСТОИТ либо которыми
+// владеет. Снимок «мои аккаунты» собственного профиля (`AuthorizeService.WhoAmI`).
 //
-// Включает аккаунты, созданные через AccountService.Create с owner_user_id =
-// userID (в таком случае в `users` нет ACTIVE-строки с account_id = новый
-// аккаунт, но аккаунт реально принадлежит пользователю), и аккаунты, в которых
-// у principal есть ACTIVE AccessBinding с resource_type='account', даже если
-// его users-row там еще PENDING (приглашение).
+// Полный набор =
 //
-// Полный набор аккаунтов, которые видит принципал =
-//
-//	(1) аккаунт bootstrap-row (users.account_id WHERE users.id = $1 ACTIVE)
+//	(1) аккаунты АКТИВНЫХ ЧЛЕНСТВ активной личности (kacho_iam.memberships)
 //	UNION
-//	(2) аккаунты, где principal является owner (accounts.owner_user_id = $1)
+//	(2) аккаунты, где principal является owner (accounts.owner_user_id = $1) —
+//	    владеть не значит состоять (решение по PRO-Robotech/kacho#610), поэтому
+//	    источник самостоятельный, а не следствие первого
 //	UNION
 //	(3) аккаунты, на которые у principal есть ACTIVE AccessBinding
-//	    (resource_type='account', subject_type='user', subject_id=$1)
+//	    (resource_type='account', subject_type='user', subject_id=$1) — сюда
+//	    попадает приглашённый, чьё членство ещё «приглашён»
 //
 // UNION автоматически устраняет дубли.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// СОСТОЯНИЕ ЛИЧНОСТИ ОТСЕКАЕТ, СОСТОЯНИЕ ЧЛЕНСТВА — НЕТ, И ЭТО НЕ ИЗБЫТОЧНОСТЬ
+//
+// Источник (1) прежде читал `users.account_id … AND invite_status = 'ACTIVE'`,
+// то есть отсекал по состоянию ЛИЧНОСТИ. Зеркало 470001 переводит состояние
+// строки в состояние членства правилом «PENDING → PENDING, ИНАЧЕ → ACTIVE»,
+// поэтому у ЗАБЛОКИРОВАННОГО человека членство остаётся `ACTIVE` — намеренно:
+// блокировка есть свойство личности, а не членства.
+//
+// Следствие: замена отбора `users.invite_status = 'ACTIVE'` на
+// `memberships.state = 'ACTIVE'` НЕ эквивалентна — она начала бы называть
+// аккаунты заблокированному, то есть расширила бы видимость под видом переноса
+// источника. Поэтому соединение с личностью здесь обязательно, и оба условия
+// стоят вместе. Держит это `TestBlockedIdentityGainsNoAccountThroughMembership`.
 func (r *userReader) ListAccountsForUser(ctx context.Context, userID domain.UserID) ([]domain.AccountID, error) {
 	rows, err := r.tx.Query(ctx, `
-		SELECT account_id FROM users WHERE id = $1 AND invite_status = 'ACTIVE'
+		SELECT m.account_id
+		  FROM memberships m
+		  JOIN users u ON u.id = m.user_id
+		 WHERE m.user_id = $1 AND m.state = 'ACTIVE' AND u.invite_status = 'ACTIVE'
 		UNION
 		SELECT id FROM accounts WHERE owner_user_id = $1
 		UNION
@@ -254,6 +269,24 @@ func (r *userReader) ListAccountsForUser(ctx context.Context, userID domain.User
 	return out, rows.Err()
 }
 
+// membershipInAny — «человек состоит хотя бы в одном из НАЗВАННЫХ аккаунтов»,
+// одним предикатом над таблицей членств.
+//
+// ЕДИНСТВЕННОЕ написание этого вопроса в списке пользователей. Три места
+// спрашивали его тремя разными выражениями над колонкой `users.account_id`
+// (фильтр запроса, множественный фильтр, сужение кандидатов), и после отрыва
+// (kacho#471) они разошлись бы поодиночке — а расхождение здесь наблюдаемо
+// только составом страницы, то есть тем, что читателю показали не тех людей.
+//
+// Полусоединение, а не соединение: строка человека обязана прийти в ответ ОДИН
+// раз, сколько бы членств ни попало в названный набор. Индекс под предикат —
+// `memberships_user_account_unique (user_id, account_id)` (470001).
+func membershipInAny(argIdx int) string {
+	return fmt.Sprintf(
+		"EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = users.id AND m.account_id = ANY($%d))",
+		argIdx)
+}
+
 func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User, string, error) {
 	pageSize, err := effectivePageSize(f.PageSize) // #184: reject >max, no silent clamp
 	if err != nil {
@@ -263,21 +296,29 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 	args := []any{}
 	argIdx := 1
 
-	// AccountID filter (single).
+	// AccountID filter (single). Читается ЧЛЕНСТВО, а не колонка: вопрос «кто
+	// состоит в этом аккаунте» есть вопрос о членстве, и после отрыва (kacho#471)
+	// у него не одна пара на человека. При одном членстве оба источника дают одно
+	// и то же by construction — зеркало 470001 держит их в согласии.
 	if f.AccountID != "" {
-		conditions = append(conditions, fmt.Sprintf("account_id = $%d", argIdx))
-		args = append(args, string(f.AccountID))
+		conditions = append(conditions, membershipInAny(argIdx))
+		args = append(args, []string{string(f.AccountID)})
 		argIdx++
 	}
 	// AccountIDs filter (multi). Применяется только если AccountID не задан.
+	//
+	// ПИСАТЕЛЯ У ЭТОГО ПОЛЯ В ПРОДЕ НЕТ — единственный, кто его заполняет, это
+	// интеграционная проба соседнего файла. Ветка сохранена, а не снята, потому
+	// что снятие поля порта — отдельный предмет; здесь она приведена к той же
+	// семантике, что и одиночная, чтобы два выражения одного вопроса не разошлись.
 	if f.AccountID == "" && len(f.AccountIDs) > 0 {
-		placeholders := make([]string, 0, len(f.AccountIDs))
+		accounts := make([]string, 0, len(f.AccountIDs))
 		for _, acc := range f.AccountIDs {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
-			args = append(args, string(acc))
-			argIdx++
+			accounts = append(accounts, string(acc))
 		}
-		conditions = append(conditions, fmt.Sprintf("account_id IN (%s)", strings.Join(placeholders, ",")))
+		conditions = append(conditions, membershipInAny(argIdx))
+		args = append(args, accounts)
+		argIdx++
 	}
 
 	if f.Filter != "" {
@@ -373,9 +414,16 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 	//
 	// nil — не сужать (администратор облака, bootstrap); непустой указатель с
 	// пустыми наборами не называет ни одной строки и потому не пропускает ни одной.
+	//
+	// Аккаунт кандидата берётся из ЧЛЕНСТВА. Отбор по СОСТОЯНИЮ членства здесь
+	// запрещён и это не осторожность: набор кандидатов обязан быть НАДМНОЖЕСТВОМ
+	// видимого (см. порт), а вердикт выносит модель. Колонка сегодня пропускает
+	// кандидата при любом состоянии строки, включая «приглашён» и «заблокирован»;
+	// добавив `state = 'ACTIVE'`, полусоединение сузило бы набор УЖЕ — то есть
+	// потеряло бы строку до того, как её кто-либо осудил.
 	if f.Candidates != nil {
 		conditions = append(conditions,
-			fmt.Sprintf("(account_id = ANY($%d) OR id = ANY($%d))", argIdx, argIdx+1))
+			fmt.Sprintf("(%s OR id = ANY($%d))", membershipInAny(argIdx), argIdx+1))
 		args = append(args, nonNilStrings(f.Candidates.AccountIDs), nonNilStrings(f.Candidates.ObjectIDs))
 		argIdx += 2
 	}

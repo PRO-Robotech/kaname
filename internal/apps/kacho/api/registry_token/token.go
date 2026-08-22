@@ -158,6 +158,15 @@ type IssueInput struct {
 	Username string // Basic-auth user — the Hydra client_id.
 	Password string // Basic-auth pass — the SA-key private-key PEM.
 	Service  string // ?service= — the registry service name (→ requested aud).
+
+	// ConfirmationX5TS256 — отпечаток ПРОВЕРЕННОГО клиентского сертификата,
+	// предъявленного на хопе выдачи (RFC 8705, Ф1б #926).
+	//
+	// Это МАТЕРИАЛ, а не пожелание вызывающего: значение выводит транспорт из
+	// проверенной цепочки, и предъявитель его не выбирает. Пусто означает
+	// «материал не предъявляли» — токен выходит предъявительским, и это
+	// законно: привязка не появляется там, где её не просили.
+	ConfirmationX5TS256 string
 }
 
 // IssueOutput — the Docker-compatible token response payload.
@@ -238,6 +247,10 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 			Subject:  cred.Subject,
 			Audience: service,
 			Scope:    u.cfg.Scope,
+			// Материал привязки — ровно тот, что предъявлен транспортом.
+			// Контур его переносит и не выбирает: привязка, которую назначает
+			// себе предъявитель, не привязывает ни к чему.
+			ConfirmationX5TS256: in.ConfirmationX5TS256,
 		})
 		if merr != nil {
 			// Неисправность СВОЕЙ чеканки — недоступность издателя, а не

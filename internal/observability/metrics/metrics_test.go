@@ -12,9 +12,8 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 )
 
@@ -95,49 +94,51 @@ func TestAuthzCheck_ErrorCounter(t *testing.T) {
 	}
 }
 
-// TestUnaryServerInterceptor_RecordsRequest — the gRPC server interceptor
-// records a request count + latency sample with the grpc_code label.
-func TestUnaryServerInterceptor_RecordsRequest(t *testing.T) {
+// TestRegistererWindowCarriesThePlatformLatencySeries — окно регистрации
+// ДЕЙСТВИТЕЛЬНО принимает платформенный измеритель задержки.
+//
+// # Что здесь предмет, а что нет
+//
+// Поведение самого измерителя (ряды, метки, сетка корзин, разделение отказа и
+// успеха) принадлежит `pkg/grpcsrv` и проверяется там — одиннадцатью пробами.
+// Здесь предмет ровно один: `Registerer()` отдаёт тот же реестр, который
+// скребут, поэтому серии, заведённые сквозь это окно, доезжают до выгрузки.
+//
+// # Почему проба осталась, хотя интерсептор из этого пакета ушёл
+//
+// Прежде здесь стояла своя пара серий со своим интерсептором; она снята как
+// второе место об одном предмете. Но если бы вместе с ней ушла и проба, то у
+// провязки iam не осталось бы ЛОКАЛЬНОГО доказательства: «окно есть» и «окно
+// ведёт в скребомый реестр» — разные факты, и второй виден только выгрузкой.
+func TestRegistererWindowCarriesThePlatformLatencySeries(t *testing.T) {
 	t.Parallel()
 	reg := metrics.NewRegistry()
-	intr := reg.UnaryServerInterceptor()
 
-	okHandler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+	lat, err := grpcsrv.NewServerLatency(reg.Registerer())
+	if err != nil {
+		t.Fatalf("измеритель не заводится в реестре iam: %v", err)
+	}
+	intr := lat.UnaryServerInterceptor(grpcsrv.ListenerInternal)
 	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.InternalIAMService/Check"}
-	if _, err := intr(context.Background(), nil, info, okHandler); err != nil {
-		t.Fatalf("interceptor returned err: %v", err)
+	if _, err := intr(context.Background(), nil, info,
+		func(context.Context, any) (any, error) { return "ok", nil }); err != nil {
+		t.Fatalf("интерсептор вернул ошибку: %v", err)
 	}
 
 	got := dumpMetrics(t, reg)
-	wantCount := `kacho_iam_grpc_server_handled_total{grpc_code="OK",grpc_method="Check",grpc_service="kacho.cloud.iam.v1.InternalIAMService"} 1`
+	wantCount := `kacho_grpc_server_handled_total{grpc_code="OK",grpc_method="Check",` +
+		`grpc_service="kacho.cloud.iam.v1.InternalIAMService",listener="internal"} 1`
 	if !strings.Contains(got, wantCount) {
-		t.Fatalf("grpc handled counter missing.\nwant substring: %s\ngot:\n%s", wantCount, got)
+		t.Fatalf("счётчика обслуженных нет в выгрузке iam.\nожидалась подстрока: %s\nполучено:\n%s",
+			wantCount, got)
 	}
-	if !strings.Contains(got, "kacho_iam_grpc_server_handling_seconds_count{") {
-		t.Fatalf("grpc latency histogram missing.\ngot:\n%s", got)
+	if !strings.Contains(got, "kacho_grpc_server_handling_seconds_count{") {
+		t.Fatalf("гистограммы задержки нет в выгрузке iam.\nполучено:\n%s", got)
 	}
-}
-
-// TestUnaryServerInterceptor_RecordsErrorCode — a failed RPC records the
-// gRPC status code.
-func TestUnaryServerInterceptor_RecordsErrorCode(t *testing.T) {
-	t.Parallel()
-	reg := metrics.NewRegistry()
-	intr := reg.UnaryServerInterceptor()
-
-	failHandler := func(ctx context.Context, req any) (any, error) {
-		return nil, status.Error(codes.PermissionDenied, "denied")
-	}
-	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.InternalIAMService/Check"}
-	_, err := intr(context.Background(), nil, info, failHandler)
-	if status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("err code = %v, want PermissionDenied", status.Code(err))
-	}
-
-	got := dumpMetrics(t, reg)
-	want := `grpc_code="PermissionDenied"`
-	if !strings.Contains(got, want) {
-		t.Fatalf("grpc error code label missing.\nwant substring: %s\ngot:\n%s", want, got)
+	// Зеркало: прежней пары серий больше нет. Две серии об одном предмете
+	// разъезжаются, и оставленная про запас читалась бы панелями как живая.
+	if strings.Contains(got, "kacho_iam_grpc_server_") {
+		t.Fatalf("прежняя пара серий пережила свою замену — два места об одном предмете:\n%s", got)
 	}
 }
 

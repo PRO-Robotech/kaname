@@ -48,8 +48,16 @@ type ReaderIface interface {
 	// (LookupSubject). Возвращает nil-срез если ACTIVE-row нет.
 	FindActiveByEmail(ctx context.Context, email domain.Email) ([]domain.User, error)
 
-	// ListAccountsForUser — все Account'ы, где у user'а есть ACTIVE-row.
-	// Используется для default-deny scope в `UserService.List`.
+	// ListAccountsForUser — все Account'ы, где человек СОСТОИТ (активное членство
+	// активной личности) либо которыми владеет, либо на которые у него есть
+	// действующая выдача.
+	//
+	// Прод-вызывающий один — `AuthorizeService.WhoAmI` (снимок «мои аккаунты»
+	// собственного профиля). Здесь стояло «используется для default-deny scope в
+	// UserService.List» — утверждение пережило свой предмет: сужение списка давно
+	// делает `visibility.ScopeOf`, и этот метод на том тракте не зовётся вовсе.
+	// Комментарий, называющий несуществующего вызывающего, посылает следующего
+	// читателя менять поведение списка правкой, которая до списка не доходит.
 	ListAccountsForUser(ctx context.Context, userID domain.UserID) ([]domain.AccountID, error)
 }
 
