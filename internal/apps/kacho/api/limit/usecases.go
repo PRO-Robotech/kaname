@@ -312,10 +312,25 @@ func (uc *DeleteUseCase) Execute(ctx context.Context, id string) (*operationpb.O
 type ResolveUseCase struct {
 	repo    limitRepo
 	checker authzguard.RelationChecker
+	// logger — ЧИТАТЕЛЬ причины отказа. Заполняется умолчанием в конструкторе, а
+	// не оставляется пустым: несобранный журнал вернул бы ровно то состояние,
+	// ради которого он заводится, — отказ без единой строки о причине (#666).
+	logger *slog.Logger
 }
 
 // NewResolveUseCase — constructor.
-func NewResolveUseCase(r limitRepo) *ResolveUseCase { return &ResolveUseCase{repo: r} }
+func NewResolveUseCase(r limitRepo) *ResolveUseCase {
+	return &ResolveUseCase{repo: r, logger: slog.Default()}
+}
+
+// WithLogger заменяет журнал по умолчанию. Пустой не принимается: молчание — не
+// настройка, а потеря причины.
+func (uc *ResolveUseCase) WithLogger(l *slog.Logger) *ResolveUseCase {
+	if l != nil {
+		uc.logger = l
+	}
+	return uc
+}
 
 // WithQuotaReaderChecker wires the narrow ReBAC gate (defense-in-depth behind the
 // edge's catalog entry). nil-safe: an unwired checker fails CLOSED — an
@@ -350,7 +365,10 @@ func (uc *ResolveUseCase) Execute(ctx context.Context, scopeID, service string) 
 
 	stated, ok, err := uc.repo.StatedFor(ctx, scopeID)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		// Перевод СТИРАЕТ причину (текст INTERNAL фиксирован, текст недоступности
+		// опаковый), поэтому она называется журналу здесь — в том единственном
+		// месте, где ещё цела.
+		return nil, shared.LogRepoErr(ctx, uc.logger, "Resolve", err)
 	}
 	if !ok {
 		// Direct-read lane: accounts and projects are iam's OWN rows.
@@ -368,11 +386,21 @@ type ListChangedUseCase struct {
 	repo    limitRepo
 	cursors deltaCursorCodec
 	checker authzguard.RelationChecker
+	// logger — ЧИТАТЕЛЬ причины отказа; см. одноимённое поле резолва.
+	logger *slog.Logger
 }
 
 // NewListChangedUseCase — constructor.
 func NewListChangedUseCase(r limitRepo, c deltaCursorCodec) *ListChangedUseCase {
-	return &ListChangedUseCase{repo: r, cursors: c}
+	return &ListChangedUseCase{repo: r, cursors: c, logger: slog.Default()}
+}
+
+// WithLogger заменяет журнал по умолчанию. Пустой не принимается.
+func (uc *ListChangedUseCase) WithLogger(l *slog.Logger) *ListChangedUseCase {
+	if l != nil {
+		uc.logger = l
+	}
+	return uc
 }
 
 // WithQuotaReaderChecker wires the narrow ReBAC gate. nil-safe, fail-closed.
@@ -409,7 +437,10 @@ func (uc *ListChangedUseCase) Execute(ctx context.Context, cursor string, pageSi
 
 	rows, next, err := uc.repo.ChangedSince(ctx, after, int(size))
 	if err != nil {
-		return ChangedResult{}, shared.MapRepoErr(err)
+		// Единственная полоса, на которой тянущий узнаёт об отказе. Без строки
+		// здесь причину назвать нечем: клиенту достаётся фиксированный текст, а
+		// журнала доступа у сервиса нет.
+		return ChangedResult{}, shared.LogRepoErr(ctx, uc.logger, "ListChangedSince", err)
 	}
 	return ChangedResult{Changes: rows, NextCursor: uc.cursors.Encode(next)}, nil
 }

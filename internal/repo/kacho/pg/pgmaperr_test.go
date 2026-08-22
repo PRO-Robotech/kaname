@@ -9,6 +9,8 @@ package pg
 
 import (
 	stderrors "errors"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 
@@ -73,7 +75,10 @@ func TestWrapPgErr_NoLeak_OnUnmappedConstraints(t *testing.T) {
 		sentinel error
 		wantText string
 	}{
-		{"unmapped-sqlstate", "XX000", iamerr.ErrInternal, "database error"},
+		// Код состояния остаётся в ЦЕПОЧКЕ ради журнала (#666); клиенту он не
+		// достаётся — перевод sentinel'а в статус заменяет сообщение `Internal`
+		// целиком, и это утверждает отдельная проба ниже.
+		{"unmapped-sqlstate", "XX000", iamerr.ErrInternal, "database error: sqlstate XX000"},
 		{"unmapped-unique", "23505", iamerr.ErrAlreadyExists, "resource with these attributes already exists"},
 		{"unmapped-fk", "23503", iamerr.ErrFailedPrecondition, "referenced resource not found or still in use"},
 		{"unmapped-check", "23514", iamerr.ErrInvalidArg, "Illegal argument: value violates a constraint"},
@@ -231,4 +236,137 @@ func TestWrapPgErr_NonPgError_PassesThrough(t *testing.T) {
 	if got := wrapPgErr(orig, "", ""); got != orig {
 		t.Errorf("non-pg error not passed through: %v", got)
 	}
+}
+
+// ── #666: отказ соединения — недоступность, а не поломка ────────────────────
+
+// TestWrapPgErr_ConnectionRefusals_AreUnavailable — отказ ОТКРЫТЬ соединение
+// читается как временная недоступность, а не как поломка сервиса.
+//
+// ПОЧЕМУ ЭТО НЕ ПЕДАНТИЗМ. Пул строится без нижней границы, соединения
+// открываются лениво на первом обращении, готовность базы служебный бинарь не
+// ждёт — значит быстрый транзиторный отказ открытия в загрузочной буре ожидаем
+// ПО ПОСТРОЕНИЮ. `Internal` не повторяется (`retry.OnUnavailable` повторяет
+// только недоступность), поэтому тянущий пределы получал терминальный отказ на
+// состояние, которое проходит само за секунды.
+//
+// Семейство `08*` уже читалось верно; здесь добавлены два класса, которые
+// поднимает САМ сервер, отказываясь принять соединение, и они лежат вне
+// восьмого семейства.
+func TestWrapPgErr_ConnectionRefusals_AreUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		code string
+		what string
+	}{
+		{"53300", "too_many_connections — сервер исчерпал слоты"},
+		{"57P03", "cannot_connect_now — сервер ещё поднимается"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			err := wrapPgErr(mkPgErr(tc.code, ""), "", "")
+			if !stderrors.Is(err, iamerr.ErrUnavailable) {
+				t.Fatalf("%s: want ErrUnavailable, got %v", tc.what, err)
+			}
+			assertNoLeak(t, iamerr.StripSentinel(err))
+		})
+	}
+}
+
+// TestWrapPgErr_DialFailure_IsUnavailable — отказ, приехавший НЕ строкой
+// состояния сервера, а невозможностью до него дозвониться.
+//
+// Такой отказ вовсе не несёт SQLSTATE (сервер не ответил), поэтому прежняя ветвь
+// пропускала его нетронутым, а общий перевод отправлял в `Internal` — «сервис
+// сломан» вместо «сосед сейчас недоступен».
+func TestWrapPgErr_DialFailure_IsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{
+			// Форма, в которой отказ набора соединения приходит чаще всего:
+			// сетевая операция не состоялась.
+			name: "сокет не открылся",
+			err: &net.OpError{
+				Op: "dial", Net: "tcp",
+				Addr: &net.TCPAddr{IP: net.ParseIP("10.0.0.7"), Port: 5432},
+				Err:  stderrors.New("connection refused"),
+			},
+		},
+		{
+			// Драйвер закрыл соединение под нами — предыдущий запрос сняли на
+			// полпути либо сокет ушёл. Повтор осмыслен.
+			name: "соединение закрыто драйвером",
+			err:  fmt.Errorf("query: %w", pgconn.ErrConnClosed),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := wrapPgErr(tc.err, "", "")
+			if !stderrors.Is(err, iamerr.ErrUnavailable) {
+				t.Fatalf("want ErrUnavailable, got %v", err)
+			}
+			// Адрес наружу не идёт: сообщение отказа фиксированное
+			// (`security.md` §Hardening #1).
+			out := iamerr.StripSentinel(err)
+			for _, secret := range []string{"10.0.0.7", "5432", "connection refused"} {
+				if strings.Contains(out, secret) {
+					t.Errorf("LEAK: клиентский текст %q несёт координату соединения %q", out, secret)
+				}
+			}
+		})
+	}
+}
+
+// TestWrapPgErr_ConnectError_IsUnavailable — та же полоса для собственного типа
+// драйвера.
+//
+// Причину внутрь этого типа положить нельзя: поле не экспортировано, и вызов его
+// `Error()` на пустой причине падает. Поэтому проба НИЧЕГО НЕ ФОРМАТИРУЕТ — ни в
+// удачном исходе, ни в отказе: диагностика здесь стоила бы паники вместо
+// вердикта. Что распознавание идёт по типу, а не по тексту, видно по тому же
+// значению — текста у него нет.
+func TestWrapPgErr_ConnectError_IsUnavailable(t *testing.T) {
+	dial := &pgconn.ConnectError{
+		Config: &pgconn.Config{Host: "kacho-iam-db", Port: 5432, User: "kacho", Database: "kacho_iam"},
+	}
+	if !stderrors.Is(wrapPgErr(dial, "", ""), iamerr.ErrUnavailable) {
+		t.Fatal("отказ соединения драйвера не прочитан как недоступность")
+	}
+}
+
+// TestWrapPgErr_OrdinaryErrorStaysUntouched — отрицательный контроль: обычная
+// ошибка недоступностью НЕ становится.
+//
+// Без него предыдущая проба зеленела бы и на переводе «всё непонятное — это
+// недоступность», а он вернул бы вызывающему обещание повтора там, где
+// повторять нечего.
+func TestWrapPgErr_OrdinaryErrorStaysUntouched(t *testing.T) {
+	plain := stderrors.New("scan quota state: bad column type")
+	err := wrapPgErr(plain, "", "")
+	if stderrors.Is(err, iamerr.ErrUnavailable) {
+		t.Fatalf("обычная ошибка объявлена недоступностью: %v", err)
+	}
+	if err != plain { //nolint:errorlint // сравнение по тождеству намеренно: ветвь обязана вернуть ТОТ ЖЕ объект
+		t.Fatalf("обычная ошибка подменена: %v", err)
+	}
+}
+
+// TestWrapPgErr_UnmappedSqlstate_KeepsTheCodeForTheLog — неопознанный SQLSTATE
+// обязан оставить СВОЙ код в цепочке ошибки.
+//
+// Клиент по-прежнему видит фиксированный текст (перевод в статус заменяет
+// сообщение `Internal` целиком), а вот журнал сервера без кода не может назвать
+// причину вовсе — и «отказ есть, причину назвать нечем» становится штатным
+// состоянием. Комментарии на этом пути обещали журналу деталь; обещание держится
+// только если деталь в цепочке ЕСТЬ.
+func TestWrapPgErr_UnmappedSqlstate_KeepsTheCodeForTheLog(t *testing.T) {
+	err := wrapPgErr(mkPgErr("XX000", ""), "", "")
+	if !stderrors.Is(err, iamerr.ErrInternal) {
+		t.Fatalf("want ErrInternal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "XX000") {
+		t.Fatalf("код состояния потерян для журнала: %q — причину отказа назвать будет нечем", err.Error())
+	}
+	// Но НЕ ценой утечки: текст сервера, имя ограничения и таблица в цепочку не
+	// попадают, а клиенту достаётся фиксированный текст перевода.
+	assertNoLeak(t, err.Error())
 }
