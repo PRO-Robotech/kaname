@@ -33,10 +33,10 @@ package shared
 // been granted (api-conventions.md: формат → authz → repo).
 
 import (
-	"encoding/base64"
 	"strings"
 	"time"
 
+	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 )
 
@@ -56,8 +56,8 @@ type VisibleCursor struct {
 // because the keyset compares the stored timestamp, not the truncated one the
 // resource message carries.
 func EncodeVisiblePageToken(c VisibleCursor) string {
-	return visibleTokenPrefix + base64.StdEncoding.EncodeToString(
-		[]byte(c.CreatedAt.UTC().Format(time.RFC3339Nano)+"|"+c.ID))
+	return visibleTokenPrefix + pagetoken.Encode(
+		pagetoken.Cursor{CreatedAt: c.CreatedAt, ID: c.ID})
 }
 
 // DecodeVisiblePageToken parses a token of this form. An empty token is the
@@ -72,19 +72,14 @@ func DecodeVisiblePageToken(field, token string) (*VisibleCursor, error) {
 	if !ok {
 		return nil, InvalidArg(field, "Illegal argument "+field)
 	}
-	raw, err := base64.StdEncoding.DecodeString(rest)
-	if err != nil {
+	// Тело — КАНОНИЧЕСКАЯ форма курсора, объявленная один раз (#652). Своим
+	// здесь остаётся только префикс: он метит вид страницы и является частью
+	// значения на проводе.
+	c, ok := pagetoken.Decode(rest)
+	if !ok || c == nil {
 		return nil, InvalidArg(field, "Illegal argument "+field)
 	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 || parts[1] == "" {
-		return nil, InvalidArg(field, "Illegal argument "+field)
-	}
-	ts, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil {
-		return nil, InvalidArg(field, "Illegal argument "+field)
-	}
-	return &VisibleCursor{CreatedAt: ts, ID: parts[1]}, nil
+	return &VisibleCursor{CreatedAt: c.CreatedAt, ID: c.ID}, nil
 }
 
 // ValidateVisiblePagination — the whole page-format question for a visible-page

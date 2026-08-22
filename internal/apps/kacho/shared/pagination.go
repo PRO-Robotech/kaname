@@ -13,10 +13,7 @@ package shared
 // short-circuit"). The repo's decodePageToken stays the authoritative backstop.
 
 import (
-	"encoding/base64"
-	"strings"
-	"time"
-
+	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 )
 
@@ -24,18 +21,13 @@ import (
 // well-formed keyset cursor (base64 of `<RFC3339Nano>|<id>`). Empty → OK (first
 // page). The message is the stable contract form "Illegal argument <field>".
 func ValidatePageToken(field, token string) error {
-	if token == "" {
-		return nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(token)
-	if err != nil {
-		return InvalidArg(field, "Illegal argument "+field)
-	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 {
-		return InvalidArg(field, "Illegal argument "+field)
-	}
-	if _, err := time.Parse(time.RFC3339Nano, parts[0]); err != nil {
+	// Разбор — ТОТ ЖЕ, что исполняется на пути чтения (#652). Здесь стояло
+	// рукописное зеркало формы, и оно было СЛАБЕЕ авторитетного кодека: пустой
+	// идентификатор оно принимало, а репозиторий отвергал. То есть проверка,
+	// стоящая ПЕРВОЙ, пропускала токен, на котором чтение падало ниже, — и
+	// расходились они ровно там, где расхождение не видно: на валидном входе оба
+	// отвечали «валидно».
+	if !pagetoken.WellFormed(token) {
 		return InvalidArg(field, "Illegal argument "+field)
 	}
 	return nil

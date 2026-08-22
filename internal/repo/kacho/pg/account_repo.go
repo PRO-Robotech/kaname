@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
@@ -438,24 +439,24 @@ func buildAccountUpdateSet(a domain.Account, labelsJSON []byte, mask []string) (
 
 // ---- filter / page-token helpers ------------------------------------------
 
+// Форма курсора объявлена ОДИН раз — в `pkg/pagetoken` (#652). Здесь стоял
+// авторитетный кодек, а на границе приложения — его рукописное зеркало, и
+// зеркало бежало ПЕРВЫМ: смена формы вносилась бы в два места, и первое же
+// пропущенное дало бы ответ, зависящий от того, какой декодер отработал раньше.
 func encodePageToken(ts time.Time, id string) string {
-	// Простой формат: `<RFC3339Nano>|<id>` через base64-URL.
-	raw := ts.UTC().Format(time.RFC3339Nano) + "|" + id
-	return base64URLEncode([]byte(raw))
+	return pagetoken.Encode(pagetoken.Cursor{CreatedAt: ts, ID: id})
 }
 
 func decodePageToken(token string) (time.Time, string, error) {
-	raw, err := base64URLDecode(token)
-	if err != nil {
-		return time.Time{}, "", err
-	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 {
+	c, ok := pagetoken.Decode(token)
+	if !ok {
 		return time.Time{}, "", fmt.Errorf("invalid page_token format")
 	}
-	ts, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil {
-		return time.Time{}, "", err
+	if c == nil {
+		// Пустой токен сюда не приходит — первую страницу вызывающий не
+		// декодирует, — но отсутствие представимо, и молча возвращать нулевое
+		// время значило бы выдать «начало эпохи» за границу страницы.
+		return time.Time{}, "", fmt.Errorf("invalid page_token format")
 	}
-	return ts, parts[1], nil
+	return c.CreatedAt, c.ID, nil
 }
