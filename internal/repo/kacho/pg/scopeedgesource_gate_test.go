@@ -49,6 +49,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -59,11 +60,70 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
-// scopeEdgeMigration — файл, несущий ДЕЙСТВУЮЩЕЕ определение представления.
+// scopeEdgeMigrationDir — каталог миграций сервиса.
 //
-// Именно файл, а не живая база: гейт обязан краснеть в конвейере, где базы нет,
+// Именно файлы, а не живая база: гейт обязан краснеть в конвейере, где базы нет,
 // иначе он сторожит только тех, кто поднял стенд.
-const scopeEdgeMigration = "services/iam/internal/migrations/785001_scope_chain_covers_iam_own_types.sql"
+const scopeEdgeMigrationDir = "services/iam/internal/migrations"
+
+// scopeEdgeViewAnchor — по чему опознаётся миграция, ОБЪЯВЛЯЮЩАЯ представление.
+// Анкер на глаголе, а не на имени: имя встречается в каждой ветви и в шапке.
+var scopeEdgeViewAnchor = regexp.MustCompile(`CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+kacho_iam\.resource_scope_edge\b`)
+
+// actingScopeEdgeMigration — файл с НАИБОЛЬШИМ номером, чей блок `Up` объявляет
+// представление. Он и есть действующее определение: goose применяет по числу, и
+// последнее объявление переживает все предыдущие.
+//
+// ВЫВОДИТСЯ ИЗ ДЕРЕВА, А НЕ ВЫПИСЫВАЕТСЯ, и это не стиль. Прежняя редакция
+// называла файл константой — и с первой же миграцией, пересоздавшей
+// представление, гейт продолжал бы сверять УСТАРЕВШЕЕ определение, объявляя
+// согласие источников, которого больше нет. Расхождение было бы тихим ровно
+// потому, что гейт зелен: он читает файл, который никто не менял.
+func actingScopeEdgeMigration(t *testing.T) (name, body string) {
+	t.Helper()
+	root := scopeEdgeRepoRoot(t)
+	dir := filepath.Join(root, scopeEdgeMigrationDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("каталог миграций не прочитан (%v): источник, который гейт не смог "+
+			"прочитать, — ОТКАЗ, а не пропуск", err)
+	}
+	bestVersion := int64(-1)
+	seen := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		seen++
+		raw, rerr := os.ReadFile(filepath.Join(dir, e.Name())) // #nosec G304 -- in-repo migrations dir
+		if rerr != nil {
+			t.Fatalf("миграция %s не прочитана (%v): отказ чтения — не пропуск", e.Name(), rerr)
+		}
+		up, uerr := upBlock(string(raw))
+		if uerr != nil || !scopeEdgeViewAnchor.MatchString(up) {
+			continue
+		}
+		v, verr := strconv.ParseInt(strings.SplitN(e.Name(), "_", 2)[0], 10, 64)
+		if verr != nil {
+			t.Fatalf("номер миграции %s не разобран (%v): порядок применения неизвестен, "+
+				"и «действующее определение» выбрать не из чего", e.Name(), verr)
+		}
+		if v > bestVersion {
+			bestVersion, name, body = v, e.Name(), string(raw)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("в каталоге миграций НОЛЬ файлов .sql: предпосылка гейта ложна, и его " +
+			"молчание означало бы «ничего не прочитано», а не «источники согласны»")
+	}
+	if name == "" {
+		t.Fatalf("среди %d миграций ни одна не объявляет kacho_iam.resource_scope_edge: "+
+			"либо анкер устарел, либо представление снято — в обоих случаях это ОТКАЗ", seen)
+	}
+	t.Logf("осмотрено миграций %d; действующее определение цепи — %s (версия %d)",
+		seen, name, bestVersion)
+	return name, body
+}
 
 // scopeEdgeBranch — одна ветвь представления, разобранная из SQL.
 type scopeEdgeBranch struct {
@@ -86,7 +146,7 @@ type legalDifference struct {
 // legalDifferences — ПОИМЁННЫЙ перечень мест, где цепь законно расходится с
 // планом чтения материализации.
 //
-// Их четыре, и ни одно не является дефектом:
+// Их пять, и ни одно не является дефектом:
 var legalDifferences = []legalDifference{
 	{"project", "звено взято из ПРОЕКЦИИ ЖУРНАЛА (781001): у проекта журнал полон по " +
 		"построению, а таблица состояния наблюдаемо нет. Containment материализации " +
@@ -100,6 +160,15 @@ var legalDifferences = []legalDifference{
 		"оговаривает), а цепь даёт. Эталон здесь — ЗАПАСНОЙ СТРУКТУРНЫЙ ПУТЬ " +
 		"(domain.StructuralParent), и модель на его стороне: у типа объявлены все три " +
 		"области"},
+	{"iam_user", "звено ЛИЧНОСТИ берётся из kacho_iam.memberships (#944), а containment " +
+		"материализации — из колонки kacho_iam.users.account_id. Различие НАМЕРЕННОЕ и есть " +
+		"предмет отрыва (#471): принадлежность человека аккаунту перестала быть свойством его " +
+		"строки, а parentAccountExpr — выражение СКАЛЯРНОЕ, одна строка → один предок, и N " +
+		"членств оно не выражает by construction. Пока членство у каждого одно, оба источника " +
+		"дают одну и ту же пару — это держат обратное заполнение и зеркалящий триггер 470001. " +
+		"Эталон здесь — ЦЕПЬ: она умеет назвать столько предков, сколько у человека членств; " +
+		"привести к согласию правкой материализации нельзя, не сменив объект, про который " +
+		"спрашивает гейт (приёмка IAM-ID-1 §2.3а)"},
 	{"iam_role", "у роли с областью «проект» containment добирает аккаунт СОЕДИНЕНИЕМ с " +
 		"таблицей проектов, а цепь берёт колонку самой роли и поднимается к аккаунту " +
 		"ОБХОДОМ. Величина та же, путь разный: требовать тождества значило бы требовать " +
@@ -113,7 +182,6 @@ var legalDifferences = []legalDifference{
 // где оно составное (соединение, CASE, ссылка на себя), эталоном служит другой
 // источник, и тип стоит в legalDifferences.
 var exactSourceTypes = map[string]string{
-	"iam_user":            "o.account_id",
 	"iam_group":           "o.account_id",
 	"iam_service_account": "o.account_id",
 }
@@ -208,7 +276,8 @@ func parseBranches(sqlText string) []scopeEdgeBranch {
 // пропущенных различий на дереве, где их четыре, — тоже находка: значит гейт
 // читает не то.
 func TestG2_ScopeEdgeSourceAgreesWithItsPerPropertyReference(t *testing.T) {
-	report, findings := auditScopeEdgeSources(readScopeEdgeMigration(t))
+	migration, body := readScopeEdgeMigration(t)
+	report, findings := auditScopeEdgeSources(migration, body)
 	for _, line := range report {
 		t.Log(line)
 	}
@@ -223,18 +292,12 @@ func TestG2_ScopeEdgeSourceAgreesWithItsPerPropertyReference(t *testing.T) {
 // точечной правкой, а не синтетической строкой. Синтетика доказывает, что гейт
 // умеет краснеть на том, что для него сочинили, и ничего не говорит о том, что
 // он увидит настоящий дефект.
-func readScopeEdgeMigration(t *testing.T) string {
+func readScopeEdgeMigration(t *testing.T) (name, body string) {
 	t.Helper()
-	root := scopeEdgeRepoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, scopeEdgeMigration))
-	if err != nil {
-		t.Fatalf("миграция цепи не прочитана (%v): источник, который гейт не смог "+
-			"прочитать, — ОТКАЗ, а не пропуск", err)
-	}
-	return string(body)
+	return actingScopeEdgeMigration(t)
 }
 
-func auditScopeEdgeSources(body string) (report, findings []string) {
+func auditScopeEdgeSources(migration, body string) (report, findings []string) {
 	up, err := upBlock(body)
 	if err != nil {
 		return nil, []string{err.Error()}
@@ -244,7 +307,7 @@ func auditScopeEdgeSources(body string) (report, findings []string) {
 		return report, append(findings, fmt.Sprintf(
 			"в блоке Up не разобрано НИ ОДНОЙ ветви, выводимой из строки объекта: "+
 				"предпосылка гейта не выполнена, и его молчание означало бы «ничего не "+
-				"прочитано», а не «источники согласны».\nМиграция: %s", scopeEdgeMigration))
+				"прочитано», а не «источники согласны».\nМиграция: %s", migration))
 	}
 
 	// ── источник 1: containment материализации ──────────────────────────────
@@ -302,7 +365,7 @@ func auditScopeEdgeSources(body string) (report, findings []string) {
 					"тип %q: цепь читает таблицу %s, containment материализации — %s.\n"+
 						"  цепь:           %s\n"+
 						"  материализация: pg.IAMDirectContainments()[%q].Table",
-					ty, b.Table, c.Table, scopeEdgeMigration, c.ObjectType))
+					ty, b.Table, c.Table, migration, c.ObjectType))
 			}
 			if b.ParentCol != wantCol || c.ParentAccountExpr != wantCol {
 				findings = append(findings, fmt.Sprintf(
@@ -312,7 +375,7 @@ func auditScopeEdgeSources(body string) (report, findings []string) {
 						"  эталон:         %s\n"+
 						"По этой колонке выдача на область ФАКТИЧЕСКИ накрывает объект; расхождение "+
 						"означает, что форма E и материализация считают «внутри» по-разному.",
-					ty, b.ParentCol, scopeEdgeMigration, c.ParentAccountExpr, c.ObjectType, wantCol))
+					ty, b.ParentCol, migration, c.ParentAccountExpr, c.ObjectType, wantCol))
 			}
 		}
 	}
@@ -332,7 +395,7 @@ func auditScopeEdgeSources(body string) (report, findings []string) {
 		return report, append(findings, fmt.Sprintf(
 			"в ветви привязки не разобран закрытый набор областей: сверять не с чем, и "+
 				"молчание здесь означало бы «не прочитано», а не «наборы совпали».\n"+
-				"Миграция: %s", scopeEdgeMigration))
+				"Миграция: %s", migration))
 	}
 	probes := []string{"project", "account", "cluster", "vpc_network", "*", "", "organization"}
 	setChecked := 0
@@ -352,7 +415,7 @@ func auditScopeEdgeSources(body string) (report, findings []string) {
 					"типа в модели нет, либо ПОТЕРЮ законной области: привязка на неё перестала "+
 					"бы иметь предка, и верхний ярус доступа к ней отвечал бы отказом, "+
 					"неотличимым от честного.",
-				scope, bindable, inChain, scopeEdgeMigration, bindingSet))
+				scope, bindable, inChain, migration, bindingSet))
 		}
 	}
 
@@ -403,9 +466,9 @@ func auditScopeEdgeSources(body string) (report, findings []string) {
 // значением, поэтому инъекция читает ИСХОД, а не побочный эффект. Через `t.Run`
 // это было бы невыразимо — падение подпробы делает красной и родительскую, и
 // «инъекция сработала» стало бы неотличимо от «инъекция сломала гейт».
-func injectedFindings(t *testing.T, body string) []string {
+func injectedFindings(t *testing.T, migration, body string) []string {
 	t.Helper()
-	_, findings := auditScopeEdgeSources(body)
+	_, findings := auditScopeEdgeSources(migration, body)
 	return findings
 }
 
@@ -415,19 +478,24 @@ func injectedFindings(t *testing.T, body string) []string {
 // другой (в плане чтения материализации) — ровно тот дрейф, ради которого гейт
 // существует: удержать две записи «одним источником» невозможно, значит
 // расхождение обязано краснеть, а не обнаруживаться прогоном на стенде.
+// ЦЕЛЬ ИНЪЕКЦИИ — ГРУППА, а не личность, и это не безразличный выбор. У личности
+// звено с #944 берётся из таблицы членств и объявлено ЗАКОННЫМ РАЗЛИЧИЕМ, то есть
+// гейт на ней молчит НАМЕРЕННО: инъекция по ней доказывала бы обратное тому, что
+// должна. Ветвь группы осталась в exactSourceTypes и имеет ту же форму — значит
+// инъекция по-прежнему меряет способность гейта найти ДРЕЙФ, а не конкретный тип.
 func TestG2_InjectionPointerColumnDivergedIsFound(t *testing.T) {
-	body := readScopeEdgeMigration(t)
-	// Точечная правка НАСТОЯЩЕГО текста: у пользователя указатель уводится с
+	migration, body := readScopeEdgeMigration(t)
+	// Точечная правка НАСТОЯЩЕГО текста: у группы указатель уводится с
 	// account_id на собственный идентификатор.
 	broken := strings.Replace(body,
-		"SELECT 'iam_user'::text, o.id, 'account'::text, o.account_id, 1",
-		"SELECT 'iam_user'::text, o.id, 'account'::text, o.id, 1", 1)
+		"SELECT 'iam_group'::text, o.id, 'account'::text, o.account_id, 1",
+		"SELECT 'iam_group'::text, o.id, 'account'::text, o.id, 1", 1)
 	if broken == body {
-		t.Fatalf("инъекция ничего не изменила: ветвь пользователя в миграции не найдена "+
+		t.Fatalf("инъекция ничего не изменила: ветвь группы в миграции не найдена "+
 			"в ожидаемой форме, и «гейт покраснел» ничего не доказывало бы.\n"+
-			"Миграция: %s", scopeEdgeMigration)
+			"Миграция: %s", migration)
 	}
-	found := injectedFindings(t, broken)
+	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {
 		t.Fatalf("гейт ПРОМОЛЧАЛ на разошедшейся колонке-указателе: цепь читает o.id, " +
 			"containment материализации — o.account_id. Такой гейт не держит ничего.")
@@ -436,7 +504,7 @@ func TestG2_InjectionPointerColumnDivergedIsFound(t *testing.T) {
 	// координаты заставляет читателя искать расхождение самому, и первым он
 	// найдёт не то.
 	joined := strings.Join(found, "\n")
-	for _, want := range []string{"iam_user", "o.account_id", scopeEdgeMigration} {
+	for _, want := range []string{"iam_group", "o.account_id", migration} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("находка не называет %q:\n%s", want, joined)
 		}
@@ -450,15 +518,15 @@ func TestG2_InjectionPointerColumnDivergedIsFound(t *testing.T) {
 // сделанная на кластер, перестала бы иметь предка, и верхний ярус доступа к ней
 // отвечал бы отказом, неотличимым от честного.
 func TestG2_InjectionScopeDroppedFromClosedSetIsFound(t *testing.T) {
-	body := readScopeEdgeMigration(t)
+	migration, body := readScopeEdgeMigration(t)
 	broken := strings.Replace(body,
 		"lower(o.resource_type) IN ('project', 'account', 'cluster')",
 		"lower(o.resource_type) IN ('project', 'account')", 1)
 	if broken == body {
 		t.Fatalf("инъекция ничего не изменила: закрытый набор областей в миграции не "+
-			"найден в ожидаемой форме.\nМиграция: %s", scopeEdgeMigration)
+			"найден в ожидаемой форме.\nМиграция: %s", migration)
 	}
-	found := injectedFindings(t, broken)
+	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {
 		t.Fatalf("гейт ПРОМОЛЧАЛ на области, убранной из набора цепи и оставшейся в " +
 			"закрытом наборе эмиттера: наборы разошлись, а сторож этого не заметил")
@@ -474,7 +542,7 @@ func TestG2_InjectionScopeDroppedFromClosedSetIsFound(t *testing.T) {
 // различием. Промолчать здесь значило бы вывести тип из-под сверки МОЛЧА — то
 // есть завести ровно ту слепую зону, ради закрытия которой гейт и написан.
 func TestG2_InjectionUndeclaredTypeIsFound(t *testing.T) {
-	body := readScopeEdgeMigration(t)
+	migration, body := readScopeEdgeMigration(t)
 	// Законная по форме, но никем не объявленная ветвь: тот же вид, что у
 	// пользователя, только тип другой.
 	extra := `
@@ -486,7 +554,7 @@ UNION ALL
 	if broken == body {
 		t.Fatalf("инъекция ничего не изменила: якорь вставки в миграции не найден")
 	}
-	found := injectedFindings(t, broken)
+	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {
 		t.Fatalf("гейт ПРОМОЛЧАЛ на ветви типа, не названного ни эталоном, ни законным " +
 			"различием: тип вышел из-под сверки, и его дрейф был бы невидим")
@@ -498,19 +566,21 @@ UNION ALL
 
 // TestG2_InjectionLegalDifferencesStaySilent — (б) ОБЯЗАН МОЛЧАТЬ.
 //
-// ЗАКОННЫЙ БЛИЗНЕЦ, и без него гейт ловил бы форму, а не существо. Все четыре
-// законных различия дерева стоят В МИГРАЦИИ КАК ЕСТЬ, и гейт обязан на них
+// ЗАКОННЫЙ БЛИЗНЕЦ, и без него гейт ловил бы форму, а не существо. Все ПЯТЬ
+// законных различий дерева стоят В МИГРАЦИИ КАК ЕСТЬ, и гейт обязан на них
 // молчать: у привязки с областью «кластер» containment предка не даёт, а цепь
 // даёт; у проектной роли containment добирает аккаунт соединением, а цепь
 // поднимается обходом; предок проекта взят из журнала; предок аккаунта — из
-// синглтона кластера.
+// синглтона кластера; предок ЛИЧНОСТИ взят из таблицы членств, тогда как
+// containment остался на колонке строки (#944 — предмет отрыва, а не дрейф).
 //
 // Красное здесь означало бы гейт, красный НА ВЕРНОЙ РЕАЛИЗАЦИИ, — и худший его
 // исход не краснота, а то, что читатель «приведёт стороны в согласие», правя
 // материализацию, то есть поведение авторизации.
 func TestG2_InjectionLegalDifferencesStaySilent(t *testing.T) {
-	if found := injectedFindings(t, readScopeEdgeMigration(t)); len(found) > 0 {
-		t.Fatalf("гейт КРАСЕН на дереве, где все четыре различия законны и объявлены:\n%s\n"+
+	migration, body := readScopeEdgeMigration(t)
+	if found := injectedFindings(t, migration, body); len(found) > 0 {
+		t.Fatalf("гейт КРАСЕН на дереве, где все ПЯТЬ различий законны и объявлены:\n%s\n"+
 			"Он сверяет цепь с ОДНИМ эталоном вместо посвойственного, и следующий читатель "+
 			"начнёт «приводить стороны в согласие», правя материализацию — то есть поведение "+
 			"авторизации.", strings.Join(found, "\n"))
@@ -524,7 +594,7 @@ func TestG2_InjectionLegalDifferencesStaySilent(t *testing.T) {
 // только тех, у кого источник читается.
 func TestG2_InjectionEmptyUpBlockRefusesInsteadOfPassing(t *testing.T) {
 	empty := "-- +goose Up\n\n-- +goose Down\n"
-	if found := injectedFindings(t, empty); len(found) == 0 {
+	if found := injectedFindings(t, "инъекция: пустой блок Up", empty); len(found) == 0 {
 		t.Fatalf("гейт ПРОШЁЛ на пустом блоке Up: «источники согласны» стало неотличимо " +
 			"от «ничего не прочитано»")
 	}
