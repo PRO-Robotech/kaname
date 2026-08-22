@@ -73,7 +73,18 @@ func MapRepoErr(err error) error {
 	case stderrors.Is(err, iamerr.ErrAborted):
 		return status.Error(codes.Aborted, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrUnavailable):
-		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+		// Фиксированный текст, как у INTERNAL, и по той же причине: цепочка ведёт
+		// к драйверу и может нести адрес узла, имя базы и учётную запись. Прежде
+		// здесь стоял `StripSentinel`, то есть текст обёртки вызывающего доезжал
+		// до провода дословно; утечки не случалось лишь потому, что все
+		// производители этого признака в сервисе опаковы сами — «by construction»
+		// на деле означало «пока никто не обернул». Деталь остаётся в цепочке и
+		// уходит в журнал (shared.LogRepoErr).
+		//
+		// Текст НЕ называет подсистему: признак недоступности ставит и база, и
+		// сосед, и гейт прав, поэтому «database unavailable» на проводе был бы
+		// собственной маленькой ложью в двух случаях из трёх.
+		return status.Error(codes.Unavailable, "service unavailable")
 	case stderrors.Is(err, iamerr.ErrInternal):
 		// hardening-invariant #1: INTERNAL carries a FIXED opaque text, never the
 		// wrapped detail (a wrapped ErrInternal may embed subject/principal ids,

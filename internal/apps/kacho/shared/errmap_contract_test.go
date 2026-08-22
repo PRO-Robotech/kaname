@@ -53,8 +53,15 @@ func TestMapRepoErrFailureBandsCharacterization(t *testing.T) {
 		{"aborted/bare", iamerr.ErrAborted, codes.Aborted, "aborted"},
 		{"aborted/wrapped", iamerr.Wrapf(iamerr.ErrAborted, "serialization failure"), codes.Aborted, "serialization failure"},
 
-		{"unavailable/bare", iamerr.ErrUnavailable, codes.Unavailable, "unavailable"},
-		{"unavailable/wrapped", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable"), codes.Unavailable, "authz unavailable"},
+		// Текст недоступности ФИКСИРОВАН, как у INTERNAL, и по той же причине:
+		// цепочка ведёт к драйверу и может нести адрес узла, имя базы и учётную
+		// запись. Прежде здесь стоял `StripSentinel`, и строка `"authz
+		// unavailable"` в этой же таблице показывала механизм: текст обёртки
+		// вызывающего доезжал до провода дословно. Утечки не случалось лишь
+		// потому, что все производители признака в сервисе опаковы сами, — то
+		// есть «by construction» в godoc означало «пока никто не обернул».
+		{"unavailable/bare", iamerr.ErrUnavailable, codes.Unavailable, "service unavailable"},
+		{"unavailable/wrapped", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable"), codes.Unavailable, "service unavailable"},
 
 		{"internal/bare", iamerr.ErrInternal, codes.Internal, "internal error"},
 		{"internal/wrapped", iamerr.Wrapf(iamerr.ErrInternal, "pgx: dial tcp 10.0.0.7:5432"), codes.Internal, "internal error"},
