@@ -1593,16 +1593,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.loadbalancer.v1.InternalResourceLifecycleService/Subscribe",
-    "permission": "loadbalancer.resourceLifecycle.subscribe",
-    "required_relation": "system_viewer",
-    "scope_extractor": {
-      "object_type": "cluster",
-      "from_request_field": "*"
-    },
-    "required_acr_min": "1"
-  },
-  {
     "fqn": "kacho.cloud.loadbalancer.v1.ListenerService/Create",
     "permission": "loadbalancer.listeners.create",
     "required_relation": "editor",

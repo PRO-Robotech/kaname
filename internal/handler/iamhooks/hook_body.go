@@ -9,7 +9,7 @@
 // Ory component (or an insider holding the hook shared-secret) could still POST
 // an arbitrarily large JSON body and force unbounded heap allocation during
 // json.Decode, repeatedly, until the pod OOM-kills (CWE-770 / OWASP A05:2021).
-// Wrapping the body in http.MaxBytesReader caps the post-auth allocation.
+// Capping the body through pkg/httpbody bounds the post-auth allocation.
 package iamhooks
 
 import (
@@ -17,6 +17,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/PRO-Robotech/kacho/pkg/httpbody"
 )
 
 // maxHookBodyBytes — hard cap on a hook request body. The real payloads
@@ -24,14 +26,22 @@ import (
 // few KiB; 1 MiB is a generous ceiling that still bounds the allocation.
 const maxHookBodyBytes int64 = 1 << 20
 
-// decodeHookBody wraps r.Body in an http.MaxBytesReader cap and decodes it into
-// dst. It MUST be called only after requireHookAuth has succeeded. On an
+// decodeHookBody caps r.Body through pkg/httpbody and decodes it into dst. It MUST be called only after requireHookAuth has succeeded. On an
 // over-cap body it writes 413; on any other decode error it writes 400. The
 // decode error is logged at Warn under tag so a malformed/oversized hook call
 // stays observable. Returns true only when dst was fully populated (the caller
 // may proceed).
 func decodeHookBody(w http.ResponseWriter, r *http.Request, dst any, logger *slog.Logger, tag string) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxHookBodyBytes)
+	// Потолок — в pkg/httpbody, единственной в дереве реализации. Отсюда же
+	// приезжает слой, которого здесь не было: объявленная длина сверх потолка
+	// отвергается ДО чтения тела.
+	if httpbody.Cap(w, r, maxHookBodyBytes) {
+		if logger != nil {
+			logger.Warn(tag+": declared length above cap", "limit_bytes", maxHookBodyBytes)
+		}
+		http.Error(w, `{"error":"payload_too_large"}`, http.StatusRequestEntityTooLarge)
+		return false
+	}
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
