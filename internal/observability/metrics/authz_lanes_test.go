@@ -37,6 +37,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
@@ -221,7 +222,14 @@ func TestServedCheckCountsAgreeWithTheAuthzCounter(t *testing.T) {
 	t.Parallel()
 	reg := metrics.NewRegistry()
 	dec := metrics.NewInstrumentedSubjectAuthorizer(fakeSubjectAuthorizer{allowed: true}, reg)
-	intr := reg.UnaryServerInterceptor()
+	// Счётчик транспорта — платформенный, заведённый сквозь окно регистрации: тот
+	// же измеритель, что провязывает композиционный корень. Независимость двух
+	// способов от этого не страдает — считают по-прежнему разные механизмы.
+	lat, lerr := grpcsrv.NewServerLatency(reg.Registerer())
+	if lerr != nil {
+		t.Fatalf("измеритель задержки: %v", lerr)
+	}
+	intr := lat.UnaryServerInterceptor(grpcsrv.ListenerPublic)
 
 	const calls = 5
 	for i := 0; i < calls; i++ {
@@ -237,7 +245,8 @@ func TestServedCheckCountsAgreeWithTheAuthzCounter(t *testing.T) {
 
 	dump := dumpMetrics(t, reg)
 	served := counterValue(t, dump,
-		`kacho_iam_grpc_server_handled_total{grpc_code="OK",grpc_method="Check",grpc_service="kacho.cloud.iam.v1.AuthorizeService"}`)
+		`kacho_grpc_server_handled_total{grpc_code="OK",grpc_method="Check",`+
+			`grpc_service="kacho.cloud.iam.v1.AuthorizeService",listener="public"}`)
 	decided := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="allow",rpc="Check"}`)
 	if served != calls || decided != calls {
 		t.Fatalf("обслужено %v, решений %v, вызовов %d — счётчики разошлись:\n%s",
