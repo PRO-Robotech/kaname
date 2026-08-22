@@ -206,6 +206,10 @@ type TokenEnrichmentService struct {
 	users      TokenEnrichmentUserPort
 	sas        TokenEnrichmentSAPort        // optional; nil → SA enrichment disabled
 	userTokens TokenEnrichmentUserTokenPort // optional; nil → User-token enrichment disabled
+	// ownClients — чтение строки реестра по НАШЕМУ идентификатору (задача
+	// #898). Опционален: пока наш токен-эндпоинт не провязан, вход в состав
+	// утверждений остаётся один.
+	ownClients TokenEnrichmentOwnClientPort
 	now        func() time.Time
 }
 

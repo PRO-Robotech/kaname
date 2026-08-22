@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
@@ -670,18 +671,37 @@ func runServe(cfg config.Config) error {
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
+		// Токен-эндпоинт платформы (задача #898) монтируется на ЭТУ ЖЕ
+		// поверхность, а не заводит свою. Вид выдачи «учётные данные клиента»
+		// задан формой запроса, а не нашим выбором порта; второй внешний
+		// слушатель об одном предмете разошёлся бы с первым в периметре,
+		// посадке TLS и профиле развёртывания — и разошёлся бы молча.
+		//
+		// Приземление, а не провязка на будущее: с этого места проверяющий
+		// утверждение получает ПРОИЗВОДСТВЕННОГО вызывающего. Проверяющий без
+		// него выглядит исправным ровно потому, что его пробы подают ему то,
+		// что он умеет разобрать.
+		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)
+		if cterr != nil {
+			return fmt.Errorf("client token endpoint: %w", cterr)
+		}
+		if clientTokenHandler != nil {
+			mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
+		}
 		registryTokenHandler = mux
 	}
 	registryTokenSurface, err := iamHTTPSurface(servicecontract.Surface{
-		Name:    "выдача docker-токена (/iam/token)",
+		Name:    "выдача токенов (/iam/token, /iam/v1/token)",
 		Mode:    surfaceMode,
 		Logger:  logger,
 		Addr:    addrAxis(registryTokenAddr, "KACHO_IAM_REGISTRY_TOKEN_ADDR не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"подпись ключом служебной учётки, проверяется обработчиком на каждом запросе; " +
-				"сам токен чеканит провайдер, iam его только брокерит"),
+			"два вида предъявления, у каждого своя проверка на каждом запросе: подпись ключом " +
+				"служебной учётки на пути docker-токена и подписанное утверждение клиента, " +
+				"сверяемое открытым ключом из нашего реестра, на пути выдачи по учётным данным " +
+				"клиента; второй выпускает НАШ подписант"),
 		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {
