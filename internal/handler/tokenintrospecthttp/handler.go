@@ -236,6 +236,14 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 		if t.Method.Alg() != string(pub.Algorithm) {
 			return nil, fmt.Errorf("header algorithm does not match the key")
 		}
+		// Параметр, помеченный отправителем обязательным к пониманию, мы обязаны
+		// либо исполнить, либо отвергнуть токен целиком (RFC 7515 §4.1.11).
+		// Обратная сторона того же требования — НЕ помеченное неизвестное
+		// игнорируется (RFC 7519, EID 8060); на этом держится совместимость,
+		// поэтому прочие неизвестные поля разбор молча пропускает.
+		if ok, name := tokenpolicy.CriticalHeadersUnderstood(critHeaders(t.Header)); !ok {
+			return nil, fmt.Errorf("critical header %q is not understood", name)
+		}
 		return parsePublicKey(pub.PublicKeyPEM)
 	})
 	if err != nil || !tok.Valid {
@@ -296,4 +304,76 @@ func writeJSON(w http.ResponseWriter, code int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// critHeaders приводит `crit` к перечню имён.
+//
+// Разбор отдаёт заголовок как произвольный JSON, поэтому годятся ровно два вида:
+// список строк и его отсутствие. Всё прочее — не перечень имён, и принимать по
+// нему решение нельзя; такой вход даёт одно ЗАВЕДОМО неизвестное имя, то есть
+// отказ. Молчаливый пропуск здесь означал бы «параметр помечен обязательным, а
+// мы не разобрали его форму и приняли токен».
+func critHeaders(h map[string]any) []string {
+	raw, ok := h["crit"]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return []string{"<crit is not a list>"}
+	}
+	out := make([]string, 0, len(list))
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return []string{"<crit entry is not a string>"}
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// DeclaredDeviations — обязательные проверки, которых интроспекция НЕ исполняет,
+// вместе с причиной. Пустая причина не засчитывается: отступление без неё
+// неотличимо от пропуска.
+//
+// Обе причины — про РАЗНИЦУ ВОПРОСА, а не про очередь работ. Интроспекция
+// отвечает о состоянии токена У ЕГО ИЗДАТЕЛЯ («выпущен нами, подписан, не
+// истёк, не отозван»), а не о пригодности токена ДЛЯ ЗАДАЮЩЕГО ВОПРОС. Адресат
+// и тип — свойства поверхности предъявления, и проверяет их та поверхность, где
+// токен предъявлен: край и проверяющий реестра исполняют обе.
+func (h *Handler) DeclaredDeviations() []tokenpolicy.Deviation {
+	return []tokenpolicy.Deviation{
+		{
+			Check: tokenpolicy.CheckAudience,
+			Reason: "интроспекция сообщает состояние токена у издателя, а не его " +
+				"пригодность для спрашивающего: адресата проверяет поверхность " +
+				"предъявления, у которой он свой",
+		},
+		{
+			Check: tokenpolicy.CheckTokenType,
+			Reason: "по той же причине: тип объявляет, для какой поверхности токен " +
+				"выпущен, и сверяет его та поверхность, а не издатель",
+		},
+	}
+}
+
+// DeclaredChecks возвращает состав проверок ЭТОГО проверяющего.
+//
+// Объявление существует затем, чтобы его можно было СВЕРИТЬ с единым перечнем
+// (`tokenpolicy.MandatoryChecks`), а не читать три реализации глазами. Запись,
+// которой проверяющий не исполняет, отсюда нельзя: тогда объявление станет
+// вторым местом об одном предмете, и разойдётся оно молча.
+func (h *Handler) DeclaredChecks() []tokenpolicy.Check {
+	return []tokenpolicy.Check{
+		tokenpolicy.CheckAlgorithmAllowed,
+		tokenpolicy.CheckKeyID,
+		tokenpolicy.CheckSignature,
+		tokenpolicy.CheckKeyBoundAlgorithm,
+		tokenpolicy.CheckIssuer,
+		tokenpolicy.CheckExpiry,
+		tokenpolicy.CheckNotBefore,
+		tokenpolicy.CheckCriticalHeaders,
+		tokenpolicy.CheckRevocation,
+	}
 }
