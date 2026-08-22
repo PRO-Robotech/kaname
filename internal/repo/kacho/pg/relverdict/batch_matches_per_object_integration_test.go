@@ -93,6 +93,21 @@ func seedMixedPage(t *testing.T, ctx context.Context, tx pgx.Tx, n int) (ids []s
 }
 
 // Страничный вердикт совпадает с одиночным — по КАЖДОМУ объекту страницы.
+//
+// # ЭТА ПРОБА НЕОТДЕЛИМА ОТ `TestAllowedMany_EveryArmOfTheRuleReachesThePage`
+//
+// Сужений по областям в страничном запросе ТРИ — ветвь выдач, ветвь прямых
+// фактов и ветвь меток, — и снятие любого даёт наблюдаемый over- или under-grant.
+// Эта проба ловит только ПЕРВОЕ: её посев строит доступ якорной выдачей, поэтому
+// на двух остальных ветвях страница и одиночный вопрос молчат ОДИНАКОВО, и
+// «ответы совпали» ничего о них не говорит.
+//
+// Две другие ветви держит `EveryArmOfTheRuleReachesThePage` (соседний файл,
+// `batch_roundtrip_integration_test.go`): у неё на каждой ветви есть достижимый
+// объект и недостижимый.
+//
+// Поэтому пробы снимаются только ВМЕСТЕ. Снятие одной оставляет её полосу без
+// сторожа, и заметно это не станет: оставшаяся продолжит зеленеть.
 func TestAllowedMany_AgreesWithAllowedObjectByObject(t *testing.T) {
 	pool, ctx := withCommittedPool(t, func(ctx context.Context, tx pgx.Tx) {
 		seedTenant(t, ctx, tx)

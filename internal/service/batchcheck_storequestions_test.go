@@ -40,6 +40,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -298,22 +299,28 @@ func equalReasons(a, b []string) bool {
 // чужим доводам, получил бы вердикт, которого о нём никто не выносил.
 type condRecordingRelations struct {
 	// want — какой довод обязан прийти вместе с объектом, чтобы ответ был «да».
-	want map[string]string
+	//
+	// Хранится СЫРЫМ значением, а сверяется `reflect.DeepEqual`. Прежняя редакция
+	// сводила довод к `fmt.Sprintf("%v", …)` — то есть меряла его ровно тем
+	// печатанием, чья неоднозначность и есть предмет соседней пробы: составные
+	// доводы `["prod","eu"]` и `["prod eu"]` дают одну строку, поэтому дублёр
+	// объявил бы «дошёл свой довод» в обоих случаях и подмену не показал.
+	want map[string]any
 
 	mu    sync.Mutex
 	calls int
-	seen  map[string]string
+	seen  map[string]any
 }
 
 func (c *condRecordingRelations) record(object string, condCtx map[string]any) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.seen == nil {
-		c.seen = map[string]string{}
+		c.seen = map[string]any{}
 	}
-	got := fmt.Sprintf("%v", condCtx["a_note"])
+	got := condCtx["a_note"]
 	c.seen[object] = got
-	return c.want[object] == got
+	return reflect.DeepEqual(c.want[object], got)
 }
 
 func (c *condRecordingRelations) CheckWithContext(_ context.Context, _, _, object string,
@@ -356,7 +363,13 @@ func (c *condRecordingRelations) DirectRelationsMany(context.Context, string, st
 }
 
 // TestBatchCheck_ItemsWithDifferentConditionContextsAreNotMerged — пункт
-// отвечается СВОИМИ доводами условий, а не соседскими.
+// отвечается СВОИМИ доводами условий, а не соседскими; здесь столкновение
+// подбирается на СКЛЕЙКЕ частей ключа.
+//
+// Парная ей проба ниже подбирает столкновение на САМОМ ЗНАЧЕНИИ. Две пробы, а не
+// одна, потому что уровня два и закрываются они разными средствами: склейка —
+// длиной части, значение — канонической кодировкой. Первая редакция закрыла
+// только склейку и объявила предмет исчерпанным; вторую нашёл рецензент.
 //
 // # Почему это проба безопасности, а не аккуратности
 //
@@ -385,7 +398,7 @@ func TestBatchCheck_ItemsWithDifferentConditionContextsAreNotMerged(t *testing.T
 	ctxA := map[string]any{"a_note": "x\x00b_extra=y"}
 	ctxB := map[string]any{"a_note": "x", "b_extra": "y"}
 
-	store := &condRecordingRelations{want: map[string]string{
+	store := &condRecordingRelations{want: map[string]any{
 		"vpc_network:" + objA: "x\x00b_extra=y",
 		"vpc_network:" + objB: "x",
 	}}
@@ -405,7 +418,7 @@ func TestBatchCheck_ItemsWithDifferentConditionContextsAreNotMerged(t *testing.T
 	store.mu.Lock()
 	calls, seen := store.calls, store.seen
 	store.mu.Unlock()
-	t.Logf("вопросов к двери %d; доводы, дошедшие до объектов: %q", calls, seen)
+	t.Logf("вопросов к двери %d; доводы, дошедшие до объектов: %#v", calls, seen)
 
 	// Предпосылка: дверь спрошена, иначе всё ниже выполнялось бы тождественно.
 	if calls == 0 {
@@ -413,7 +426,7 @@ func TestBatchCheck_ItemsWithDifferentConditionContextsAreNotMerged(t *testing.T
 	}
 	for i, r := range results {
 		if !r.Allowed {
-			t.Fatalf("пункт %d (%s) отвечен отказом: до него доехали доводы %q вместо своих — "+
+			t.Fatalf("пункт %d (%s) отвечен отказом: до него доехали доводы %#v вместо своих — "+
 				"два разных набора доводов слились в один прогон, и вердикт вынесен по чужому "+
 				"вопросу", i, reqs[i].Resource.ID, seen["vpc_network:"+reqs[i].Resource.ID])
 		}
@@ -422,6 +435,99 @@ func TestBatchCheck_ItemsWithDifferentConditionContextsAreNotMerged(t *testing.T
 	// доводами другого, и «оба разрешены» тогда получилось бы случайно.
 	if calls < 2 {
 		t.Fatalf("дверь спрошена %d раз(а) на два РАЗНЫХ набора доводов: они сведены в один "+
+			"прогон, и совпадение ответов ничего не доказывает", calls)
+	}
+}
+
+// TestBatchCheck_ItemsWithDifferentCompositeConditionsAreNotMerged — столкновение
+// подбирается на САМОМ ЗНАЧЕНИИ довода, а не на склейке частей ключа.
+//
+// # Почему одной соседней пробы не хватило — и это тот же класс, что она ловит
+//
+// Соседняя проба закрывает СКЛЕЙКУ: длина перед каждой частью делает «имя=значение»
+// неподделываемым. Она строит пару из СКАЛЯРНЫХ строк, поэтому живёт вне
+// пространства составных значений — и класс, который здесь, прошёл мимо неё
+// незамеченным. Закрыть уровень и объявить предмет исчерпанным, не проверив
+// второй, — ровно то, за чем этот корпус и следит.
+//
+// # Составной довод — законный вход, а не выдумка пробы
+//
+// Тело запроса несёт `google.protobuf.Struct`, и его разбор (`AsMap`) отдаёт
+// `[]any` и `map[string]any`. То есть арендатор кладёт список и отображение по
+// контракту, а не в обход него.
+//
+// # Три пары, каждая печатается через `%v` ОДИНАКОВО
+//
+//	["prod","eu"]        и  ["prod eu"]
+//	{"a":"b","c":"d"}    и  {"a":"b c:d"}
+//	{"x": 1.0}           и  {"x": "1"}
+//
+// Проба берёт первую и доводит до НАБЛЮДАЕМОГО исхода: слияние прогонов означает,
+// что второй пункт отвечен доводами первого, а не что «ключи похожи».
+//
+// # Опасность сегодня названа честно, и она НЕ повод не чинить
+//
+// Единственное зарегистрированное условие читает четыре скалярных довода, и все
+// четыре сервер переставляет сам, одинаковыми на всю партию, — значит вердикт
+// сегодня не меняется. Чинится потому, что: класс ЗАВЕДЁН сведением партии в
+// прогоны (до него сводить было нечего); защита сработает наоборот в тот день,
+// когда условие прочитает сквозной довод; а сквозные доводы объявлены законными
+// прямо в разборе запроса.
+func TestBatchCheck_ItemsWithDifferentCompositeConditionsAreNotMerged(t *testing.T) {
+	const (
+		subject = "user:usr_tenant"
+		objA    = "net-a"
+		objB    = "net-b"
+	)
+	// Составные доводы, НЕРАЗЛИЧИМЫЕ печатанием `%v`: список из двух элементов и
+	// список из одного, склеенного пробелом. Оба печатаются как `[prod eu]`.
+	ctxA := map[string]any{"a_note": []any{"prod", "eu"}}
+	ctxB := map[string]any{"a_note": []any{"prod eu"}}
+
+	// Предпосылка пробы: пара и вправду неразличима тем печатанием, чью
+	// неоднозначность она проверяет. Без этого проба зеленела бы на паре, которую
+	// различает даже негодная кодировка, и ничего не утверждала бы.
+	if fmt.Sprintf("%T=%v", ctxA["a_note"], ctxA["a_note"]) !=
+		fmt.Sprintf("%T=%v", ctxB["a_note"], ctxB["a_note"]) {
+		t.Fatalf("предпосылка нарушена: пара доводов различима печатанием %%v (%v против %v) — "+
+			"столкновение не подобрано, и проба ничего не проверяет",
+			ctxA["a_note"], ctxB["a_note"])
+	}
+
+	store := &condRecordingRelations{want: map[string]any{
+		"vpc_network:" + objA: []any{"prod", "eu"},
+		"vpc_network:" + objB: []any{"prod eu"},
+	}}
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
+
+	reqs := []CheckRequest{
+		{Subject: subject, Resource: ResourceRef{Type: "vpc_network", ID: objA},
+			Action: "vpc.networks.get", RequiredRelation: "v_get", Context: ctxA},
+		{Subject: subject, Resource: ResourceRef{Type: "vpc_network", ID: objB},
+			Action: "vpc.networks.get", RequiredRelation: "v_get", Context: ctxB},
+	}
+	results, err := svc.BatchCheck(context.Background(), reqs)
+	if err != nil {
+		t.Fatalf("партия: %v", err)
+	}
+
+	store.mu.Lock()
+	calls, seen := store.calls, store.seen
+	store.mu.Unlock()
+	t.Logf("вопросов к двери %d; доводы, дошедшие до объектов: %#v", calls, seen)
+
+	if calls == 0 {
+		t.Fatalf("дверь не спрошена ни разу — предмета замера нет")
+	}
+	for i, r := range results {
+		if !r.Allowed {
+			t.Fatalf("пункт %d (%s) отвечен отказом: до него доехали доводы %#v вместо своих — "+
+				"два составных довода, неразличимых печатанием, слились в один прогон, и вердикт "+
+				"вынесен по чужому вопросу", i, reqs[i].Resource.ID, seen["vpc_network:"+reqs[i].Resource.ID])
+		}
+	}
+	if calls < 2 {
+		t.Fatalf("дверь спрошена %d раз(а) на два РАЗНЫХ составных довода: они сведены в один "+
 			"прогон, и совпадение ответов ничего не доказывает", calls)
 	}
 }
