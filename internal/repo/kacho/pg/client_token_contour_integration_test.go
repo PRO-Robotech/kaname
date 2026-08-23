@@ -145,6 +145,7 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 	h, err := clienttokenwire.FromPool(f.pool, clienttokenwire.BuildConfig{
 		ExpectedAudience:         ctIssuer,
 		AssertionLifetimeCeiling: tokenpolicy.MaxAssertionLifetime,
+		FederatedLifetimeCeiling: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:                tokenpolicy.ClockSkew,
 		Clock:                    clock,
 		AllowedAudiences:         []string{ctAudience},
