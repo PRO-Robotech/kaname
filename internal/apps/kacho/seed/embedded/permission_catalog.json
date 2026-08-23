@@ -1454,7 +1454,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Block",
     "permission": "iam.users.block",
-    "required_relation": "v_update",
+    "required_relation": "identity_suspender",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"
@@ -1514,7 +1514,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Unblock",
     "permission": "iam.users.unblock",
-    "required_relation": "v_update",
+    "required_relation": "identity_suspender",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"
@@ -1524,7 +1524,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Update",
     "permission": "iam.users.update",
-    "required_relation": "v_update",
+    "required_relation": "record_writer",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"

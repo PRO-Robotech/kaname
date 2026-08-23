@@ -37,9 +37,21 @@
 //   - ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ 1: сам человек (`subject`) источник ИМЕЕТ — иначе
 //     запрет зеленел бы на отношении, которого не держит вообще никто, и
 //     собственная чеканка была бы сломана незаметно;
-//   - ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ 2: у отношения ПРАВКИ ЗАПИСИ (`UserService/Update`)
+//   - ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ 2: у отношения ЧТЕНИЯ ЗАПИСИ (`UserService/Get`)
 //     ровно те источники уровня аккаунта, отсутствие которых утверждается выше.
 //     Без него «источников нет» неотличимо от «разбор ничего не нашёл».
+//
+// > [!note] Контролем была ПРАВКА записи, и она перестала им быть (#1102)
+// > Пока правка гейтилась `v_update`, она была естественным контролем: «вот
+// > право, у которого источники уровня аккаунта обязаны БЫТЬ». Вторая половина
+// > директивы владельца увела её на `record_writer`, у которого их нет по тому
+// > же основанию, что и здесь, — человек есть ГЛОБАЛЬНАЯ личность.
+// >
+// > Оставить прежний контроль значило бы получить пробу, которая утверждает
+// > обратное сделанному и краснеет на верном дереве; молча снять его — получить
+// > вакуумное отрицание. Контроль перенесён на ЧТЕНИЕ записи: видеть своих людей
+// > — законное дело аккаунта, и источники уровня аккаунта у `v_get` остаются
+// > намеренно, а не по недосмотру.
 //
 // # Чего проба НЕ утверждает, и это названо, а не умолчано
 //
@@ -76,9 +88,12 @@ var actingAsRPCs = []string{
 	"kacho.cloud.iam.v1.UserTokenService/Revoke",
 }
 
-// recordEditRPC — правка ЗАПИСИ человека. Положительный контроль: именно у него
+// recordReadRPC — чтение ЗАПИСИ человека. Положительный контроль: именно у него
 // источники уровня аккаунта обязаны БЫТЬ.
-const recordEditRPC = "kacho.cloud.iam.v1.UserService/Update"
+//
+// Правка записи контролем больше не служит: с #1102 она гейтится отношением, у
+// которого этих источников нет — по тому же основанию, что закрывает и эта проба.
+const recordReadRPC = "kacho.cloud.iam.v1.UserService/Get"
 
 // accountLevelSources — источники разрешения, которых у отношения «действовать от
 // имени» быть не должно.
@@ -119,16 +134,16 @@ func TestActingAsAPersonHasNoAccountLevelSource(t *testing.T) {
 
 	// Положительный контроль 2 — сперва, чтобы отрицание ниже не могло зеленеть на
 	// сломанном разборе: у ПРАВКИ ЗАПИСИ источники уровня аккаунта обязаны быть.
-	editEntry, ok := catalog[recordEditRPC]
-	require.Truef(t, ok, "каталог не знает %s — контроль отрицания отсутствует", recordEditRPC)
-	editPlan, err := model.Compile(editEntry.objectType, editEntry.relation)
-	require.NoErrorf(t, err, "компиляция %s.%s (правка записи)", editEntry.objectType, editEntry.relation)
-	editSources := sourcesOf(t, editPlan)
-	for _, want := range accountLevelSources(editEntry.relation) {
-		require.Containsf(t, editSources, want,
-			"КОНТРОЛЬ: у отношения правки записи %s.%s обязан быть источник уровня аккаунта %+v. "+
+	readEntry, ok := catalog[recordReadRPC]
+	require.Truef(t, ok, "каталог не знает %s — контроль отрицания отсутствует", recordReadRPC)
+	readPlan, err := model.Compile(readEntry.objectType, readEntry.relation)
+	require.NoErrorf(t, err, "компиляция %s.%s (чтение записи)", readEntry.objectType, readEntry.relation)
+	readSources := sourcesOf(t, readPlan)
+	for _, want := range accountLevelSources(readEntry.relation) {
+		require.Containsf(t, readSources, want,
+			"КОНТРОЛЬ: у отношения чтения записи %s.%s обязан быть источник уровня аккаунта %+v. "+
 				"Его отсутствие означает, что разбор модели ничего не нашёл, и тогда отрицание "+
-				"ниже вакуумно", editEntry.objectType, editEntry.relation, want)
+				"ниже вакуумно", readEntry.objectType, readEntry.relation, want)
 	}
 
 	checked := 0
@@ -188,8 +203,8 @@ func TestActingAsAPersonHasNoAccountLevelSource(t *testing.T) {
 	}
 
 	t.Logf("перепись: записей каталога прочитано %d · RPC «действие от имени» сверено %d · "+
-		"контроль правки записи %s.%s (источников %d)",
-		len(catalog), checked, editEntry.objectType, editEntry.relation, len(editSources))
+		"контроль чтения записи %s.%s (источников %d)",
+		len(catalog), checked, readEntry.objectType, readEntry.relation, len(readSources))
 }
 
 // accountLevelSources — три пути, которыми право доходит до держателя выдачи
