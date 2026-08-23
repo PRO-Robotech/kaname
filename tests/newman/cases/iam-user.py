@@ -1748,3 +1748,135 @@ CASES.append(Case(
         poll_operation_until_done(),
     ],
 ))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-TOK-ACTAS-* — «действовать ОТ ИМЕНИ человека» и «править его запись» —
+# РАЗНЫЕ права (задача kacho#1086).
+#
+# ПРЕДМЕТ. Персональный токен делает предъявителя САМИМ ЧЕЛОВЕКОМ: всюду, где
+# действует он, и во всех аккаунтах, где он состоит. Пока выпуск гейтился тем же
+# отношением, что и правка записи, право выступать от чужого имени приезжало
+# всякому держателю обычной выдачи внутри аккаунта — в том числе тому, кто
+# человека всего лишь пригласил.
+#
+# ПОЧЕМУ ПАРА, А НЕ ОДНО ОТРИЦАНИЕ. Запрет, снятый в одиночку, зеленеет и на
+# сломанной чеканке: «никто не может» неотличимо от «никому и не положено».
+# Поэтому рядом — положительная половина: сам человек выпускает и отзывает свой
+# токен. Ей нужен предъявитель, принадлежащий ЧЕЛОВЕКУ, поэтому она идёт волной
+# церемонии (`tests/authz-fixtures/ceremony_credentials.py`) — как и остальные
+# кейсы этого файла, которым нужен `jwtHumanCeremony*`.
+#
+# ЧТО ЭТИ КЕЙСЫ НЕ УТВЕРЖДАЮТ. Правку ЗАПИСИ приглашённого (имя, метки,
+# состояние) администратор аккаунта по-прежнему держит — это отдельный предмет с
+# отдельным размером, и здесь он не трогается. Утверждать здесь «правка тоже
+# отказана» значило бы описывать дерево, которого нет.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-TOK-ACTAS-NEG-INVITER",
+    title="Пригласивший добавляет права приглашённому — успех; выпустить и отозвать "
+          "его персональный токен — отказ (действие от имени ≠ правка записи)",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        # ПОЛОЖИТЕЛЬНАЯ ПОЛОВИНА — способность, которая обязана УЦЕЛЕТЬ.
+        # Приглашение с ролью и есть «добавить права»: тот же администратор
+        # аккаунта, та же ручка, что и в соседних кейсах файла. Без этого шага
+        # отказы ниже неотличимы от «у этого предъявителя вообще нет доступа».
+        *_invite_probe("actAsInvitedUserId", "actas-invitee"),
+        Step(
+            name="inviter-issues-token-for-the-invited-person",
+            method="POST",
+            path="/iam/v1/users/{{actAsInvitedUserId}}/tokens",
+            auth="jwtAccountAdminAStepUp",
+            body={
+                "userId": "{{actAsInvitedUserId}}",
+                "createdByUserId": "{{actAsInvitedUserId}}",
+                "description": "actas probe {{runId}}",
+                "name": "actas-{{runId}}",
+            },
+            test_script=[
+                *assert_answered("UserTokenService.Issue от пригласившего"),
+                "pm.test('пригласивший НЕ выпускает персональный токен приглашённого: "
+                "удостоверение действует всюду, где действует человек, включая аккаунты, "
+                "к которым пригласивший отношения не имеет', "
+                "() => pm.expect(pm.response.code, pm.response.text()).to.equal(403));",
+                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                "pm.test('отказ назван кодом PERMISSION_DENIED, а не подменён иным исходом', "
+                "() => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
+            ],
+        ),
+        Step(
+            name="inviter-revokes-token-of-the-invited-person",
+            method="DELETE",
+            # Идентификатор токена намеренно вымышленный: решение принимает КРАЙ,
+            # по объекту личности из адреса, ДО того как сервис увидит запрос.
+            # Настоящий токен здесь пришлось бы сперва выпустить — тем самым
+            # действием, которое кейс объявляет невозможным.
+            path="/iam/v1/users/{{actAsInvitedUserId}}/tokens/uoc00000000000000act",
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("UserTokenService.Revoke от пригласившего"),
+                "pm.test('пригласивший НЕ отзывает персональный токен приглашённого — "
+                "это та же полоса, что и выпуск', "
+                "() => pm.expect(pm.response.code, pm.response.text()).to.equal(403));",
+                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                "pm.test('отказ назван кодом PERMISSION_DENIED', "
+                "() => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
+            ],
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-USR-TOK-ACTAS-POS-SELF",
+    title="Сам человек выпускает и отзывает СВОЙ персональный токен "
+          "(положительная половина запрета выше)",
+    classes=["AUTHZ", "CRUD"],
+    priority="P0",
+    steps=[
+        Step(
+            name="self-issues-own-token",
+            method="POST",
+            path="/iam/v1/users/{{ceremonyUserId}}/tokens",
+            auth="jwtHumanCeremonyStepUp",
+            body={
+                "userId": "{{ceremonyUserId}}",
+                "createdByUserId": "{{ceremonyUserId}}",
+                "description": "actas self probe {{runId}}",
+                "name": "actas-self-{{runId}}",
+            },
+            test_script=[
+                *assert_answered("UserTokenService.Issue самому себе"),
+                "pm.test('человек выпускает СВОЙ токен: удостоверение принадлежит ему, "
+                "и запрет на чужой выпуск не имеет права отнимать собственный', "
+                "() => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                # Идентификатор берётся из metadata, где он предвыделен ДО
+                # асинхронного исхода, — поэтому ниже стоит проверка самого исхода,
+                # а не только `done`.
+                *save_from_response("j.metadata && j.metadata.keyId", "actAsSelfTokenId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(
+            name="self-revokes-own-token",
+            method="DELETE",
+            path="/iam/v1/users/{{ceremonyUserId}}/tokens/{{actAsSelfTokenId}}",
+            auth="jwtHumanCeremonyStepUp",
+            test_script=[
+                *assert_answered("UserTokenService.Revoke своего токена"),
+                "pm.test('человек отзывает СВОЙ токен', "
+                "() => pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+    ],
+))

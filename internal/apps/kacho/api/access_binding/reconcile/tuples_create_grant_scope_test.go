@@ -148,6 +148,57 @@ func implications(t *testing.T, dsl, fgaType string) map[string][]string {
 	return out
 }
 
+// declaredRelations — имена отношений, которые модель объявляет У ЭТОГО типа.
+//
+// Нужно, чтобы отличить ДВА разных состояния, которые парный положительный
+// контроль ниже прежде сваливал в одно: «каталог назвал отношение, которого
+// модель на этом типе не знает» (опечатка либо снятое отношение — находка) и
+// «отношение объявлено, но НЕВЫДАВАЕМО by construction» (вычисляемое, без
+// прямого списка субъектов — намеренная посадка). Первое обязано ронять пробу,
+// второе — нет.
+func declaredRelations(t *testing.T, dsl, fgaType string) map[string]bool {
+	t.Helper()
+	lines := strings.Split(dsl, "\n")
+	start := -1
+	for i, l := range lines {
+		if m := reTypeDecl.FindStringSubmatch(l); m != nil && m[1] == fgaType {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("модель %s не объявляет `type %s` — предпосылка пробы неверна", modelRelPath, fgaType)
+	}
+	out := map[string]bool{}
+	for _, l := range lines[start+1:] {
+		if reTypeDecl.MatchString(l) {
+			break
+		}
+		if m := reDefineDecl.FindStringSubmatch(l); m != nil {
+			out[m[1]] = true
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("у типа %s не разобрано ни одного объявления — разборщик или модель сломаны", fgaType)
+	}
+	return out
+}
+
+// ungrantableByDesign — RPC, чьё отношение НЕВЫДАВАЕМО НАМЕРЕННО: держать его
+// можно только по своей природе, а не по выдаче.
+//
+// Перечень закрыт, и каждая запись несёт причину. Он ИСТЕКАЕТ САМ: если
+// названное отношение перестанет быть вычисляемым (у него появится прямой список
+// субъектов, то есть выдача начнёт его резолвить), запись станет находкой — см.
+// утверждение в теле пробы. Без такого перечня парный положительный контроль
+// требовал бы, чтобы КАЖДЫЙ гейт края был открываем выдачей, — а это ровно то
+// допущение, которое неверно для права «действовать ОТ ИМЕНИ человека».
+var ungrantableByDesign = map[string]string{
+	"kacho.cloud.iam.v1.UserTokenService/Issue": "выпуск персонального токена — действие ОТ ИМЕНИ человека; " +
+		"`iam_user.token_issuer` вычисляется из `subject`, поэтому обладать им можно только БУДУЧИ этим человеком (#1086)",
+	"kacho.cloud.iam.v1.UserTokenService/Revoke": "отзыв персонального токена — та же полоса, что и выпуск (#1086)",
+}
+
 // closure — что РЕАЛЬНО резолвится, если субъект держит перечисленные отношения.
 func closure(seed []string, implies map[string][]string) map[string]bool {
 	got := map[string]bool{}
@@ -255,6 +306,7 @@ func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
 		// Кэш по типу: закрытие «что резолвит create-only выдача» считается один раз.
 		createClosure := map[string]map[string]bool{}
 		fullClosure := map[string]map[string]bool{}
+		declared := map[string]map[string]bool{}
 		for _, row := range population {
 			fgaType := row.ScopeExtractor.ObjectType
 			if _, ok := createClosure[fgaType]; !ok {
@@ -275,6 +327,7 @@ func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
 					t.Fatalf("эмиссия полного правила для %s не состоялась", dotted)
 				}
 				fullClosure[fgaType] = closure(relationsOf(fullTuples), implies)
+				declared[fgaType] = declaredRelations(t, string(dsl), fgaType)
 			}
 
 			// ОТРИЦАНИЕ: create-выдача не открывает этот RPC.
@@ -283,7 +336,32 @@ func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
 					"Значит право создать на этом ресурсе автоматически даёт то, о чём спрашивает %s — доступ шире выданного",
 					rel, row.FQN, row.RequiredRel, sortedKeys(createClosure[fgaType]), row.FQN)
 			}
-			// ПАРНЫЙ ПОЛОЖИТЕЛЬНЫЙ: полная выдача этот же RPC открывает.
+			// ПАРНЫЙ ПОЛОЖИТЕЛЬНЫЙ: полная выдача этот же RPC открывает —
+			// КРОМЕ отношений, невыдаваемых намеренно.
+			//
+			// Прежде здесь стояло безусловное требование, и оно несло скрытое
+			// допущение: всякий гейт края открываем выдачей. Для права
+			// «действовать ОТ ИМЕНИ человека» это неверно by construction —
+			// обладать им можно только будучи этим человеком. Поэтому проверка
+			// разведена на два вопроса, и оба обязаны отвечаться: отношение
+			// ОБЪЯВЛЕНО моделью на этом типе (иначе каталог называет несуществующее
+			// — прежний предмет контроля), и оно либо резолвится выдачей, либо
+			// стоит в закрытом перечне невыдаваемых.
+			if reason, byDesign := ungrantableByDesign[row.FQN]; byDesign {
+				if !declared[fgaType][row.RequiredRel] {
+					t.Errorf("%s: %s требует %q, которого модель на типе %s НЕ ОБЪЯВЛЯЕТ. Запись в перечне "+
+						"невыдаваемых (%s) не отменяет этого: отношение, которого нет, гейтом не является — "+
+						"край получил бы отказ всем и всегда",
+						rel, row.FQN, row.RequiredRel, fgaType, reason)
+				}
+				if fullClosure[fgaType][row.RequiredRel] {
+					t.Errorf("%s: %s объявлен невыдаваемым (%s), но полная выдача `*` его отношение %q уже "+
+						"резолвит (%v). Запись пережила свой предмет — либо снимите её, либо верните "+
+						"отношению невыдаваемость",
+						rel, row.FQN, reason, row.RequiredRel, sortedKeys(fullClosure[fgaType]))
+				}
+				continue
+			}
 			if !fullClosure[fgaType][row.RequiredRel] {
 				t.Errorf("%s: %s требует %q, которого не резолвит даже полная выдача `*` (%v) — "+
 					"каталог называет отношение, которого модель на этом типе не знает; тогда отрицание выше ничего не утверждает",
