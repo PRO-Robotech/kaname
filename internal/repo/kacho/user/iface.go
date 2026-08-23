@@ -65,14 +65,21 @@ type WriterIface interface {
 	// Upsert — InternalUserService.UpsertFromIdentity (legacy path; ACTIVE-only).
 	// Kept for backward compatibility with tests; production-path —
 	// `InsertPending` / `ActivateInvite` / `bootstrapNewIdentity` use-case.
-	// Создает row если (account_id, external_id) новый, иначе UPDATE
-	// email/display_name. Caller должен заполнить AccountID + InviteStatus=ACTIVE.
+	// Создаёт строку, если внешний субъект новый, иначе UPDATE
+	// email/display_name; членство в названном аккаунте пишется в том же
+	// стейтменте. Арбитр — ГЛОБАЛЬНЫЙ ключ внешнего субъекта, не пара с
+	// аккаунтом. Caller должен заполнить AccountID + InviteStatus=ACTIVE.
 	Upsert(ctx context.Context, u domain.User) (domain.User, bool /*created*/, error)
 
-	// InsertPending — атомарный idempotent INSERT PENDING-row через
-	// ON CONFLICT (account_id, lower(email)) DO NOTHING.
-	// Если row с таким (account_id, email) уже существует — возвращает
-	// existing-row с inserted=false; display_name НЕ перезаписывается.
+	// InsertPending — «человек существует и приглашён в ЭТОТ аккаунт», атомарно
+	// и идемпотентно: строка человека (арбитр — ГЛОБАЛЬНЫЙ ключ почты
+	// `users_identity_email_uniq`) плюс его членство в названном аккаунте, одним
+	// стейтментом.
+	//
+	// Второй результат — «строка ЗАВЕДЕНА этим вызовом», и он несущий:
+	// приглашение известной почты во второй аккаунт строки не заводит, а
+	// добавляет членство, и отличить «завёл» от «нашёл» вызывающему больше нечем.
+	// display_name существующей строки НЕ перезаписывается.
 	InsertPending(ctx context.Context, u domain.User) (domain.User, bool /*inserted*/, error)
 
 	// ActivateInvite — атомарный UPDATE PENDING → ACTIVE с set external_id +

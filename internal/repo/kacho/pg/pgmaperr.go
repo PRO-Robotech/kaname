@@ -165,13 +165,28 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	case "accounts_name_unique":
 		return fmt.Sprintf("Account with name %s already exists", idHint)
 	case "users_external_id_unique",
-		// users_active_external_id_uniq — migration 0011's global partial
-		// UNIQUE on (external_id) WHERE invite_status='ACTIVE'. A lost
-		// concurrent-bootstrap race (two first-logins for the same Kratos sub)
-		// hits this 23505; map it to the canonical text so the raw pgx
-		// constraint name never leaks (data-integrity.md).
-		"users_active_external_id_uniq":
+		// users_active_external_id_uniq — глобальный частичный ключ 0011 по
+		// (external_id) WHERE invite_status='ACTIVE'. Проигранная гонка
+		// конкурентного первого входа (два входа одного внешнего субъекта)
+		// приходит этим 23505.
+		"users_active_external_id_uniq",
+		// users_identity_external_id_uniq — тот же предмет, но строго шире
+		// (миграция 20260823050000): ключ накрывает и запрещённую строку, у
+		// которой внешний субъект непуст по тому же CHECK. Отображается в ТОТ ЖЕ
+		// текст намеренно: тон сообщения есть часть контракта, и вызывающему
+		// безразлично, каким из двух ключей платформа держит одно и то же
+		// свойство. Не добавив имя сюда, мы сменили бы контракт-тон на generic
+		// МОЛЧА — отказ остался бы верным по коду и перестал бы называть предмет.
+		"users_identity_external_id_uniq":
 		return "User with external_id already exists"
+	case "users_account_email_unique",
+		// users_identity_email_uniq — глобальный ключ почты (миграция
+		// 20260823050000). Пер-аккаунтный лежит рядом и остаётся законным
+		// производителем этого же отказа, пока экспанд не свёрнут, поэтому
+		// названы оба: перечень обязан покрывать КАЖДОГО производителя, иначе
+		// непокрытый молча отвечает своей, отличимой формой.
+		"users_identity_email_uniq":
+		return "User with email already exists"
 	case "projects_account_name_unique":
 		return fmt.Sprintf("Project with name %s already exists", idHint)
 	case "service_accounts_account_name_unique":
