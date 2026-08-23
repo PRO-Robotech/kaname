@@ -39,6 +39,19 @@ func (c AuthNConfig) ResolveHookSharedSecret() string {
 	return os.Getenv(envName)
 }
 
+// JWKSEncryptionKeyEnvName — имя переменной окружения, из которой берётся ключ
+// ОБЁРТКИ приватной половины, когда ручка не задана значением напрямую.
+//
+// Объявлено ОДНИМ местом: имя переменной называют текст отказа резолва, текст
+// отказа старта при смене ключа и сам резолв. Три копии разошлись бы молча — на
+// той, которую забыли поправить, и оператор искал бы не ту переменную.
+func (c AuthNConfig) JWKSEncryptionKeyEnvName() string {
+	if n := strings.TrimSpace(c.JWKSEncryptionKeyHexEnv); n != "" {
+		return n
+	}
+	return "KACHO_IAM_JWKS_ENC_KEY"
+}
+
 // ResolveJWKSEncryptionKey возвращает 32-байтовый ключ ОБЁРТКИ приватной
 // половины подписного ключа, декодированный из hex.
 //
@@ -64,14 +77,10 @@ func (c AuthNConfig) ResolveHookSharedSecret() string {
 func (c AuthNConfig) ResolveJWKSEncryptionKey() ([]byte, error) {
 	raw := c.JWKSEncryptionKeyHex
 	if raw == "" {
-		envName := c.JWKSEncryptionKeyHexEnv
-		if envName == "" {
-			envName = "KACHO_IAM_JWKS_ENC_KEY"
-		}
-		raw = os.Getenv(envName)
+		raw = os.Getenv(c.JWKSEncryptionKeyEnvName())
 	}
 	if raw == "" {
-		return nil, fmt.Errorf("authn.jwks-encryption-key-hex is empty (set ENV KACHO_IAM_JWKS_ENC_KEY)")
+		return nil, fmt.Errorf("authn.jwks-encryption-key-hex is empty (set ENV %s)", c.JWKSEncryptionKeyEnvName())
 	}
 	key, err := hex.DecodeString(raw)
 	if err != nil {
