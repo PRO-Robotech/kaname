@@ -3,20 +3,20 @@
 
 package bootstrap_token
 
-// mint_truthful_ttl_test.go — the expiry reported for a minted bootstrap token
-// must be the expiry the token actually has.
+// mint_truthful_ttl_test.go — срок, СООБЩЁННЫЙ о выпущенном удостоверении,
+// обязан быть сроком, который у него есть.
 //
-// The token is signed by the issuer, and its lifetime is a property of the
-// issuer's client — this service does not sign and cannot shorten a token after
-// the fact. So the only number it may report is the issuer's. Reporting a smaller
-// one does not make the bearer live less: it makes the holder believe a
-// cluster-admin credential is already dead while it is still accepted — the one
-// error that cannot be recovered from, because nobody looks for a token they
-// think expired.
+// # Что здесь изменилось вместе с переходом на свою чеканку (задача #1119)
 //
-// The request no longer offers a lifetime parameter: it could not be honoured
-// (see the contract test below), and a parameter that cannot be honoured must not
-// be accepted.
+// Прежде срок был свойством клиента у внешнего издателя, и единственное, что
+// служба могла с ним сделать, — сообщить честно. Теперь подпись НАША, значит и
+// срок наш; но урок остаётся тем же и потому проба живёт: сообщается то, что
+// стоит В ТОКЕНЕ, и берётся оно ИЗ ТОКЕНА, а не считается заново.
+//
+// Второй расчёт того же предмета разошёлся бы с первым молча — и разошёлся бы в
+// ту сторону, где предъявитель считает cluster-admin удостоверение умершим, пока
+// край его ещё принимает. Это единственная ошибка, из которой нет возврата:
+// токен, который считают истёкшим, никто не ищет и не отзывает.
 
 import (
 	"context"
@@ -30,50 +30,60 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 )
 
-// TestMintBootstrapToken_ReportedLifetimeIsTheIssuedOne — issuer says 900s, so
-// the caller is told 900s.
-func TestMintBootstrapToken_ReportedLifetimeIsTheIssuedOne(t *testing.T) {
-	uc := newUseCase(t, &fakeStore{}, &fakeHydra{}, &fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 900}}, Config{})
+// TestMintBootstrapToken_ReportedLifetimeIsTheSignedOne — подписант выпустил
+// токен на 900 секунд, значит вызывающему сообщается 900.
+func TestMintBootstrapToken_ReportedLifetimeIsTheSignedOne(t *testing.T) {
+	issued := fixedNow
+	uc := newUseCase(t, &fakeStore{}, &fakeMinter{out: MintOutput{
+		AccessToken: "signed.by.us",
+		IssuedAt:    issued,
+		ExpiresAt:   issued.Add(900 * time.Second),
+	}}, Config{})
 
 	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(900), res.ExpiresIn,
-		"the reported lifetime must be the issuer's, not a shorter number this service invented")
+		"сообщается срок ПОДПИСАННОГО токена, а не число, которое служба предпочла бы")
 	assert.Equal(t, int64(900), int64(res.ExpiresAt.Sub(res.IssuedAt)/time.Second),
-		"expires_at - issued_at must agree with expires_in")
+		"expires_at − issued_at обязано сходиться с expires_in")
 }
 
-// TestMintBootstrapToken_LongerIssuedLifetimeIsReportedHonestly — if the issuer
-// mints a longer-lived token than this service would like, the answer is still
-// the truth. Understating it is what hides a live credential.
-func TestMintBootstrapToken_LongerIssuedLifetimeIsReportedHonestly(t *testing.T) {
-	uc := newUseCase(t, &fakeStore{}, &fakeHydra{}, &fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 86400}}, Config{})
+// TestMintBootstrapToken_LongerSignedLifetimeIsReportedHonestly — если токен
+// подписан на дольше, чем контур просил, ответ всё равно правда. Занижение и
+// есть то, что прячет живое удостоверение.
+func TestMintBootstrapToken_LongerSignedLifetimeIsReportedHonestly(t *testing.T) {
+	issued := fixedNow
+	uc := newUseCase(t, &fakeStore{}, &fakeMinter{out: MintOutput{
+		AccessToken: "signed.by.us",
+		IssuedAt:    issued,
+		ExpiresAt:   issued.Add(24 * time.Hour),
+	}}, Config{})
 
 	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(86400), res.ExpiresIn,
-		"a token that lives 24h must not be reported as expiring sooner")
+		"токен, живущий сутки, не может быть объявлен истекающим раньше")
 }
 
-// TestMintBootstrapToken_IssuerSilentOnLifetime_FallsBackToTheProvisionedOne —
-// when the issuer states no lifetime, the honest stand-in is the lifespan this
-// service provisioned its client with (not a smaller wish).
-func TestMintBootstrapToken_IssuerSilentOnLifetime_FallsBackToTheProvisionedOne(t *testing.T) {
-	uc := newUseCase(t, &fakeStore{}, &fakeHydra{}, &fakeExchanger{out: ExchangeOutput{AccessToken: "tok"}}, Config{})
+// TestMintBootstrapToken_DefaultLifetimeIsTheContourPolicy — не переопределённый
+// срок берётся из политики контура, а не из запроса.
+func TestMintBootstrapToken_DefaultLifetimeIsTheContourPolicy(t *testing.T) {
+	minter := okMinter()
+	uc := newUseCase(t, &fakeStore{}, minter, Config{})
 
 	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, int64(MaxTTL/time.Second), res.ExpiresIn,
-		"with no issuer-stated lifetime, report the lifespan the client was provisioned with")
+	assert.Equal(t, MaxTTL, minter.last.TTL, "срок просится политикой контура")
+	assert.Equal(t, int64(MaxTTL/time.Second), res.ExpiresIn)
 }
 
-// TestMintBootstrapTokenRequest_NoUnhonouredTTLField — the parameter is off the
-// contract, tag and name reserved.
+// TestMintBootstrapTokenRequest_NoUnhonouredTTLField — параметра срока в
+// контракте нет, номер и имя зарезервированы.
 func TestMintBootstrapTokenRequest_NoUnhonouredTTLField(t *testing.T) {
 	d := (&iamv1.MintBootstrapTokenRequest{}).ProtoReflect().Descriptor()
 
 	assert.Nil(t, d.Fields().ByName("ttl_seconds"),
-		"a requested lifetime cannot be honoured by the issuer, so it must not be accepted")
+		"срок не выбирает вызывающий: удостоверение выпускается политикой контура")
 
 	reservedTags := map[int32]bool{}
 	for i := 0; i < d.ReservedRanges().Len(); i++ {

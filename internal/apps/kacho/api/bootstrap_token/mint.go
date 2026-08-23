@@ -12,41 +12,36 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytoken"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// Token lifetime. The bootstrap token is SIGNED BY THE ISSUER, and its lifetime
-// is a property of the issuer's client — this service neither signs it nor can
-// shorten it afterwards. MaxTTL is therefore what the client is PROVISIONED with
-// (CreateOAuthClient.AccessTokenLifespan), i.e. the lifetime tokens really get;
-// it is not a number applied to the response afterwards. The response reports
-// what the issuer says the token's lifetime is — see effectiveExpiresIn.
-const (
-	// MaxTTL — the access-token lifespan this service provisions its bootstrap
-	// client with, and hence the lifetime of the tokens it mints.
-	MaxTTL = 15 * time.Minute
-	// assertionTTL — the client_assertion lifetime (short, ≤ 60s).
-	assertionTTL = 60 * time.Second
-)
+// MaxTTL — срок бутстрап-удостоверения.
+//
+// С переводом на свою чеканку это решение стало НАШИМ: подпись наша, значит и
+// срок наш, и он не выводится из чужого ответа. Величина мала намеренно — токен
+// несёт cluster-admin и существует ради того, чтобы получить ПЕРВЫЙ доступ, а не
+// чтобы им пользоваться.
+const MaxTTL = 15 * time.Minute
 
-// Config — mint policy + the env-held bootstrap signing key.
+// Config — mint policy + the env-held bootstrap key.
 type Config struct {
-	// SigningKeyPEM — the bootstrap SA ES256 (P-256, PKCS#8) private key PEM,
-	// supplied from a k8s Secret. Used ONLY in-memory to sign client_assertions;
-	// never persisted. Empty → mint disabled (fail-closed, ErrSigningKeyNotConfigured).
+	// SigningKeyPEM — the bootstrap ES256 (P-256, PKCS#8) private key PEM,
+	// supplied from a k8s Secret. Empty → mint disabled (fail-closed,
+	// ErrSigningKeyNotConfigured).
+	//
+	// Ключ ОСТАЁТСЯ и после перевода на свою чеканку, но роль у него одна из
+	// двух прежних: он больше не подписывает утверждение поставщику — им
+	// заводится открытая половина, записываемая в строку соответствия как наша
+	// запись о ключе бутстрап-клиента. И он же остаётся ручкой, которой контур
+	// включают: страж старта читает ЕЁ, поэтому «включено» у стража и у рантайма
+	// не может разойтись.
 	SigningKeyPEM string
-	// AssertionAudience — the `aud` of the client_assertion: the Hydra token
-	// endpoint URL Hydra recognises.
-	AssertionAudience string
-	// GatewayAudience — the requested token `aud` (https://{API_DOMAIN}) — the
-	// audience the production gateway accepts.
+	// GatewayAudience — адресат выпускаемого удостоверения (https://{API_DOMAIN}):
+	// то, что принимает боевой край.
 	GatewayAudience string
-	// MaxTTL overrides the package default lifespan the bootstrap OAuth client is
-	// provisioned with (zero → MaxTTL).
+	// MaxTTL overrides the package default lifetime (zero → MaxTTL).
 	MaxTTL time.Duration
 }
 
@@ -60,55 +55,44 @@ type Result struct {
 	IssuedAt    time.Time
 }
 
-// MintUseCase idempotently provisions the bootstrap OAuth client (if absent) and
-// mints a short-lived RS256 token for the bootstrap SA via the Hydra exchange.
+// MintUseCase idempotently provisions the bootstrap client mapping (if absent)
+// and mints a short-lived token for the bootstrap SA with OUR signer.
 type MintUseCase struct {
-	store     BootstrapStore
-	txb       service.TxBeginner
-	hydra     OAuthClientAdmin
-	exchanger TokenExchanger
-	cfg       Config
-	now       func() time.Time
-	jti       func() (string, error)
-	logger    *slog.Logger
+	store  BootstrapStore
+	txb    service.TxBeginner
+	minter LocalMinter
+	cfg    Config
+	logger *slog.Logger
 }
 
 // NewMintUseCase constructs. MaxTTL falls back to the package default.
-func NewMintUseCase(store BootstrapStore, txb service.TxBeginner, hydra OAuthClientAdmin, exchanger TokenExchanger, cfg Config) *MintUseCase {
+func NewMintUseCase(store BootstrapStore, txb service.TxBeginner, minter LocalMinter, cfg Config) *MintUseCase {
 	if cfg.MaxTTL <= 0 {
 		cfg.MaxTTL = MaxTTL
 	}
-	return &MintUseCase{
-		store:     store,
-		txb:       txb,
-		hydra:     hydra,
-		exchanger: exchanger,
-		cfg:       cfg,
-		now:       time.Now,
-		jti:       registrytoken.NewJTI,
-	}
+	return &MintUseCase{store: store, txb: txb, minter: minter, cfg: cfg}
 }
-
-// WithClock overrides the clock (deterministic tests).
-func (u *MintUseCase) WithClock(now func() time.Time) *MintUseCase { u.now = now; return u }
-
-// WithJTIFunc overrides the jti generator (deterministic tests).
-func (u *MintUseCase) WithJTIFunc(f func() (string, error)) *MintUseCase { u.jti = f; return u }
 
 // WithLogger wires the failure logger (composition root). nil → no logging.
 func (u *MintUseCase) WithLogger(l *slog.Logger) *MintUseCase { u.logger = l; return u }
 
 // Execute provisions (idempotently) and mints. Fail-closed: no signing key →
-// UNAVAILABLE; Hydra unreachable/rejected → UNAVAILABLE (no token, no leak).
+// UNAVAILABLE; nothing to sign with → UNAVAILABLE (no token, no leak).
 //
-// The lifetime is not a parameter: the issuer decides it (per its client's
-// configured lifespan), so the only thing this service can do about it is REPORT
-// IT HONESTLY. It takes no request lifetime and never reports a shorter one than
-// the token actually has — an understated expiry would leave a live cluster-admin
-// credential in the wild that nobody looks for, because everyone believes it died.
+// Срок НЕ является параметром запроса и никогда им не был: удостоверение
+// подписано, и число в ответе не может укоротить подписанный предъявитель. Оно
+// сообщает то, что стоит В ТОКЕНЕ, и берётся из него же — заниженный срок
+// оставил бы живое cluster-admin удостоверение в обращении, потому что его никто
+// не ищет: все считают, что оно умерло.
 func (u *MintUseCase) Execute(ctx context.Context) (*Result, error) {
 	if u.cfg.SigningKeyPEM == "" {
 		u.logErr(ctx, "mint disabled", ErrSigningKeyNotConfigured)
+		return nil, status.Error(codes.Unavailable, "bootstrap token minting is not configured")
+	}
+	if u.minter == nil {
+		// Полусобранный контур — ОТКАЗ, а не тишина. Композиционный корень это
+		// уже требует; здесь вторая, структурная половина того же требования.
+		u.logErr(ctx, "mint disabled", errors.New("local minter is not wired"))
 		return nil, status.Error(codes.Unavailable, "bootstrap token minting is not configured")
 	}
 
@@ -117,57 +101,43 @@ func (u *MintUseCase) Execute(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 
-	now := u.now()
-	jti, jerr := u.jti()
-	if jerr != nil {
-		u.logErr(ctx, "jti", jerr)
-		return nil, status.Error(codes.Internal, "internal error")
-	}
-
-	assertion, aerr := registrytoken.SignClientAssertionES256(id.SocID, u.cfg.SigningKeyPEM, registrytoken.AssertionClaims{
-		Issuer:    id.ClientID,
-		Subject:   id.ClientID,
-		Audience:  u.cfg.AssertionAudience,
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(assertionTTL).Unix(),
-		JTI:       jti,
+	out, merr := u.minter.MintToken(ctx, MintInput{
+		SAKeyID:     id.SocID,
+		PrincipalID: id.SvaID,
+		Audience:    u.cfg.GatewayAudience,
+		TTL:         u.cfg.MaxTTL,
 	})
-	if aerr != nil {
-		u.logErr(ctx, "sign assertion", aerr)
+	// Fail-closed: нечем подписать / ключница не ответила ⇒ токена нет и
+	// открытого отказа нет. Наружу — фиксированный текст (никакого оракула),
+	// причина — в журнал.
+	if merr != nil {
+		u.logErr(ctx, "mint", merr)
+		if errors.Is(merr, ErrMintingUnavailable) {
+			return nil, status.Error(codes.Unavailable, "bootstrap token minting is unavailable")
+		}
 		return nil, status.Error(codes.Internal, "internal error")
-	}
-
-	out, xerr := u.exchanger.Exchange(ctx, ExchangeInput{
-		ClientAssertion: assertion,
-		Audience:        u.cfg.GatewayAudience,
-	})
-	// Fail-closed: peer unavailability / rejection / a 2xx-but-empty token must
-	// NOT yield a token and must NOT open-fail. The raw Hydra body never rides in
-	// the error (no auth-oracle); the cause is logged (with a distinct message for
-	// the empty-token case so the trail isn't a nil err), not returned.
-	if xerr != nil {
-		u.logErr(ctx, "hydra exchange", xerr)
-		return nil, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
 	}
 	if out.AccessToken == "" {
-		u.logErr(ctx, "hydra exchange", errors.New("issuer returned an empty access token"))
-		return nil, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
+		// Пустой токен при отсутствии ошибки — дефект НАШЕЙ провязки, и он
+		// обязан отличаться от отказа подписанта: «выпустили ничто» не лечится
+		// повтором.
+		u.logErr(ctx, "mint", errors.New("minter returned an empty access token"))
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	expiresIn := u.effectiveExpiresIn(ctx, out.ExpiresIn)
 	return &Result{
 		AccessToken: out.AccessToken,
 		TokenType:   "Bearer",
-		ExpiresIn:   expiresIn,
-		ExpiresAt:   now.Add(time.Duration(expiresIn) * time.Second).Truncate(time.Second),
+		ExpiresIn:   int64(out.ExpiresAt.Sub(out.IssuedAt) / time.Second),
+		ExpiresAt:   out.ExpiresAt.Truncate(time.Second),
 		PrincipalID: id.SvaID,
-		IssuedAt:    now.Truncate(time.Second),
+		IssuedAt:    out.IssuedAt.Truncate(time.Second),
 	}, nil
 }
 
-// provision ensures the bootstrap OAuth-client mapping exists, creating the
-// external Hydra client exactly once under the transaction-scoped advisory lock
-// (IBT-03). Returns the reconciled bootstrap identity.
+// provision ensures the bootstrap client mapping row exists, writing it exactly
+// once under the transaction-scoped advisory lock (IBT-03). Returns the
+// reconciled bootstrap identity.
 func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 	id := DeriveIdentity()
 
@@ -189,40 +159,16 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 	}
 
 	if !found {
-		jwk, pubPEM, kerr := publicJWKFromPrivatePEM(u.cfg.SigningKeyPEM, id.SocID)
+		pubPEM, kerr := publicKeyPEMFromPrivatePEM(u.cfg.SigningKeyPEM)
 		if kerr != nil {
-			u.logErr(ctx, "derive public jwk", kerr)
+			u.logErr(ctx, "derive public key", kerr)
 			return Identity{}, status.Error(codes.Internal, "internal error")
-		}
-		// #nosec G101 -- "client_credentials"/"private_key_jwt" are OAuth2 grant /
-		// client-assertion identifiers (RFC 6749/7521), not credentials.
-		_, herr := u.hydra.CreateOAuthClient(ctx, clients.CreateOAuthClientRequest{
-			ClientID:                    id.ClientID,
-			ClientName:                  bootstrapClientNm,
-			Owner:                       id.SvaID,
-			GrantTypes:                  []string{"client_credentials"},
-			TokenEndpointAuthMethod:     "private_key_jwt",
-			TokenEndpointAuthSigningAlg: "ES256",
-			JWKS:                        &clients.JWKS{Keys: []clients.JWK{jwk}},
-			// Whitelist the gateway audience so the exchange requesting it is
-			// accepted by Hydra (else "audience has not been whitelisted", #320).
-			Audience:            []string{u.cfg.GatewayAudience},
-			AccessTokenLifespan: u.cfg.MaxTTL.String(),
-		})
-		// A Hydra 409 (client already exists — a prior/concurrent provision under
-		// retry) is idempotent success: the deterministic client_id + the JWK
-		// derived from the same env signing key target the identical client. NOTE
-		// (ops): this does NOT reconcile an existing client's JWKS — rotating the
-		// bootstrap signing key requires deleting the Hydra client so it re-provisions.
-		if herr != nil && !clients.IsConflict(herr) {
-			u.logErr(ctx, "hydra create-client", herr)
-			return Identity{}, status.Error(codes.Unavailable, "bootstrap token issuer unavailable")
 		}
 		c = domain.ServiceAccountOAuthClient{
 			ID:              domain.SAOAuthClientID(id.SocID),
 			SvaID:           domain.ServiceAccountID(id.SvaID),
 			OAuthClientID:   domain.OAuthClientID(id.ClientID),
-			Description:     domain.Description("bootstrap-admin token-mint OAuth client (#58)"),
+			Description:     domain.Description("bootstrap-admin token-mint client (#58)"),
 			CreatedByUserID: domain.UserID(id.CreatedByUserID),
 			PublicKeyPEM:    pubPEM,
 			KeyAlgorithm:    "ES256",
@@ -247,32 +193,6 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 	return id, nil
 }
 
-// effectiveExpiresIn is the lifetime REPORTED for the minted token: the one the
-// issuer states. It is never trimmed to a smaller number this service would have
-// preferred — the bearer would still be accepted after the reported expiry, and
-// an expiry that has "already passed" is exactly what stops anyone from revoking
-// or rotating a credential that is still live.
-//
-// The issuer stating no lifetime is the only case with nothing to report; the
-// honest stand-in is then the lifespan this service provisioned the client with.
-// An issuer lifetime LONGER than that means the client was provisioned elsewhere
-// (or reconfigured): it is reported as-is and flagged, because the discrepancy is
-// an operational fact about a privileged credential, not something to round away.
-func (u *MintUseCase) effectiveExpiresIn(ctx context.Context, issuerExpiresIn int) int64 {
-	provisioned := int64(u.cfg.MaxTTL / time.Second)
-	if issuerExpiresIn <= 0 {
-		u.logWarn(ctx, "issuer stated no token lifetime; reporting the provisioned client lifespan",
-			slog.Int64("reported_expires_in", provisioned))
-		return provisioned
-	}
-	if int64(issuerExpiresIn) > provisioned {
-		u.logWarn(ctx, "issued bootstrap token outlives the provisioned client lifespan; reporting the real lifetime",
-			slog.Int("issuer_expires_in", issuerExpiresIn),
-			slog.Int64("provisioned_lifespan", provisioned))
-	}
-	return int64(issuerExpiresIn)
-}
-
 // mapErr maps a repo error to a gRPC status, never leaking pgx/driver text.
 func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) error {
 	if err == nil {
@@ -295,13 +215,6 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 	}
 	u.logErr(ctx, action, err)
 	return status.Error(codes.Internal, "internal error")
-}
-
-// logWarn surfaces an operational fact about the minted credential. nil-safe.
-func (u *MintUseCase) logWarn(ctx context.Context, msg string, attrs ...any) {
-	if u.logger != nil {
-		u.logger.WarnContext(ctx, msg, attrs...)
-	}
 }
 
 func (u *MintUseCase) logErr(ctx context.Context, action string, err error) {

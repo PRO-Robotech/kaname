@@ -41,9 +41,9 @@ import (
 
 func TestBootstrapToken_InternalOnly_NotOnExternalListener(t *testing.T) {
 	// No signing key → Execute fails closed (Unavailable) without touching the
-	// store/Hydra: reachable but no side effects, no DB.
+	// store/minter: reachable but no side effects, no DB.
 	handler := bootstraptoken.NewHandler(
-		bootstraptoken.NewMintUseCase(nil, nil, nil, nil, bootstraptoken.Config{}))
+		bootstraptoken.NewMintUseCase(nil, nil, nil, bootstraptoken.Config{}))
 	svcs := &services{internalBootstrapTokenHandler: handler}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

@@ -11,31 +11,39 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
-// countingHydra is a concurrency-safe OAuthClientAdmin recording how many times
-// the external Hydra create was invoked (IBT-03: at most once).
-type countingHydra struct {
+// countingMinter — НАШ подписант, считающий выпуски, потокобезопасно.
+//
+// Он же и есть доказательство «поставщика нет вовсе»: у use-case не осталось ни
+// одного порта, которым внешнюю сторону можно было бы подать, поэтому подставить
+// её в этот прогон НЕЛЬЗЯ — не «мы не стали», а «нечем».
+type countingMinter struct {
 	mu    sync.Mutex
 	calls int
+	token string
 }
 
-func (h *countingHydra) CreateOAuthClient(_ context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
-	h.mu.Lock()
-	h.calls++
-	h.mu.Unlock()
-	return clients.HydraOAuthClient{ClientID: req.ClientID}, nil
+func (m *countingMinter) MintToken(_ context.Context, in MintInput) (MintOutput, error) {
+	m.mu.Lock()
+	m.calls++
+	m.mu.Unlock()
+	tok := m.token
+	if tok == "" {
+		tok = "signed.by.us"
+	}
+	issued := fixedNow
+	return MintOutput{AccessToken: tok, IssuedAt: issued, ExpiresAt: issued.Add(in.TTL)}, nil
 }
 
-func (h *countingHydra) count() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.calls
+func (m *countingMinter) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
 }
 
-func buildIntegrationUseCase(t *testing.T, dsn string, hydra OAuthClientAdmin, ex TokenExchanger) *MintUseCase {
+func buildIntegrationUseCase(t *testing.T, dsn string, minter LocalMinter) *MintUseCase {
 	t.Helper()
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, dsn)
@@ -44,12 +52,10 @@ func buildIntegrationUseCase(t *testing.T, dsn string, hydra OAuthClientAdmin, e
 
 	store := kachopg.NewBootstrapStore(pool)
 	txb := kachopg.NewPoolTxBeginner(pool)
-	uc := NewMintUseCase(store, txb, hydra, ex, Config{
-		SigningKeyPEM:     genES256PEM(t),
-		AssertionAudience: "https://hydra.kacho.cloud/oauth2/token",
-		GatewayAudience:   "https://api.kacho.cloud",
+	return NewMintUseCase(store, txb, minter, Config{
+		SigningKeyPEM:   genES256PEM(t),
+		GatewayAudience: "https://api.kacho.cloud",
 	})
-	return uc
 }
 
 // countRows helper.
@@ -82,26 +88,23 @@ func TestMintBootstrapToken_FirstCall_ProvisionsAndMints(t *testing.T) {
 	// Not yet provisioned at runtime.
 	require.Equal(t, 0, countRows(t, dsn, `SELECT count(*) FROM service_account_oauth_clients WHERE sva_id=$1`, id.SvaID))
 
-	hydra := &countingHydra{}
-	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "rs256.jwt.token", ExpiresIn: 900}}
-	uc := buildIntegrationUseCase(t, dsn, hydra, ex)
+	minter := &countingMinter{token: "our.jwt.token"}
+	uc := buildIntegrationUseCase(t, dsn, minter)
 
 	res, err := uc.Execute(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "rs256.jwt.token", res.AccessToken)
+	require.Equal(t, "our.jwt.token", res.AccessToken)
 	require.Equal(t, "Bearer", res.TokenType)
 	require.Positive(t, res.ExpiresIn)
 	require.Equal(t, id.SvaID, res.PrincipalID)
 	require.False(t, res.ExpiresAt.IsZero())
 	require.False(t, res.IssuedAt.IsZero())
 
-	require.Equal(t, 1, hydra.count(), "Hydra OAuth client created once")
-	// Runtime mapping now exists (enrichment resolves client_id → bootstrap SA).
+	require.Equal(t, 1, minter.count(), "удостоверение выпущено ровно один раз")
+	// Runtime mapping now exists (enrichment resolves our client id → bootstrap SA).
 	require.Equal(t, 1, countRows(t, dsn, `SELECT count(*) FROM service_account_oauth_clients WHERE sva_id=$1`, id.SvaID))
 	require.Equal(t, 1, countRows(t, dsn,
 		`SELECT count(*) FROM service_account_oauth_clients WHERE hydra_client_id=$1 AND key_algorithm='ES256'`, id.ClientID))
-	// The exchange requested the gateway audience (not registry.*).
-	require.Equal(t, "https://api.kacho.cloud", ex.lastAudience)
 }
 
 // ── IBT-02: idempotent reuse ────────────────────────────────────────────────────
@@ -109,21 +112,17 @@ func TestMintBootstrapToken_FirstCall_ProvisionsAndMints(t *testing.T) {
 func TestMintBootstrapToken_Idempotent_ReusesSA(t *testing.T) {
 	dsn := setupTestDB(t)
 	id := DeriveIdentity()
-	hydra := &countingHydra{}
-	uc := buildIntegrationUseCase(t, dsn, hydra,
-		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok1", ExpiresIn: 900}})
+	uc := buildIntegrationUseCase(t, dsn, &countingMinter{token: "tok1"})
 
 	first, err := uc.Execute(context.Background())
 	require.NoError(t, err)
 
-	uc2 := buildIntegrationUseCase(t, dsn, hydra,
-		&fakeExchanger{out: ExchangeOutput{AccessToken: "tok2-fresh", ExpiresIn: 900}})
+	uc2 := buildIntegrationUseCase(t, dsn, &countingMinter{token: "tok2-fresh"})
 	second, err := uc2.Execute(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, first.PrincipalID, second.PrincipalID, "same bootstrap SA")
 	require.Equal(t, "tok2-fresh", second.AccessToken, "a fresh token is minted for the same principal")
-	require.Equal(t, 1, hydra.count(), "no new Hydra client on reuse")
 	require.Equal(t, 1, countRows(t, dsn, `SELECT count(*) FROM service_account_oauth_clients WHERE sva_id=$1`, id.SvaID),
 		"exactly one mapping row (singleton invariant)")
 }
@@ -133,7 +132,7 @@ func TestMintBootstrapToken_Idempotent_ReusesSA(t *testing.T) {
 func TestMintBootstrapToken_Concurrent_SingleBootstrapSA(t *testing.T) {
 	dsn := setupTestDB(t)
 	id := DeriveIdentity()
-	hydra := &countingHydra{}
+	minter := &countingMinter{}
 
 	const n = 8
 	results := make([]string, n)
@@ -146,8 +145,7 @@ func TestMintBootstrapToken_Concurrent_SingleBootstrapSA(t *testing.T) {
 			defer wg.Done()
 			// Each goroutine gets its own use-case (its own pool) — realistic
 			// concurrent first-callers racing the singleton provisioning.
-			uc := buildIntegrationUseCase(t, dsn, hydra,
-				&fakeExchanger{out: ExchangeOutput{AccessToken: "tok", ExpiresIn: 900}})
+			uc := buildIntegrationUseCase(t, dsn, minter)
 			<-start
 			res, err := uc.Execute(context.Background())
 			errs[i] = err
@@ -163,8 +161,14 @@ func TestMintBootstrapToken_Concurrent_SingleBootstrapSA(t *testing.T) {
 		require.NoError(t, errs[i], "goroutine %d", i)
 		require.Equal(t, id.SvaID, results[i], "all callers see the same bootstrap principal")
 	}
-	// DB-singleton: exactly one mapping row; external Hydra client created at most once.
+	// DB-singleton: exactly one mapping row under concurrency.
+	//
+	// Замок консультации остаётся и после снятия внешней стороны, но обоснование
+	// у него теперь СВОЁ: он сериализует запись строки соответствия, и проигравшие
+	// читают строку победителя вместо того, чтобы столкнуться на UNIQUE(sva_id).
+	// Прежде здесь стояло «внешний клиент заводится не более раза» — предмет того
+	// утверждения снят вместе с дорогой к поставщику (задача #1119).
 	require.Equal(t, 1, countRows(t, dsn, `SELECT count(*) FROM service_account_oauth_clients WHERE sva_id=$1`, id.SvaID),
 		"exactly one bootstrap mapping row under concurrency (no dup / no constraint-INTERNAL-leak)")
-	require.Equal(t, 1, hydra.count(), "external Hydra client provisioned at most once under concurrency (IBT-03)")
+	require.Equal(t, n, minter.count(), "каждый вызывающий получил СВОЁ свежее удостоверение")
 }
