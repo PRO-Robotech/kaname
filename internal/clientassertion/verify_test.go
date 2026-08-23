@@ -82,8 +82,12 @@ func (s *stubReplay) Redeem(_ context.Context, clientID, assertionID string, _ t
 type fixture struct {
 	verifier *clientassertion.Verifier
 	registry stubRegistry
-	replay   *stubReplay
-	key      testKey
+	// issuers — перечень доверенных издателей. На полосе клиента он ПУСТ, и
+	// это утверждение: полоса клиента не резолвится через него ни при каком
+	// входе, поэтому пустой перечень здесь ничего не ослабляет.
+	issuers stubTrustedIssuers
+	replay  *stubReplay
+	key     testKey
 }
 
 func newFixture(t *testing.T, opts ...func(*domain.AssertionClient)) fixture {
@@ -101,15 +105,17 @@ func newFixture(t *testing.T, opts ...func(*domain.AssertionClient)) fixture {
 		o(&row)
 	}
 	reg := stubRegistry{rows: map[string]domain.AssertionClient{testClientID: row}}
+	iss := stubTrustedIssuers{rows: map[string]domain.TrustedIssuer{}}
 	rep := newReplay()
 	v, err := clientassertion.New(clientassertion.Policy{
-		ExpectedAudience: testIssuerID,
-		MaxLifetime:      tokenpolicy.MaxAssertionLifetime,
-		ClockSkew:        tokenpolicy.ClockSkew,
-		Clock:            func() time.Time { return testNow },
-	}, reg, rep)
+		ExpectedAudience:     testIssuerID,
+		MaxLifetime:          tokenpolicy.MaxAssertionLifetime,
+		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
+		ClockSkew:            tokenpolicy.ClockSkew,
+		Clock:                func() time.Time { return testNow },
+	}, reg, iss, rep)
 	require.NoError(t, err)
-	return fixture{verifier: v, registry: reg, replay: rep, key: key}
+	return fixture{verifier: v, registry: reg, issuers: iss, replay: rep, key: key}
 }
 
 // goodClaims — полезная нагрузка, которая обязана приниматься. Всё, что проба

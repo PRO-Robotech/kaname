@@ -29,11 +29,12 @@ func atClock(t *testing.T, at time.Time, opts ...func(*domain.AssertionClient)) 
 	t.Helper()
 	f := newFixture(t, opts...)
 	v, err := clientassertion.New(clientassertion.Policy{
-		ExpectedAudience: testIssuerID,
-		MaxLifetime:      tokenpolicy.MaxAssertionLifetime,
-		ClockSkew:        tokenpolicy.ClockSkew,
-		Clock:            func() time.Time { return at },
-	}, f.registry, f.replay)
+		ExpectedAudience:     testIssuerID,
+		MaxLifetime:          tokenpolicy.MaxAssertionLifetime,
+		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
+		ClockSkew:            tokenpolicy.ClockSkew,
+		Clock:                func() time.Time { return at },
+	}, f.registry, f.issuers, f.replay)
 	require.NoError(t, err)
 	f.verifier = v
 	return f
@@ -214,38 +215,49 @@ func TestVerifierReadsNoClockButTheDeclaredOne(t *testing.T) {
 // построения, а не умолчанием.
 func TestVerifierRefusesToBuildWithoutItsDeclaredNumbers(t *testing.T) {
 	full := clientassertion.Policy{
-		ExpectedAudience: testIssuerID,
-		MaxLifetime:      tokenpolicy.MaxAssertionLifetime,
-		ClockSkew:        tokenpolicy.ClockSkew,
-		Clock:            func() time.Time { return testNow },
+		ExpectedAudience:     testIssuerID,
+		MaxLifetime:          tokenpolicy.MaxAssertionLifetime,
+		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
+		ClockSkew:            tokenpolicy.ClockSkew,
+		Clock:                func() time.Time { return testNow },
 	}
 	reg := stubRegistry{rows: map[string]domain.AssertionClient{}}
+	iss := stubTrustedIssuers{rows: map[string]domain.TrustedIssuer{}}
 
 	degenerate := map[string]func(*clientassertion.Policy){
 		"адресат не задан":                 func(p *clientassertion.Policy) { p.ExpectedAudience = "" },
 		"адресат — одни пробелы":           func(p *clientassertion.Policy) { p.ExpectedAudience = "   " },
 		"потолок длительности не задан":    func(p *clientassertion.Policy) { p.MaxLifetime = 0 },
 		"потолок длительности отрицателен": func(p *clientassertion.Policy) { p.MaxLifetime = -time.Second },
-		"допуск часов отрицателен":         func(p *clientassertion.Policy) { p.ClockSkew = -time.Second },
-		"часы не поданы":                   func(p *clientassertion.Policy) { p.Clock = nil },
+		"федеративный потолок не задан": func(p *clientassertion.Policy) {
+			p.MaxFederatedLifetime = 0
+		},
+		"федеративный потолок отрицателен": func(p *clientassertion.Policy) {
+			p.MaxFederatedLifetime = -time.Second
+		},
+		"допуск часов отрицателен": func(p *clientassertion.Policy) { p.ClockSkew = -time.Second },
+		"часы не поданы":           func(p *clientassertion.Policy) { p.Clock = nil },
 	}
 	for name, break_ := range degenerate {
 		p := full
 		break_(&p)
-		_, err := clientassertion.New(p, reg, newReplay())
+		_, err := clientassertion.New(p, reg, iss, newReplay())
 		require.Error(t, err, "вырожденный вход %q обязан отвергнуть построение", name)
 	}
 
 	// Порты обязательны так же: проверяющий без реестра принимал бы всех,
-	// проверяющий без однократности — повторы.
-	_, err := clientassertion.New(full, nil, newReplay())
+	// проверяющий без однократности — повторы, проверяющий без перечня
+	// доверенных издателей — отвергал бы каждое федеративное утверждение молча.
+	_, err := clientassertion.New(full, nil, iss, newReplay())
 	require.Error(t, err)
-	_, err = clientassertion.New(full, reg, nil)
+	_, err = clientassertion.New(full, reg, nil, newReplay())
+	require.Error(t, err)
+	_, err = clientassertion.New(full, reg, iss, nil)
 	require.Error(t, err)
 
 	// Положительный контроль: с полной настройкой проверяющий строится. Без
 	// него проба зелена на конструкторе, не пускающем никого.
-	_, err = clientassertion.New(full, reg, newReplay())
+	_, err = clientassertion.New(full, reg, iss, newReplay())
 	require.NoError(t, err)
 }
 

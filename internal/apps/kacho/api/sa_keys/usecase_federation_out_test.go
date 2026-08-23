@@ -78,7 +78,8 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	hydra := &stubHydra{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 	u.AudiencePrefix = "https://internal.example/iam"
 
 	in := IssueInput{
@@ -88,6 +89,8 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 			{
 				Issuer:         "https://token.actions.githubusercontent.com",
 				SubjectPattern: "^repo:acme/infra:ref:refs/heads/main$",
+				PublicKeyPEM:   testIssuerPublicKeyPEM,
+				KeyAlgorithm:   "ES256",
 			},
 		},
 		Audience: []string{

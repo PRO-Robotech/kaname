@@ -79,6 +79,7 @@ func buildClientTokenEndpoint(
 		// параметром: сборка обязана отличать поданную величину от неподанной,
 		// а константа незаданной не бывает.
 		AssertionLifetimeCeiling: tokenpolicy.MaxAssertionLifetime,
+		FederatedLifetimeCeiling: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:                tokenpolicy.ClockSkew,
 		Clock:                    time.Now,
 		AllowedAudiences:         cfg.AuthN.ClientToken.AudienceList(),

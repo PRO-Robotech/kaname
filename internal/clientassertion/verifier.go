@@ -87,12 +87,21 @@ const (
 	// #nosec G101 -- машинный ПРИЗНАК ПРИЧИНЫ ОТКАЗА, уезжающий в журнал и в
 	// счётчик, а не секрет: значения этого словаря наружу не выходят вовсе,
 	// потому что ответ предъявителю у всех исходов один.
-	OutcomeTokenTypeMismatch      Outcome = "token-type-mismatch"
-	OutcomeAlgorithmNotAllowed    Outcome = "algorithm-not-allowed"
-	OutcomeAlgorithmMismatch      Outcome = "algorithm-mismatch"
-	OutcomeIdentityMismatch       Outcome = "identity-mismatch"
-	OutcomeClientUnknown          Outcome = "client-unknown"
-	OutcomeClientCannotAssert     Outcome = "client-cannot-assert"
+	OutcomeTokenTypeMismatch   Outcome = "token-type-mismatch"
+	OutcomeAlgorithmNotAllowed Outcome = "algorithm-not-allowed"
+	OutcomeAlgorithmMismatch   Outcome = "algorithm-mismatch"
+	OutcomeIdentityMismatch    Outcome = "identity-mismatch"
+	OutcomeClientUnknown       Outcome = "client-unknown"
+	OutcomeClientCannotAssert  Outcome = "client-cannot-assert"
+	// OutcomeIssuerUntrusted — пара (издатель, субъект) не резолвится в нашем
+	// перечне доверенных издателей. Один исход на все состояния «мы за это не
+	// ручаемся»: различимые дали бы предъявителю оракул состава перечня.
+	OutcomeIssuerUntrusted Outcome = "issuer-untrusted"
+	// OutcomeTrustExpired — запись доверия найдена, её срок истёк. Отдельный
+	// счётчик от предыдущего: «доверия не было» и «доверие кончилось» суть
+	// разные события эксплуатации, и слитые в один счётчик они делают
+	// истечение невидимым.
+	OutcomeTrustExpired           Outcome = "issuer-trust-expired"
 	OutcomeSignatureMismatch      Outcome = "signature-mismatch"
 	OutcomeAudienceMismatch       Outcome = "audience-mismatch"
 	OutcomeExpiryMissing          Outcome = "expiry-missing"
@@ -154,6 +163,8 @@ func Outcomes() []Outcome {
 		OutcomeIdentityMismatch,
 		OutcomeClientUnknown,
 		OutcomeClientCannotAssert,
+		OutcomeIssuerUntrusted,
+		OutcomeTrustExpired,
 		OutcomeSignatureMismatch,
 		OutcomeAudienceMismatch,
 		OutcomeExpiryMissing,
@@ -222,8 +233,16 @@ type Policy struct {
 	// ExpectedAudience — идентификатор НАШЕГО издателя. Единственная
 	// принимаемая форма адресата утверждения.
 	ExpectedAudience string
-	// MaxLifetime — потолок разницы «срок − момент выпуска».
+	// MaxLifetime — потолок разницы «срок − момент выпуска» на полосе клиента.
 	MaxLifetime time.Duration
+	// MaxFederatedLifetime — тот же потолок на федеративной полосе.
+	//
+	// Отдельное поле, а не то же число: утверждение полосы клиента выписывает
+	// НАШ клиент специально для нас и вправе дать ему минуты, а внешний
+	// издатель выпускает своей нагрузке токен со своим сроком и о нашем
+	// потолке не знает. Одно число на две полосы означало бы либо отказ
+	// каждому внешнему издателю, либо месячное окно у собственного клиента.
+	MaxFederatedLifetime time.Duration
 	// ClockSkew — допуск расхождения часов. Действует на ОБЕ стороны: и на
 	// истечение, и на момент выпуска в будущем.
 	ClockSkew time.Duration
@@ -243,6 +262,17 @@ type ClientResolver interface {
 	ResolveAssertionClient(ctx context.Context, clientID string) (domain.AssertionClient, error)
 }
 
+// TrustedIssuerResolver — порт НАШЕГО перечня доверенных издателей.
+//
+// Возвращает и запись доверия, и строку, которую она уполномочивает, ОДНИМ
+// обращением. Два обращения дали бы разную длительность ответа у пары, дошедшей
+// до второго чтения, и у пары, отвергнутой на первом, — то есть оракул,
+// сообщающий, доверен ли издатель, ничего не отвечая по существу.
+type TrustedIssuerResolver interface {
+	ResolveTrustedIssuer(ctx context.Context, issuer, subject string) (
+		domain.TrustedIssuer, domain.AssertionClient, error)
+}
+
 // ReplayGuard — порт однократности.
 type ReplayGuard interface {
 	Redeem(ctx context.Context, clientID, assertionID string, expiresAt time.Time) error
@@ -252,6 +282,7 @@ type ReplayGuard interface {
 type Verifier struct {
 	policy  Policy
 	clients ClientResolver
+	issuers TrustedIssuerResolver
 	replay  ReplayGuard
 }
 
@@ -260,22 +291,32 @@ type Verifier struct {
 // Проверяющий, собранный наполовину, принимал бы утверждения, которые обязан
 // отвергнуть, — и узналось бы это не на старте, а на первом принятом чужом
 // предъявлении, то есть никогда.
-func New(p Policy, clients ClientResolver, replay ReplayGuard) (*Verifier, error) {
+func New(p Policy, clients ClientResolver, issuers TrustedIssuerResolver, replay ReplayGuard) (*Verifier, error) {
 	switch {
 	case strings.TrimSpace(p.ExpectedAudience) == "":
 		return nil, fmt.Errorf("clientassertion: expected audience is required (empty means 'accept any')")
 	case p.MaxLifetime <= 0:
 		return nil, fmt.Errorf("clientassertion: assertion lifetime ceiling must be declared as a positive number")
+	case p.MaxFederatedLifetime <= 0:
+		return nil, fmt.Errorf("clientassertion: federated assertion lifetime ceiling must be declared as a positive number")
 	case p.ClockSkew < 0:
 		return nil, fmt.Errorf("clientassertion: clock skew allowance must not be negative")
 	case p.Clock == nil:
 		return nil, fmt.Errorf("clientassertion: clock is required (time source is an input, not the environment)")
 	case clients == nil:
 		return nil, fmt.Errorf("clientassertion: client resolver is required")
+	case issuers == nil:
+		// Проверяющий без перечня доверенных издателей не «работает без
+		// федерации»: он отвергает КАЖДОЕ федеративное утверждение, и посадка,
+		// забывшая провязать перечень, выглядит исправной. Возможность,
+		// объявленная и не работающая ни при каком входе, — это отказ
+		// построения, а не режим.
+		return nil, fmt.Errorf("clientassertion: trusted issuer resolver is required " +
+			"(a verifier without one refuses every federated assertion while looking healthy)")
 	case replay == nil:
 		return nil, fmt.Errorf("clientassertion: replay guard is required")
 	}
-	return &Verifier{policy: p, clients: clients, replay: replay}, nil
+	return &Verifier{policy: p, clients: clients, issuers: issuers, replay: replay}, nil
 }
 
 // refuse собирает отказ. Ответ предъявителю у всех исходов один; различает их
@@ -308,40 +349,13 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeAssertionTypeMismatch, "declared assertion type is not the one named by the standard")
 	}
 
-	// (2) Компактная последовательная форма ровно с одной подписью.
-	parts := strings.Split(raw, ".")
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		return refuse(OutcomeMalformedSerialization, "not a compact serialization with exactly one signature")
-	}
-
-	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	// (2)-(4) Форма, дублирующиеся имена членов и пометка «обязателен к
+	// пониманию». Общее для ОБЕИХ полос — см. decodeEnvelope.
+	env, res, err := decodeEnvelope(raw)
 	if err != nil {
-		return refuse(OutcomeMalformedSerialization, "header segment is not base64url")
+		return res, err
 	}
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return refuse(OutcomeMalformedSerialization, "payload segment is not base64url")
-	}
-
-	// (3) Дублирующееся имя члена — отказ ДО использования ЛЮБОГО значения.
-	// Проверяется и в заголовке, и в нагрузке: два значения одного члена
-	// означают, что прочитать могли разное, и предмет этот от места не зависит.
-	if dup, ok := duplicateMember(headerBytes); ok {
-		return refuse(OutcomeDuplicateHeaderMember, "header member %q appears more than once", dup)
-	}
-	if dup, ok := duplicateMember(payloadBytes); ok {
-		return refuse(OutcomeDuplicateHeaderMember, "claim %q appears more than once", dup)
-	}
-
-	var header map[string]json.RawMessage
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return refuse(OutcomeMalformedSerialization, "header is not a JSON object")
-	}
-
-	// (4) Член, помеченный обязательным к пониманию, которого мы не понимаем.
-	if member, ok := unsupportedCritical(header); ok {
-		return refuse(OutcomeUnsupportedCritical, "header marks %q as must-understand and we do not understand it", member)
-	}
+	header := env.header
 
 	// (5) Объявленный тип. ПЕРВЫЙ из трёх независимых признаков, отделяющих
 	// утверждение клиента от токена доступа: с этой фазы один издатель работает
@@ -362,20 +376,18 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeTokenTypeMismatch, "header does not declare the client-assertion type")
 	}
 
-	// (6) Алгоритм заголовка — из закрытого словаря. Симметричное семейство,
-	// «без подписи» и всё, чего в словаре нет, отвергаются ЗДЕСЬ, до разрешения
-	// ключа: «прочее» не является корзиной приёма.
-	alg, err := stringMember(header, "alg")
-	if err != nil || !tokenpolicy.AlgorithmAllowed(alg) {
-		return refuse(OutcomeAlgorithmNotAllowed, "declared algorithm is not in the closed dictionary")
+	// (6) Алгоритм заголовка — из закрытого словаря. Общее для обеих полос.
+	alg, res, err := declaredAlgorithm(header)
+	if err != nil {
+		return res, err
 	}
 
 	// Встроенный ключевой материал ключ НЕ ВЫБИРАЕТ — мы его попросту не
 	// читаем. Ключ будет взят из реестра ниже, и это единственный его источник.
 
-	var claims map[string]json.RawMessage
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return refuse(OutcomeMalformedSerialization, "payload is not a JSON object")
+	claims, res, err := decodeClaims(env.payloadBytes)
+	if err != nil {
+		return res, err
 	}
 
 	// (7) Личность. Издатель и субъект обязаны совпадать между собой и оба
@@ -440,6 +452,25 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeSignatureMismatch, "signature does not verify against the registered key")
 	}
 
+	// (12)-(15) Адресат, время, однократность. Общее для обеих полос — см.
+	// admit. Потолок длительности подаётся полосой: он у них РАЗНЫЙ.
+	return v.admit(ctx, claims, client, v.policy.MaxLifetime)
+}
+
+// admit — общий хвост обеих полос: адресат, время, однократность, погашение.
+//
+// # Почему он общий, а не выписан у каждой полосы
+//
+// Это ровно те проверки, различие в которых не видно: обе полосы по отдельности
+// выглядели бы полными, а расхождение вылезло бы у той, которую реже читают.
+// Полоса подаёт сюда ДВЕ вещи, которые у неё свои, — разрешённую строку и
+// потолок длительности; всё остальное обязано совпадать дословно.
+func (v *Verifier) admit(
+	ctx context.Context,
+	claims map[string]json.RawMessage,
+	client domain.AssertionClient,
+	maxLifetime time.Duration,
+) (Result, error) {
 	// (12) Адресат — идентификатор нашего издателя. Адрес эндпоинта в этом
 	// качестве отвергается: он не одна строка, а несколько.
 	if !audienceContains(claims, v.policy.ExpectedAudience) {
@@ -470,9 +501,9 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 	// Потолок длительности — арифметика над ОБЪЯВЛЕННЫМ числом. Отсчёт от
 	// момента выпуска, а не от «сейчас»: разница `exp − iat` есть свойство
 	// самого утверждения и не зависит от задержки доставки.
-	if exp.Sub(iat) > v.policy.MaxLifetime {
+	if exp.Sub(iat) > maxLifetime {
 		return refuse(OutcomeLifetimeAboveCeiling,
-			"assertion lifetime %s exceeds the declared ceiling %s", exp.Sub(iat), v.policy.MaxLifetime)
+			"assertion lifetime %s exceeds the declared ceiling %s", exp.Sub(iat), maxLifetime)
 	}
 
 	// Граница истечения ВКЛЮЧИТЕЛЬНА: ровно в момент истечения — отказ.
@@ -511,6 +542,85 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		AssertionID: assertionID,
 		ExpiresAt:   exp,
 	}, nil
+}
+
+// ── Разбор, общий для обеих полос ───────────────────────────────────────────
+
+// assertionEnvelope — разобранная оболочка предъявленного утверждения.
+type assertionEnvelope struct {
+	header       map[string]json.RawMessage
+	payloadBytes []byte
+}
+
+// decodeEnvelope — форма, дублирующиеся имена членов, пометка «обязателен к
+// пониманию».
+//
+// Вынесено ради того, чтобы полосы не разошлись: три эти проверки не зависят от
+// того, кто подписал утверждение, и выписанные дважды они разъехались бы там,
+// где расхождение не видно.
+func decodeEnvelope(raw string) (assertionEnvelope, Result, error) {
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		res, err := refuse(OutcomeMalformedSerialization, "not a compact serialization with exactly one signature")
+		return assertionEnvelope{}, res, err
+	}
+	headerBytes, decErr := base64.RawURLEncoding.DecodeString(parts[0])
+	if decErr != nil {
+		res, err := refuse(OutcomeMalformedSerialization, "header segment is not base64url")
+		return assertionEnvelope{}, res, err
+	}
+	payloadBytes, decErr := base64.RawURLEncoding.DecodeString(parts[1])
+	if decErr != nil {
+		res, err := refuse(OutcomeMalformedSerialization, "payload segment is not base64url")
+		return assertionEnvelope{}, res, err
+	}
+	// Дублирующееся имя члена — отказ ДО использования ЛЮБОГО значения.
+	// Проверяется и в заголовке, и в нагрузке: два значения одного члена
+	// означают, что прочитать могли разное, и предмет этот от места не зависит.
+	if dup, ok := duplicateMember(headerBytes); ok {
+		res, err := refuse(OutcomeDuplicateHeaderMember, "header member %q appears more than once", dup)
+		return assertionEnvelope{}, res, err
+	}
+	if dup, ok := duplicateMember(payloadBytes); ok {
+		res, err := refuse(OutcomeDuplicateHeaderMember, "claim %q appears more than once", dup)
+		return assertionEnvelope{}, res, err
+	}
+	var header map[string]json.RawMessage
+	if uErr := json.Unmarshal(headerBytes, &header); uErr != nil {
+		res, err := refuse(OutcomeMalformedSerialization, "header is not a JSON object")
+		return assertionEnvelope{}, res, err
+	}
+	// Член, помеченный обязательным к пониманию, которого мы не понимаем.
+	if member, ok := unsupportedCritical(header); ok {
+		res, err := refuse(OutcomeUnsupportedCritical,
+			"header marks %q as must-understand and we do not understand it", member)
+		return assertionEnvelope{}, res, err
+	}
+	return assertionEnvelope{header: header, payloadBytes: payloadBytes}, Result{}, nil
+}
+
+// declaredAlgorithm — объявленный алгоритм из ЗАКРЫТОГО словаря.
+//
+// Симметричное семейство, «без подписи» и всё, чего в словаре нет, отвергаются
+// ЗДЕСЬ, до разрешения ключа: «прочее» не является корзиной приёма.
+func declaredAlgorithm(header map[string]json.RawMessage) (string, Result, error) {
+	alg, err := stringMember(header, "alg")
+	if err != nil || !tokenpolicy.AlgorithmAllowed(alg) {
+		res, rErr := refuse(OutcomeAlgorithmNotAllowed, "declared algorithm is not in the closed dictionary")
+		return "", res, rErr
+	}
+	return alg, Result{}, nil
+}
+
+// decodeClaims — разбор полезной нагрузки. Дублирующиеся имена в ней уже
+// отвергнуты оболочкой.
+func decodeClaims(payloadBytes []byte) (map[string]json.RawMessage, Result, error) {
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		res, rErr := refuse(OutcomeMalformedSerialization, "payload is not a JSON object")
+		return nil, res, rErr
+	}
+	return claims, Result{}, nil
 }
 
 // ── Разбор, которого библиотека не делает ───────────────────────────────────

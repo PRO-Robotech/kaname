@@ -49,10 +49,31 @@ type stubVerifier struct {
 	outcome clientassertion.Outcome
 	seenTyp string
 	seenRaw string
+	// seenFederatedRaw — что дошло до ФЕДЕРАТИВНОЙ полосы. Отдельное поле, а не
+	// то же: проба обязана различать, какая из двух полос проверяла, — иначе
+	// «утверждение проверено» осталось бы верным при проверке не той полосой.
+	seenFederatedRaw string
+	captureCtx       bool
+	seenCtx          context.Context
 }
 
-func (s *stubVerifier) Verify(_ context.Context, typ, raw string) (clientassertion.Result, error) {
+func (s *stubVerifier) Verify(ctx context.Context, typ, raw string) (clientassertion.Result, error) {
 	s.seenTyp, s.seenRaw = typ, raw
+	if s.captureCtx {
+		s.seenCtx = ctx
+	}
+	return s.result()
+}
+
+func (s *stubVerifier) VerifyFederated(ctx context.Context, raw string) (clientassertion.Result, error) {
+	s.seenFederatedRaw = raw
+	if s.captureCtx {
+		s.seenCtx = ctx
+	}
+	return s.result()
+}
+
+func (s *stubVerifier) result() (clientassertion.Result, error) {
 	if s.outcome == "" || s.outcome == clientassertion.OutcomeAccepted {
 		return clientassertion.Result{Outcome: clientassertion.OutcomeAccepted}, nil
 	}
@@ -231,15 +252,21 @@ func TestF2_02_ExactlyOneAssertionIsAccepted(t *testing.T) {
 }
 
 // TestF2_43_GrantTypeDictionaryIsClosed — «прочее» не является корзиной приёма.
+//
+// Видов в словаре ДВА с задачи #1124 (второй — федеративная выдача), и это не
+// ослабление: перечень по-прежнему закрыт и перечисляет оба поимённо. Проба
+// сверяет перечень отвергаемых с ОБЪЯВЛЕННЫМ словарём, а не со своим списком —
+// иначе третий заведённый вид остался бы ею незамеченным.
 func TestF2_43_GrantTypeDictionaryIsClosed(t *testing.T) {
 	s := newStand(t)
 	for _, g := range []string{
 		"authorization_code",
 		"refresh_token",
-		"urn:ietf:params:oauth:grant-type:jwt-bearer",
 		"password",
 		"CLIENT_CREDENTIALS",
 		"client_credentials ",
+		"urn:ietf:params:oauth:grant-type:jwt-bearer ",
+		"URN:IETF:PARAMS:OAUTH:GRANT-TYPE:JWT-BEARER",
 		"",
 	} {
 		form := goodForm()
@@ -249,6 +276,9 @@ func TestF2_43_GrantTypeDictionaryIsClosed(t *testing.T) {
 		require.Equal(t, "unsupported_grant_type", errorCode(t, rec.Body.Bytes()), "вид выдачи %q", g)
 	}
 
+	// Ни один вид из объявленного словаря не отвергается как неизвестный —
+	// иначе объявление и приём разошлись бы молча.
+	require.Len(t, tokenpolicy.GrantTypes(), 2)
 	require.Equal(t, http.StatusOK, s.post(t, goodForm()).Code)
 }
 
@@ -271,6 +301,10 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 		clientassertion.OutcomeIdentityMismatch,
 		clientassertion.OutcomeClientUnknown,
 		clientassertion.OutcomeClientCannotAssert,
+		// Два исхода федеративной полосы (#1124). Перепись потребовала их
+		// входов раньше человека — ровно так, как и задумана.
+		clientassertion.OutcomeIssuerUntrusted,
+		clientassertion.OutcomeTrustExpired,
 		clientassertion.OutcomeSignatureMismatch,
 		clientassertion.OutcomeAudienceMismatch,
 		clientassertion.OutcomeExpiryMissing,

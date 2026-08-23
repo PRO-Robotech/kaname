@@ -7,9 +7,37 @@
 package domain
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 )
+
+// testSPKI и testPrivatePEM — НАСТОЯЩИЕ ключи, а не правдоподобные строки.
+//
+// Валидация проверяет разбираемость, поэтому фикстура, похожая на ключ и им не
+// являющаяся, отвергалась бы вместе с положительным контролем. Обратный случай
+// хуже: приняв заглушку, проба перестала бы отличать «ключ разобран» от
+// «разобралось что угодно».
+var testSPKI, testPrivatePEM = func() (string, string) {
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	pub, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	if err != nil {
+		panic(err)
+	}
+	priv, err := x509.MarshalECPrivateKey(k)
+	if err != nil {
+		panic(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: priv}))
+}()
 
 func TestTrustedSubject_Validate(t *testing.T) {
 	tests := []struct {
@@ -19,73 +47,107 @@ func TestTrustedSubject_Validate(t *testing.T) {
 	}{
 		{
 			name:    "ok literal anchored k8s subject",
-			in:      TrustedSubject{Issuer: "https://kube.cluster.local", SubjectPattern: "^system:serviceaccount:ci:deployer$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://kube.cluster.local", SubjectPattern: "^system:serviceaccount:ci:deployer$"},
 			wantErr: "",
 		},
 		{
 			name:    "ok literal anchored ci subject",
-			in:      TrustedSubject{Issuer: "https://token.actions.githubusercontent.com", SubjectPattern: "^repo:acme/app:ref:refs/heads/main$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://token.actions.githubusercontent.com", SubjectPattern: "^repo:acme/app:ref:refs/heads/main$"},
 			wantErr: "",
 		},
 		{
 			name:    "empty issuer",
-			in:      TrustedSubject{Issuer: "", SubjectPattern: "^x$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "", SubjectPattern: "^x$"},
 			wantErr: "issuer: required",
 		},
 		{
 			name:    "non-url issuer",
-			in:      TrustedSubject{Issuer: "not-a-url", SubjectPattern: "^x$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "not-a-url", SubjectPattern: "^x$"},
 			wantErr: "https URL to a public host",
 		},
 		{
 			name:    "non-https issuer",
-			in:      TrustedSubject{Issuer: "http://x.example", SubjectPattern: "^x$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "http://x.example", SubjectPattern: "^x$"},
 			wantErr: "https URL to a public host",
 		},
 		{
 			name:    "loopback issuer (anti-SSRF)",
-			in:      TrustedSubject{Issuer: "https://127.0.0.1", SubjectPattern: "^x$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://127.0.0.1", SubjectPattern: "^x$"},
 			wantErr: "https URL to a public host",
 		},
 		{
 			name:    "localhost issuer (anti-SSRF)",
-			in:      TrustedSubject{Issuer: "https://localhost", SubjectPattern: "^x$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://localhost", SubjectPattern: "^x$"},
 			wantErr: "https URL to a public host",
 		},
 		{
 			name:    "private-ip issuer (anti-SSRF)",
-			in:      TrustedSubject{Issuer: "https://10.1.2.3", SubjectPattern: "^x$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://10.1.2.3", SubjectPattern: "^x$"},
 			wantErr: "https URL to a public host",
 		},
 		{
 			name:    "empty pattern",
-			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: ""},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: ""},
 			wantErr: "subject_pattern: required",
 		},
 		{
 			name:    "unanchored pattern",
-			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: "system:serviceaccount:ci:deployer"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: "system:serviceaccount:ci:deployer"},
 			wantErr: "literal anchored subject",
 		},
 		{
 			name:    "missing closing anchor",
-			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^system:serviceaccount:ci:deployer"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: "^system:serviceaccount:ci:deployer"},
 			wantErr: "literal anchored subject",
 		},
 		{
 			name:    "wildcard .* pattern",
-			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^system:serviceaccount:ci:.*$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: "^system:serviceaccount:ci:.*$"},
 			wantErr: "literal anchored subject",
 		},
 		{
 			name:    "glob star pattern",
-			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^system:serviceaccount:ci:*$"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: "^system:serviceaccount:ci:*$"},
 			wantErr: "literal anchored subject",
 		},
 		{
 			name:    "bare wildcard",
-			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: ".*"},
+			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: ".*"},
 			wantErr: "literal anchored subject",
+		},
+		// Ключевой материал ИЗДАТЕЛЯ — с задачи #1124. Пустой ключ означал бы
+		// «доверяем паре без проверки подписи», то есть ровно тот класс, ради
+		// которого перечень и заводится.
+		{
+			name:    "ключ издателя не назван",
+			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^x$", KeyAlgorithm: "ES256"},
+			wantErr: "public_key_pem: required",
+		},
+		{
+			name:    "алгоритм издателя не назван",
+			in:      TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^x$", PublicKeyPEM: testSPKI},
+			wantErr: "key_algorithm: required",
+		},
+		{
+			name: "алгоритм вне закрытого словаря",
+			in: TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^x$",
+				PublicKeyPEM: testSPKI, KeyAlgorithm: "HS256"},
+			wantErr: "key_algorithm: must be one of",
+		},
+		{
+			name: "ключ не разбирается",
+			in: TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^x$",
+				PublicKeyPEM: "not a pem at all", KeyAlgorithm: "ES256"},
+			wantErr: "not a PEM block",
+		},
+		{
+			// Закрытая половина, попавшая сюда по недосмотру называющего, была
+			// бы принята как «ключ есть» — и мы взяли бы на хранение чужой
+			// секрет, которого просить не должны.
+			name: "прислан закрытый ключ вместо открытого",
+			in: TrustedSubject{Issuer: "https://x.example", SubjectPattern: "^x$",
+				PublicKeyPEM: testPrivatePEM, KeyAlgorithm: "ES256"},
+			wantErr: "private key was supplied",
 		},
 	}
 	for _, tt := range tests {
@@ -133,7 +195,8 @@ func TestSAOAuthClient_Validate_FederatedVsPrivateKey(t *testing.T) {
 
 	// Federated row with public_key set → must reject.
 	bad := base
-	bad.TrustedSubjects = []TrustedSubject{{Issuer: "https://x.example", SubjectPattern: "^x$"}}
+	bad.TrustedSubjects = []TrustedSubject{{Issuer: "https://x.example", SubjectPattern: "^x$",
+		PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256"}}
 	bad.PublicKeyPEM = "fake-pem"
 	bad.KeyAlgorithm = "ES256"
 	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "must not carry public_key_pem") {
@@ -142,7 +205,8 @@ func TestSAOAuthClient_Validate_FederatedVsPrivateKey(t *testing.T) {
 
 	// Federated row clean — must pass.
 	ok := base
-	ok.TrustedSubjects = []TrustedSubject{{Issuer: "https://x.example", SubjectPattern: "^x$"}}
+	ok.TrustedSubjects = []TrustedSubject{{Issuer: "https://x.example", SubjectPattern: "^x$",
+		PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256"}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("clean federated must pass, got %v", err)
 	}

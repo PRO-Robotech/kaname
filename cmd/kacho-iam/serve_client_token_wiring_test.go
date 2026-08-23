@@ -38,6 +38,17 @@ func (wiringResolver) ResolveAssertionClient(context.Context, string) (domain.As
 	return domain.AssertionClient{}, domain.ErrAssertionClientUnknown
 }
 
+// wiringIssuers — перечень доверенных издателей. Пустой: проба утверждает
+// ДОСТИЖИМОСТЬ поверхности, а не исход разрешения, и пустой перечень отвечает
+// тем же признаком, что настоящий.
+type wiringIssuers struct{}
+
+func (wiringIssuers) ResolveTrustedIssuer(context.Context, string, string) (
+	domain.TrustedIssuer, domain.AssertionClient, error,
+) {
+	return domain.TrustedIssuer{}, domain.AssertionClient{}, domain.ErrTrustedIssuerUnknown
+}
+
 type wiringReplay struct{}
 
 func (wiringReplay) Redeem(context.Context, string, string, time.Time) error { return nil }
@@ -73,6 +84,7 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 	h, err := clienttokenwire.New(clienttokenwire.BuildConfig{
 		ExpectedAudience:         "https://iam.kacho.local",
 		AssertionLifetimeCeiling: tokenpolicy.MaxAssertionLifetime,
+		FederatedLifetimeCeiling: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:                tokenpolicy.ClockSkew,
 		Clock:                    time.Now,
 		AllowedAudiences:         []string{"registry.kacho.local"},
@@ -80,7 +92,7 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
-	}, wiringResolver{}, wiringReplay{}, wiringSigner{}, wiringClaims{})
+	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{})
 	if err != nil {
 		t.Fatalf("сборка токен-эндпоинта: %v", err)
 	}

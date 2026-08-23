@@ -118,6 +118,8 @@ func federatedInput() IssueInput {
 			{
 				Issuer:         "https://token.actions.githubusercontent.com",
 				SubjectPattern: "^repo:acme/infra:ref:refs/heads/main$",
+				PublicKeyPEM:   testIssuerPublicKeyPEM,
+				KeyAlgorithm:   "ES256",
 			},
 		},
 	}
@@ -136,7 +138,9 @@ func TestIssueSAKey_CommitFails_AndProviderDeleteFails_LeavesDurableCompensation
 	comp := &recordingCompensation{}
 	ops := &stubOpsRepo{}
 
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithCompensationEmitter(comp)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+		WithCompensationEmitter(comp).
+		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
 	if _, err := u.Execute(context.Background(), federatedInput()); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -163,7 +167,9 @@ func TestIssueSAKey_CommitFails_CompensationEmitFails_FallsBackToDirectRelease(t
 	comp := &recordingCompensation{err: errors.New("outbox unavailable")}
 	ops := &stubOpsRepo{}
 
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithCompensationEmitter(comp)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+		WithCompensationEmitter(comp).
+		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
 	if _, err := u.Execute(context.Background(), federatedInput()); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -185,7 +191,9 @@ func TestIssueSAKey_Success_EmitsNoCompensation(t *testing.T) {
 	comp := &recordingCompensation{}
 	ops := &stubOpsRepo{}
 
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithCompensationEmitter(comp)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+		WithCompensationEmitter(comp).
+		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
 	if _, err := u.Execute(context.Background(), federatedInput()); err != nil {
 		t.Fatalf("Execute: %v", err)

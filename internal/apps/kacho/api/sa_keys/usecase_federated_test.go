@@ -166,7 +166,8 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	hydra := &stubHydra{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 	u.HydraClientNamePrefix = "kacho-sak-"
 	u.AudiencePrefix = "https://example/api"
 
@@ -177,6 +178,8 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 			{
 				Issuer:         "https://token.actions.githubusercontent.com",
 				SubjectPattern: "^repo:acme/infra:ref:refs/heads/main$",
+				PublicKeyPEM:   testIssuerPublicKeyPEM,
+				KeyAlgorithm:   "ES256",
 			},
 		},
 	}

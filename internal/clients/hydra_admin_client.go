@@ -6,7 +6,6 @@
 // Carries the shared connection config (base URL, bearer, HTTP client) for the
 // Hydra admin surfaces iam actually drives, each in its own file:
 //   - hydra_oauth_clients.go — OAuth2 client lifecycle (/admin/clients).
-//   - hydra_trust_grants.go  — JWT-bearer trust grants (/admin/trust/grants).
 //
 // It no longer publishes or deletes JWKs. iam owns no signing keyset: it mints
 // nothing, Hydra is the issuer and signer, and iam only serves a byte-identical

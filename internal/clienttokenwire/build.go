@@ -49,8 +49,13 @@ type BuildConfig struct {
 	// ExpectedAudience — идентификатор НАШЕГО издателя: единственная
 	// принимаемая форма адресата утверждения.
 	ExpectedAudience string
-	// AssertionLifetimeCeiling — потолок разницы «срок − момент выпуска».
+	// AssertionLifetimeCeiling — потолок разницы «срок − момент выпуска» на
+	// полосе аутентификации клиента.
 	AssertionLifetimeCeiling time.Duration
+	// FederatedLifetimeCeiling — тот же потолок на федеративной полосе, где
+	// утверждение подписал внешний издатель (#1124). Отдельная величина, а не
+	// та же: внешний издатель выпускает своей нагрузке токен со своим сроком.
+	FederatedLifetimeCeiling time.Duration
 	// ClockSkew — допуск расхождения часов, на обе стороны.
 	ClockSkew time.Duration
 	// Clock — источник времени. Вход, а не окружение.
@@ -80,6 +85,7 @@ type BuildConfig struct {
 func New(
 	cfg BuildConfig,
 	clients clientassertion.ClientResolver,
+	issuers clientassertion.TrustedIssuerResolver,
 	replay clientassertion.ReplayGuard,
 	signer client_token.Signer,
 	claims client_token.ClaimSource,
@@ -95,16 +101,26 @@ func New(
 	if clients == nil {
 		return nil, fmt.Errorf("clienttokenwire: client resolver is required")
 	}
+	if issuers == nil {
+		// Перечень доверенных издателей — не «дополнительная возможность»:
+		// эндпоинт объявляет федеративную выдачу, и без перечня она отвергала
+		// бы всякое утверждение молча.
+		return nil, fmt.Errorf("clienttokenwire: trusted issuer resolver is required")
+	}
 	if replay == nil {
 		return nil, fmt.Errorf("clienttokenwire: replay guard is required")
 	}
 
 	verifier, err := clientassertion.New(clientassertion.Policy{
-		ExpectedAudience: cfg.ExpectedAudience,
-		MaxLifetime:      cfg.AssertionLifetimeCeiling,
-		ClockSkew:        cfg.ClockSkew,
-		Clock:            cfg.Clock,
-	}, WithDeadlineResolver(clients, cfg.PeerTimeout), WithDeadlineReplay(replay, cfg.PeerTimeout))
+		ExpectedAudience:     cfg.ExpectedAudience,
+		MaxLifetime:          cfg.AssertionLifetimeCeiling,
+		MaxFederatedLifetime: cfg.FederatedLifetimeCeiling,
+		ClockSkew:            cfg.ClockSkew,
+		Clock:                cfg.Clock,
+	},
+		WithDeadlineResolver(clients, cfg.PeerTimeout),
+		WithDeadlineIssuers(issuers, cfg.PeerTimeout),
+		WithDeadlineReplay(replay, cfg.PeerTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: verifier: %w", err)
 	}
@@ -142,6 +158,7 @@ func FromPool(
 	}
 	return New(cfg,
 		kachopg.NewAssertionClientRepo(pool),
+		kachopg.NewTrustedIssuerRepo(pool),
 		kachopg.NewClientAssertionReplayRepo(pool),
 		signer, claims)
 }
@@ -168,6 +185,31 @@ func (d deadlineResolver) ResolveAssertionClient(ctx context.Context, clientID s
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	return d.inner.ResolveAssertionClient(ctx, clientID)
+}
+
+// deadlineIssuers — чтение перечня доверенных издателей со СВОИМ пределом.
+type deadlineIssuers struct {
+	inner   clientassertion.TrustedIssuerResolver
+	timeout time.Duration
+}
+
+// WithDeadlineIssuers оборачивает чтение перечня собственным пределом.
+//
+// Тот же довод, что у чтения реестра: перечень лежит на пути АУТЕНТИФИКАЦИИ, и
+// чтение без предела вешает горутину на неотвечающей базе — отказ приходит не
+// туда, где причина.
+func WithDeadlineIssuers(
+	inner clientassertion.TrustedIssuerResolver, timeout time.Duration,
+) clientassertion.TrustedIssuerResolver {
+	return deadlineIssuers{inner: inner, timeout: timeout}
+}
+
+func (d deadlineIssuers) ResolveTrustedIssuer(ctx context.Context, issuer, subject string) (
+	domain.TrustedIssuer, domain.AssertionClient, error,
+) {
+	ctx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	return d.inner.ResolveTrustedIssuer(ctx, issuer, subject)
 }
 
 // deadlineReplay — допуск однократности со СВОИМ пределом времени.

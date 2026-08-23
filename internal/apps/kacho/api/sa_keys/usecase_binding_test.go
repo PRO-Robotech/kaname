@@ -63,13 +63,15 @@ func TestIssue_BindDPoPOff_RegistersUnboundClient(t *testing.T) {
 func TestIssue_Federated_BindDPoP_RegistersBoundClient(t *testing.T) {
 	h := newTTLHarness(t)
 	h.uc.BindDPoP = true
-	h.uc.WithTrustGrantAdmin(h.trust)
 
 	err := h.issue(t, IssueInput{
 		TTLSeconds: 3600,
-		TrustedSubjects: []domain.TrustedSubject{
-			{Issuer: "https://kube.cluster.local", SubjectPattern: "^system:serviceaccount:ci:deployer$"},
-		},
+		TrustedSubjects: []domain.TrustedSubject{{
+			Issuer:         "https://kube.cluster.local",
+			SubjectPattern: "^system:serviceaccount:ci:deployer$",
+			PublicKeyPEM:   testIssuerPublicKeyPEM,
+			KeyAlgorithm:   "ES256",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

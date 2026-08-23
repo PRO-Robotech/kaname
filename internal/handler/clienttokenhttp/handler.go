@@ -34,6 +34,7 @@ package clienttokenhttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -53,9 +54,19 @@ import (
 // Слово в адресе называет предмет выдачи, а не хранимый секрет.
 const TokenPath = "/iam/v1/token"
 
-// Verifier — порт проверяющего утверждение.
+// Verifier — порт проверяющего утверждение, ОБЕ полосы.
+//
+// Один порт на две полосы, а не два: эндпоинт обязан выбирать полосу сам, по
+// объявленному виду выдачи. Разнеси их по двум портам — и появилась бы посадка,
+// где провязана одна, а вторая молча отвергает всё.
 type Verifier interface {
+	// Verify — полоса аутентификации клиента (RFC 7523 §2.2): утверждение
+	// доказывает личность клиента, ключ берётся из строки реестра.
 	Verify(ctx context.Context, assertionType, raw string) (clientassertion.Result, error)
+	// VerifyFederated — федеративная полоса (RFC 7523 §2.1): утверждение
+	// подписал внешний издатель, ключ берётся из нашего перечня доверенных
+	// издателей.
+	VerifyFederated(ctx context.Context, raw string) (clientassertion.Result, error)
 }
 
 // Issuer — порт выдачи.
@@ -175,29 +186,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// (3) Вид выдачи — из ЗАКРЫТОГО перечня. «Прочее» не является корзиной
-	// приёма.
-	if r.PostForm.Get("grant_type") != tokenpolicy.GrantTypeClientCredentials {
+	// приёма, и заведение второго вида её не завело: развилка ниже перечисляет
+	// оба поимённо, а всё остальное отвергается здесь.
+	grantType := r.PostForm.Get("grant_type")
+	if grantType != tokenpolicy.GrantTypeClientCredentials && grantType != tokenpolicy.GrantTypeJWTBearer {
 		h.count(clientassertion.OutcomeUnsupportedGrantType)
 		writeJSON(w, http.StatusBadRequest, errorBody("unsupported_grant_type"))
 		return
 	}
 
-	// (4) Ровно ОДНО утверждение и ровно ОДИН объявленный вид предъявления.
-	// Это требование к НАШЕМУ разбору, а не описание намерения клиента: форма
-	// позволяет прислать параметр дважды, и разбор, берущий первое значение,
-	// проверил бы не то, что подписал предъявитель.
-	assertionValues := r.PostForm["client_assertion"]
-	typeValues := r.PostForm["client_assertion_type"]
-	if len(assertionValues) != 1 || len(typeValues) != 1 {
-		// Отказ наступает ДО проверки подписи любого из значений.
-		h.count(clientassertion.OutcomeMultipleAssertions)
-		writeJSON(w, http.StatusBadRequest, errorBody("invalid_request"))
-		return
-	}
-
-	// (5) Аутентификация. Всё, что ниже, отдаёт наружу ОДНО И ТО ЖЕ.
-	res, err := h.verifier.Verify(r.Context(), typeValues[0], assertionValues[0])
+	// (4) Полоса выбирается ВИДОМ ВЫДАЧИ, и формы двух полос не смешиваются.
+	//
+	// У каждого вида свои параметры: пара `client_assertion` +
+	// `client_assertion_type` у аутентификации клиента, одиночный `assertion` у
+	// федеративной выдачи. Приняв чужой параметр, эндпоинт позволил бы
+	// предъявителю ВЫБИРАТЬ, какой проверкой его проверят, — а проверки эти
+	// берут ключ из разных источников: одна из строки реестра, другая из
+	// перечня доверенных издателей.
+	res, err := h.authenticate(r, grantType)
 	if err != nil {
+		if res.Outcome == outcomeMalformedGrantForm {
+			// Форма запроса, а не отказ аутентификации: подписи здесь ещё
+			// никто не проверял, и различимость этого исхода оракулом не
+			// является — он говорит о запросе, не о состоянии перечня.
+			h.count(clientassertion.OutcomeMultipleAssertions)
+			writeJSON(w, http.StatusBadRequest, errorBody("invalid_request"))
+			return
+		}
 		h.refuse(r, res.Outcome, err)
 		writeJSON(w, http.StatusUnauthorized, errorBody(res.PresenterResponse()))
 		return
@@ -224,6 +239,54 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"scope":        out.Scope,
 	})
 }
+
+// outcomeMalformedGrantForm — внутренний признак «форма запроса не та».
+//
+// Не значение закрытого словаря исходов: у того словаря каждое значение несёт
+// СВОЙ счётчик, а этот случай считается уже заведённым счётчиком формы запроса.
+// Заведи мы здесь новое значение — оно осталось бы без счётчика, и мёртвый
+// контроль снова стал бы невидимым.
+const outcomeMalformedGrantForm clientassertion.Outcome = "\x00malformed-grant-form"
+
+// authenticate выбирает полосу по виду выдачи и проверяет утверждение.
+//
+// Возвращает outcomeMalformedGrantForm, когда форма запроса не соответствует
+// объявленному виду выдачи: до проверки подписи дело в этом случае не доходит.
+func (h *Handler) authenticate(r *http.Request, grantType string) (clientassertion.Result, error) {
+	switch grantType {
+	case tokenpolicy.GrantTypeJWTBearer:
+		// Параметры полосы клиента здесь не принимаются вовсе.
+		if len(r.PostForm["client_assertion"]) != 0 || len(r.PostForm["client_assertion_type"]) != 0 {
+			return clientassertion.Result{Outcome: outcomeMalformedGrantForm},
+				errFormMismatch
+		}
+		// Ровно ОДНО утверждение: форма позволяет прислать параметр дважды, и
+		// разбор, берущий первое значение, проверил бы не то, что подписал
+		// предъявитель.
+		values := r.PostForm["assertion"]
+		if len(values) != 1 {
+			return clientassertion.Result{Outcome: outcomeMalformedGrantForm}, errFormMismatch
+		}
+		return h.verifier.VerifyFederated(r.Context(), values[0])
+
+	default: // tokenpolicy.GrantTypeClientCredentials — проверен вызывающим.
+		// Зеркально: одиночный параметр федеративной полосы здесь не
+		// принимается. Запрет симметричен, потому что и предмет его
+		// симметричен: выбирать проверку не вправе ни один вид выдачи.
+		if len(r.PostForm["assertion"]) != 0 {
+			return clientassertion.Result{Outcome: outcomeMalformedGrantForm}, errFormMismatch
+		}
+		assertionValues := r.PostForm["client_assertion"]
+		typeValues := r.PostForm["client_assertion_type"]
+		if len(assertionValues) != 1 || len(typeValues) != 1 {
+			return clientassertion.Result{Outcome: outcomeMalformedGrantForm}, errFormMismatch
+		}
+		return h.verifier.Verify(r.Context(), typeValues[0], assertionValues[0])
+	}
+}
+
+// errFormMismatch — форма запроса не соответствует объявленному виду выдачи.
+var errFormMismatch = errors.New("clienttokenhttp: request form does not match the declared grant type")
 
 // refuse записывает отказ туда, где различимость ЗАКОННА.
 //

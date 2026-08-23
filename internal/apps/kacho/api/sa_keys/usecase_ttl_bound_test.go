@@ -39,7 +39,7 @@ type ttlHarness struct {
 	repo  *stubSAClientRepo
 	hydra *stubHydra
 	ops   *stubOpsRepo
-	trust *fakeTrustGrants
+	trust *fakeTrustedIssuers
 	now   time.Time
 }
 
@@ -49,10 +49,10 @@ func newTTLHarness(t *testing.T) *ttlHarness {
 		repo:  &stubSAClientRepo{},
 		hydra: &stubHydra{},
 		ops:   &stubOpsRepo{},
-		trust: &fakeTrustGrants{},
+		trust: &fakeTrustedIssuers{},
 		now:   time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
 	}
-	h.uc = NewIssueSAKeyUseCase(h.repo, &stubTx{}, h.hydra, h.ops)
+	h.uc = NewIssueSAKeyUseCase(h.repo, &stubTx{}, h.hydra, h.ops).WithTrustedIssuerWriter(h.trust)
 	h.uc.now = func() time.Time { return h.now }
 	return h
 }
@@ -221,12 +221,14 @@ func TestIssue_RegistersClientWithAccessTokenLifespan(t *testing.T) {
 func TestIssue_Federated_RegistersClientWithAccessTokenLifespan(t *testing.T) {
 	h := newTTLHarness(t)
 	h.uc.AccessTokenLifespan = 15 * time.Minute
-	h.uc.WithTrustGrantAdmin(h.trust)
 
 	err := h.issue(t, IssueInput{
-		TrustedSubjects: []domain.TrustedSubject{
-			{Issuer: "https://kube.cluster.local", SubjectPattern: "^system:serviceaccount:ci:deployer$"},
-		},
+		TrustedSubjects: []domain.TrustedSubject{{
+			Issuer:         "https://kube.cluster.local",
+			SubjectPattern: "^system:serviceaccount:ci:deployer$",
+			PublicKeyPEM:   testIssuerPublicKeyPEM,
+			KeyAlgorithm:   "ES256",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -255,22 +257,27 @@ func TestIssue_AccessTokenLifespanUnset_LeavesFieldEmpty(t *testing.T) {
 	}
 }
 
-// ── federation trust-grant lifetime ──────────────────────────────────────────
+// ── срок доверия издателю ────────────────────────────────────────────────────
 
-// TestIssue_Federated_TrustGrantBoundedByDefault — the federated path derived
-// its trust-grant expiry from the key TTL and fell back to TEN YEARS when the
-// TTL was omitted. That fallback outlives any plausible rotation policy, and
-// it was reached by the *default* call shape.
-func TestIssue_Federated_TrustGrantBoundedByDefault(t *testing.T) {
+// TestIssue_Federated_TrustBoundedByDefault — доверие издателю ограничено
+// умолчанием, а не десятилетием.
+//
+// Свойство осталось прежним, измеряется оно теперь по НАШЕЙ таблице (#1124): до
+// перевода перечня срок ставился гранту у поставщика и при опущенном TTL
+// откатывался к ДЕСЯТИ ГОДАМ — причём достигалось это ФОРМОЙ ВЫЗОВА ПО
+// УМОЛЧАНИЮ. Величина пережила бы любую политику смены ключей.
+func TestIssue_Federated_TrustBoundedByDefault(t *testing.T) {
 	h := newTTLHarness(t)
 	h.uc.DefaultTTL = 90 * 24 * time.Hour
 	h.uc.MaxTTL = 365 * 24 * time.Hour
-	h.uc.WithTrustGrantAdmin(h.trust)
 
 	err := h.issue(t, IssueInput{
-		TrustedSubjects: []domain.TrustedSubject{
-			{Issuer: "https://kube.cluster.local", SubjectPattern: "^system:serviceaccount:ci:deployer$"},
-		},
+		TrustedSubjects: []domain.TrustedSubject{{
+			Issuer:         "https://kube.cluster.local",
+			SubjectPattern: "^system:serviceaccount:ci:deployer$",
+			PublicKeyPEM:   testIssuerPublicKeyPEM,
+			KeyAlgorithm:   "ES256",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -278,11 +285,16 @@ func TestIssue_Federated_TrustGrantBoundedByDefault(t *testing.T) {
 	waitForOp(t, h.ops)
 
 	if len(h.trust.calls) != 1 {
-		t.Fatalf("trust-grant calls = %d; want 1", len(h.trust.calls))
+		t.Fatalf("записей перечня = %d; ожидалась 1", len(h.trust.calls))
 	}
-	if got, want := h.trust.calls[0].ExpiresAt, h.now.Add(90*24*time.Hour); !got.Equal(want) {
-		t.Errorf("trust-grant expires_at = %v; want the bounded default %v "+
-			"(an omitted TTL must not buy a decade of federation trust)", got, want)
+	got := h.trust.calls[0].expiresAt
+	if got == nil {
+		t.Fatal("срок доверия не назван: бессрочное доверие постороннему издателю " +
+			"переживает любую политику смены ключей")
+	}
+	if want := h.now.Add(90 * 24 * time.Hour); !got.Equal(want) {
+		t.Errorf("срок доверия = %v; ожидалось ограниченное умолчание %v "+
+			"(опущенный TTL не покупает десятилетия доверия)", got, want)
 	}
 }
 

@@ -4,6 +4,8 @@
 package domain
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/url"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	"go.uber.org/multierr"
+
+	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 )
 
 // ServiceAccountOAuthClient — Class A workload identity (Hydra static client).
@@ -44,16 +48,14 @@ type ServiceAccountOAuthClient struct {
 	// always set "ES256"; federated rows leave it empty.
 	KeyAlgorithm string
 
-	// TrustedSubjects — federated mode (Federation IN). When non-empty, this SA
-	// uses the RFC 7521/7523 jwt-bearer grant with an EXTERNAL IdP rather
-	// than the private_key_jwt flow: kacho-iam holds no key
-	// material, the Hydra OAuth2 client is registered for
-	// `urn:ietf:params:oauth:grant-type:jwt-bearer` with
-	// `token_endpoint_auth_method=none`, and Hydra validates incoming
-	// assertions against the configured global trusted issuers
-	// (helm umbrella `hydra.config.oauth2.grant.jwt` + admin trust-grants).
-	// Each entry restricts which external `(iss, sub)` tuples may assert
-	// this client. Empty slice = private_key_jwt mode.
+	// TrustedSubjects — федеративный вид ключа. Непустой перечень означает, что
+	// удостоверение предъявляет ВНЕШНИЙ издатель по RFC 7521/7523: своего
+	// ключевого материала строка не несёт вовсе, а подпись проверяется ключом
+	// издателя из НАШЕГО перечня доверенных издателей (задача #1124), который
+	// читает проверяющий утверждения на пути запроса.
+	//
+	// Каждый элемент сужает, какая внешняя пара `(iss, sub)` вправе выступать
+	// за этот ключ. Пустой перечень — обычный вид с ключевым материалом.
 	TrustedSubjects []TrustedSubject
 
 	// Name — человекочитаемое имя ключа, выставляется на Issue (create-only,
@@ -69,21 +71,33 @@ type ServiceAccountOAuthClient struct {
 // verbatim; `SubjectPattern` is a LITERAL-anchored exact subject (`^<literal>$`,
 // no regex metacharacters).
 //
-// The literal-anchored form is required because the enforcement point is Hydra's
-// native jwt-bearer trust-grant, which matches an EXACT subject (`allow_any_
-// subject=false`) — not a per-client regex engine. kacho-iam is off the request
-// path (the pod exchanges its projected token with Hydra directly), so a wildcard
-// pattern could not be enforced and is rejected up front (any pod of the cluster
-// would otherwise obtain a token). Per-subject wildcard federation would require a
-// kacho-side enforcer on the request path.
+// Точная форма субъекта требуется потому, что доверие выдаётся ПОИМЁННО: запись,
+// покрывающая субъектов образцом, называет тех, кого выдававший не перечислял, и
+// установить их состав нельзя ни по записи, ни по журналу.
+//
+// # Перечень — НАША таблица (задача #1124)
+//
+// Прежде решение о доверии принимал поставщик: запись жила у него, и там же
+// лежал ключ издателя. Отсюда была выведена и прежняя редакция этого
+// комментария — «служба прав вне пути запроса, поэтому образец было бы нечем
+// применить». Сегодня служба прав НА пути запроса: перечень читает её проверка
+// утверждения (`internal/clientassertion`, федеративная полоса). Точная форма
+// осталась, но держит её теперь названный выше довод, а не чужая реализация.
 type TrustedSubject struct {
 	Issuer         string
 	SubjectPattern string
+	// PublicKeyPEM — открытый ключ ИЗДАТЕЛЯ (SPKI PEM). Тот, которым подписано
+	// внешнее утверждение; нашего ключевого материала федеративная строка не
+	// несёт вовсе.
+	PublicKeyPEM string
+	// KeyAlgorithm — зарегистрированный алгоритм издателя. Пустое значение
+	// означает «ключа нет», а НЕ «любой алгоритм».
+	KeyAlgorithm string
 }
 
 // literalSubjectRe — a subject_pattern anchored with `^…$` around a run of
 // characters that are NOT regex metacharacters (so the enclosed text is a literal
-// subject, matched exactly by the Hydra trust-grant).
+// subject, сверяемый с `sub` предъявленного утверждения дословно).
 var literalSubjectRe = regexp.MustCompile(`^\^[^.\\*+?()\[\]{}|^$]+\$$`)
 
 // LiteralSubject returns the exact subject enclosed by a valid literal-anchored
@@ -100,6 +114,13 @@ func (ts TrustedSubject) LiteralSubject() (string, bool) {
 // trust-config: no non-https / loopback / private / link-local host);
 // SubjectPattern must be a literal-anchored exact subject. Length caps mirror the
 // proto (≤512 each).
+//
+// Ключевой материал издателя обязателен и проверяется на РАЗБИРАЕМОСТЬ здесь, а
+// не при первом предъявлении: непригодный ключ, принятый на выдаче, даёт запись
+// доверия, которая не примет никогда никого, — то есть возможность, объявленную
+// и не работающую ни при каком входе. Отказ на выдаче виден тому, кто её
+// заказал; отказ на предъявлении виден постороннему и неотличим для него от
+// «доверия нет».
 func (ts TrustedSubject) Validate() error {
 	var errs error
 	switch {
@@ -121,7 +142,44 @@ func (ts TrustedSubject) Validate() error {
 				"Illegal argument subject_pattern: must be a literal anchored subject (^...$, no wildcards)"))
 		}
 	}
+	switch {
+	case ts.KeyAlgorithm == "":
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument key_algorithm: required"))
+	case !tokenpolicy.AlgorithmAllowed(ts.KeyAlgorithm):
+		errs = multierr.Append(errs, fmt.Errorf(
+			"Illegal argument key_algorithm: must be one of %v", tokenpolicy.Algorithms()))
+	}
+	switch {
+	case ts.PublicKeyPEM == "":
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument public_key_pem: required"))
+	case len(ts.PublicKeyPEM) > 8192:
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument public_key_pem: length must be <=8192"))
+	default:
+		if err := validateSPKIPublicKeyPEM(ts.PublicKeyPEM); err != nil {
+			errs = multierr.Append(errs, fmt.Errorf("Illegal argument public_key_pem: %v", err))
+		}
+	}
 	return errs
+}
+
+// validateSPKIPublicKeyPEM — ключ разбирается и он ОТКРЫТЫЙ.
+//
+// Проверяется и то, что блок вообще разбирается, и то, что это не закрытая
+// половина: закрытый ключ, попавший сюда по недосмотру называющего, был бы
+// принят как «ключ есть» и осел бы в нашей таблице — то есть мы приняли бы на
+// хранение чужой секрет, которого просить не должны.
+func validateSPKIPublicKeyPEM(raw string) error {
+	block, _ := pem.Decode([]byte(raw))
+	if block == nil {
+		return fmt.Errorf("not a PEM block")
+	}
+	if strings.Contains(block.Type, "PRIVATE") {
+		return fmt.Errorf("a private key was supplied where a public key is expected")
+	}
+	if _, err := x509.ParsePKIXPublicKey(block.Bytes); err != nil {
+		return fmt.Errorf("not an SPKI public key")
+	}
+	return nil
 }
 
 // isPublicHTTPSIssuer — true when raw parses as an https URL whose host is not a

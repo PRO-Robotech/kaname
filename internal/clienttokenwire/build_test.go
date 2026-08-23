@@ -45,6 +45,20 @@ func (r *recordingResolver) ResolveAssertionClient(ctx context.Context, _ string
 	return domain.AssertionClient{}, domain.ErrAssertionClientUnknown
 }
 
+// recordingIssuers — перечень доверенных издателей. Как и реестр выше, он
+// ничего не утверждает об исходе — лишь запоминает, с каким сроком его позвали.
+type recordingIssuers struct {
+	deadline time.Time
+	had      bool
+}
+
+func (r *recordingIssuers) ResolveTrustedIssuer(ctx context.Context, _, _ string) (
+	domain.TrustedIssuer, domain.AssertionClient, error,
+) {
+	r.deadline, r.had = ctx.Deadline()
+	return domain.TrustedIssuer{}, domain.AssertionClient{}, domain.ErrTrustedIssuerUnknown
+}
+
 type recordingReplay struct {
 	deadline time.Time
 	had      bool
@@ -72,6 +86,7 @@ func full() clienttokenwire.BuildConfig {
 	return clienttokenwire.BuildConfig{
 		ExpectedAudience:         "https://iam.kacho.local",
 		AssertionLifetimeCeiling: tokenpolicy.MaxAssertionLifetime,
+		FederatedLifetimeCeiling: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:                tokenpolicy.ClockSkew,
 		Clock:                    time.Now,
 		AllowedAudiences:         []string{"api.kacho.local"},
@@ -84,7 +99,7 @@ func full() clienttokenwire.BuildConfig {
 
 func build(cfg clienttokenwire.BuildConfig) (*recordingResolver, *recordingReplay, error) {
 	res, rep := &recordingResolver{}, &recordingReplay{}
-	_, err := clienttokenwire.New(cfg, res, rep, stubSigner{}, stubClaims{})
+	_, err := clienttokenwire.New(cfg, res, &recordingIssuers{}, rep, stubSigner{}, stubClaims{})
 	return res, rep, err
 }
 
@@ -104,6 +119,8 @@ func TestF2_22_CompositionRefusesADegenerateDeclaredNumber(t *testing.T) {
 		{"ожидаемый адресат не задан", func(c *clienttokenwire.BuildConfig) { c.ExpectedAudience = " " }, "audience"},
 		{"потолок длительности утверждения нулевой", func(c *clienttokenwire.BuildConfig) { c.AssertionLifetimeCeiling = 0 }, "lifetime"},
 		{"потолок длительности утверждения отрицателен", func(c *clienttokenwire.BuildConfig) { c.AssertionLifetimeCeiling = -time.Second }, "lifetime"},
+		{"федеративный потолок длительности нулевой", func(c *clienttokenwire.BuildConfig) { c.FederatedLifetimeCeiling = 0 }, "lifetime"},
+		{"федеративный потолок длительности отрицателен", func(c *clienttokenwire.BuildConfig) { c.FederatedLifetimeCeiling = -time.Second }, "lifetime"},
 		{"допуск часов отрицателен", func(c *clienttokenwire.BuildConfig) { c.ClockSkew = -time.Second }, "skew"},
 		{"часы не поданы", func(c *clienttokenwire.BuildConfig) { c.Clock = nil }, "clock"},
 		{"перечень адресатов пуст", func(c *clienttokenwire.BuildConfig) { c.AllowedAudiences = nil }, "audience"},
@@ -127,19 +144,23 @@ func TestF2_22_CompositionRefusesADegenerateDeclaredNumber(t *testing.T) {
 func TestCompositionRefusesAMissingPort(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"без реестра": func() error {
-			_, err := clienttokenwire.New(full(), nil, &recordingReplay{}, stubSigner{}, stubClaims{})
+			_, err := clienttokenwire.New(full(), nil, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, stubClaims{})
+			return err
+		},
+		"без перечня доверенных издателей": func() error {
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, nil, &recordingReplay{}, stubSigner{}, stubClaims{})
 			return err
 		},
 		"без однократности": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, nil, stubSigner{}, stubClaims{})
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, nil, stubSigner{}, stubClaims{})
 			return err
 		},
 		"без подписанта": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingReplay{}, nil, stubClaims{})
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, nil, stubClaims{})
 			return err
 		},
 		"без источника состава": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingReplay{}, stubSigner{}, nil)
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, nil)
 			return err
 		},
 	} {

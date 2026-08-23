@@ -94,8 +94,11 @@ flowchart LR
 - **`private_key_jwt`** (по умолчанию): клиент подписывает `client_assertion` приватным ключом и
   обменивает его в Hydra `/oauth2/token` на kacho-JWT.
 - **`jwt-bearer` (федерация)**: внешняя нагрузка (CI-runner, k8s-под, внешний OIDC IdP) предъявляет
-  **свой** OIDC-JWT. Ключ регистрируется с `trustedSubjects[]` — парами `(issuer, subjectPattern)`,
-  ограничивающими, какие внешние `iss`/`sub` вправе представлять этот SA. `audience[]` управляет
+  **свой** OIDC-JWT токен-эндпоинту платформы. Ключ выдаётся с `trustedSubjects[]` — записями
+  `(issuer, subjectPattern, publicKeyPem, keyAlgorithm)`, которые ложатся в **наш** перечень
+  доверенных издателей и ограничивают, какие внешние `iss`/`sub` вправе представлять этот SA.
+  Подпись внешнего утверждения проверяется ключом издателя **из этого перечня**: решение о
+  доверии постороннему принимаем мы, и принимается оно на пути запроса. `audience[]` управляет
   `aud`-claim'ом kacho-JWT для внешних consumer'ов (STS, workload-identity-federation).
 
 ## Проверка на gateway

@@ -866,9 +866,9 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// (serve.go passes it as registrytokenwire.BuildConfig.Service). Without it
 	// Hydra rejects a docker-login exchange as an un-whitelisted audience.
 	issueUC.RegistryAudience = cfg.APIServer.RegistryToken.TokenService()
-	// Register exact-subject jwt-bearer trust-grants for federated (k8s/CI) keys —
-	// the same Hydra admin client carries the trust-grant endpoint.
-	issueUC.WithTrustGrantAdmin(hydraAdmin)
+	// Перечень доверенных издателей федеративного ключа — НАША таблица (#1124):
+	// писатель провязан здесь, читает её проверка утверждения на пути запроса.
+	issueUC.WithTrustedIssuerWriter(kachopg.NewTrustedIssuerRepo(pool))
 	// Wire the post-Issue secret redactor. After the Operation is
 	// MarkDone'd with plaintext client_secret, this pg adapter clears the
 	// client_secret field in the proto-marshalled response_data (BYTEA) via a
