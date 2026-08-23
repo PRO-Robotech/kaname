@@ -1164,42 +1164,40 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 	committed = true
 	// Delete from Hydra (idempotent — 404 OK).
 	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
-		if !errors.Is(err, clients.ErrHydraClientNotFound) {
-			// The DB delete already committed, so the RPC stays successful and the
-			// provider-side client registration outlives it. There is no cleanup
-			// worker in this service and deliberately none is added: what makes a
-			// revocation a revocation is that the credential stops working, and
-			// that no longer depends on this call succeeding.
-			//
-			// The mapping row IS the authority on whether a client is a kacho
-			// credential, and the token hook consults it on every single mint. With
-			// the row gone the surviving client resolves to no principal, so the
-			// hook refuses it (`invalid_client`, 403) and records an
-			// `authn.token.denied` with reason `principal_not_found` each time it
-			// tries — see handler/iamhooks/token_hook_handler.go. So at commit this
-			// key can obtain NOTHING FURTHER, and that no longer waits on the
-			// provider being reachable.
-			//
-			// What it does not do is reach back for what was already handed out. An
-			// access token minted before this commit is self-contained and stays
-			// valid until it expires; revocation bounds the credential, not the
-			// tokens already in flight. The window is therefore the access-token
-			// lifetime — minutes in production, deliberately wider on the local
-			// stand — and that is the property to state when someone asks how fast
-			// a revoke takes effect.
-			//
-			// A compensating outbox or sweeper was considered and rejected: both
-			// are EVENTUAL, so neither would have closed the window the hook closes
-			// outright, and what they would buy — deleting a registration that can
-			// no longer obtain a token — is inventory hygiene, not security. That
-			// leftover is what this WARN is for; an operator can delete it by hand.
-			if u.logger != nil {
-				u.logger.WarnContext(ctx, "sa-key hydra oauth-client delete failed after DB commit — the registration outlives its row (it can no longer mint; delete it by hand)",
-					slog.String("oauth_client_id", string(cur.OAuthClientID)),
-					slog.String("key_id", string(in.KeyID)),
-					slog.String("err", err.Error()),
-				)
-			}
+		// The DB delete already committed, so the RPC stays successful and the
+		// provider-side client registration outlives it. There is no cleanup
+		// worker in this service and deliberately none is added: what makes a
+		// revocation a revocation is that the credential stops working, and
+		// that no longer depends on this call succeeding.
+		//
+		// The mapping row IS the authority on whether a client is a kacho
+		// credential, and the token hook consults it on every single mint. With
+		// the row gone the surviving client resolves to no principal, so the
+		// hook refuses it (`invalid_client`, 403) and records an
+		// `authn.token.denied` with reason `principal_not_found` each time it
+		// tries — see handler/iamhooks/token_hook_handler.go. So at commit this
+		// key can obtain NOTHING FURTHER, and that no longer waits on the
+		// provider being reachable.
+		//
+		// What it does not do is reach back for what was already handed out. An
+		// access token minted before this commit is self-contained and stays
+		// valid until it expires; revocation bounds the credential, not the
+		// tokens already in flight. The window is therefore the access-token
+		// lifetime — minutes in production, deliberately wider on the local
+		// stand — and that is the property to state when someone asks how fast
+		// a revoke takes effect.
+		//
+		// A compensating outbox or sweeper was considered and rejected: both
+		// are EVENTUAL, so neither would have closed the window the hook closes
+		// outright, and what they would buy — deleting a registration that can
+		// no longer obtain a token — is inventory hygiene, not security. That
+		// leftover is what this WARN is for; an operator can delete it by hand.
+		if u.logger != nil {
+			u.logger.WarnContext(ctx, "sa-key hydra oauth-client delete failed after DB commit — the registration outlives its row (it can no longer mint; delete it by hand)",
+				slog.String("oauth_client_id", string(cur.OAuthClientID)),
+				slog.String("key_id", string(in.KeyID)),
+				slog.String("err", err.Error()),
+			)
 		}
 	}
 	resp := &iamv1.RevokeSAKeyResponse{
