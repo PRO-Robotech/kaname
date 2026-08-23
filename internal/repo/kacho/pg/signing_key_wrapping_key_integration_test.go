@@ -83,12 +83,16 @@ func TestSigningKeyContour_StandRaisedOverAnExistingDatabase(t *testing.T) {
 	at := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return at }
 
+	// Счётчик строк смотрит в базу МИМО ключницы — иначе он утверждал бы о том
+	// же, о чём и она. Пул у него СВОЙ и один на пробу: закрытие идёт через
+	// pgtest.ClosePoolAtEnd, потому что `defer pool.Close()` ждёт возврата всех
+	// выданных соединений и на упавшей пробе вешает весь пакет, а не её одну.
+	countPool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, countPool)
 	countKeys := func() int {
-		pool, err := coredb.NewPool(ctx, dsn)
-		require.NoError(t, err)
-		defer pool.Close()
 		var n int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kacho_iam.token_signing_keys`).Scan(&n))
+		require.NoError(t, countPool.QueryRow(ctx, `SELECT count(*) FROM kacho_iam.token_signing_keys`).Scan(&n))
 		return n
 	}
 
