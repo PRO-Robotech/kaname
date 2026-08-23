@@ -2469,6 +2469,17 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.subscription.InternalSubscriptionService/Subscribe",
+    "permission": "platform.subscription.subscribe",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "scope_filtered": true
+  },
+  {
     "fqn": "kacho.cloud.vpc.v1.AddressPoolService/AddCidrBlocks",
     "permission": "vpc.address_pools.add_cidr_blocks",
     "required_relation": "system_admin",
