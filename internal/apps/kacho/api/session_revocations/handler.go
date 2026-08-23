@@ -81,6 +81,10 @@ type Handler struct {
 	// relations — the relation-Check port deciding whether the caller may read
 	// the user NAMED IN THE REQUEST. See ListByUser.
 	relations authzguard.RelationChecker
+	// cutoffs — читатель отсечки субъекта (`user_token_revocations`). Отдельный
+	// от `read`: та таблица про удостоверение, эта про человека. См.
+	// session_cutoff.go.
+	cutoffs cutoffReader
 }
 
 // NewHandler — builder. `revoke` carries the RevokeUseCase; `read` is the
