@@ -305,8 +305,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// тихо ставший своей противоположностью.
 	userBlock := userapp.NewBlockUserUseCase(kachoRepo, opsRepo)
 	userUnblock := userapp.NewUnblockUserUseCase(kachoRepo, opsRepo)
+	// Исключение из аккаунта — пара к приглашению: тот вводит человека в
+	// аккаунт, этот выводит (#1127). Строку личности не трогает.
+	userRemoveFromAccount := userapp.NewRemoveFromAccountUseCase(kachoRepo, opsRepo)
 	userHandler := userapp.NewHandler(userGet, userList, userUpdate, userDelete, userInvite,
-		userBlock, userUnblock).
+		userBlock, userUnblock, userRemoveFromAccount).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
 

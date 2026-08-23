@@ -31,12 +31,15 @@ type Handler struct {
 	invite  *InviteUserUseCase
 	block   *BlockUserUseCase
 	unblock *UnblockUserUseCase
+	remove  *RemoveFromAccountUseCase
 	listOp  *shared.ListOperationsUseCase
 }
 
 func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d *DeleteUserUseCase,
-	i *InviteUserUseCase, block *BlockUserUseCase, unblock *UnblockUserUseCase) *Handler {
-	return &Handler{get: g, list: l, update: u, delete: d, invite: i, block: block, unblock: unblock}
+	i *InviteUserUseCase, block *BlockUserUseCase, unblock *UnblockUserUseCase,
+	remove *RemoveFromAccountUseCase) *Handler {
+	return &Handler{get: g, list: l, update: u, delete: d, invite: i,
+		block: block, unblock: unblock, remove: remove}
 }
 
 // WithListOperations wires the per-resource operation-listing use-case.
@@ -152,6 +155,19 @@ func (h *Handler) Block(ctx context.Context, req *iamv1.BlockUserRequest) (*oper
 // Unblock — участие разрешается снова.
 func (h *Handler) Unblock(ctx context.Context, req *iamv1.UnblockUserRequest) (*operationpb.Operation, error) {
 	op, err := h.unblock.Execute(ctx, domain.UserID(req.GetUserId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// RemoveFromAccount — человек перестаёт состоять в названном аккаунте. Пара к
+// Invite: тот вводит человека в аккаунт, этот выводит. Строку личности не
+// трогает — её снятие спрашивает `identity_remover` (#1131), а это отношение
+// аккаунта `member_remover` (#1127).
+func (h *Handler) RemoveFromAccount(ctx context.Context, req *iamv1.RemoveUserFromAccountRequest) (*operationpb.Operation, error) {
+	op, err := h.remove.Execute(ctx,
+		domain.UserID(req.GetUserId()), domain.AccountID(req.GetAccountId()))
 	if err != nil {
 		return nil, err
 	}

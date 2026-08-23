@@ -387,3 +387,11 @@ type usrUnrestrictedVisibility struct{}
 func (usrUnrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject) (visibility.Scope, error) {
 	return visibility.Scope{Unrestricted: true, GrantedObjects: map[string][]string{}}, nil
 }
+
+// MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
+// пробы другой, и подставной ответ был бы утверждением, которого никто не
+// делал. Единственный прод-вызывающий — разрешение осиротевшей операции
+// исключения из аккаунта (#1127).
+func (*scopeUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
+	return false, nil
+}

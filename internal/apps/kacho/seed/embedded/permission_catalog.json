@@ -1474,7 +1474,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Delete",
     "permission": "iam.users.delete",
-    "required_relation": "v_delete",
+    "required_relation": "identity_remover",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"
@@ -1520,6 +1520,16 @@
       "from_request_field": "user_id"
     },
     "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.UserService/RemoveFromAccount",
+    "permission": "iam.users.removeFromAccount",
+    "required_relation": "member_remover",
+    "scope_extractor": {
+      "object_type": "account",
+      "from_request_field": "account_id"
+    },
+    "required_acr_min": "2"
   },
   {
     "fqn": "kacho.cloud.iam.v1.UserService/Unblock",

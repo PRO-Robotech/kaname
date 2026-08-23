@@ -38,6 +38,11 @@ import (
 // then the probe would pass without the floor ever running.
 const actionsUserID = "usr000000000000actns"
 
+// actionsAccountID — well-formed account id, по той же причине, что и
+// `actionsUserID`: отказ по формату прошёл бы мимо пола и оставил бы пробу
+// зелёной, ни разу его не позвав.
+const actionsAccountID = "acc000000000000actns"
+
 func TestHandlerServesBlockAndUnblock(t *testing.T) {
 	// Nil use-cases on purpose: the anti-anonymous floor answers before any of
 	// them is dereferenced, so the probe needs no fixture to be decisive.
@@ -45,6 +50,7 @@ func TestHandlerServesBlockAndUnblock(t *testing.T) {
 		nil, nil, nil, nil, nil,
 		NewBlockUserUseCase(nil, nil),
 		NewUnblockUserUseCase(nil, nil),
+		NewRemoveFromAccountUseCase(nil, nil),
 	)
 
 	t.Run("block", func(t *testing.T) {
@@ -54,6 +60,16 @@ func TestHandlerServesBlockAndUnblock(t *testing.T) {
 	t.Run("unblock", func(t *testing.T) {
 		_, err := srv.Unblock(context.Background(), &iamv1.UnblockUserRequest{UserId: actionsUserID})
 		requireUserHandlerAnswered(t, err, "Unblock")
+	})
+	// Исключение из аккаунта (#1127) — третье действие того же вида, и та же
+	// ловушка ему грозит: RPC объявлен, маршрутизирован, стоит в каталоге, а
+	// метод не переопределяет вшитую заглушку, и каждый вызов отвечает
+	// `Unimplemented`. Ни одна проба слоёв ниже этого не увидит — они не входят
+	// через транспорт.
+	t.Run("removeFromAccount", func(t *testing.T) {
+		_, err := srv.RemoveFromAccount(context.Background(),
+			&iamv1.RemoveUserFromAccountRequest{UserId: actionsUserID, AccountId: actionsAccountID})
+		requireUserHandlerAnswered(t, err, "RemoveFromAccount")
 	})
 }
 

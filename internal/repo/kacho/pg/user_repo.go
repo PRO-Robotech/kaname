@@ -111,6 +111,22 @@ func (r *userReader) GetByAccountEmail(ctx context.Context, accountID domain.Acc
 	return u, nil
 }
 
+// MembershipExists — состоит ли человек в НАЗВАННОМ аккаунте.
+//
+// Вопрос задаётся паре, а не строке: `users.account_id` называет ОДИН аккаунт
+// человека из многих (легаси-поле перехода IAM-ID-1), и ответ по ней был бы
+// ответом про другой аккаунт.
+func (r *userReader) MembershipExists(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (bool, error) {
+	var exists bool
+	err := r.tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM memberships WHERE user_id = $1 AND account_id = $2)`,
+		string(userID), string(accountID)).Scan(&exists)
+	if err != nil {
+		return false, mapErr(err, "", string(userID))
+	}
+	return exists, nil
+}
+
 // FindPendingByEmail — приглашённые строки по адресу.
 //
 // Строк по адресу больше не бывает больше одной (`users_identity_email_uniq`,
@@ -488,6 +504,13 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 
 type userWriter struct {
 	userReader
+	// membershipHintSink — обратный указатель в объемлющую writeTx (ставится
+	// `writeTx.UsersW`). Исключение из аккаунта отвергается ОТЛОЖЕННЫМ
+	// триггером, то есть на COMMIT, а не на своём стейтменте: к моменту отказа
+	// вызывающий из виду потерян, и назвать в тексте человека и аккаунт можно
+	// только тем, что писатель оставил здесь. Тот же приём, что у
+	// `ownerFKHintSink` соседа, и по той же причине.
+	membershipHintSink *string
 }
 
 // Upsert — legacy path retained for backward-compat with integration tests
@@ -965,3 +988,32 @@ func nullableInvitedBy(id domain.UserID) any {
 var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func escapeLikePattern(s string) string { return likePatternEscaper.Replace(s) }
+
+// RemoveMembership — снять членство человека в названном аккаунте.
+//
+// Один стейтмент: «человека здесь больше нет» выражается отсутствием строки, и
+// проверка-перед-снятием была бы check-then-act (ban #10) — между вопросом и
+// снятием членство успевает появиться повторным приглашением.
+//
+// Идемпотентность здесь не свойство кода, а свойство предмета: снятие
+// отсутствующего членства и есть достигнутая цель. Поэтому 0 строк — не ошибка,
+// а второй законный исход, и вызывающий отличает их по признаку возврата.
+//
+// Строка `users` не читается и не пишется: исключение — действие над ЧЛЕНСТВОМ.
+// Колонка `users.account_id` намеренно остаётся как есть — она легаси-поле
+// перехода и называет один аккаунт из многих; править её отсюда значило бы
+// менять предмет, которого этот вызов не касается.
+func (w *userWriter) RemoveMembership(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (bool, error) {
+	// Подсказка ставится ДО стейтмента: отказ придёт на COMMIT, и к тому моменту
+	// ни человек, ни аккаунт из аргументов уже недоступны отображению ошибок.
+	if w.membershipHintSink != nil {
+		*w.membershipHintSink = string(userID) + "|" + string(accountID)
+	}
+	tag, err := w.tx.Exec(ctx,
+		`DELETE FROM memberships WHERE user_id = $1 AND account_id = $2`,
+		string(userID), string(accountID))
+	if err != nil {
+		return false, mapErr(err, "Membership.Remove", string(userID)+"|"+string(accountID))
+	}
+	return tag.RowsAffected() > 0, nil
+}

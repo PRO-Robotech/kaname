@@ -17,4 +17,11 @@ const (
 	// only way it stays answerable once the payload shape has moved on.
 	auditEventUserBlocked   = "iam.user.blocked"
 	auditEventUserUnblocked = "iam.user.unblocked"
+
+	// Исключение человека из аккаунта — событие СВОЁ, а не `deleted` и не
+	// `updated`. Оно ничего не меняет в строке личности: тот же человек
+	// продолжает работать в остальных своих аккаунтах. Отвечать на вопрос «кто
+	// вывел этого человека из нашего аккаунта и когда» можно только событием —
+	// строка, которой больше нет, ответа не хранит (#1127).
+	auditEventUserRemovedFromAccount = "iam.user.removed_from_account"
 )

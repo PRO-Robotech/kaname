@@ -70,6 +70,12 @@ type writeTx struct {
 	// canonical "User <id> not found" text when the DEFERRABLE accounts_owner_fk
 	// fires at commit-time (see Commit below).
 	ownerFKHint string
+	// membershipHint — «человек|аккаунт» снимаемого членства, поставленный
+	// `userWriter.RemoveMembership`. Читается Commit'ом: отложенный триггер
+	// `membership_carrying_rights_is_kept` (472002) отвергает снятие членства,
+	// несущего живую выдачу, НА КОММИТЕ — и без подсказки текст отказа не смог бы
+	// назвать ни человека, ни аккаунт.
+	membershipHint string
 }
 
 func (w *writeTx) AccountsW() account.WriterIface {
@@ -83,7 +89,10 @@ func (w *writeTx) ProjectsW() project.WriterIface {
 	return &projectWriter{projectReader: projectReader{tx: w.tx}}
 }
 func (w *writeTx) UsersW() user.WriterIface {
-	return &userWriter{userReader: userReader{tx: w.tx}}
+	return &userWriter{
+		userReader:         userReader{tx: w.tx},
+		membershipHintSink: &w.membershipHint,
+	}
 }
 func (w *writeTx) ServiceAccountsW() service_account.WriterIface {
 	return &saWriter{saReader: saReader{tx: w.tx}}
@@ -108,7 +117,15 @@ func (w *writeTx) AccessBindingsW() access_binding.WriterIface {
 // hint (recorded by accountWriter.Insert) yields the canonical Kachō
 // "User <id> not found" FailedPrecondition text. mapErr(nil, …) is nil-safe.
 func (w *writeTx) Commit(ctx context.Context) error {
-	return mapErr(w.tx.Commit(ctx), "", w.ownerFKHint)
+	err := w.tx.Commit(ctx)
+	// Отложенные проверки срабатывают ЗДЕСЬ, и подсказка выбирается по тому, кто
+	// её оставил. Две подсказки на одной транзакции взаимоисключающи по предмету:
+	// одна ставится вставкой аккаунта, другая — снятием членства, и ни один
+	// путь use-case не делает обоих.
+	if w.membershipHint != "" {
+		return mapErr(err, "Membership.Remove", w.membershipHint)
+	}
+	return mapErr(err, "", w.ownerFKHint)
 }
 
 // EmitAuditEvent appends one durable audit_outbox compliance row on THIS

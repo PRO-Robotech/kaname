@@ -156,6 +156,32 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		// NOT like Delete (which resolves to absence).
 		return resolveExistence(ctx, kindUpdate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 
+	case *iamv1.RemoveUserFromAccountMetadata:
+		// Исключение человека из аккаунта (#1127). Разрешается по ОТСУТСТВИЮ
+		// членства — той самой строки, которую операция и снимает.
+		//
+		// Общий `resolveExistence` здесь не годится, и это не оформительская
+		// разница: он ищет ресурс по ОДНОМУ идентификатору, а членство есть ПАРА
+		// (человек, аккаунт). Спросить по строке личности значило бы ответить про
+		// другой аккаунт: `users.account_id` называет один аккаунт человека из
+		// многих. Поэтому вопрос задаётся паре, и отвечает на него
+		// `MembershipExists`.
+		//
+		// Семантика та же, что у `kindDelete`: членства нет — операция состоялась
+		// (`Empty`); членство есть — не состоялась, и строка объявляется
+		// прерванной, а не пропускается: иначе вызывающий поллил бы ответ, которого
+		// не будет.
+		exists, mErr := rd.Users().MembershipExists(ctx,
+			domain.UserID(m.GetUserId()), domain.AccountID(m.GetAccountId()))
+		if mErr != nil {
+			return operations.ResolverResult{}, fmt.Errorf(
+				"operationresolver: membership %q in %q: %w", m.GetUserId(), m.GetAccountId(), mErr)
+		}
+		if exists {
+			return interrupted(), nil
+		}
+		return done(nil), nil
+
 	default:
 		// Condition / прочие типы метаданных — не разрешаются этим resolver'ом.
 		return skip(), nil

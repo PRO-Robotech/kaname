@@ -1139,3 +1139,11 @@ func (unrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject) (
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (r *abFakeWriter) Visibility() visibility.ReaderIface { return nil }
+
+// MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
+// пробы другой, и подставной ответ был бы утверждением, которого никто не
+// делал. Единственный прод-вызывающий — разрешение осиротевшей операции
+// исключения из аккаунта (#1127).
+func (*fakeUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
+	return false, nil
+}
