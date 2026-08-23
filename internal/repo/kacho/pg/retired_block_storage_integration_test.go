@@ -23,6 +23,22 @@ package pg_test
 //	retired rows whether or not the DELETE works, so the first assertion alone
 //	would be satisfied by a migration that does nothing at all.
 //
+// ПОВТОР ИДЁТ НА СХЕМЕ ВЕРСИИ 0074, А НЕ НА ГОЛОВЕ (kacho#1042). Прежде тело
+// миграции переигрывалось поверх полностью намигрированной базы, и это несло
+// структурный изъян: тело обязано ссылаться на объекты СВОЕЙ эпохи, а поздняя
+// миграция вправе их снять. Так и вышло — 20260822160000 (kacho#917) сняла у
+// журнала намерений колонки доставки, и шаг (5) тела 0074, отбирающий очередные
+// кортежи по `sent_at IS NULL`, перестал исполняться вовсе: повтор падал
+// `column "sent_at" does not exist` (42703) ЦЕЛИКОМ, то есть проба перестала
+// утверждать даже то, о чём спрашивала. Править саму 0074 нельзя (ban #5), и
+// правильного тела у неё нет: тело верно для своей версии схемы.
+//
+// Поэтому база поднимается ровно до 0074 (`migrateEnvUpTo`), фикстуры сеются
+// сырым SQL той же эпохи, и тело переигрывается там, где оно исполнимо. Изъян
+// закрыт НАВСЕГДА: следующая миграция, снявшая что-нибудь из названного в 0074,
+// эту пробу больше не заденет. Побочный выигрыш — шаг (5) теперь исполняется и
+// утверждается, а раньше не утверждался никем.
+//
 // Every assertion is paired with a positive control from the SAME module
 // (compute.instance) or the present owner (storage.volumes): "the retired name is
 // absent" is otherwise indistinguishable from "the table is empty" and from "the
@@ -30,14 +46,13 @@ package pg_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // retiredDottedTypes / retiredRoleNames — the block-storage identities iam has
@@ -126,32 +141,42 @@ func TestRetiredBlockStorageIsGoneFromMigratedSchema(t *testing.T) {
 	}
 }
 
-// retireMigrationPrefix — the migration under test. Named once so the gate moves
-// with it.
-const retireMigrationPrefix = "0074"
+// retireMigrationPrefix / retireMigrationVersion — the migration under test.
+// Named once so the gate moves with it; версия нужна, чтобы поднять схему ровно
+// до неё (см. шапку файла).
+const (
+	retireMigrationPrefix  = "0074"
+	retireMigrationVersion = int64(74)
+)
 
 func TestRetireMigrationRemovesRetiredRowsOnly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: requires Postgres container")
 	}
 	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
+
+	// Схема РОВНО той версии, для которой тело 0074 написано: 0074 уже применена,
+	// повтор ниже — проверка идемпотентности и прицельности её операторов.
+	pool, db, _ := migrateEnvUpTo(t, ctx, retireMigrationVersion)
 
 	// A retired-type mirror row and a live-type one, side by side.
 	seedRetireFixtureMirrorRow(t, ctx, pool, "compute.disk", "dsk-retired-fixture")
 	seedRetireFixtureMirrorRow(t, ctx, pool, "compute.instance", "ins-live-fixture")
 	seedRetireFixtureMirrorRow(t, ctx, pool, "storage.volumes", "vol-live-fixture")
 
+	// Очередные кортежи журнала намерений: на снятом типе и на живом. Шаг (5) тела
+	// отбирает первый и обязан не тронуть второй. Пара обязательна: «строки нет»
+	// неотличимо от «оператор снёс всё».
+	seedRetireFixtureOutboxRow(t, ctx, pool, "compute_disk:dsk-retired-fixture")
+	seedRetireFixtureOutboxRow(t, ctx, pool, "compute_instance:ins-live-fixture")
+
 	// A custom role whose selector names a retired type ALONGSIDE a live one. The
 	// retire must strip the retired element and keep the row; dropping the whole
 	// row would take the live type's materialization with it.
 	owner := mustSeedUser(t, ctx, pool, "retiredbs")
-	acc := seedAccount(t, ctx, kachopg.New(pool, nil), "retiredbs-acc", owner)
-	mixedRole := seedCustomRoleSQL(t, ctx, pool, acc.ID, "retiredbs_mixed")
-	_, err = pool.Exec(ctx, `
+	acc := ownAccountOf(t, ctx, pool, owner)
+	mixedRole := seedCustomRoleSQL(t, ctx, pool, acc, "retiredbs_mixed")
+	_, err := pool.Exec(ctx, `
 		INSERT INTO kacho_iam.role_rule_selectors
 		  (role_id, rule_fp, object_types, match_labels, arm, resource_names)
 		VALUES ($1, 'fp_mixed', ARRAY['compute.disk','compute.instance'], '{"env":"prod"}'::jsonb, 'labels', '{}')`,
@@ -161,7 +186,7 @@ func TestRetireMigrationRemovesRetiredRowsOnly(t *testing.T) {
 	// A custom role whose selector names ONLY retired types: nothing is left to
 	// select, and role_rule_selectors_types_nonempty forbids a zero-type row, so
 	// the row itself must go.
-	onlyRole := seedCustomRoleSQL(t, ctx, pool, acc.ID, "retiredbs_only")
+	onlyRole := seedCustomRoleSQL(t, ctx, pool, acc, "retiredbs_only")
 	_, err = pool.Exec(ctx, `
 		INSERT INTO kacho_iam.role_rule_selectors
 		  (role_id, rule_fp, object_types, match_labels, arm, resource_names)
@@ -170,9 +195,6 @@ func TestRetireMigrationRemovesRetiredRowsOnly(t *testing.T) {
 	require.NoError(t, err, "seed retired-only selector")
 
 	// Re-run the REAL migration body (not a copy of it) against the seeded state.
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
 	require.NoError(t, applyMigrationUpBody(t, db, retireMigrationPrefix),
 		"re-running the retire migration must be idempotent")
 
@@ -180,6 +202,10 @@ func TestRetireMigrationRemovesRetiredRowsOnly(t *testing.T) {
 	requireMirrorCount(t, ctx, pool, "compute.disk", "dsk-retired-fixture", 0)
 	requireMirrorCount(t, ctx, pool, "compute.instance", "ins-live-fixture", 1)
 	requireMirrorCount(t, ctx, pool, "storage.volumes", "vol-live-fixture", 1)
+
+	// Журнал намерений: снятый тип уходит, живой остаётся.
+	requireOutboxCount(t, ctx, pool, "compute_disk:dsk-retired-fixture", 0)
+	requireOutboxCount(t, ctx, pool, "compute_instance:ins-live-fixture", 1)
 
 	// Mixed selector: kept, with the retired element removed and the live one left.
 	var mixedTypes []string
@@ -195,6 +221,39 @@ func TestRetireMigrationRemovesRetiredRowsOnly(t *testing.T) {
 		`SELECT count(*) FROM kacho_iam.role_rule_selectors WHERE role_id = $1 AND rule_fp = 'fp_only'`,
 		onlyRole).Scan(&onlyLeft))
 	require.Zero(t, onlyLeft, "a selector left with no object type at all must be removed, not left violating role_rule_selectors_types_nonempty")
+}
+
+// ownAccountOf — аккаунт, который mustSeedUser завёл вместе с пользователем.
+// Берётся запросом, а не через Go-репозиторий: репозиторий пишет по схеме ГОЛОВЫ,
+// а эта проба работает на схеме версии 0074.
+func ownAccountOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid domain.UserID) domain.AccountID {
+	t.Helper()
+	var accID string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT account_id FROM kacho_iam.users WHERE id = $1`, string(uid)).Scan(&accID))
+	return domain.AccountID(accID)
+}
+
+// seedRetireFixtureOutboxRow — очередная (недоставленная) строка журнала намерений
+// на заданный объект. `relation` обязателен: на версии 0074 ключ упорядочивания
+// заполняет триггер, и его сторож отвергает неполную полезную нагрузку.
+func seedRetireFixtureOutboxRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, object string) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+		VALUES ('fga.tuple.write',
+		        jsonb_build_object('user', 'user:usr-retiredbs', 'relation', 'v_get', 'object', $1::text),
+		        now())`, object)
+	require.NoError(t, err, "seed fga_outbox row for %s", object)
+}
+
+// requireOutboxCount — сколько строк журнала осталось на объекте.
+func requireOutboxCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, object string, want int) {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.fga_outbox WHERE payload->>'object' = $1`, object).Scan(&n))
+	require.Equalf(t, want, n, "kacho_iam.fga_outbox rows on %s", object)
 }
 
 func seedRetireFixtureMirrorRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objectType, objectID string) {

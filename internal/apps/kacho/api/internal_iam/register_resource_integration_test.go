@@ -78,7 +78,12 @@ func TestRegisterResource_A01_EnqueuesWriteTupleInTx(t *testing.T) {
 	require.Equal(t, "project:prj-1", payload["user"])
 	require.Equal(t, "parent", payload["relation"])
 	require.Equal(t, obj, payload["object"])
-	require.True(t, h.outboxUnsent(t, ctx, obj), "sent_at IS NULL until drainer applies")
+
+	// Здесь стояло ещё одно утверждение — «строка ПОКА НЕ ДОСТАВЛЕНА»
+	// (`sent_at IS NULL`). Оно снято вместе со своим предметом (kacho#1042):
+	// дренажа у этого журнала нет (стадия S6 эпика #747, `a4b6cfba9`), колонки
+	// доставки сняла миграция 20260822160000 (kacho#917). Строка действует
+	// С КОММИТА, поэтому «доставлена или нет» — вопрос, которого не существует.
 }
 
 func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
@@ -248,17 +253,4 @@ func (p *outboxProbe) lastOutbox(t *testing.T, ctx context.Context, objects ...s
 func (p *outboxProbe) totalRows(t *testing.T, ctx context.Context) int {
 	t.Helper()
 	return outboxTotalRows(t, ctx, p.pool)
-}
-
-// outboxUnsent reports whether the latest row for the test's OWN objects has
-// sent_at IS NULL.
-func (p *outboxProbe) outboxUnsent(t *testing.T, ctx context.Context, objects ...string) bool {
-	t.Helper()
-	own := scopedToOwnObjects(t, objects)
-	var unsent bool
-	require.NoError(t, p.pool.QueryRow(ctx,
-		`SELECT sent_at IS NULL FROM kacho_iam.fga_outbox
-		  WHERE payload->>'object' = ANY($1::text[])
-		  ORDER BY id DESC LIMIT 1`, own).Scan(&unsent))
-	return unsent
 }

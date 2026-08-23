@@ -15,6 +15,13 @@ package pg_test
 //          (event_type='fga.tuple.write', payload {user:user:<id>, member,
 //          object:group:<gid>}) co-commit in the SAME writer-tx. The object type
 //          is `group`, NOT `iam_group`.
+//
+//          Здесь стояло ещё одно утверждение — «строка ПОКА НЕ ДОСТАВЛЕНА»
+//          (`sent_at IS NULL`). Оно снято вместе со своим предметом: дренажа у
+//          этого журнала больше нет (стадия S6 эпика #747, `a4b6cfba9`), а
+//          колонки доставки сняла миграция 20260822160000 (kacho#917). Строка
+//          журнала действует С КОММИТА, поэтому «доставлена или нет» — вопрос,
+//          которого не существует; проверять его было нечем и незачем.
 //   GM-O2  Rollback discards BOTH the group_members row AND the fga_outbox intent
 //          — atomic all-or-nothing (запрет #10).
 //   GM-O3  RemoveMember co-commits the SYMMETRIC delete intent
@@ -71,15 +78,13 @@ func TestGroupMember_FGAOutbox_GM_O1_AddEmitsMemberTupleInTx(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	var et, payloadRaw string
-	var sentAtNull bool
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT event_type, payload::text, sent_at IS NULL
+		`SELECT event_type, payload::text
 		   FROM kacho_iam.fga_outbox
 		  WHERE payload->>'object' = $1
 		  ORDER BY id DESC LIMIT 1`,
-		"group:"+string(g.ID)).Scan(&et, &payloadRaw, &sentAtNull))
+		"group:"+string(g.ID)).Scan(&et, &payloadRaw))
 	require.Equal(t, "fga.tuple.write", et)
-	require.True(t, sentAtNull, "member-tuple intent must be pending until drainer applies")
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal([]byte(payloadRaw), &payload))
 	require.Equal(t, "user:"+string(uid), payload["user"])

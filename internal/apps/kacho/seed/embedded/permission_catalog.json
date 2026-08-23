@@ -280,17 +280,6 @@
     "required_acr_min": "1"
   },
   {
-    "fqn": "kacho.cloud.compute.v1.InternalWatchService/Watch",
-    "permission": "compute.instances.watch",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    },
-    "required_acr_min": "1",
-    "scope_filtered": true
-  },
-  {
     "fqn": "kacho.cloud.compute.v1.MachineTypeService/Get",
     "permission": "compute.machineTypes.get",
     "required_relation": "viewer",
