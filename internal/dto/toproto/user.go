@@ -21,9 +21,12 @@ func (userObj) toPb(u domain.User) (*iamv1.User, error) {
 	if !u.CreatedAt.IsZero() {
 		createdAt = timestamppb.New(u.CreatedAt.Truncate(tsTruncate))
 	}
+	// Аккаунт в ответе НЕ называется (kacho#471, IAM-ID-1-19): у человека их
+	// столько, сколько у него членств, и `domain.User.AccountID` — лишь то из
+	// них, что стоит в колонке строки. Отдать его значило бы выдать один
+	// элемент множества за весь ответ.
 	return &iamv1.User{
 		Id:           string(u.ID),
-		AccountId:    string(u.AccountID),
 		ExternalId:   string(u.ExternalID),
 		Email:        string(u.Email),
 		DisplayName:  string(u.DisplayName),

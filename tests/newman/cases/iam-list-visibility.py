@@ -82,12 +82,52 @@ _SURFACES = [
     (
         "users", "/iam/v1/users", "users",
         "userAABId", "userAAAId",
-        "r.accountId === pm.environment.get('accountBId')",
+        # Ответ пользователя аккаунта БОЛЬШЕ НЕ НАЗЫВАЕТ (kacho#471): у человека
+        # их столько, сколько членств, и одного значения, которое можно было бы
+        # сравнить, не существует. Признак принадлежности берётся оттуда же,
+        # откуда его берёт сам край, — из членств: строка принадлежит
+        # вызывающему тогда и только тогда, когда она состоит в его аккаунте, а
+        # состав аккаунта отдаёт тот же список, суженный аккаунтом.
+        #
+        # Это НЕ ослабление: прежний предикат утверждал ровно то же («строка
+        # принадлежит аккаунту B»), только читал это из поля, которого больше
+        # нет. Состав по-прежнему проверяется целиком, а не по одному
+        # названному чужаку — на это есть отдельное утверждение выше.
+        "membersOfB.includes(r.id)",
     ),
 ]
 
+# Поверхности, которым нужен предварительный шаг: он приносит то, чего в ответе
+# основного шага больше нет. Ключ — slug.
+#
+# Шаг ОБЯЗАН быть громким: пустой состав аккаунта сделал бы утверждение состава
+# тождественно ложным, а недоступный — тождественно истинным. Оба исхода
+# называются здесь же, а не обнаруживаются на разборе чужого прогона.
+_PRELUDE = {
+    "users": Step(
+        name="list-members-of-own-account",
+        method="GET",
+        path="/iam/v1/users?accountId={{accountBId}}&pageSize=1000",
+        auth="jwtAccountAdminB",
+        test_script=[
+            *assert_status(200),
+            "const j = pm.response.json();",
+            "const body = JSON.stringify(j);",
+            "const rows = j.users || [];",
+            "pm.test('[645-users] account membership listing is usable', () => {",
+            "  pm.expect(rows, body).to.be.an('array');",
+            "  pm.expect(rows.length, 'состав аккаунта пуст: утверждение состава "
+            "на следующем шаге стало бы тождественно ложным, а разбор указал бы "
+            "на край вместо фикстуры. Ответ: ' + body).to.be.above(0);",
+            "});",
+            "pm.environment.set('membersOfBIds', rows.map(r => r.id).join(','));",
+        ],
+    ),
+}
+
 
 for _slug, _path, _field, _own_var, _foreign_var, _belongs in _SURFACES:
+    _pre = _PRELUDE.get(_slug)
     CASES.append(Case(
         id=f"IAM-645-LIST-VISIBLE-PAGE-{_slug.upper()}",
         title=(f"{_slug}: own object is on the FIRST small page though older "
@@ -95,6 +135,7 @@ for _slug, _path, _field, _own_var, _foreign_var, _belongs in _SURFACES:
         classes=["AUTHZ", "CRUD", "NEG"],
         priority="P0",
         steps=[
+            *([_pre] if _pre else []),
             Step(
                 name=f"list-{_slug}-small-page",
                 method="GET",
@@ -108,6 +149,11 @@ for _slug, _path, _field, _own_var, _foreign_var, _belongs in _SURFACES:
                     f"const rows = j.{_field} || [];",
                     f"const own = pm.environment.get('{_own_var}');",
                     f"const foreign = pm.environment.get('{_foreign_var}');",
+                    # Состав аккаунта — из предварительного шага там, где он есть.
+                    # Пустой массив у поверхности БЕЗ такого шага безвреден: её
+                    # признак принадлежности к нему не обращается.
+                    "const membersOfB = (pm.environment.get('membersOfBIds') || '')"
+                    ".split(',').filter(Boolean);",
                     # Страж фикстуры: без обоих идентификаторов утверждения ниже
                     # выродились бы в сравнение с undefined и зеленели бы всегда.
                     f"pm.test('[645-{_slug}] fixture supplies both ids', () => {{",
