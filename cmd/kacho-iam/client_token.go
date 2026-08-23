@@ -33,7 +33,6 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/clienttokenhttp"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
 )
 
@@ -66,25 +65,10 @@ func buildClientTokenEndpoint(
 	}
 
 	// Состав утверждений собирают ТЕ ЖЕ функции, что и на пути обратного
-	// вызова: перечень и правила объявлены один раз, и правка любого из них
-	// доезжает до обеих сторон by construction.
-	users := kachopg.NewUserPoolRepo(pool)
-	saClients := kachopg.NewSAOAuthClientRepo(pool)
-	userClients := kachopg.NewUserOAuthClientRepo(pool)
-
-	claims := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{
-			Domain:      cfg.AuthN.ResolveDomain(),
-			HydraIssuer: cfg.AuthN.ResolveHydraIssuer(),
-		},
-		users,
-	).
-		WithSAPort(&tokenEnrichSAAdapter{saClients: saClients}).
-		WithUserTokenPort(&tokenEnrichUserTokenAdapter{userClients: userClients, users: users}).
-		// Резолв по НАШЕМУ идентификатору. Зеркальное значение на пути
-		// разрешения клиента не участвует вовсе — оно остаётся значением
-		// утверждения и истекает вместе с внешним сервером.
-		WithOwnClientPort(&ownClientAdapter{userClients: userClients, saClients: saClients})
+	// вызова, и ТА ЖЕ сборка, что у прочих полос нашей чеканки: перечень и
+	// правила объявлены один раз (token_claims.go), и правка любого из них
+	// доезжает до всех сторон by construction.
+	claims := newAssertionClaimsComposer(pool, cfg)
 
 	return clienttokenwire.FromPool(pool, clienttokenwire.BuildConfig{
 		Logger: logger,

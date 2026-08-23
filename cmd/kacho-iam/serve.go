@@ -202,7 +202,7 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeySweeper(ctx, signingKeystore, logger)
 
-	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, metricsReg, cfg, logger)
+	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, metricsReg, cfg, tokenSigner, logger)
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
