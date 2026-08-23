@@ -38,10 +38,15 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
-// migrate0033Env brings a fresh DB up to a target version with goose and returns
-// a pool + the raw sql.DB (for further up/down). version 32 = pre-0033 (array
-// shape live); 33 = post-0033 (scalar shape).
-func migrate0033Env(t *testing.T, ctx context.Context, toVersion int64) (*pgxpool.Pool, *sql.DB, string) {
+// migrateEnvUpTo brings a fresh DB up to a target goose version and returns a pool
+// + the raw sql.DB (for further up/down). Ничего специфичного для 0033 в нём нет —
+// им пользуется и проба отставки блочного хранения (0074), которой нужна схема
+// ТОЙ ЖЕ версии, что у проверяемой миграции.
+//
+// Здесь он назывался `migrate0033Env`. Имя связывало общий харнесс с одной
+// миграцией и заставляло второго вызывающего либо звать «чужую» функцию, либо
+// завести её копию.
+func migrateEnvUpTo(t *testing.T, ctx context.Context, toVersion int64) (*pgxpool.Pool, *sql.DB, string) {
 	t.Helper()
 	dsn := setupTestDBNoUp(t)
 
@@ -110,7 +115,7 @@ func TestMigration0033_ArrayToScalarRewrite(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	pool, db, _ := migrate0033Env(t, ctx, 32) // pre-0033: array shape
+	pool, db, _ := migrateEnvUpTo(t, ctx, 32) // pre-0033: array shape
 
 	roleID := seedCustomRoleRaw(t, ctx, pool,
 		`[{"modules":["iam"],"resources":["account"],"verbs":["read","list","get"]}]`)
@@ -141,7 +146,7 @@ func TestMigration0033_DefensiveSplit(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	pool, db, _ := migrate0033Env(t, ctx, 32)
+	pool, db, _ := migrateEnvUpTo(t, ctx, 32)
 
 	roleID := seedCustomRoleRaw(t, ctx, pool,
 		`[{"modules":["iam","vpc"],"resources":["account"],"verbs":["get"]}]`)
@@ -172,7 +177,7 @@ func TestMigration0033_IdempotentRerun(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	pool, db, _ := migrate0033Env(t, ctx, 32)
+	pool, db, _ := migrateEnvUpTo(t, ctx, 32)
 	roleID := seedCustomRoleRaw(t, ctx, pool,
 		`[{"modules":["iam"],"resources":["account"],"verbs":["get"]}]`)
 
@@ -191,7 +196,7 @@ func TestMigration0033_CheckScalarAcceptArrayReject(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	pool, _, _ := migrate0033Env(t, ctx, 33) // post-0033
+	pool, _, _ := migrateEnvUpTo(t, ctx, 33) // post-0033
 
 	uid := mustSeedUser(t, ctx, pool, "m33chk")
 	accID := ids.NewID(domain.PrefixAccount)
@@ -225,7 +230,7 @@ func TestMigration0033_UpDownUpRoundTrip(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
-	pool, db, _ := migrate0033Env(t, ctx, 32)
+	pool, db, _ := migrateEnvUpTo(t, ctx, 32)
 	roleID := seedCustomRoleRaw(t, ctx, pool,
 		`[{"modules":["vpc"],"resources":["subnet"],"verbs":["get","list"]}]`)
 

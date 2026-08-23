@@ -41,16 +41,15 @@
 //	sent_at       timestamptz  NULL until drainer applies
 //	last_error    text
 //	attempt_count int
-//	tuple_key     text         `user object` — the GRANT key, filled by a BEFORE
-//	                           INSERT trigger, NEVER by a writer. It is the
-//	                           drainer's ordering partition, so a second rendering
-//	                           of it would split one grant across two partitions
-//	                           and lose the write→delete order silently. A payload
-//	                           missing a component yields NULL and is refused
-//	                           by fga_outbox_tuple_key_present_check at INSERT.
-//	                           The COLUMN NAME is historical: until migration 0099
-//	                           the key was the whole triple (see PartitionColumn
-//	                           below for why it no longer can be).
+//
+// Ключа упорядочивания у строки БОЛЬШЕ НЕТ. Колонку `tuple_key` заполнял триггер
+// `BEFORE INSERT`, а читал её клейм дренажа — «только голова партиции». Дренажа
+// не стало вместе с внешним движком прав (стадия S6 эпика #747), и писатель
+// пережил своего читателя: после снятия колонки он отвергал КАЖДУЮ вставку
+// (`record "new" has no field "tuple_key"`, 42703), то есть каждую выдачу и
+// каждый отзыв доступа. Триггер, его функция и сторож наличия ключа сняты
+// миграцией 20260823001000 (kacho#1033); сама колонка и её индексы — миграцией
+// 20260822160000 (kacho#917).
 //
 // Drainer event types (clients/fga_applier.go):
 //   - clients.FGAEventTypeWrite  = "fga.tuple.write"
@@ -74,19 +73,6 @@ const (
 	EventTypeWrite  = "fga.tuple.write"
 	EventTypeDelete = "fga.tuple.delete"
 )
-
-// PartitionColumn is the drainer's ORDERING PARTITION column on this table. It
-// lives here, next to the emitter, because the emitter decides what a row IS and
-// the partition decides which rows are ordered against each other — a second
-// rendering of the name in the wiring would let those two drift apart silently,
-// which is the failure mode the table's own doc warns about.
-//
-// Its stored value is `user || ' ' || object` (migration 0099), NOT the whole
-// triple: the unit a row now carries is one subject's WHOLE relation set on one
-// object (see emitTx), and a partition has to cover every row it can be ordered
-// against. Narrower than that and a revoke of the set could apply ahead of the
-// grant it supersedes, which is the exact over-grant migration 0061 closed.
-const PartitionColumn = "tuple_key"
 
 // RelationPredicate renders the SQL predicate «this row carries <arg> as one of its
 // relations», matching BOTH row shapes — the single-relation payload and the set.
