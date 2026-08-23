@@ -831,6 +831,23 @@ func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 	return c
 }
 
+// saKeyIssuanceIsOurs — переведён ли контур выдачи ключей служебных учёток на
+// свою чеканку (задача #1120, подфаза Ф4б эпика #896).
+//
+// ПРЕДИКАТ — ЭНДПОИНТ ОБМЕНА, А НЕ ПОДПИСАНТ. Ключ служебной учётки предъявляет
+// подписанное утверждение ВНЕШНИЙ вызывающий, и обменивает он его на нашем
+// токен-эндпоинте. Подписант без эндпоинта дал бы ключ, которому некуда пойти:
+// зеркала уже нет, а своей дороги ещё нет. Настройка при этом требует включённой
+// чеканки от включённого эндпоинта (`ClientTokenConfig.Validate`), поэтому
+// «эндпоинт включён» влечёт «подписант есть», а не наоборот.
+//
+// Отдельная функция, а не ветка внутри сборки: выбор полосы — утверждение о том,
+// как посадка выдаёт удостоверение, и его надо уметь спросить, не собирая контур
+// целиком (тот же довод, что у выбора полосы обмена докер-токена).
+func saKeyIssuanceIsOurs(cfg config.Config) bool {
+	return cfg.AuthN.ClientToken.Enabled
+}
+
 // buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
 // via Hydra OAuth2 client_credentials.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
@@ -846,6 +863,13 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	auditEmitter := kachopg.NewAuditOutboxEmitter(pool)
 
 	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kachopg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	// Переведён ли контур выдачи ключей на свою чеканку (задача #1120). Решается
+	// ЗДЕСЬ, в единственном месте сборки: «переведён» — свойство посадки, и
+	// use-case его не выводит.
+	ownIssuance := saKeyIssuanceIsOurs(cfg)
+	if ownIssuance {
+		issueUC.WithOwnIssuance()
+	}
 	// Always whitelist the configured registry service audience on every issued
 	// SA-key's Hydra client (#320) — the SAME value the `/iam/token` Docker-
 	// Registry shim requests during the client_credentials exchange
@@ -894,7 +918,13 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	revokeUC.WithLogger(logger)
 	listKeysUC := sakeysapp.NewListSAKeysUseCase(saClientRepo)
 
-	logger.Info("sa_keys wired", "hydra_admin", hydraAdminURL)
+	// Посадка контура печатается ВСЕГДА, включая непереведённую: «зеркала больше
+	// не заводим» иначе невидимо ниоткуда, а оператору, разбирающему выдачу, это
+	// первое, что нужно знать — у ключа, выданного переведённым контуром, записи у
+	// прежнего издателя нет и искать её негде.
+	logger.Info("sa_keys wired",
+		"hydra_admin", hydraAdminURL,
+		"own_issuance", ownIssuance)
 
 	return sakeysapp.NewHandler(issueUC, revokeUC, listKeysUC)
 }
